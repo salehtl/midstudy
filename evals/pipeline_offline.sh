@@ -42,6 +42,21 @@ else
   bad "sam3d run succeeds — $(tail -n 3 "$OUT/sam.err" | tr '\n' ' ')"
 fi
 
+# verify round 1: the photo an engine uploads to fal carries no camera metadata (EXIF, GPS, XMP, comments) and is
+# upright; source.<ext> keeps the upload as given (never served). A JPEG with GPS + orientation 6, and a PNG with eXIf/tEXt.
+evals/py evals/lib/metadata.py make --kind gps-jpeg --orientation 6 --from "$IMG" --out "$OUT/gps.jpg" >"$OUT/gps-make.json" 2>&1
+evals/py evals/lib/metadata.py make --kind gps-png --from "$IMG" --out "$OUT/gps.png" >/dev/null 2>&1
+if run gpsjpg "$OUT/gps.jpg" --engine sam3d --name "GPS Chair" --id gps-chair --dims 75x80x95 --library "$LIB" && run gpspng "$OUT/gps.png" --engine trellis2 --name "GPS Png" --id gps-png --dims 75x80x95 --library "$LIB"; then
+  evals/py evals/lib/metadata.py inspect "$LIB/gps-chair/raw/engine-input.jpg" >"$OUT/gps-sent.json" 2>&1
+  evals/py evals/lib/metadata.py inspect "$LIB/gps-png/raw/engine-input.jpg" >"$OUT/gps-png-sent.json" 2>&1
+  check "a GPS-tagged JPEG (orientation 6): the engine input has no metadata, is upright, and is what was uploaded" 'node -e "
+const m=JSON.parse(require(\"fs\").readFileSync(\"$OUT/gps-make.json\",\"utf8\").trim().split(\"\\n\").pop()), s=JSON.parse(require(\"fs\").readFileSync(\"$OUT/gps-sent.json\",\"utf8\").trim().split(\"\\n\").pop());
+process.exit(s.clean && s.w===m.h && s.h===m.w ? 0 : 1)" && grep -q "uploads/engine-input.jpg" "$LIB/gps-chair/raw/request.json" && cmp -s "$OUT/gps.jpg" "$LIB/gps-chair/source.jpg"' "$(tail -n 1 "$OUT/gps-sent.json" | head -c 300)"
+  check "a PNG with eXIf and tEXt: the engine input has none of it" 'grep -q "\"clean\": true" "$OUT/gps-png-sent.json"' "$(tail -n 1 "$OUT/gps-png-sent.json" | head -c 300)"
+else
+  bad "midstudy-add runs on photos with GPS — $(tail -n 2 "$OUT/gpsjpg.err" "$OUT/gpspng.err" 2>/dev/null | tr '\n' ' ')"
+fi
+
 if run trellis "$IMG" --engine trellis2 --name "Mock Trellis Chair" --id mock-trellis --dims "75 × 60.5 × 80" --library "$LIB"; then
   ok "trellis2 run succeeds (dims with spaces, ×, decimals)"
   check "trellis2 writes model.glb and no splat" '[ -f $LIB/mock-trellis/model.glb ] && [ ! -f $LIB/mock-trellis/splat.ply ]'

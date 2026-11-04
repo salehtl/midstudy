@@ -120,6 +120,30 @@ def check_image(path: Path) -> str:
         raise MidstudyError(f"{path} isn't an image midstudy-add can read ({type(e).__name__}); use a JPEG, PNG, HEIC or WebP") from None
 
 
+def engine_input(src: Path, dest_dir: Path) -> Path:
+    """The photo the engines get (and so what is uploaded to fal): upright (EXIF orientation applied), a JPEG (a PNG
+    when it has transparency), with no metadata at all: no EXIF, GPS, XMP, IPTC or comments. A phone photo of a chair
+    at home carries the home's location; none of it may leave the machine. The ICC colour profile is kept: it only
+    says how to read the colours. Written to dest_dir (the item's raw/, never served) as engine-input.<ext>."""
+    from PIL import Image, ImageOps
+
+    heif_support()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with Image.open(src) as im:
+        icc = im.info.get("icc_profile")
+        im = ImageOps.exif_transpose(im)
+        alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+        im = im.convert("RGBA" if alpha else "RGB")
+        im.info = {}  # Pillow carries comments, XMP and the like over from info when it saves
+        extra = {"icc_profile": icc} if icc else {}
+        out = dest_dir / ("engine-input.png" if alpha else "engine-input.jpg")
+        if alpha:
+            im.save(out, "PNG", **extra)
+        else:
+            im.save(out, "JPEG", quality=92, **extra)
+    return out
+
+
 def make_thumb(image: Path, out: Path) -> None:
     """256 x 256 center-cropped JPEG."""
     from PIL import Image, ImageOps
@@ -241,13 +265,10 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
         if ext == ".zip":
             local = objzip.to_glb(local, staging / "unzipped", staging / "converted.glb")
             ext = ".glb"
-        if image_engine and fmt == "HEIF":
-            # The engines and the thumbnail get a JPEG of the photo; source.heic keeps the original.
-            from PIL import Image, ImageOps
-
-            with Image.open(local) as im:
-                ImageOps.exif_transpose(im).convert("RGB").save(staging / "converted.jpg", "JPEG", quality=92)
-            local = staging / "converted.jpg"
+        if image_engine:
+            # The engines and the thumbnail get a metadata-free, upright copy (raw/engine-input.<ext>); source.<ext>
+            # keeps the original as given and is never served (contract §2.8).
+            local = engine_input(local, staging / "raw")
 
         model_src, splat_src, splat_to_glb = local, None, np.eye(3)
         if image_engine:

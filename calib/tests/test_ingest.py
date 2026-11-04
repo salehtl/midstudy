@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageCms
 
-from midstudy_calib.ingest import exif_block, fov_from_35mm, ingest, jpeg_markers, sniff
+from midstudy_calib.ingest import exif_block, fov_from_35mm, ingest, is_clean_jpeg, jpeg_markers, sniff
 from midstudy_calib.util import Fail
 
 REPO = Path(__file__).resolve().parents[2]
@@ -50,6 +50,54 @@ def test_golden_jpeg_passes_through_byte_for_byte(tmp_path):
     assert res == {"ok": True, "photo": "photo.jpg", "source": "source.jpg", "image": {"w": 1600, "h": 1200}}
     assert (tmp_path / "photo.jpg").read_bytes() == src.read_bytes()
     assert (tmp_path / "source.jpg").read_bytes() == src.read_bytes()
+
+
+def gps_jpeg(w=64, h=48, **kw) -> bytes:
+    ex = exif_with(make="TestCam", model="TestCam GPS")
+    ex[0x8825] = {1: "N", 2: (0.0, 30.0, 0.0), 3: "E", 4: (0.0, 30.0, 0.0)}  # GPSInfo
+    buf = io.BytesIO()
+    gradient(w, h).save(buf, "JPEG", exif=ex.tobytes(), quality=90, **kw)
+    return buf.getvalue()
+
+
+def plain_jpeg(w=64, h=48, **kw) -> bytes:
+    buf = io.BytesIO()
+    gradient(w, h).save(buf, "JPEG", quality=90, **kw)
+    return buf.getvalue()
+
+
+def app1_after_first_scan(prog: bytes, payload: bytes) -> bytes:
+    """A progressive JPEG with an APP1 segment inserted right after its first scan (before the second SOS)."""
+    first = prog.index(b"\xff\xda")
+    second = prog.index(b"\xff\xda", first + 2)
+    seg = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
+    return prog[:second] + seg + prog[second:]
+
+
+@pytest.mark.parametrize("case", ["trailing_jpeg", "zero_padding", "html_trailer", "app1_between_scans", "com_between_scans"])
+def test_no_pass_through_with_hidden_metadata(tmp_path, case):
+    """Contract §4.3: pass-through only when nothing follows EOI and no APP1-APP15 or COM appears anywhere."""
+    clean = plain_jpeg()
+    assert is_clean_jpeg(clean)
+    if case == "trailing_jpeg":  # an MPF-style second image after EOI, with its own EXIF and GPS
+        data = clean + gps_jpeg()
+    elif case == "zero_padding":
+        data = clean + b"\0" * 4096
+    elif case == "html_trailer":
+        data = clean + b"<html>hi</html>\xff\xd9"
+    else:
+        prog = plain_jpeg(progressive=True)
+        assert prog.count(b"\xff\xda") >= 2 and is_clean_jpeg(prog)
+        exif = Image.open(io.BytesIO(gps_jpeg())).info["exif"]
+        data = app1_after_first_scan(prog, exif) if case == "app1_between_scans" else \
+            prog[:prog.index(b"\xff\xda", prog.index(b"\xff\xda") + 2)] + b"\xff\xfe\x00\x0bTestCam GPS" + prog[prog.index(b"\xff\xda", prog.index(b"\xff\xda") + 2):]
+    assert not is_clean_jpeg(data)
+    up = tmp_path / "up.jpg"
+    up.write_bytes(data)
+    ingest(up, tmp_path / "s")
+    photo = (tmp_path / "s/photo.jpg").read_bytes()
+    assert photo != data and is_clean_jpeg(photo)
+    assert b"TestCam" not in photo and b"Exif" not in photo
 
 
 def test_exif_rotated_portrait(tmp_path):
@@ -136,7 +184,7 @@ def test_guards(tmp_path):
     # over 25 MB
     big = tmp_path / "big.jpg"
     big.write_bytes(b"\xff\xd8\xff\xe0" + b"\0" * (25 * 1024 * 1024 + 1))
-    with pytest.raises(Fail, match="limit is 25 MB"):
+    with pytest.raises(Fail, match=r"25\.1 MB, over the 25 MB limit"):
         ingest(big, tmp_path / "s")
     # decompression bomb: a tiny PNG that claims 30000 x 30000 pixels
     def chunk(t, d):

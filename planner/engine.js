@@ -27,22 +27,27 @@
 //   getStageRect()      { x, y, w, h } the part of the window the photo fits into (client px)
 //   isSceneDirty() / isLayoutDirty() / getDirty() { scene, layout }
 //   getItems() / getItem(uid) / getItemBounds(uid) / getSelected() / getDrag() / getFootprint(uid) / hitItemAt(uid, x, y, pad)
+//   itemAt(x, y)        the placed piece under a client point, or null
 //   getLook()           { exposure, warmth, contactShadows }
 //   getLibrary(), assetUrl(rel), getLayouts(), getLayoutDetails(), getLayoutName(), getRenders(), isRenderMock()
+//   getLayoutTitle(), layoutDisplayName(slug)   a layout's name as typed ("Phone A"), else the slug made readable
+//   getScenesTrash()    [{name, title, created, deleted}] deleted scenes the server keeps
 //   getRuler()          { active, points: [[x,0,z]…], meters|null }
 //   getState() / getRenderSettings()   the window.midstudy shapes (contract §2.4, §4.6)
 // Actions (async ones return Promises that reject with a reported error)
 //   init(), mount(el), setStageInsets({ left, right, top, bottom }) (client px the chrome covers)
-//   listScenesInternal(), openScene(name), closeScene(), waitForScene(name), createScene(file, meta), deleteScene(name),
-//   renameScene(name, title), saveScene(), saveThumbnail()
+//   listScenesInternal(), openScene(name) (also loads the layout last open there on this device), closeScene(),
+//   waitForScene(name), createScene(file, meta), deleteScene(name), restoreScene(name), renameScene(name, title),
+//   saveScene(), saveThumbnail()
 //   setCamera(partial), resetCamera(), setAdjustFloor(on), setOcclusion(on), setGridVisible(on), setPitchFromHorizon(py)
 //   zoomAt(clientX, clientY, zoom), zoomBy(factor, clientX?, clientY?), panBy(dxClient, dyClient), fitView()
 //   addItemInternal(id, opts), moveItemInternal(uid, opts), removeItemInternal(uid), clearItemsInternal(), select(uid|null),
 //   rotateSelected(deg), setSnap(on), beginItemDrag / beginRotateDrag / dragTo / endItemDrag, removeItemWithUndo(uid),
 //   restoreItem(snapshot), setElevation(uid, m), nudgeElevation(uid, dm), dropToFloor(uid), reloadLibrary()
-//   tap(clientX, clientY), setRulerActive(on), clearRuler()
+//   tap(clientX, clientY), setRulerActive(on), clearRuler(), setRulerTrueLength(m) (scales the camera height)
 //   setLook({exposure, warmth}), setContactShadows(on)
-//   saveLayoutInternal(name), loadLayoutInternal(name), deleteLayoutInternal(name), listLayoutsInternal(), refreshLayouts()
+//   saveLayoutInternal(name, { title }), loadLayoutInternal(name), deleteLayoutInternal(name) → the doc (for Undo),
+//   restoreLayoutInternal(doc), listLayoutsInternal(), refreshLayouts()
 //   captureComposite({ maxPx, quality }), captureMask(), postRender(shot, opts), renderViewInternal(opts),
 //   listRendersInternal(), compare(a, b)
 //   reportError(msg, err) → Error, toast(text, kind, ms), onFrame(fn), worldToScreen(p) → { x, y, visible } (client px)
@@ -545,6 +550,7 @@ function syncShadow(rec) {
 
 // --- library + items --------------------------------------------------------------------------------------------------
 let library = []
+let libraryLoading = Promise.resolve() // the library read in flight (a layout waits for it, or its pieces look missing)
 const items = new Map() // uid -> { uid, id, lib, group, child, localBox, rotationDeg, shadow, missing }
 let itemsGen = 0
 let uidCounter = 0
@@ -563,7 +569,11 @@ async function fetchBytes(url) {
   return new Uint8Array(await res.arrayBuffer())
 }
 
-async function loadLibrary() {
+function loadLibrary() {
+  libraryLoading = readLibrary()
+  return libraryLoading
+}
+async function readLibrary() {
   let list = []
   try {
     const res = await fetch(LIBRARY_URL)
@@ -837,8 +847,28 @@ function distToHull(h, x, y) {
   }
   return best
 }
-// Drag to move: the item keeps its offset from the finger and slides on its own horizontal plane (y stays its
-// elevation): farther away it shrinks with perspective, closer it grows. With `lift` (Shift) it moves up and down only.
+// The point of a placed piece under a client point: where the ray first meets its mesh, else its box, else null.
+function grabPointOn(rec, clientX, clientY) {
+  setRay(clientX, clientY)
+  const hit = raycaster.intersectObject(rec.group, true).find((h) => h.object.name !== 'contact-shadow')
+  if (hit) return hit.point.clone()
+  return raycaster.ray.intersectBox(worldBounds(rec), new THREE.Vector3())
+}
+// The height of the horizontal plane a move-drag slides on: the grabbed point's own height, so that point stays under
+// the pointer (a plane at the floor would amplify the motion with depth when the seat or the back is grabbed). Kept
+// at least 15 cm from the eye height (where that plane is seen edge-on) and within the piece.
+function dragHeight(rec, clientX, clientY) {
+  const b = worldBounds(rec)
+  const p = grabPointOn(rec, clientX, clientY)
+  let y = p ? p.y : (b.min.y + b.max.y) / 2 // grabbed beside the piece (the touch pad): its middle
+  y = Math.max(b.min.y, Math.min(b.max.y, y))
+  const eye = cam.height_m
+  if (Math.abs(y - eye) < 0.15) y = eye - 0.15 >= b.min.y ? eye - 0.15 : Math.min(b.max.y, eye + 0.15)
+  return y
+}
+// Drag to move: the grabbed point of the piece stays under the finger: the piece slides on the horizontal plane
+// through that point (its elevation doesn't change), so farther away it shrinks with perspective, closer it grows.
+// With `lift` (Shift) it moves up and down only.
 function beginItemDrag(uid, clientX, clientY, { lift = snap } = {}) {
   const rec = items.get(uid)
   if (!rec) return false
@@ -849,7 +879,7 @@ function beginItemDrag(uid, clientX, clientY, { lift = snap } = {}) {
     const n = new THREE.Vector3(-rec.group.position.x, 0, -rec.group.position.z) // faces the camera (at x = z = 0)
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1)
     plane.setFromNormalAndCoplanarPoint(n.normalize(), rec.group.position)
-  } else plane.set(new THREE.Vector3(0, 1, 0), -rec.group.position.y)
+  } else plane.set(new THREE.Vector3(0, 1, 0), -dragHeight(rec, clientX, clientY))
   const p = planePointAt(plane, clientX, clientY)
   if (!p) return false
   if (selected !== uid) select(uid)
@@ -921,6 +951,22 @@ function setRulerActive(on) {
   emit('ruler', getRuler())
 }
 function clearRuler() { ruler.points = []; emit('ruler', getRuler()) }
+// The ruler measured a known length (a rug, a tile, a sofa's width): scale the camera height so it reads `meters`.
+// Every floor point under a pixel scales with the height (the angles don't change), so this fixes the scene's scale,
+// and with it the size every piece is drawn at, from one length the user knows (MoGe's metric scale is often off by
+// 5–15 %). The ruler's points move with the floor and keep their place in the photo.
+function setRulerTrueLength(meters) {
+  const r = getRuler()
+  if (!isNum(meters) || meters <= 0 || !r.meters || r.meters < 1e-3) return false
+  const k = meters / r.meters
+  const [lo, hi] = CAMERA_RANGE.height_m
+  const h = Math.min(hi, Math.max(lo, cam.height_m * k))
+  const kk = h / cam.height_m
+  ruler.points = ruler.points.map((p) => [p[0] * kk, 0, p[2] * kk])
+  setCamera({ height_m: h })
+  emit('ruler', getRuler())
+  return Math.abs(kk - k) < 1e-9
+}
 // Move ruler point i to the floor under a client point (after a camera change the points stay in the photo's place).
 function setRulerPointAt(i, clientX, clientY) {
   const p = photoToFloor(...clientToPhoto(clientX, clientY))
@@ -930,6 +976,12 @@ function setRulerPointAt(i, clientX, clientY) {
   return true
 }
 
+// The placed piece under a client point (its mesh, not its shadow), or null.
+function itemAt(clientX, clientY) {
+  if (!sceneName) return null
+  setRay(clientX, clientY)
+  return hitItems()?.uid ?? null
+}
 // A click/tap at a client point: a ruler point, or (de)selecting an item.
 function tap(clientX, clientY) {
   if (!sceneName) return
@@ -965,6 +1017,7 @@ let adjustFloor = false
 let occlusion = true
 let floorNote = null
 let scenesList = []
+let scenesTrash = []  // [{name, title, deleted}] deleted scenes the server keeps (scenes/.trash)
 let sceneToken = 0
 const sceneLoad = { loading: false, phase: null, name: null, scene: null }
 const dirty = { scene: false, layout: false }
@@ -977,13 +1030,19 @@ function setDirty(next) {
 const sceneSig = () => JSON.stringify([cam, look.exposure, look.warmth])
 let sceneBaseline = ''
 const touchScene = () => setDirty({ ...dirty, scene: !!sceneName && sceneSig() !== sceneBaseline })
-events.addEventListener('items', () => { if (!quietItems) setDirty({ ...dirty, layout: true }) })
+// The layout is dirty when the placed pieces differ from the ones last saved or loaded (not merely when something
+// happened: Remove then Undo puts back the same layout). Pieces compare by library id, position (to 0.1 mm) and turn.
+const layoutSig = () => JSON.stringify([...items.values()].map((r) => [r.id, ...[r.group.position.x, r.group.position.y, r.group.position.z].map((v) => Math.round(v * 1e4)), Math.round(wrapDeg(r.rotationDeg) * 100)]).sort())
+let layoutBaseline = '[]'
+const markLayoutClean = () => { layoutBaseline = layoutSig(); setDirty({ ...dirty, layout: false }) }
+events.addEventListener('items', () => { if (!quietItems) setDirty({ ...dirty, layout: layoutSig() !== layoutBaseline }) })
 async function quietly(fn) { quietItems++; try { return await fn() } finally { quietItems-- } }
 
 async function listScenesInternal() {
   let data
   try { data = await apiJson('/api/scenes') } catch (e) { throw reportError('Could not list the scenes', e) }
   scenesList = Array.isArray(data?.scenes) ? data.scenes : []
+  scenesTrash = Array.isArray(data?.trash) ? data.trash : []
   emit('scenes', { scenes: scenesList.slice() })
   return scenesList.slice()
 }
@@ -1181,6 +1240,7 @@ async function openScene(name) {
     layoutNames = []
     layoutDetails = []
     renders = []
+    layoutBaseline = '[]'
     setDirty({ scene: false, layout: false })
     store.set(LAST_SCENE_KEY, name)
     syncUrl(name)
@@ -1191,7 +1251,17 @@ async function openScene(name) {
     emit('grid', { visible: true })
     emitView()
     emit('scene', { phase: 'opened', name })
-    quiet(refreshLayouts())
+    // The layout that was open here last time (on this device) comes back with the scene, so the furniture isn't lost
+    // on a reload; then the layouts and renders lists.
+    const remembered = store.get(layoutKey(name))
+    if (remembered && SLUG.test(remembered)) {
+      await Promise.all([refreshLayouts(), libraryLoading.catch(() => {})])
+      if (token !== sceneToken) return
+      if (layoutNames.includes(remembered)) {
+        try { await loadLayoutInternal(remembered) } catch { /* reported */ }
+        if (token !== sceneToken) return
+      } else store.set(layoutKey(name), null)
+    } else quiet(refreshLayouts())
     quiet(listRendersInternal())
     wake(1500)
     await nextFrame()
@@ -1230,6 +1300,7 @@ function closeScene() {
   layoutDetails = []
   renders = []
   setLayoutName('')
+  layoutBaseline = '[]'
   setDirty({ scene: false, layout: false })
   syncUrl(null)
   emit('adjust', { on: false })
@@ -1243,6 +1314,16 @@ async function deleteScene(name) {
   if (name === sceneName) closeScene()
   emit('scene', { phase: 'deleted', name })
   quiet(listScenesInternal())
+}
+
+// Undo of a delete: POST /api/scenes/<name>/restore puts the scene (and its layouts) back; its renders show again.
+async function restoreScene(name) {
+  if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`Scene names are slugs (got "${name}")`)
+  try { await apiJson(`${sceneUrl(name)}/restore`, { method: 'POST' }) } catch (e) {
+    throw reportError(e.status === 409 ? `Can't restore "${name}": a scene by that name exists again` : `Could not restore the scene "${name}"`, e)
+  }
+  emit('scene', { phase: 'restored', name })
+  await listScenesInternal()
 }
 
 async function renameScene(name, title) {
@@ -1367,11 +1448,26 @@ function setGridVisible(on) {
 let layoutNames = []
 let layoutDetails = []
 let layoutName = ''
-function setLayoutName(name) { layoutName = String(name ?? '') }
+let layoutTitle = ''  // the name as typed ("Phone A"), shown instead of the slug
+function setLayoutName(name, title = null) {
+  layoutName = String(name ?? '')
+  layoutTitle = layoutName && typeof title === 'string' ? title.trim() : ''
+}
+// "two-chairs" → "Two chairs"; the stored title when the layout has one ("Phone A").
+export const prettyLayout = (name) => { const s = String(name || '').replace(/-/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1) }
+function layoutDisplayName(name) {
+  if (!name) return ''
+  if (name === layoutName && layoutTitle) return layoutTitle
+  const d = layoutDetails.find((x) => x.name === name)
+  return (d && typeof d.title === 'string' && d.title.trim()) || prettyLayout(name)
+}
+// The layout open in each scene, remembered on this device, so the scene reopens with it (a reload, the next visit).
+const layoutKey = (scene) => `midstudy.layout.${scene}`
+const rememberLayout = (name) => { if (sceneName) store.set(layoutKey(sceneName), name || null) }
 const layoutQuery = () => `?scene=${encodeURIComponent(sceneName || '')}`
-function layoutDoc(name) {
+function layoutDoc(name, title = null) {
   return {
-    version: 1, name, scene_name: sceneName, library: LIBRARY_URL,
+    version: 1, name, title: title || null, scene_name: sceneName, library: LIBRARY_URL,
     items: [...items.values()].map((r) => ({
       uid: r.uid, id: r.id, render: 'glb',
       position: [round(r.group.position.x, 6), round(r.group.position.y, 6), round(r.group.position.z, 6)],
@@ -1380,16 +1476,21 @@ function layoutDoc(name) {
     })),
   }
 }
-async function saveLayoutInternal(name) {
+// opts.title: the name as the user typed it; saving over a layout keeps its title unless a new one is given.
+async function saveLayoutInternal(name, opts = {}) {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`Layout name must be a slug like "reading-corner" (got "${name}")`)
   if (!sceneName) throw reportError('Open a scene first, then save a layout')
+  const given = typeof opts?.title === 'string' && opts.title.trim() ? opts.title.trim().slice(0, 120) : null
+  const kept = name === layoutName ? layoutTitle : layoutDetails.find((d) => d.name === name)?.title
+  const title = given || (typeof kept === 'string' && kept.trim() ? kept.trim() : null)
   try {
-    await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(layoutDoc(name)) })
+    await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(layoutDoc(name, title)) })
   } catch (e) {
     throw reportError(e.status ? `Could not save layout "${name}"` : `Layout "${name}" not saved: the server isn't answering`, e)
   }
-  setLayoutName(name)
-  setDirty({ ...dirty, layout: false })
+  setLayoutName(name, title)
+  rememberLayout(name)
+  markLayoutClean()
   emit('layouts', { name })
   await refreshLayouts()
 }
@@ -1416,13 +1517,31 @@ async function loadLayoutInternal(name) {
       toast(`${n === 1 ? 'One piece in' : `${n} pieces in`} "${name}" ${n === 1 ? "isn't" : "aren't"} in the library any more: shown as ${n === 1 ? 'a box' : 'boxes'}.`, 'info', 9000)
     }
   })
-  setLayoutName(name)
-  setDirty({ ...dirty, layout: false })
+  setLayoutName(name, doc.title)
+  rememberLayout(name)
+  markLayoutClean()
   emit('layouts', { name })
 }
+// Deletes a layout (the server keeps it in layouts/<scene>/.trash). Resolves with the layout as it was, for Undo.
 async function deleteLayoutInternal(name) {
+  let doc = null
+  try { doc = await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`) } catch { /* deleted below anyway */ }
   try { await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`, { method: 'DELETE' }) } catch (e) { throw reportError(`Could not delete layout "${name}"`, e) }
-  if (layoutName === name) setLayoutName('')
+  const wasCurrent = layoutName === name
+  if (wasCurrent) { setLayoutName(''); rememberLayout(null) }
+  await refreshLayouts()
+  return doc ? { ...doc, wasCurrent } : null
+}
+// Undo of a delete: puts the layout back as it was (same items and title). It becomes the current layout again if it
+// was, without touching the pieces in the scene.
+async function restoreLayoutInternal(doc) {
+  if (!doc || typeof doc.name !== 'string' || !SLUG.test(doc.name) || !Array.isArray(doc.items)) throw reportError('Nothing to restore')
+  if (!sceneName || (doc.scene_name && doc.scene_name !== sceneName)) throw reportError('That layout belongs to another scene')
+  const body = { version: 1, name: doc.name, title: doc.title ?? null, scene_name: sceneName, library: doc.library ?? LIBRARY_URL, items: doc.items, ...(typeof doc.notes === 'string' ? { notes: doc.notes } : {}) }
+  try {
+    await apiJson(`/api/layouts/${doc.name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  } catch (e) { throw reportError(`Could not restore layout "${doc.name}"`, e) }
+  if (doc.wasCurrent && !layoutName) { setLayoutName(doc.name, doc.title); rememberLayout(doc.name); emit('layouts', { name: doc.name }) }
   await refreshLayouts()
 }
 async function listLayoutsInternal() {
@@ -1739,13 +1858,14 @@ export const engine = {
   getItemBounds: (uid) => { const rec = items.get(uid); if (!rec) return null; const b = worldBounds(rec); return { min: b.min.toArray(), max: b.max.toArray() } },
   getSelected: () => selected,
   getDrag: () => (drag.mode ? { mode: drag.mode, uid: drag.uid } : null),
-  getFootprint, hitItemAt, getScreenRect, getElevation,
+  getFootprint, hitItemAt, itemAt, getScreenRect, getElevation,
   getLook, getLibrary: () => library.slice(), assetUrl,
   getLayouts: () => layoutNames.slice(), getLayoutDetails: () => layoutDetails.map((d) => ({ ...d })), getLayoutName: () => layoutName,
+  getLayoutTitle: () => layoutDisplayName(layoutName), layoutDisplayName, getScenesTrash: () => scenesTrash.map((t) => ({ ...t })),
   getRenders: () => renders.slice(), isRenderMock: () => renderMock,
   getRuler, getState, getRenderSettings, horizonAt,
   // scenes
-  listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, renameScene, saveScene, saveThumbnail, recalibrate,
+  listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, restoreScene, renameScene, saveScene, saveThumbnail, recalibrate,
   setCamera, resetCamera, setAdjustFloor, setOcclusion, setGridVisible, setPitchFromHorizon,
   // view
   zoomAt, zoomBy, panBy, fitView,
@@ -1753,11 +1873,11 @@ export const engine = {
   addItemInternal, moveItemInternal, removeItemInternal, clearItemsInternal, select, rotateSelected, setSnap,
   beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem,
   setElevation, nudgeElevation, dropToFloor, reloadLibrary: () => loadLibrary(),
-  tap, setRulerActive, clearRuler, setRulerPointAt,
+  tap, setRulerActive, clearRuler, setRulerPointAt, setRulerTrueLength,
   // look
   setLook, setContactShadows,
   // layouts
-  saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, listLayoutsInternal, refreshLayouts, setLayoutName,
+  saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal, refreshLayouts, setLayoutName,
   // renders
   captureComposite, captureMask, postRender, renderViewInternal, listRendersInternal, compare,
   // errors + overlays + projection

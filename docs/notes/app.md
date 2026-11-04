@@ -1,5 +1,15 @@
 # App track notes (planner/ and planner/serve.py)
 
+> **Since verify round 1 (see `verify-fix-1.md`):** `serve.py` serves an allowlist only (`/planner/`, `/library/`
+> assets, `/scenes/` photo/depth/thumb, `/renders/`), never `/library/<id>/source.*`; strips metadata from client JPEGs
+> (render, thumb); restores deleted scenes (`POST /api/scenes/<name>/restore`, `trash` in `GET /api/scenes`); trashes
+> deleted layouts; stores layout `title`s; refuses duplicate `Content-Length`, junk `Host`s and any `--costs-file` other
+> than `<library-dir>/costs.csv`; answers 411/413 before the body. The planner: drags keep the grabbed point under the
+> pointer, a mouse press-drags unselected pieces, the open layout comes back on reload, Undo for layout and scene
+> deletes (Recently deleted on the Scenes page), Set scale from the ruler, a fine horizon drag on the phone, one toast at
+> a time on the phone, 44 px targets in Compare and the viewer, layout names as typed. The "Known gaps" entry "Deleting
+> a scene has no undo" is fixed.
+
 > **Since integration (see `integrate.md`):** three fixes landed. The depth pre-pass scales `depth.png` by
 > `height / calib height` after Adjust floor changes the height (occlusion was wrong for manual cameras; E4.15 checks
 > it). `serve.py` answers an empty `library.json` for a fresh library folder instead of a 404 console error. The

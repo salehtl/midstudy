@@ -5,8 +5,9 @@
 // Calibration runs through evals/lib/gated_calib.py (→ fixtures/stub_calib.py), which holds a job in "running"
 // while its gate file is missing, so "pending" and the one-at-a-time queue can be observed.
 // Usage: node evals/scenes_api.mjs   (or npm run eval:scenes-api). Output: evals/out/scenes-api/.
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import Ajv2020 from 'ajv/dist/2020.js'
 import {
@@ -347,5 +348,129 @@ if (srv2.up) {
   ev.check('W2 no call was made: no cost row, no render files', fs.readFileSync(srv2.dirs.costs, 'utf8') === costs0 && fs.readdirSync(srv2.dirs.renders).length === 0, fmt(fs.readdirSync(srv2.dirs.renders)))
   r = await api.get(srv2.base, '/api/spend')
   ev.check('W2 GET /api/spend: nothing spent or reserved, cap 0.03', r.json?.spent_usd === 0 && r.json?.reserved_usd === 0 && r.json?.cap_usd === 0.03, st(r))
+  r = await api.send(srv2.base, 'POST', '/api/render', { image: dataUri('image/jpeg', livingBytes), scene: S2 })
+  ev.check('the 402 for one render that costs more than the whole cap says so (not "used up: $0.00 spent")', r.status === 402 && /costs \$0\.0398, more than the daily fal budget/.test(r.json?.error || ''), st(r))
+  await srv2.stop()
 }
+
+// --- verify round 1: privacy and HTTP hardening (docs/notes/verify-fix-1.md) ---------------------------------------------------
+const META = path.join(ev.out, 'meta')
+fs.mkdirSync(META, { recursive: true })
+const meta = (...args) => { try { return JSON.parse(execFileSync(path.join(REPO, 'evals/py'), [path.join(REPO, 'evals/lib/metadata.py'), ...args], { cwd: REPO, encoding: 'utf8' }).trim().split('\n').at(-1)) } catch (e) { return { error: String(e.stderr || e).slice(0, 300) } } }
+const makeImg = (kind, extra = []) => { const out = path.join(META, `${kind}.jpg`); meta('make', '--kind', kind, '--out', out, ...extra); return out }
+// A raw TCP request (for what Node's HTTP client won't send): resolves with the first bytes of the answer, or '' on timeout.
+const tcp = (port, text, { waitMs = 4000 } = {}) => new Promise((resolve) => {
+  const sock = net.connect(port, '127.0.0.1'), t0 = Date.now()
+  let got = ''
+  const done = () => { clearTimeout(timer); sock.destroy(); resolve({ text: got, ms: Date.now() - t0 }) }
+  const timer = setTimeout(done, waitMs)
+  sock.on('data', (d) => { got += d.toString('latin1'); if (/\r\n\r\n/.test(got)) setTimeout(done, 50) })
+  sock.on('error', done)
+  sock.on('close', done)
+  sock.write(text)
+})
+
+ev.section('verify round 1: what the server serves (an allowlist, any spelling)')
+const srv3 = await startServer(ev)
+ev.check('a third server (stub calibration, probe library)', srv3.up, srv3.up ? srv3.base : srv3.why)
+if (srv3.up) {
+  const B3 = srv3.base
+  const gpsJpeg = fs.readFileSync(makeImg('gps-jpeg', ['--from', LIVING.photo]))
+  const up = await uploadScene(B3, gpsJpeg, { filename: 'IMG_0001.JPG' })
+  const N = up.json?.scene
+  await waitScene(B3, N || '_', 30000)
+  const rel = path.relative(REPO, srv3.dirs.scenes)
+  fs.mkdirSync(path.join(srv3.dirs.library, 'probe-box'), { recursive: true })
+  fs.writeFileSync(path.join(srv3.dirs.library, 'probe-box', 'source.jpg'), gpsJpeg) // as midstudy-add keeps an upload
+  const denied = [`/Scenes/${N}/source.jpg`, `/SCENES/${N}/calib.json`, `/sCenes/${N}/scene.json`, `/scenes/${N}/source.jpg`, `/scenes/${N}/Photo.JPG/../source.jpg`,
+    `/${rel}/${N}/source.jpg`, `/${rel}/${N}/calib.json`, `/${rel.toUpperCase()}/${N}/source.jpg`,
+    '/Library/costs.csv', '/library/costs.csv', '/LIBRARY/library.json/../costs.csv', '/library/probe-box/source.jpg', '/library/probe-box/SOURCE.JPG', '/Library/probe-box/source.jpg',
+    '/fixtures/photos/notes.md', '/Fixtures/photos/notes.md', '/fixtures/PHOTOS/notes.md', '/fixtures/Photos/private/x.jpg', '/fixtures/scenes/living-wide/truth.json',
+    '/README.md', '/CLAUDE.md', '/package.json', '/flake.nix', '/.env', '/%2Eenv', '/contract/CONTRACT.md', '/evals/out/', '/AD9729E1-593E-4443-9BCD-B0519A7265F1_1_201_a', '/IMG_0007.tiff', '/Downloads/IMG_0005.jpeg']
+  const leaks = []
+  for (const p of denied) { const rr = await raw(B3, 'GET', p); if (rr.status !== 404) leaks.push(`${p} → ${rr.status}`) }
+  ev.check(`none of ${denied.length} spellings of private paths is served (source.*, calib.json, scene.json, costs.csv, library sources, fixtures/photos, repo files, scratch scenes)`, leaks.length === 0, leaks.join('; ') || 'all 404')
+  r = await raw(B3, 'GET', '/planner/index.html')
+  ev.check('the planner itself is still served, with nosniff', r.status === 200 && /nosniff/i.test(r.headers?.['x-content-type-options'] || ''), `${r.status} ${r.headers?.['x-content-type-options']}`)
+  r = await raw(B3, 'GET', '/library/library.json')
+  ev.check('…and /library/library.json and /scenes/<n>/photo.jpg', r.status === 200 && (await raw(B3, 'GET', `/scenes/${N}/photo.jpg`)).status === 200, `${r.status}`)
+
+  ev.section('verify round 1: no camera metadata in what is served or sent')
+  const photoOf = async (bytes, name) => {
+    const u = await uploadScene(B3, bytes, { filename: name })
+    const s = await waitScene(B3, u.json?.scene || '_', 30000)
+    const f = path.join(META, `served-${name}`)
+    const g = s?.photo_url ? await raw(B3, 'GET', s.photo_url.split('?')[0]) : null
+    if (g?.status === 200) fs.writeFileSync(f, g.buf)
+    return { scene: s, info: g?.status === 200 ? meta('inspect', f) : { error: `GET photo ${g?.status}` }, same: g?.buf?.length ? Buffer.compare(g.buf, bytes) === 0 : null }
+  }
+  for (const kind of ['trailing-gps', 'prog-midscan-gps', 'zero-pad']) {
+    const bytes = fs.readFileSync(makeImg(kind))
+    const res = await photoOf(bytes, `${kind}.jpg`)
+    ev.check(`a JPEG with ${kind === 'trailing-gps' ? 'a GPS-bearing JPEG after its EOI' : kind === 'prog-midscan-gps' ? 'EXIF/GPS between progressive scans' : '64 KB of padding after EOI'}: the served photo.jpg is not passed through and carries nothing`, res.info.clean === true && res.same === false,
+      fmt({ calib: res.scene?.calib_status, same: res.same, ...res.info }))
+  }
+  const gpsData = fs.readFileSync(path.join(META, 'gps-jpeg.jpg'))
+  r = await api.send(B3, 'PUT', `/api/scenes/${N}/thumb`, { image: dataUri('image/jpeg', gpsData) })
+  const thumbInfo = r.status === 200 ? (fs.writeFileSync(path.join(META, 'thumb.jpg'), (await raw(B3, 'GET', `/scenes/${N}/thumb.jpg`)).buf), meta('inspect', path.join(META, 'thumb.jpg'))) : { error: r.status }
+  ev.check('a thumbnail sent with EXIF/GPS is stored and served without it', thumbInfo.clean === true, fmt(thumbInfo))
+  r = await api.send(B3, 'POST', '/api/render', { image: dataUri('image/jpeg', gpsData), scene: N })
+  const rn = r.json?.name
+  const rInfo = rn ? ['', '-input'].map((x) => meta('inspect', path.join(srv3.dirs.renders, `${rn}${x}.jpg`))) : []
+  ev.check('a render composite sent with EXIF/GPS: <name>-input.jpg and <name>.jpg (what fal gets, mock) carry none of it', r.status === 200 && rInfo.length === 2 && rInfo.every((x) => x.clean), fmt({ status: r.status, rInfo }))
+
+  ev.section('verify round 1: slugs, framing, Host, early 413, listing order')
+  r = await api.send(B3, 'PUT', `/api/layouts/evil%0A?scene=${N}`, { items: [] })
+  ev.check('a layout name with a trailing newline (evil%0A) is 400, not written', r.status === 400 && !(await api.get(B3, `/api/layouts?scene=${N}`)).json?.layouts?.some((x) => x.startsWith('evil')), st(r))
+  const metaHdr = Buffer.from(JSON.stringify({ name: 'Evil', id: 'evil\n', dims_cm: { w: 1, d: 1, h: 1 } })).toString('base64')
+  r = await raw(B3, 'POST', '/api/library/items', { headers: { 'X-Midstudy': '1', 'X-Midstudy-Kind': 'model', 'X-Midstudy-Filename': 'a.glb', 'X-Midstudy-Meta': metaHdr }, body: fs.readFileSync(path.join(srv3.dirs.library, 'probe-box', 'model.glb')) })
+  ev.check('a library id with a trailing newline is 400', r.status === 400, st(r))
+  let t = await tcp(srv3.port, `POST /api/scenes HTTP/1.1\r\nHost: 127.0.0.1:${srv3.port}\r\nX-Midstudy: 1\r\nX-Midstudy-Filename: a.jpg\r\nContent-Length: 10\r\nContent-Length: ${livingBytes.length}\r\n\r\n`)
+  ev.check('two Content-Length headers → 400 (ambiguous framing), nothing created', /^HTTP\/1\.[01] 400/.test(t.text), clip(t.text.split('\r\n')[0], 80))
+  for (const host of [`127.0.0.1:${srv3.port}@evil.example`, '[::1]evil.example', `localhost:${srv3.port}.evil.example`]) {
+    t = await tcp(srv3.port, `GET /api/scenes HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`)
+    ev.check(`Host "${host}" is not loopback → 403`, /^HTTP\/1\.[01] 403/.test(t.text), clip(t.text.split('\r\n')[0], 80))
+  }
+  t = await tcp(srv3.port, `GET /api/scenes HTTP/1.1\r\nHost: localhost:${srv3.port}\r\nConnection: close\r\n\r\n`)
+  ev.check('Host "localhost:<port>" still works', /^HTTP\/1\.[01] 200/.test(t.text), clip(t.text.split('\r\n')[0], 80))
+  t = await tcp(srv3.port, `POST /api/scenes HTTP/1.1\r\nHost: 127.0.0.1:${srv3.port}\r\nX-Midstudy: 1\r\nX-Midstudy-Filename: big.jpg\r\nContent-Length: ${25 * 1024 * 1024 + 1}\r\n\r\n`, { waitMs: 3000 })
+  ev.check('a 25 MB + 1 byte upload gets its 413 at once, without sending the body, saying "25.1 MB"', /^HTTP\/1\.[01] 413/.test(t.text) && t.ms < 2500 && /25\.1 MB: a scene photo can be at most 25 MB/.test(t.text), `${clip(t.text.split('\r\n')[0], 60)} in ${t.ms} ms; ${clip(t.text.split('\r\n\r\n')[1], 120)}`)
+  // ties on `created`: the collision suffix sorts as a number (…-10 before …-9)
+  for (const n of [2, 9, 10, 11]) {
+    const d = path.join(srv3.dirs.scenes, `scene-19990101-000000${n === 1 ? '' : `-${n}`}`)
+    fs.mkdirSync(d, { recursive: true })
+    fs.writeFileSync(path.join(d, 'scene.json'), JSON.stringify({ version: 1, title: null, created: '1999-01-01T00:00:00Z', saved: null, camera: DEFAULT_CAMERA, camera_source: 'default' }))
+  }
+  const order = ((await api.get(B3, '/api/scenes')).json?.scenes || []).map((x) => x.name).filter((x) => x.startsWith('scene-19990101'))
+  ev.check('scenes made in the same second list newest first: -11, -10, -9, -2', fmt(order) === fmt(['-11', '-10', '-9', '-2'].map((x) => `scene-19990101-000000${x}`)), fmt(order))
+
+  ev.section('verify round 1: a deleted scene can be restored; a deleted layout is kept')
+  r = await api.send(B3, 'PUT', `/api/layouts/phone-a?scene=${N}`, { title: 'Phone A', items: [{ id: 'probe-box', position: [0, 0, -2], rotation_y_deg: 0 }] })
+  ev.check('PUT a layout with a title: stored as typed ("Phone A"), listed in details', r.status === 200 && r.json?.title === 'Phone A' && (await api.get(B3, `/api/layouts?scene=${N}`)).json?.details?.[0]?.title === 'Phone A' && vLayout(r.json), `${st(r)} ${errs(vLayout)}`)
+  r = await api.send(B3, 'PUT', `/api/layouts/long?scene=${N}`, { title: 'x'.repeat(121), items: [] })
+  ev.check('a title over 120 characters is 400', r.status === 400, st(r))
+  r = await api.send(B3, 'DELETE', `/api/layouts/phone-a?scene=${N}`)
+  const ltrash = path.join(srv3.dirs.layouts, N, '.trash')
+  ev.check('DELETE a layout moves it to layouts/<scene>/.trash/ (not listed, not gone)', r.status === 200 && fs.existsSync(ltrash) && fs.readdirSync(ltrash).some((f) => f.startsWith('phone-a-'))
+    && !(await api.get(B3, `/api/layouts?scene=${N}`)).json?.layouts?.includes('phone-a'), st(r))
+  await api.send(B3, 'PUT', `/api/layouts/kept?scene=${N}`, { items: [] })
+  r = await api.send(B3, 'DELETE', `/api/scenes/${N}`)
+  let list = (await api.get(B3, '/api/scenes')).json
+  ev.check('a deleted scene is listed in GET /api/scenes → trash [{name, title, created, deleted}]', r.status === 200 && list?.trash?.some((x) => x.name === N && x.deleted && 'created' in x) && !list.scenes.some((x) => x.name === N), fmt(list?.trash))
+  r = await api.send(B3, 'POST', `/api/scenes/${N}/restore`, null, { forged: true })
+  ev.check('W1 POST …/restore without X-Midstudy → 403', r.status === 403, st(r))
+  r = await api.send(B3, 'POST', `/api/scenes/${N}/restore`)
+  list = (await api.get(B3, '/api/scenes')).json
+  ev.check('POST /api/scenes/<name>/restore → 200: back in the list, calibrated, photo served, its layouts back', r.status === 200 && r.json?.name === N && list.scenes.some((x) => x.name === N && x.calib_status === 'done')
+    && (await raw(B3, 'GET', `/scenes/${N}/photo.jpg`)).status === 200 && (await api.get(B3, `/api/layouts?scene=${N}`)).json?.layouts?.includes('kept') && !list.trash.some((x) => x.name === N), st(r))
+  ev.check('restoring again → 404 (nothing left in the trash)', (r = await api.send(B3, 'POST', `/api/scenes/${N}/restore`)).status === 404, st(r))
+  await srv3.stop()
+}
+
+ev.section('verify round 1: the spend cap reads the file midstudy-add writes')
+const other = path.join(ev.out, 'other-costs.csv')
+const run = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--costs-file', other, '--calib', 'python3 fixtures/stub_calib.py'],
+  { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })
+ev.check('--costs-file that isn\'t <library-dir>/costs.csv is refused even without --library-dir (adds would be uncapped)', run.status !== 0 && run.signal == null && /costs-file/.test(run.stderr || ''),
+  `exit ${run.status ?? run.signal}: ${clip((run.stderr || '').trim(), 200)}`)
 await ev.finish()

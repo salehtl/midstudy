@@ -10,7 +10,6 @@
 //   openCompare(a, b)    getPending() → [{ id, model, started, state, error? }]    events: 'state' 'done' 'failed'
 import { RENDER_MODELS, renderPrice, quiet } from '../../engine.js'
 import { pic, withIcon, emptyState, dayDate, clock, money, modelShort, imageShot } from './common.js'
-import { pretty } from './layouts.js'
 
 const ABOUT = 25 // seconds a render usually takes
 const MODEL_NOTE = { 'nano-banana': 'Uses the photo as a reference', kontext: 'Freer light, may move things', qwen: 'Restyles more, slower' }
@@ -43,7 +42,10 @@ export function mount(ctx) {
   panel.body.append(summary, pickBar, list, empty)
 
   const real = (p) => (p && !DEFAULT_PROMPTS.some((re) => re.test(p)) ? p : '')
-  const metaLine = (m) => [modelShort(m.model), m.layout ? pretty(m.layout) : null, m.keep_room ? (m.aligned?.applied ? 'room kept' : 'keep room not applied') : null].filter(Boolean).join(' · ')
+  const layoutOf = (m) => (m.layout ? engine.layoutDisplayName(m.layout) : '')
+  // The layout is what tells two renders apart, so it leads (the title line), then the time, model and keep-room.
+  const titleLine = (m) => layoutOf(m) || dayDate(m.created)
+  const metaLine = (m) => [layoutOf(m) ? dayDate(m.created) : null, modelShort(m.model), m.keep_room ? (m.aligned?.applied ? 'room kept' : 'keep room not applied') : null].filter(Boolean).join(' · ')
   const cost = (m) => (m.mock ? '$0' : money(m.cost_usd))
   const byName = (n) => engine.getRenders().find((r) => r.name === n)
 
@@ -90,7 +92,7 @@ export function mount(ctx) {
       rows.push(h(`button.rn-row${chosen ? '.is-picked' : ''}`, { type: 'button', role: 'listitem', dataset: { render: m.name }, 'aria-pressed': picking ? String(!!chosen) : null, onclick: () => (picking ? pickRow(m) : openViewer(m)) },
         picking ? h('span.rn-check', chosen ? pic('check', { size: 16 }) : null) : null,
         h('img.rn-thumb', { src: m.url, alt: '', loading: 'lazy', draggable: false }),
-        h('span.rn-text', h('span.rn-title.tnum', dayDate(m.created)), h('span.rn-meta', metaLine(m))),
+        h('span.rn-text', h('span.rn-title.tnum', { title: layoutOf(m) || null }, titleLine(m)), h('span.rn-meta', metaLine(m))),
         h('span.rn-cost.tnum', cost(m)),
         phone && !picking ? h('span.rn-chev', pic('chevron-right', { size: 18 })) : null))
     })
@@ -252,7 +254,7 @@ export function mount(ctx) {
         let x0 = null
         const stage = h('div.rv-stage', { onpointerdown: (e) => { x0 = e.clientX }, onpointerup: (e) => { if (x0 != null && Math.abs(e.clientX - x0) > 60) step(e.clientX < x0 ? 1 : -1); x0 = null } }, img)
         return { label: `Render, ${dayDate(r.created)}`, el: h('div.rv-phone',
-          h('header.rv-head', closeBtn, h('div.rv-titles', h('h2.rv-title.tnum', dayDate(r.created)), h('span.rv-sub.tnum', [of, modelShort(r.model), cost(r)].filter(Boolean).join(' · ')))),
+          h('header.rv-head', closeBtn, h('div.rv-titles', h('h2.rv-title.tnum', layoutOf(r) || dayDate(r.created)), h('span.rv-sub.tnum', [layoutOf(r) ? dayDate(r.created) : null, of, modelShort(r.model), cost(r)].filter(Boolean).join(' · ')))),
           h('div.rv-seg', seg), stage,
           h('footer.rv-foot', alignNote, promptEl, h('div.rv-actions', cmp, again))) }
       }
@@ -265,7 +267,7 @@ export function mount(ctx) {
         h('button.btn.btn-icon.btn-quiet', { type: 'button', 'aria-label': 'Older', dataset: { tip: 'Older', kbd: '→' }, onclick: () => step(1) }, pic('chevron-right', { size: 16 }))) : null
       return { label: `Render, ${dayDate(r.created)}`, el: h('div.rv-desk',
         h('header.rv-head', h('h2.rv-title.tnum', `Render · ${dayDate(r.created)}`),
-          h('span.rv-sub.tnum', [RENDER_MODELS[r.model]?.label || r.model, cost(r), r.layout ? pretty(r.layout) : null].filter(Boolean).join(' · ')),
+          h('span.rv-sub.tnum', [layoutOf(r) || null, RENDER_MODELS[r.model]?.label || r.model, cost(r)].filter(Boolean).join(' · ')),
           h('span.rv-spacer'),
           h('a.btn.btn-quiet', { href: side === 'raw' ? r.raw_url : r.url, target: '_blank', rel: 'noopener' }, 'Open image'), nav, h('span.rv-sep'), closeBtn),
         h('div.rv-pair',
@@ -292,7 +294,10 @@ export function mount(ctx) {
       const modes = phone ? [{ value: 'split', label: 'Split' }, { value: 'swipe', label: 'Swipe' }] : [{ value: 'side', label: 'Side by side' }, { value: 'split', label: 'Split' }]
       if (!modes.some((x) => x.value === mode)) mode = modes[0].value
       const pair = [ra, rb]
-      const tag = (r, i) => h('span.cv-tag', h('b', i ? 'B' : 'A'), h('span.tnum', `${dayDate(r.created)} · ${modelShort(r.model)}${r.layout ? ` · ${pretty(r.layout)}` : ''}`))
+      // A and B are told apart by their layout first (two renders of the same minute differ only there); the phone drops
+      // the model to keep the caption readable.
+      const tag = (r, i) => h('span.cv-tag', { title: [layoutOf(r), dayDate(r.created), modelShort(r.model)].filter(Boolean).join(' · ') }, h('b', i ? 'B' : 'A'),
+        h('span.tnum', [layoutOf(r) || null, dayDate(r.created), phone ? null : modelShort(r.model)].filter(Boolean).join(' · ')))
       const closeBtn = h('button.btn.btn-icon.rv-close', { type: 'button', 'aria-label': 'Close', onclick: close }, pic('close', { size: 16 }))
       const seg = segmented(modes, mode, (v) => { mode = v; m.rerender() }, { small: true, label: 'Compare as' })
       const swap = h('button.btn.btn-quiet.cv-swap', { type: 'button', onclick: () => { [ra, rb] = [rb, ra]; m.rerender() } }, 'Swap A and B')
@@ -303,7 +308,12 @@ export function mount(ctx) {
         const top = h('img.cv-top', { src: rb.url, alt: 'Render B', style: { clipPath: `inset(0 0 0 ${split}%)` } })
         const bar = h('div.cv-bar', { style: { left: `${split}%` } }, h('span.cv-knob', pic('chevron-left', { size: 14 }), pic('chevron-right', { size: 14 })))
         const range = h('input.cv-range', { type: 'range', min: 0, max: 100, step: 0.5, value: split, 'aria-label': 'Split between A and B' })
-        const box = h('div.cv-split', h('img.cv-under', { src: ra.url, alt: 'Render A' }), top, bar, range)
+        const under = h('img.cv-under', { src: ra.url, alt: 'Render A' })
+        const box = h('div.cv-split', under, top, bar, range)
+        // The box has the render's own shape, so the split line and its handle run over the image, not the black bars.
+        const setAr = (w, hh) => { if (w > 0 && hh > 0) box.style.setProperty('--ar', String(w / hh)) }
+        setAr(ra.out_w || ra.width, ra.out_h || ra.height)
+        under.addEventListener('load', () => setAr(under.naturalWidth, under.naturalHeight))
         const setSplit = (v) => { split = Math.max(0, Math.min(100, v)); top.style.clipPath = `inset(0 0 0 ${split}%)`; bar.style.left = `${split}%`; range.value = split }
         range.addEventListener('input', () => setSplit(Number(range.value)))
         let dragging = false
@@ -312,7 +322,7 @@ export function mount(ctx) {
         box.addEventListener('pointermove', (e) => { if (dragging) at(e) })
         box.addEventListener('pointerup', () => { dragging = false })
         box.addEventListener('pointercancel', () => { dragging = false })
-        stage = h('div.cv-splitwrap', box, h('div.cv-tags', tag(ra, 0), tag(rb, 1)))
+        stage = h('div.cv-splitwrap', h('div.cv-splitarea', box), h('div.cv-tags', tag(ra, 0), tag(rb, 1)))
       } else {
         const r = pair[shown]
         let x0 = null

@@ -47,7 +47,7 @@ Only phase-boundary agents commit; nothing is pushed.
 
 `evals/README.md` describes each one; `docs/notes/*.md` say where things stand. All are $0 (fal mocked) and set the mock variables themselves.
 
-- `nix develop -c npm run eval:all`: E1 and E3–E9 (scenes API, planner, occlusion, floor, render, library, pipeline, phone), one after another; `-- --with-calib` adds E2.
+- `nix develop -c npm run eval:all`: E1 and E3–E9 (scenes API, planner, occlusion, floor, render, library, pipeline, phone) and E11 (`eval:ux`, the verify round 1 UX regressions), one after another; `-- --with-calib` adds E2.
 - `nix develop -c npm run eval:calib`: E2, real MoGe-2 on the golden scenes and `fixtures/photos/` (`-- --mock` checks ingest only).
 - `nix develop -c npm run eval:real`: the real path on this Mac (real MoGe-2, a photo from `fixtures/photos/`, GLB add, renders, Compare); not in `eval:all`.
 - `nix develop -c npm run eval:selftest`: the eval machinery itself.

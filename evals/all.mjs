@@ -1,5 +1,5 @@
-// E10 eval:all — runs E1 and E3–E9 one after another (PLAN.md §6.2), and E2 (real MoGe, then --mock) only with
-// --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
+// E10 eval:all — runs E1 and E3–E9 one after another (PLAN.md §6.2), then E11 (the verify round 1 UX regressions),
+// and E2 (real MoGe, then --mock) only with --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
 // Usage: node evals/all.mjs [--with-calib] [--only E3,E4]   (or npm run eval:all [-- --with-calib])
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -19,6 +19,7 @@ const steps = [
   ['E7', 'library', 'bash', ['evals/library_api.sh']],
   ['E8', 'pipeline', 'bash', ['evals/pipeline_offline.sh']],
   ['E9', 'phone', 'node', ['evals/phone.mjs']],
+  ['E11', 'ux', 'node', ['evals/ux_fixes.mjs']],
 ].filter(([id]) => !only || only.includes(id))
 
 const run = (cmd, argv) => new Promise((resolve) => {

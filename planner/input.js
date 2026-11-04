@@ -3,8 +3,9 @@
 //   enabled.pointer / enabled.keyboard   set false to switch these handlers off
 //   setKeyFilter(fn)                     fn(keydownEvent) → true to swallow the key (e.g. while a dialog is open)
 // The camera never moves (contract §4.5): zoom and pan are 2D, inside the photo.
-// Pointer, one gesture at a time: a drag that starts on the selected item (its box on screen, plus 16 px on touch)
-// moves it on its own horizontal plane (Shift+drag: up and down, §2.10); two fingers pinch-zoom and pan; the middle
+// Pointer, one gesture at a time: a drag that starts on the selected item (its box on screen, plus 16 px on touch), or
+// with a mouse or pen on any piece, moves it so the grabbed point stays under the pointer (Shift+drag: up and down,
+// §2.10); two fingers pinch-zoom and pan; the middle
 // button (or any drag on the photo once zoomed in) pans. A tap (no drag, one finger) selects, deselects or sets a ruler point.
 // Wheel / trackpad pinch: zoom at the pointer, 1× to 4×.
 // Keys: R / Shift+R rotate 15°, Delete/Backspace remove, Esc deselects or leaves the ruler, PageUp / PageDown raise and
@@ -41,8 +42,15 @@ export function installInput(engine) {
     g = { id: e.pointerId, kind: 'other', x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, t0: performance.now(), type: e.pointerType, moved: false, multi: false }
     const sel = engine.getSelected()
     const pad = e.pointerType === 'mouse' ? 6 : 16
+    const ruler = engine.getRuler().active
     if (e.button === 1) g.kind = 'pan'
-    else if (sel && !engine.getRuler().active && engine.hitItemAt(sel, e.clientX, e.clientY, pad) && engine.beginItemDrag(sel, e.clientX, e.clientY, { lift: e.shiftKey })) g.kind = 'item'
+    else if (sel && !ruler && engine.hitItemAt(sel, e.clientX, e.clientY, pad) && engine.beginItemDrag(sel, e.clientX, e.clientY, { lift: e.shiftKey })) g.kind = 'item'
+    else if (!ruler && !engine.getAdjustFloor() && e.pointerType !== 'touch') {
+      // Mouse and pen: press on any piece and drag it straight away (it gets selected). Touch keeps "tap, then drag",
+      // so a finger on the photo can still pan a zoomed view without moving furniture by accident.
+      const hit = engine.itemAt(e.clientX, e.clientY)
+      if (hit && engine.beginItemDrag(hit, e.clientX, e.clientY, { lift: e.shiftKey })) g.kind = 'item'
+    }
     canvas.setPointerCapture?.(e.pointerId)
   }, true)
   on(window, 'pointermove', (e) => {

@@ -58,7 +58,7 @@ window.midstudy = {
   removeItem: (uid) => engine.removeItemInternal(uid),
   clearItems: () => engine.clearItemsInternal(),
   // layouts (per scene, §2.7)
-  saveLayout: (name) => engine.saveLayoutInternal(name),
+  saveLayout: (name, opts) => engine.saveLayoutInternal(name, opts), // opts.title: the name as typed (optional)
   loadLayout: (name) => engine.loadLayoutInternal(name),
   listLayouts: () => engine.listLayoutsInternal().catch((e) => { throw engine.reportError('Could not list layouts', e) }),
   getState: () => engine.getState(),

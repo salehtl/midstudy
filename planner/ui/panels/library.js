@@ -162,9 +162,9 @@ export function mount(ctx) {
     addBtn.hidden = !manage
     const n = counts()
     const sel = engine.getItem(engine.getSelected())
-    const inRoomCount = all.filter((l) => n.get(l.id)).length
+    const inRoomCount = all.reduce((sum, l) => sum + (n.get(l.id) || 0), 0) // pieces placed, not kinds of piece
     panel.setCount(all.length ? String(all.length) : '')
-    input.placeholder = all.length ? (shell.isPhone() ? `Search ${all.length} items` : 'Search furniture') : 'Search furniture'
+    input.placeholder = all.length ? (shell.isPhone() ? `Search ${all.length} ${all.length === 1 ? 'item' : 'items'}` : 'Search furniture') : 'Search furniture'
     clear.hidden = !input.value
     chips.all.set(filter === 'all')
     chips.inroom.set(filter === 'inroom')
@@ -197,13 +197,14 @@ export function mount(ctx) {
     ready.add(j.id)
     const item = j.item
     const title = item?.name || j.item_id
-    if (j.kind === 'rescale') { shell.toast(`${title} refitted to its new size`, { kind: 'ok', id: `lib-done-${j.id}` }); return }
-    shell.toast(`${title} is in the library`, { kind: 'ok', id: `lib-done-${j.id}`, ms: 10000,
+    if (j.kind === 'rescale') { shell.toast(`${title} refitted to its new size`, { kind: 'ok', id: `lib-job-${j.id}` }); return }
+    // Same id as the "Making …" toast, so this one replaces it instead of stacking under it.
+    shell.toast(`${title} is in the library`, { kind: 'ok', id: `lib-job-${j.id}`, ms: 10000,
       action: item ? { label: 'Place', onClick: () => { ready.delete(j.id); const l = engine.getLibrary().find((x) => x.id === item.id); if (l) quiet(add(l)) } } : undefined })
   })
   lib.events.addEventListener('job-failed', (e) => {
     const j = e.detail.job
-    shell.toast(`Couldn't make ${j.item?.name || j.item_id}: ${j.message || 'it stopped on the server'}`, { kind: 'error', id: `lib-failed-${j.id}` })
+    shell.toast(`Couldn't make ${j.item?.name || j.item_id}: ${j.message || 'it stopped on the server'}`, { kind: 'error', id: `lib-job-${j.id}` })
   })
   shell.events.addEventListener('mode', render)
   shell.events.addEventListener('panel', (e) => {

@@ -154,9 +154,9 @@
 .ly-row.is-current .ly-mark { color: var(--color-accent); }
 .ly-text { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .ly-name { display: flex; align-items: center; gap: 6px; font-weight: 500; line-height: 17px; min-width: 0; }
-.ly-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ly-name { overflow-wrap: anywhere; }
 .ly-row.is-current .ly-name { font-weight: 600; }
-.ly-meta { color: var(--color-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ly-meta { color: var(--color-muted); font-size: 12px; line-height: 16px; } /* wraps rather than cutting the time */
 .ly-cur-word { color: var(--color-accent); font-weight: 600; }
 .ly-current { color: var(--color-accent); padding: 0 6px; }
 .ly-load { height: 28px; padding: 0 10px; }
@@ -184,8 +184,8 @@
 .rn-thumb.is-rendering { background: var(--color-ground); }
 .rn-thumb > span { display: flex; }
 .rn-text { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.rn-title { font-weight: 500; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rn-meta { color: var(--color-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-title { font-weight: 500; line-height: 17px; overflow-wrap: anywhere; } /* the layout name: whole, on two lines if need be */
+.rn-meta { color: var(--color-muted); font-size: 12px; line-height: 16px; } /* wraps rather than cutting */
 .rn-cost { color: var(--color-text); white-space: nowrap; }
 .rn-cost.is-pending { color: var(--color-muted); }
 .rn-retry { height: 32px; padding: 0 6px; color: var(--color-accent); font-weight: 600; white-space: nowrap; }
@@ -254,9 +254,9 @@
 .rc-sheet .rc-model[aria-checked="true"] { box-shadow: inset 3px 0 0 var(--color-accent); }
 .rc-sheet .rc-radio { width: 20px; height: 20px; margin: 0; }
 .rc-sheet .rc-model-note { font-size: var(--text-body-phone); line-height: 20px; }
-.rc-prompt-wrap { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 0 0 14px; border-radius: var(--radius-panel); border: 1px solid var(--color-line); background: var(--color-raised); color: var(--color-muted); margin-top: 4px; }
+.rc-prompt-wrap { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 0 0 14px; border-radius: var(--radius-panel); border: 1px solid var(--color-line); background: var(--color-raised); color: var(--color-muted); margin-top: 4px; }
 .rc-prompt-wrap:focus-within { border-color: var(--color-accent); }
-.rc-prompt-wrap .rc-prompt { flex: 1 1 0; height: 100%; border: 0; background: none; padding: 0 12px 0 0; font-size: 16px; box-shadow: none; }
+.rc-prompt-wrap .rc-prompt { flex: 1 1 0; height: 46px; border: 0; background: none; padding: 0 12px 0 0; font-size: 16px; box-shadow: none; }
 .rc-sheet .rc-foot { flex-direction: column; gap: 4px; border-top: 0; padding: 4px 16px 8px; }
 .rc-sheet .rc-foot > .btn { height: 50px; font-size: var(--text-title-phone); }
 .rc-cancel { height: 44px; width: 100%; font-weight: 600; }
@@ -287,8 +287,8 @@
 .rv-phone .rv-title { font-size: var(--text-title-phone); line-height: 22px; }
 .rv-phone .rv-sub { max-width: 100%; }
 .rv-seg { display: flex; justify-content: center; padding: 4px 0 10px; }
-.rv-seg .seg-sm { height: 40px; padding: 3px; border-radius: var(--radius-pill); }
-.rv-seg .seg-sm > button { height: 32px; padding: 0 22px; border-radius: var(--radius-pill); font-size: var(--text-body-phone); }
+.rv-seg .seg-sm { height: 50px; padding: 3px; border-radius: var(--radius-pill); }
+.rv-seg .seg-sm > button { height: 44px; padding: 0 22px; border-radius: var(--radius-pill); font-size: var(--text-body-phone); }
 .rv-stage { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; background: #0C0D0F; touch-action: pan-y; }
 .rv-img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .rv-phone .rv-foot { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 16px; border: 0; }

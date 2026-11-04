@@ -1,5 +1,12 @@
 # Evals track notes
 
+> **Since verify round 1 (see `verify-fix-1.md`):** new `evals/ux_fixes.mjs` (**E11**, `npm run eval:ux`, part of
+> `eval:all`) and `evals/lib/metadata.py` (synthetic GPS photos and a whole-file inspector). E1, E2 `--mock`, E7, E8 and
+> E9 gained checks for the security and privacy fixes. **The 44 px audit (`smallTargets`) was wrong:** it skipped every
+> element inside a `pointer-events: none` container, i.e. all dialogs, Compare and the viewer; it now reads the
+> element's own `pointer-events` and also counts invisible range inputs. E11 reads the photo rect from
+> `window.midstudyCtx` (the app's console handle), as `real_path.mjs` does.
+
 > **Since integration (see `integrate.md`):** the integration agent confirmed the `library_api.sh` and `package.json`
 > edits and E6's real `align`, kept E2's golden tolerances (E2 real is now 53/60: the same 7 misses, plus 3 passing
 > scale-free depth checks it added), added E4.15 (occlusion with a manual camera height; E4 is 20/20) and

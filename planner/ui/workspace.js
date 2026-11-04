@@ -31,6 +31,7 @@ const G = {
   scenes: '<rect x="2.5" y="4" width="15" height="12" rx="1.5"/><path d="M2.5 13l4-3.5 3 2.5 2.5-2 5.5 4"/>',
 }
 const HINT_KEY = 'midstudy.hint.gestures'
+const HORIZON_FINE = 0.12 // ° of tilt per CSS px, at most, when dragging the horizon
 const store = {
   get: (k) => { try { return localStorage.getItem(k) } catch { return null } },
   set: (k, v) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
@@ -336,6 +337,21 @@ export function mount(ctx) {
     const pitch = h('span.ws-adj-pitch.tnum')
     const rulerBtn = h('button.ws-adj-btn.is-quiet', { type: 'button', 'aria-pressed': 'false', onclick: () => engine.setRulerActive(!engine.getRuler().active) }, glyph(G.ruler, 18), h('span', 'Ruler'))
     const rulerText = h('span.ws-adj-ruler.tnum')
+    // A known length fixes the scale: "Really [ ] cm · Set scale" scales the camera height (engine.setRulerTrueLength).
+    const trueInput = h('input.input.ws-adj-true.tnum', { type: 'text', inputmode: 'decimal', enterkeyhint: 'done', autocomplete: 'off', spellcheck: false, placeholder: 'e.g. 200', 'aria-label': 'Its real length, cm', dataset: { midstudy: 'ruler-true' } })
+    const applyTrue = () => {
+      const cm = parseFloat(String(trueInput.value).replace(',', '.'))
+      if (!(cm > 0)) { trueInput.focus(); return }
+      const exact = engine.setRulerTrueLength(cm / 100)
+      trueInput.value = ''
+      trueInput.blur()
+      const hcm = Math.round(engine.getCamera().height_m * 100)
+      shell.toast(exact ? `Scale set from ${Math.round(cm)} cm: camera height ${hcm} cm. Looks right saves it.` : `Camera height is at its limit (${hcm} cm): measure a longer length.`, { kind: exact ? 'ok' : 'info', id: 'ruler-scale', ms: 5000 })
+    }
+    trueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyTrue() } })
+    const trueRow = h('div.ws-adj-truerow', { hidden: true },
+      h('span.ws-adj-true-cap', 'Know its real length?'), h('label.ws-adj-true-field', trueInput, h('span', 'cm')),
+      h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'ruler-set', tip: 'Scale the room so the ruler reads this length' }, onclick: applyTrue }, 'Set scale'))
     const reset = h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'floor-reset', tip: 'Back to the automatic camera' }, onclick: () => engine.resetCamera() }, 'Reset')
     const ok = h('button.ws-adj-btn.is-primary', { type: 'button', dataset: { midstudy: 'floor-ok' }, onclick: () => quiet(looksRight()) }, 'Looks right')
     const close = h('button.ws-adj-close', { type: 'button', 'aria-label': 'Close Adjust floor', onclick: () => setAdjust(false) }, icon('close', { size: 16, stroke: 2 }))
@@ -345,6 +361,7 @@ export function mount(ctx) {
         camSlider('cam-height', 'height_m', 'Camera height', 'cm', Math.round(hl * 100), Math.round(hh * 100), 1, (m) => Math.round(m * 100), (cm) => cm / 100, 0),
         camSlider('cam-fov', 'fov_y_deg', 'Field of view', '°', fl, fh, 0.5, (d) => Math.round(d * 2) / 2, (d) => d, 1),
         camSlider('cam-roll', 'roll_deg', 'Roll', '°', rl, rh, 0.1, (d) => Math.round(d * 10) / 10, (d) => d, 1)),
+      trueRow,
       h('div.ws-adj-foot', h('div.ws-adj-tools', rulerBtn, rulerText, pitch), h('span.ws-spacer'), reset, ok))
     adjustCard.sync = () => {
       for (const r of Object.values(camRows)) if (r.isConnected) r.sync()
@@ -355,6 +372,8 @@ export function mount(ctx) {
       const r = engine.getRuler()
       rulerBtn.setAttribute('aria-pressed', String(r.active))
       rulerText.textContent = r.active ? (r.meters != null ? `${Math.round(r.meters * 100)} cm` : r.points.length ? 'Tap the other end' : 'Tap two points on the floor') : ''
+      const showTrue = r.active && r.meters != null
+      if (trueRow.hidden === showTrue) { trueRow.hidden = !showTrue; requestAnimationFrame(syncStage) }
       reset.disabled = false
     }
     adjustCard.sync()
@@ -503,8 +522,13 @@ export function mount(ctx) {
   })
   horizonHandle.addEventListener('pointermove', (e) => {
     if (!hz || e.pointerId !== hz.id) return
-    const s = engine.getPhotoRect().w / engine.getPhotoSize().w
-    engine.setPitchFromHorizon(hz.py0 + (e.clientY - hz.y0) / s)
+    const rect = engine.getPhotoRect()
+    const s = rect.w / engine.getPhotoSize().w
+    // The line follows the finger, except on a small photo (the phone at Fit: about 0.4° a pixel), where the tilt
+    // moves at most HORIZON_FINE degrees per CSS pixel: drag further for the same change, so it can be set finely.
+    const degPerPx = (360 / Math.PI) * Math.tan((engine.getCamera().fov_y_deg * Math.PI) / 360) / Math.max(1, rect.h) // 1 / focal, in ° per CSS px
+    const gain = Math.min(1, HORIZON_FINE / degPerPx)
+    engine.setPitchFromHorizon(hz.py0 + ((e.clientY - hz.y0) / s) * gain)
   })
   const hzUp = () => { hz = null; horizonHandle.classList.remove('is-active') }
   horizonHandle.addEventListener('pointerup', hzUp)
@@ -556,7 +580,15 @@ export function mount(ctx) {
       const len = Math.hypot(dx, dy) || 1
       dx /= len; dy /= len
       line(fpStem, [fr.x, fr.y], [fr.x + dx * 11, fr.y + dy * 11])
-      const gx = fr.x + dx * 24 - 22, gy = fr.y + dy * 24 - 22
+      // The grip sits off the front-right corner, but always on the visible photo and clear of the selection bar and
+      // the phone's lift column, so it can be grabbed when the piece is close to the camera (its corner off the photo).
+      const vr = engine.getVisiblePhotoRect()
+      const barTop0 = selBar.hidden ? vh() : selBar.getBoundingClientRect().top
+      const liftR = lift.hidden ? null : lift.getBoundingClientRect()
+      const maxX = Math.min(vr.x + vr.w, vw(), liftR && liftR.width ? liftR.left - 4 : Infinity) - 46
+      const maxY = Math.min(vr.y + vr.h, vh(), barTop0 - 6) - 46
+      const gx = Math.max(Math.max(vr.x, 0) + 2, Math.min(maxX, fr.x + dx * 24 - 22))
+      const gy = Math.max(Math.max(vr.y, 0) + 2, Math.min(maxY, fr.y + dy * 24 - 22))
       px(grip, gx, gy)
       const it = engine.getItem(sel)
       const up = Math.round(it.position[1] * 100)

@@ -71,10 +71,15 @@ export function mount(ctx) {
   async function remove(s) {
     const n = s.layouts || 0
     const ok = await shell.confirm({ title: `Delete ${sceneTitle(s)}?`, icon: 'trash', danger: true, confirm: 'Delete',
-      body: `The photo${n ? ` and its ${plural(n, 'layout')}` : ''} move to the server's trash (scenes/.trash). Renders stay.` })
+      body: `The photo${n ? ` and its ${plural(n, 'layout')}` : ''} move to Recently deleted, where you can restore ${n ? 'them' : 'it'}. Its renders come back with it.` })
     if (!ok) return
     try { await scenes.remove(s.name) } catch { return }
-    shell.toast(`${sceneTitle(s)} deleted`, { id: `scene-deleted:${s.name}` })
+    const t = shell.toast(`${sceneTitle(s)} deleted`, { id: `scene-deleted:${s.name}`, icon: 'trash', ms: 10000, action: { label: 'Undo', onClick: () => quiet(restore(s)) } })
+    t.el.querySelector('.toast-action')?.setAttribute('data-midstudy', 'scene-undo')
+  }
+  async function restore(s) {
+    try { await engine.restoreScene(s.name) } catch { return } // reported
+    shell.toast(`${sceneTitle(s)} is back`, { kind: 'ok', id: `scene-deleted:${s.name}` })
   }
 
   // --- render ---------------------------------------------------------------------------------------------------
@@ -119,12 +124,23 @@ export function mount(ctx) {
         h('p', 'A scene is one photo of a room, taken from where you would stand to look at it. Wide (0.5×) is fine. The floor should be visible.'),
         button({ label: 'Take or choose a photo', kind: 'primary', onClick: () => pick() }),
         st.offline ? h('p.sc-offline', "The server isn't answering: check it's running.") : null)
-        : h('div.sc-loading', ring(null, { size: 24 }), h('span', 'Loading scenes…')))
+        : h('div.sc-loading', ring(null, { size: 24 }), h('span', 'Loading scenes…')), st.loaded ? trashView() : null)
       return
     }
     root.replaceChildren(
       h('p.sc-hint', shell.isPhone() ? 'Tap a scene to open it.' : 'Click a scene to open it. Each scene keeps its own layouts and renders.'),
-      h('div.sc-grid', { role: 'list' }, upEl, list.map(card)))
+      h('div.sc-grid', { role: 'list' }, upEl, list.map(card)),
+      trashView())
+  }
+  // Recently deleted: scenes the server keeps in scenes/.trash, each with Restore (its layouts and renders come back).
+  function trashView() {
+    const trash = engine.getScenesTrash()
+    if (!trash.length) return null
+    const seen = new Set()
+    const rows = trash.filter((t) => !seen.has(t.name) && seen.add(t.name)).map((t) => h('div.sc-trash-row', { role: 'listitem' },
+      h('span.sc-trash-text', h('span.sc-trash-name', sceneTitle(t)), h('span.sc-meta.tnum', t.deleted ? `Deleted ${relDate(t.deleted)}` : 'Deleted')),
+      h('button.btn.btn-secondary.sc-restore', { type: 'button', dataset: { midstudy: 'scene-restore', scene: t.name }, onclick: () => quiet(restore(t)) }, 'Restore')))
+    return h('section.sc-trash', h('h3.caps', 'Recently deleted'), h('div.sc-trash-list', { role: 'list' }, rows))
   }
 
   scenes.events.addEventListener('scenes', render)

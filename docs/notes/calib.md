@@ -1,5 +1,12 @@
 # Calib track notes
 
+> **Since verify round 1 (see `verify-fix-1.md`):** ingest's pass-through walks the whole JPEG (between progressive
+> scans too) and requires nothing after EOI, so an appended GPS JPEG, mid-scan EXIF or padding are re-encoded (5 new
+> pytest cases, 3 new E2 `--mock` checks); the over-25 MB message reads "the photo is 25.1 MB, over the 25 MB limit".
+> The verifiers measured MoGe's scale bias in what the user sees (furniture 3–12 % too big on golden, likely 5–25 % on
+> the lounge, through the floor the planner uses, not depth.png); the planner now lets the user set the scale from a
+> known length (Adjust floor → Ruler → Set scale). Using the EXIF FOV is left to the plan owner.
+
 > **Since integration (see `integrate.md`):** the integration agent kept E2's PLAN.md tolerances and the golden scenes
 > as they are, so E2 real is 53/60 (the 7 golden misses below, plus 3 new scale-free depth checks that pass at
 > 0.7–1.1 %). The depth masking described here (max(4 cm, 1.2 % of depth), below-floor zeroing, unmasked without a

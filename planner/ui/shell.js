@@ -366,7 +366,7 @@ export function createShell({ engine }) {
     const textEl = h('span.toast-text', text)
     const el = h(`div.toast.toast-${kind}`, { role: kind === 'error' ? 'alert' : 'status' },
       icon(ic || (kind === 'ok' ? 'check' : kind === 'error' ? 'warning' : 'info'), { size: 20 }), textEl)
-    const t = { key, el, timer: null }
+    const t = { key, el, timer: null, kind }
     t.close = (instant) => {
       clearTimeout(t.timer)
       const i = toasts.indexOf(t)
@@ -382,6 +382,8 @@ export function createShell({ engine }) {
     if (life > 0) t.timer = setTimeout(() => t.close(), life)
     toasts.push(t)
     mounts.toasts.append(el)
+    // The phone's photo is short: one message at a time over it (errors stay until closed, one at most besides).
+    if (mode === 'phone') for (const o of toasts.slice()) if (o !== t && (o.kind !== 'error' || kind === 'error')) o.close(true)
     while (toasts.length > 3) toasts[0].close(true)
     return { el, close: () => t.close(), update: t.update }
   }
@@ -465,17 +467,19 @@ export function createShell({ engine }) {
 
   // Tooltips (desktop hover): data-tip + optional data-kbd
   let tipEl = null, tipTimer = null
-  const hideTip = () => { clearTimeout(tipTimer); tipEl?.remove(); tipEl = null }
+  let tipFor = null // { el, x, y }: the element the tip is about and where it was when the tip was placed
+  const hideTip = () => { clearTimeout(tipTimer); tipEl?.remove(); tipEl = null; tipFor = null }
   document.addEventListener('pointerover', (e) => {
     if (mode !== 'desktop' || e.pointerType !== 'mouse') return
     const t = e.target.closest?.('[data-tip]')
     hideTip()
-    if (!t) return
+    if (!t || e.buttons) return // not during a drag (the rotate grip moves under the pointer)
     tipTimer = setTimeout(() => {
-      if (!t.isConnected) return
+      if (!t.isConnected || !t.matches(':hover') || dragging) return
       tipEl = h('div.tooltip', { role: 'tooltip' }, h('span', t.dataset.tip), t.dataset.kbd ? kbd(t.dataset.kbd) : null)
       mounts.layer.append(tipEl)
       const r = t.getBoundingClientRect(), tr = tipEl.getBoundingClientRect()
+      tipFor = { el: t, x: r.left, y: r.top }
       const below = r.bottom + 6 + tr.height < m.height
       Object.assign(tipEl.style, {
         left: `${Math.max(6, Math.min(m.width - tr.width - 6, r.left + r.width / 2 - tr.width / 2))}px`,
@@ -485,7 +489,16 @@ export function createShell({ engine }) {
       if (t.closest('.side-rail')) Object.assign(tipEl.style, { left: `${r.right + 6}px`, top: `${r.top + r.height / 2 - tr.height / 2}px` })
     }, 450)
   })
-  document.addEventListener('pointerdown', hideTip, true)
+  // A press hides the tip and none shows until the button is up again; a tip whose element moved (the grip follows the
+  // piece) goes too, so it never stays behind at an old spot.
+  let dragging = false
+  document.addEventListener('pointerdown', () => { dragging = true; hideTip() }, true)
+  for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, () => { dragging = false }, true)
+  document.addEventListener('pointermove', (e) => {
+    if (!tipEl || !tipFor) return
+    const r = tipFor.el.getBoundingClientRect()
+    if (e.buttons || !tipFor.el.isConnected || Math.abs(r.left - tipFor.x) > 2 || Math.abs(r.top - tipFor.y) > 2) hideTip()
+  }, true)
 
   // --- keys: Esc closes the innermost layer; modals swallow keys before the engine's input sees them -------------
   const keyFilters = []

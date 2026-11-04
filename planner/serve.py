@@ -59,7 +59,8 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 
 REPO = Path(__file__).resolve().parent.parent
-SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+# \Z, not $: "$" also matches before a trailing newline, so "evil\n" would pass as a slug.
+SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\Z")
 MAX_BODY = 32 * 1024 * 1024
 MAX_THUMB = 2 * 1024 * 1024
 
@@ -82,7 +83,7 @@ REFERENCE_RENDER_PROMPT = (
     "it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or "
     "move anything."
 )
-RENDER_NAME = re.compile(r"^render-\d{8}-\d{6}(-\d+)?$")
+RENDER_NAME = re.compile(r"^render-\d{8}-\d{6}(-\d+)?\Z")
 COSTS_HEADER = ["date", "id", "engine", "cost_usd", "mock", "input"]
 FAL_TIMEOUT = 300
 NO_KEY = "FAL_KEY not set: add FAL_KEY=... to midstudy/.env"
@@ -225,13 +226,17 @@ def read_json_file(path: Path):
 MAX_MODEL = 200 * 1024 * 1024
 MAX_IMAGE = 20 * 1024 * 1024
 MAX_DRAIN = 256 * 1024 * 1024  # an early error reads (and drops) a body up to this, so the client sees the answer
+DRAIN_SECONDS = 60             # ...for at most this long
+EARLY_DRAIN_SECONDS = 5        # after a 411/413 that was already sent
+SOCKET_TIMEOUT = 30            # s one read or write on a connection may block (a client that stops sending is dropped)
 ENGINE_PRICE = {"sam3d": lambda res: 0.02, "trellis2": lambda res: {512: 0.25, 1024: 0.30, 1536: 0.35}[res],
                 "glb": lambda res: 0.0}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 ZIP_ALLOWED = {".obj", ".mtl", ".png", ".jpg", ".jpeg"}
 ZIP_MAX_ENTRIES = 1000
 ZIP_MAX_UNPACKED = 500 * 1024 * 1024
-LIBRARY_ASSET = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}/(model\.glb|splat\.ply|thumb\.jpg|source\.[A-Za-z0-9]{1,8})$")
+# source.<ext> is never served: it is the upload as given, camera metadata (GPS) included (§2.8).
+LIBRARY_ASSET = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}/(model\.glb|splat\.ply|thumb\.jpg)\Z")
 MIDSTUDY_ADD_TIMEOUT = 3600
 LOCK_WAIT = 60  # s a library edit waits for a running midstudy-add before answering 503
 FORGED = "cross-site request refused"
@@ -240,12 +245,14 @@ UNKNOWN_HOST = "unknown host name: add it with --allowed-host"
 DEFAULT_MIDSTUDY_ADD = "uv run --project pipeline midstudy-add"
 
 
+HOST_RE = re.compile(r"(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(\d{1,5}))?\Z")
+
+
 def host_name(host: str) -> str:
-    """A Host header's name without its port, lowercased (`[::1]:8765` -> `[::1]`)."""
-    host = host.strip().lower()
-    if host.startswith("["):
-        return host.split("]")[0] + "]"
-    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    """A Host header's name without its port, lowercased (`[::1]:8765` -> `[::1]`), or "" when it isn't exactly
+    `name[:port]` (so `127.0.0.1:80@evil.example` or `[::1]evil.example` never pass as loopback, §2.9)."""
+    m = HOST_RE.match(host.strip().lower())
+    return m.group(1) if m else ""
 
 
 def clean_path(raw: str) -> str | None:
@@ -270,6 +277,11 @@ def mock_cost() -> bool:
 def counts_against_cap() -> bool:
     """Live calls count; mock calls count for nothing unless MIDSTUDY_FAL_MOCK_COST=1."""
     return not fal_mock() or mock_cost()
+
+
+def mb_text(n: int) -> str:
+    """A size in MB (MiB, as the limits are), rounded up, so a body just over a limit never reads as the limit."""
+    return f"{math.ceil(n / 2**20 * 10) / 10:.1f} MB"
 
 
 def slugify(text: str) -> str:
@@ -654,8 +666,14 @@ class LibraryService:
             spent = self.spent(day)
             used = spent + sum(self.reserved.values())
             if used + amount > self.cap + 1e-9:
-                return {"error": f"today's fal budget (${self.cap:.2f}) is used up: ${used:.2f} spent",
-                        "spent_usd": spent, "cap_usd": self.cap}
+                held = used - spent
+                if amount > self.cap + 1e-9:
+                    error = f"this call costs ${fmt_cost(amount)}, more than the daily fal budget (${self.cap:.2f}) allows"
+                else:
+                    error = (f"today's fal budget (${self.cap:.2f}) is used up: ${spent:.2f} spent"
+                             + (f" and ${held:.2f} reserved by calls still running" if held > 1e-9 else "")
+                             + f", and this call costs ${fmt_cost(amount)}")
+                return {"error": error, "spent_usd": spent, "cap_usd": self.cap}
             self.reserved[key] = amount
         return None
 
@@ -814,11 +832,14 @@ DEFAULT_CALIB = "uv run --project calib midstudy-calib"
 DEFAULT_CAMERA = {"fov_y_deg": 55.0, "height_m": 1.40, "pitch_deg": -10.0, "roll_deg": 0.0}
 CAMERA_RANGE = {"fov_y_deg": (20.0, 110.0), "height_m": (0.2, 3.0), "pitch_deg": (-80.0, 30.0), "roll_deg": (-20.0, 20.0)}
 LOOK_RANGE = {"exposure": (0.25, 4.0), "warmth": (-1.0, 1.0)}
-SCENE_ASSET = re.compile(r"^([a-z0-9][a-z0-9-]{0,63})/(photo\.jpg|depth\.png|thumb\.jpg)$")
+SCENE_ASSET = re.compile(r"^([a-z0-9][a-z0-9-]{0,63})/(photo\.jpg|depth\.png|thumb\.jpg)\Z")
 UPLOAD_EXT = {"jpeg": "jpg", "png": "png", "heic": "heic", "webp": "webp"}
-LAYOUT_KEYS = ("version", "name", "scene_name", "library", "updated", "items", "notes")
+LAYOUT_KEYS = ("version", "name", "title", "scene_name", "library", "updated", "items", "notes")
+MAX_LAYOUT_TITLE = 120
 LAYOUT_ITEM_KEYS = ("uid", "id", "render", "position", "rotation_y_deg", "mounted", "dims_cm")
 NOT_IMAGE = "that file isn't a JPEG, PNG, HEIC or WebP image"
+TRASH_META = "trash.json"  # {name, title, deleted} in a trashed scene's folder
+TRASHED_SCENE = re.compile(r"^([a-z0-9][a-z0-9-]*?\d{8}-\d{6}(?:-\d+)?)-\d{8}-\d{6}(?:-\d+)?\Z")
 
 
 def is_num(v) -> bool:
@@ -864,6 +885,55 @@ def decode_data_uri(value, kinds: tuple[str, ...]) -> bytes | None:
         return None
 
 
+def clean_jpeg(data: bytes) -> bytes | None:
+    """The JPEG without its metadata: APP1–APP15 (EXIF, GPS, XMP, ICC, …) and COM segments dropped wherever they are
+    (before the first scan or between progressive scans), and nothing after EOI. The image data is copied as it is
+    (no re-encode). None when it isn't a well-formed JPEG. Used on JPEGs a client sends (the render composite, the
+    thumbnail), which the server stores, serves and sends to fal: none of that may carry camera metadata."""
+    n = len(data)
+    if n < 4 or data[:2] != b"\xff\xd8":
+        return None
+    out = bytearray(b"\xff\xd8")
+    i = 2
+    while i < n:
+        if data[i] != 0xFF:
+            return None
+        while i < n and data[i] == 0xFF:  # fill bytes
+            i += 1
+        if i >= n:
+            return None
+        m = data[i]
+        i += 1
+        if m == 0xD9:  # EOI: whatever follows (a second image, a trailer) is dropped
+            out += b"\xff\xd9"
+            return bytes(out)
+        if 0xD0 <= m <= 0xD7 or m == 0x01:
+            out += bytes((0xFF, m))
+            continue
+        if m == 0x00 or i + 2 > n:
+            return None
+        length = (data[i] << 8) | data[i + 1]
+        if length < 2 or i + length > n:
+            return None
+        if not (0xE1 <= m <= 0xEF or m == 0xFE):
+            out += bytes((0xFF, m)) + data[i:i + length]
+        i += length
+        if m == 0xDA:  # SOS: the entropy-coded data runs to the next marker (FF 00 is a stuffed byte, FF D0–D7 a restart)
+            j = i
+            while True:
+                j = data.find(b"\xff", j)
+                if j < 0 or j + 1 >= n:
+                    return None
+                nx = data[j + 1]
+                if nx == 0x00 or 0xD0 <= nx <= 0xD7:
+                    j += 2
+                    continue
+                break
+            out += data[i:j]
+            i = j
+    return None
+
+
 def last_json_line(text: str):
     """The last non-empty stdout line parsed as JSON, or None (contract §4.3: the tools' output contract)."""
     for line in reversed([ln.strip() for ln in (text or "").splitlines() if ln.strip()]):
@@ -882,6 +952,12 @@ def tool_error(proc, out, tool: str) -> str:
     err = [ln.strip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
     mine = [ln.removeprefix("midstudy-calib:").strip() for ln in err if ln.startswith("midstudy-calib:")]
     return (mine or err or [f"{tool} exited with code {proc.returncode}"])[-1]
+
+
+def name_order(name: str) -> tuple[str, int]:
+    """("scene-20261104-201500", 3) for "scene-20261104-201500-3": a sort key that orders collision suffixes as numbers."""
+    m = re.fullmatch(r"(.*?\d{8}-\d{6})(?:-(\d+))?", name)
+    return (m.group(1), int(m.group(2) or 1)) if m else (name, 0)
 
 
 class SceneService:
@@ -971,8 +1047,10 @@ class SceneService:
                 "calib": self.calib_json(name)}
 
     def all(self) -> list[dict]:
+        """Newest first by `created`; ties (uploads in the same second) by the name's collision suffix as a number, so
+        scene-…-10 comes before scene-…-9."""
         out = [s for s in (self.scene_object(n) for n in self.names()) if s]
-        out.sort(key=lambda s: (str(s.get("created") or ""), s["name"]), reverse=True)
+        out.sort(key=lambda s: (str(s.get("created") or ""), *name_order(s["name"])), reverse=True)
         return out
 
     # --- create, update, delete -------------------------------------------------------------------------------
@@ -1073,11 +1151,55 @@ class SceneService:
                 n += 1
                 trash = self.dir / ".trash" / f"{base}-{n}"
             trash.parent.mkdir(parents=True, exist_ok=True)
+            title = (self.read(name) or {}).get("title")
             shutil.move(str(self.dir / name), str(trash))
             layouts = self.layouts_dir / name
             if layouts.is_dir():
                 shutil.move(str(layouts), str(trash / "layouts"))
+            atomic_write_json(trash / TRASH_META, {"name": name, "title": title if isinstance(title, str) else None,
+                                                   "deleted": iso_utc()})
         return f"{self.dir.name}/.trash/{trash.name}"
+
+    def trash(self) -> list[dict]:
+        """[{name, title, deleted, dir}] for every deleted scene in scenes/.trash/, newest first."""
+        root = self.dir / ".trash"
+        out = []
+        if root.is_dir():
+            for d in root.iterdir():
+                if not d.is_dir() or not (d / "scene.json").is_file():
+                    continue
+                meta = read_json_file(d / TRASH_META)
+                if isinstance(meta, dict) and isinstance(meta.get("name"), str) and SLUG.match(meta["name"]):
+                    name, deleted, title = meta["name"], meta.get("deleted"), meta.get("title")
+                else:  # trashed before trash.json existed: <name>-<UTC stamp>[-n]
+                    m = TRASHED_SCENE.match(d.name)
+                    if not m:
+                        continue
+                    name, deleted = m.group(1), iso_utc(d.stat().st_mtime)
+                    title = (read_json_file(d / "scene.json") or {}).get("title")
+                created = (read_json_file(d / "scene.json") or {}).get("created")
+                out.append({"name": name, "title": title if isinstance(title, str) else None,
+                            "created": created if isinstance(created, str) else None, "deleted": str(deleted or ""), "dir": d})
+        out.sort(key=lambda t: (t["deleted"], t["dir"].name), reverse=True)
+        return out
+
+    def restore(self, name: str) -> dict:
+        """POST …/restore: the newest trashed copy of `name` back to scenes/<name>/, its layouts back to
+        layouts/<name>/. KeyError: none in the trash; FileExistsError: a scene by that name exists again."""
+        with self.lock:
+            copies = [t for t in self.trash() if t["name"] == name]
+            if not copies:
+                raise KeyError(name)
+            if (self.dir / name).exists() or (self.layouts_dir / name).exists():
+                raise FileExistsError(name)
+            src = copies[0]["dir"]
+            dest = self.dir / name
+            shutil.move(str(src), str(dest))
+            (dest / TRASH_META).unlink(missing_ok=True)
+            if (dest / "layouts").is_dir():
+                self.layouts_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(dest / "layouts"), str(self.layouts_dir / name))
+        return self.scene_object(name)
 
     # --- jobs -------------------------------------------------------------------------------------------------
     def list_jobs(self) -> list[dict]:
@@ -1158,6 +1280,7 @@ class SceneService:
 
 class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map, **MIME, "": "application/octet-stream"}
+    timeout = SOCKET_TIMEOUT  # StreamRequestHandler sets it on the socket: no handler thread waits forever on a body
 
     def __init__(self, *args, layouts_dir: Path, renders_dir: Path, costs_file: Path, scenes: "SceneService",
                  library_dir: Path | None = None, library: "LibraryService | None" = None,
@@ -1195,12 +1318,14 @@ class Handler(SimpleHTTPRequestHandler):
             if rel != "library.json" and not LIBRARY_ASSET.match(rel):
                 return str(self.library_dir / ".missing")
             return str(self.library_dir.joinpath(*[x for x in rel.split("/") if x]))
-        # The user's own photos are never served: fixtures/photos/ (location data in private/) and camera originals
-        # dropped at the repo root (git-ignored, CLAUDE.md).
+        # Everything else is an allowlist: the planner's own files and nothing more. The repo also holds the user's
+        # photos (fixtures/photos/, camera originals dropped at the root, with or without an extension), scratch scenes
+        # under evals/out/ and the tracked library/costs.csv, and APFS is case-insensitive, so "/Fixtures/photos/…" or
+        # "/Library/costs.csv" would reach them through any rule that matched spellings (§2.9 Paths, §4.4 Static).
         parts = [x for x in p.split("/") if x]
-        if parts[:2] == ["fixtures", "photos"] or (len(parts) == 1 and PurePosixPath(parts[0]).suffix.lower() in IMAGE_EXTS):
-            return str(REPO / ".missing")
-        return str(REPO.joinpath(*parts))
+        if parts and parts[0] == "planner":
+            return str(REPO.joinpath(*parts))
+        return str(REPO / ".missing")
 
     def list_directory(self, path):
         """No directory listings anywhere (they'd show library/_inbox, raw/ and the like): a folder is a 404."""
@@ -1212,27 +1337,34 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
-        if (clean_path(self.path) or "").startswith(("/library/", "/api/library", "/scenes/", "/api/scenes", "/renders/")):
-            self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
     def parse_request(self):
         self.body_done = False  # one handler serves every request on a keep-alive connection
         if not super().parse_request():
             return False
-        if host_name(self.headers.get("Host") or "") in self.hosts:
-            return True
-        self.error_json(HTTPStatus.FORBIDDEN, UNKNOWN_HOST)  # §2.9 Host names (DNS rebinding), before anything else
-        return False
+        if host_name(self.headers.get("Host") or "") not in self.hosts:
+            self.error_json(HTTPStatus.FORBIDDEN, UNKNOWN_HOST)  # §2.9 Host names (DNS rebinding), before anything else
+            return False
+        if len(self.headers.get_all("Content-Length") or []) > 1:
+            # Two lengths (even equal ones) frame the body ambiguously: refuse instead of picking one (§2.9).
+            self.body_done = True
+            self.close_connection = True
+            self.error_json(HTTPStatus.BAD_REQUEST, "the request has more than one Content-Length header")
+            return False
+        return True
 
     def chunked(self) -> bool:
         return "chunked" in (self.headers.get("Transfer-Encoding") or "").lower()
 
-    def discard_body(self) -> None:
-        """Read and drop an unread request body, so an early error reaches the client instead of a reset."""
+    def discard_body(self, seconds: float = DRAIN_SECONDS) -> None:
+        """Read and drop an unread request body (up to MAX_DRAIN, for at most `seconds`), so an early error reaches
+        the client instead of a reset. A body that doesn't arrive in time closes the connection."""
         if self.body_done or self.command in ("GET", "HEAD"):
             return
         self.body_done = True
+        deadline = time.monotonic() + seconds
         try:
             if self.chunked():
                 total = 0
@@ -1243,7 +1375,7 @@ class Handler(SimpleHTTPRequestHandler):
                             pass
                         return
                     total += size
-                    if total > MAX_DRAIN:
+                    if total > MAX_DRAIN or time.monotonic() > deadline:
                         break
                     self.rfile.read(size + 2)
                 self.close_connection = True
@@ -1253,6 +1385,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self.close_connection = True
                 return
             while left > 0:
+                if time.monotonic() > deadline:
+                    self.close_connection = True
+                    return
                 chunk = self.rfile.read(min(left, 1 << 20))
                 if not chunk:
                     break
@@ -1274,14 +1409,28 @@ class Handler(SimpleHTTPRequestHandler):
         sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
 
     def send_json(self, status: int, data) -> None:
-        self.discard_body()
+        # 411 and 413 answer at once, before the (missing or too large) body: the client sees the answer even if it
+        # never sends that body. The connection closes after it, once a short drain has given the client time to read it.
+        early = status in (HTTPStatus.LENGTH_REQUIRED, HTTPStatus.REQUEST_ENTITY_TOO_LARGE) and not self.body_done
+        if early:
+            self.close_connection = True
+        else:
+            self.discard_body()
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        if early:
+            self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+        if early:
+            try:
+                self.wfile.flush()
+            except OSError:
+                return
+            self.discard_body(seconds=EARLY_DRAIN_SECONDS)
 
     def error_json(self, status: int, message: str) -> None:
         self.send_json(status, {"error": message})
@@ -1369,6 +1518,9 @@ class Handler(SimpleHTTPRequestHandler):
             m = re.fullmatch(r"/api/scenes/([^/]*)/calibrate", api or "")
             if m:
                 return self.calibrate_scene(m.group(1))
+            m = re.fullmatch(r"/api/scenes/([^/]*)/restore", api or "")
+            if m:
+                return self.restore_scene(m.group(1))
             if api == "/api/library/items":
                 return self.post_library_upload()
             if api == "/api/library/items/from-url":
@@ -1420,7 +1572,8 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_api_get(self, api: str):
         try:
             if api == "/api/scenes":
-                return self.send_json(HTTPStatus.OK, {"scenes": self.scenes.all()})
+                trash = [{k: t[k] for k in ("name", "title", "created", "deleted")} for t in self.scenes.trash()]
+                return self.send_json(HTTPStatus.OK, {"scenes": self.scenes.all(), "trash": trash})
             if api == "/api/scenes/jobs":
                 return self.send_json(HTTPStatus.OK, {"jobs": self.scenes.list_jobs()})
             m = re.fullmatch(r"/api/scenes/jobs/([^/]*)", api)
@@ -1471,7 +1624,7 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(length)
         if length > MAX_SCENE_UPLOAD:
             return self.error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                                   f"that photo is {length / 2**20:.1f} MB: a scene photo can be at most 25 MB")
+                                   f"that photo is {mb_text(length)}: a scene photo can be at most 25 MB")
         filename = PurePosixPath((self.headers.get("X-Midstudy-Filename") or "").replace("\\", "/")).name.strip()
         if not filename:
             return self.error_json(HTTPStatus.BAD_REQUEST, "X-Midstudy-Filename is required (the photo's name, e.g. IMG_0042.HEIC)")
@@ -1578,10 +1731,11 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError as e:
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
         data = decode_data_uri(body.get("image") if isinstance(body, dict) else None, ("jpeg",))
-        if not data or data[:3] != b"\xff\xd8\xff":
-            return self.error_json(HTTPStatus.BAD_REQUEST, "image must be a JPEG data URI (data:image/jpeg;base64,...)")
-        if len(data) > MAX_THUMB:
+        if data and len(data) > MAX_THUMB:
             return self.error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "thumbnail is over 2 MB: send a smaller JPEG")
+        data = clean_jpeg(data) if data and data[:3] == b"\xff\xd8\xff" else None  # served: no metadata
+        if not data:
+            return self.error_json(HTTPStatus.BAD_REQUEST, "image must be a JPEG data URI (data:image/jpeg;base64,...)")
         with self.scenes.lock:
             if not self.scenes.exists(name):
                 return self.no_scene(name)
@@ -1604,6 +1758,17 @@ class Handler(SimpleHTTPRequestHandler):
         except KeyError:
             return self.no_scene(name)
         return self.send_json(HTTPStatus.OK, {"ok": True, "trash": trash})
+
+    def restore_scene(self, name: str):
+        if not SLUG.match(name):
+            return self.error_json(HTTPStatus.NOT_FOUND, f"no deleted scene named {name!r}")
+        try:
+            scene = self.scenes.restore(name)
+        except KeyError:
+            return self.error_json(HTTPStatus.NOT_FOUND, f"{name!r} isn't in the scenes' trash")
+        except FileExistsError:
+            return self.error_json(HTTPStatus.CONFLICT, f"a scene {name!r} (or its layouts) exists again: delete it first")
+        return self.send_json(HTTPStatus.OK, scene)
 
     # --- layouts, per scene (contract §2.7) ---------------------------------------------------------------------
     def layout_scene(self):
@@ -1639,7 +1804,9 @@ class Handler(SimpleHTTPRequestHandler):
                 data = read_json_file(p)
                 items = data.get("items") if isinstance(data, dict) else None
                 updated = data.get("updated") if isinstance(data, dict) else None
-                details.append({"name": p.stem, "items": len(items) if isinstance(items, list) else 0,
+                title = data.get("title") if isinstance(data, dict) else None
+                details.append({"name": p.stem, "title": title if isinstance(title, str) and title.strip() else None,
+                                "items": len(items) if isinstance(items, list) else 0,
                                 "updated": updated if isinstance(updated, str) else iso_utc(p.stat().st_mtime)})
         return self.send_json(HTTPStatus.OK, {"layouts": [x["name"] for x in details], "details": details})
 
@@ -1686,8 +1853,14 @@ class Handler(SimpleHTTPRequestHandler):
             items.append(out)
         lib = body.get("library")
         notes = body.get("notes")
-        doc = {"version": 1, "name": name, "scene_name": scene, "library": lib if isinstance(lib, str) else None,
-               "updated": iso_utc(), "items": items}
+        title = body.get("title")
+        if title is not None and not isinstance(title, str):
+            return self.error_json(HTTPStatus.BAD_REQUEST, "title must be text (the layout's name as typed) or null")
+        title = " ".join((title or "").split())
+        if len(title) > MAX_LAYOUT_TITLE:
+            return self.error_json(HTTPStatus.BAD_REQUEST, f"the title can be at most {MAX_LAYOUT_TITLE} characters")
+        doc = {"version": 1, "name": name, "title": title or None, "scene_name": scene,
+               "library": lib if isinstance(lib, str) else None, "updated": iso_utc(), "items": items}
         if isinstance(notes, str):
             doc["notes"] = notes
         atomic_write_json(self.layouts_dir / scene / f"{name}.json", doc)
@@ -1700,8 +1873,18 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.layouts_dir / scene / f"{name}.json"
         if not path.is_file():
             return self.error_json(HTTPStatus.NOT_FOUND, f"scene {scene!r} has no layout named {name!r}")
-        path.unlink()
-        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "scene": scene})
+        # Not gone for good: layouts/<scene>/.trash/<layout>-<UTC stamp>.json (never listed or served). The planner's
+        # Undo puts the layout back with a PUT of the copy it read first.
+        trash_dir = self.layouts_dir / scene / ".trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        base = f"{name}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
+        trash, n = trash_dir / f"{base}.json", 1
+        while trash.exists():
+            n += 1
+            trash = trash_dir / f"{base}-{n}.json"
+        os.replace(path, trash)
+        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "scene": scene,
+                                              "trash": f"{self.layouts_dir.name}/{scene}/.trash/{trash.name}"})
 
     # --- library (contract §2.8) ------------------------------------------------------------------
     def library_busy(self):
@@ -1779,7 +1962,7 @@ class Handler(SimpleHTTPRequestHandler):
         limit = MAX_MODEL if kind == "model" else MAX_IMAGE
         if length > limit:
             return self.error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                                   f"that file is {length / 1e6:.0f} MB: {'models' if kind == 'model' else 'photos'} can be at most {limit // (1024 * 1024)} MB")
+                                   f"that file is {mb_text(length)}: {'models' if kind == 'model' else 'photos'} can be at most {limit // (1024 * 1024)} MB")
         if length == 0:
             return self.error_json(HTTPStatus.BAD_REQUEST, "the file is empty")
         tmp = Path(tempfile.mkdtemp(prefix="midstudy-upload-"))  # private, never under a served path
@@ -1976,7 +2159,9 @@ class Handler(SimpleHTTPRequestHandler):
         if not isinstance(body, dict):
             return self.error_json(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
         data = decode_data_uri(body.get("image"), ("jpeg",))
-        if not data or data[:3] != b"\xff\xd8\xff":
+        # Stored, served and sent to fal: without any metadata the client's JPEG may carry (§2.6, privacy).
+        data = clean_jpeg(data) if data and data[:3] == b"\xff\xd8\xff" else None
+        if not data:
             return self.error_json(HTTPStatus.BAD_REQUEST, "image must be a JPEG data URI (data:image/jpeg;base64,...)")
         model = body.get("model") or "nano-banana"
         if model not in RENDER_MODELS:
@@ -2150,7 +2335,7 @@ def main(argv=None):
     ap.add_argument("--layouts-dir", default="layouts")
     ap.add_argument("--renders-dir", default="renders")
     ap.add_argument("--costs-file", default=None,
-                    help="default: <library-dir>/costs.csv, where midstudy-add writes; with --library-dir it must be that file")
+                    help="default: <library-dir>/costs.csv, where midstudy-add writes its rows; if given, it must be that file")
     ap.add_argument("--calib", default=DEFAULT_CALIB,
                     help=f"the calibration command, run as an argument list (default: {DEFAULT_CALIB})")
     ap.add_argument("--midstudy-add", default=DEFAULT_MIDSTUDY_ADD,
@@ -2168,9 +2353,9 @@ def main(argv=None):
 
     library_dir = resolve(args.library_dir or "library")
     costs_file = resolve(args.costs_file) if args.costs_file else library_dir / "costs.csv"
-    # midstudy-add always writes <library-dir>/costs.csv, so the cap would miss its rows if this read another file.
-    # (Without --library-dir, a separate --costs-file is allowed: evals keep renders' rows out of the repo's library.)
-    if args.library_dir and costs_file.resolve() != (library_dir / "costs.csv").resolve():
+    # midstudy-add always writes <library-dir>/costs.csv, so the cap would miss its rows (library adds would be
+    # unlimited) if this read another file: refuse any other --costs-file, with or without --library-dir (§2.9 W2).
+    if costs_file.resolve() != (library_dir / "costs.csv").resolve():
         sys.exit(f"midstudy planner: --costs-file {costs_file} isn't {library_dir / 'costs.csv'}, where midstudy-add writes "
                  "its costs: drop --costs-file (it defaults to <library-dir>/costs.csv)")
     library = LibraryService(library_dir, costs_file, shlex.split(args.midstudy_add), args.daily_spend_usd)

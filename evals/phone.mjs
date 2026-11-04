@@ -227,6 +227,31 @@ if (!(cv.cover >= 0.85) && lr.length >= 2) {
 }
 ev.check('the phone Compare has the split slider', cv.slider > 0, fmt({ slider: cv.slider, toggled: cv.toggled ?? null }))
 await audit('compare')
+// Verify round 1: A and B must be told apart on the phone (their layout, whole), and the split must cover the image only.
+const tags = await page.evaluate(() => [...document.querySelectorAll('.cv-tag span')].filter((e) => e.checkVisibility()).map((e) => ({ text: e.textContent, cut: e.scrollWidth > e.clientWidth + 1 }))).catch(() => [])
+ev.check('Compare captions on the phone name the layout and are not cut off', tags.length >= 2 && tags.every((t) => /phone.layout/i.test(t.text) && !t.cut), fmt(tags))
+const split = await page.evaluate(() => {
+  const box = document.querySelector('.cv-split'), img = box?.querySelector('img')
+  if (!box || !img?.naturalWidth) return null
+  const r = box.getBoundingClientRect()
+  return { boxAr: r.width / r.height, imgAr: img.naturalWidth / img.naturalHeight, h: r.height }
+}).catch(() => null)
+ev.check('the split box has the render\'s own shape (the line and handle stay on the image, not the bars)', !!split && Math.abs(split.boxAr / split.imgAr - 1) < 0.02, fmt(split))
+await closeSheets()
+await sleep(300)
+// the render viewer (tap a render in the panel)
+const rp2 = await named('renders', /^renders$/i)
+await tap(rp2)
+await sleep(500)
+const row = page.locator('button[data-render]')
+let viewerOpen = false
+for (let k = 0; k < await row.count(); k++) if (await row.nth(k).isVisible().catch(() => false)) { viewerOpen = await row.nth(k).tap({ timeout: 5000 }).then(() => true, () => false); break }
+await sleep(500)
+ev.check('a render opens in the viewer by touch', viewerOpen && await page.locator('.rv-phone').first().isVisible().catch(() => false), `tapped ${viewerOpen}`)
+await audit('render viewer')
+const head = await page.locator('.rv-phone .rv-titles').first().innerText().catch(() => '')
+ev.check('the phone viewer header names the layout', /phone.layout/i.test(head), JSON.stringify(head))
+await closeSheets()
 
 ev.section('errors')
 ev.check('no page errors', P.errors.page.length === 0, P.errors.page.join(' | ') || 'none')

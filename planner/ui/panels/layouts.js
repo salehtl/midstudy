@@ -27,20 +27,22 @@ export function mount({ engine, scenes, shell, kit, icons }) {
 
   const current = () => engine.getLayoutName().trim()
   const names = () => engine.getLayoutDetails().map((d) => d.name)
+  // The name as the user typed it ("Phone A"), else the slug made readable ("two-chairs" → "Two chairs").
+  const show = (name) => engine.layoutDisplayName(name) || pretty(name)
 
-  async function save(name, { quietly = false } = {}) {
+  async function save(name, { quietly = false, title = null } = {}) {
     if (busy) return false
     busy = true
     failure = null
     render()
     try {
-      await engine.saveLayoutInternal(name)
+      await engine.saveLayoutInternal(name, { title })
       asking = false
       draft = ''
-      if (!quietly) shell.toast(`Layout saved as ${pretty(name)}`, { kind: 'ok', id: 'layout-saved' })
+      if (!quietly) shell.toast(`Layout saved as ${show(name)}`, { kind: 'ok', id: 'layout-saved' })
       return true
     } catch (e) {
-      failure = { message: e.message, offline: isOffline(e), retry: () => quiet(save(name)) }
+      failure = { message: e.message, offline: isOffline(e), retry: () => quiet(save(name, { title })) }
       return false
     } finally {
       busy = false
@@ -57,8 +59,8 @@ export function mount({ engine, scenes, shell, kit, icons }) {
         { label: 'Cancel', value: null, kind: 'secondary', cancel: true },
       ]
       const v = await shell.confirm({
-        title: `Load ${pretty(name)}?`, icon: 'warning',
-        body: cur ? `The furniture has changes that aren't saved to ${pretty(cur)}. Loading replaces it.` : "The furniture in the scene isn't saved as a layout. Loading replaces it.",
+        title: `Load ${show(name)}?`, icon: 'warning',
+        body: cur ? `The furniture has changes that aren't saved to ${show(cur)}. Loading replaces it.` : "The furniture in the scene isn't saved as a layout. Loading replaces it.",
         actions: shell.isPhone() ? acts : [acts[2], acts[1], acts[0]],
       })
       if (v == null) return
@@ -68,15 +70,20 @@ export function mount({ engine, scenes, shell, kit, icons }) {
       }
     }
     try { await engine.loadLayoutInternal(name) } catch { return } // reported
-    shell.toast(`Loaded ${pretty(name)}`, { kind: 'ok', id: 'layout-loaded' })
+    shell.toast(`Loaded ${show(name)}`, { kind: 'ok', id: 'layout-loaded' })
   }
 
   async function del(name) {
-    const ok = await shell.confirm({ title: `Delete ${pretty(name)}?`, icon: 'trash', danger: true, confirm: 'Delete',
-      body: "It's removed from the server. The furniture in the scene stays as it is." })
+    const label = show(name)
+    const ok = await shell.confirm({ title: `Delete ${label}?`, icon: 'trash', danger: true, confirm: 'Delete',
+      body: 'The furniture in the scene stays as it is. You can undo this for a few seconds.' })
     if (!ok) return
-    try { await engine.deleteLayoutInternal(name) } catch { return }
-    shell.toast(`${pretty(name)} deleted`, { id: 'layout-deleted' })
+    let doc
+    try { doc = await engine.deleteLayoutInternal(name) } catch { return }
+    // Undo puts it back as it was; the server also keeps a copy in layouts/<scene>/.trash.
+    const t = shell.toast(`${label} deleted`, { id: 'layout-deleted', icon: 'trash', ms: 10000,
+      action: doc ? { label: 'Undo', onClick: () => quiet(engine.restoreLayoutInternal(doc).then(() => shell.toast(`${label} is back`, { kind: 'ok', id: 'layout-deleted' }))) } : undefined })
+    t.el.querySelector('.toast-action')?.setAttribute('data-midstudy', 'layout-undo')
   }
 
   function openForm() {
@@ -93,15 +100,15 @@ export function mount({ engine, scenes, shell, kit, icons }) {
     const slug = slugify(text)
     if (!text.trim()) return { slug, error: null, hint: 'Letters, numbers and spaces.' }
     if (!slug || !SLUG.test(slug)) return { slug, error: 'Use letters or numbers in the name.' }
-    if (names().includes(slug)) return { slug, error: `${pretty(slug)} already exists. Pick another name, or use its … menu to save over it.` }
-    return { slug, error: null, hint: slug !== text.trim() ? `Saved as ${slug}` : '' }
+    if (names().includes(slug)) return { slug, error: `${show(slug)} already exists. Pick another name, or use its … menu to save over it.` }
+    return { slug, error: null, hint: '' }
   }
 
   function cardView() {
     const n = engine.getItems().length
     const cur = current()
     const dirty = engine.isLayoutDirty()
-    const title = cur ? pretty(cur) : n ? 'Not saved as a layout' : 'Nothing placed'
+    const title = cur ? show(cur) : n ? 'Not saved as a layout' : 'Nothing placed'
     const metaText = `${n} ${n === 1 ? 'item' : 'items'} · ${cur ? (dirty ? 'changed since saved' : 'saved') : n ? 'not saved yet' : 'add furniture first'}`
     const head = [
       h('span.caps', 'Now in the scene'),
@@ -123,7 +130,7 @@ export function mount({ engine, scenes, shell, kit, icons }) {
         e?.preventDefault()
         const c = formCheck(draft)
         if (c.error || !draft.trim()) return
-        quiet(save(c.slug))
+        quiet(save(c.slug, { title: draft.trim() }))
       }
       go.type = 'submit'
       const input = h('input.input', { type: 'text', value: draft, placeholder: 'Evening, lamp by the window', spellcheck: false, autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'New layout name',
@@ -151,13 +158,13 @@ export function mount({ engine, scenes, shell, kit, icons }) {
     const count = Number.isFinite(d.items) ? `${d.items} ${d.items === 1 ? 'item' : 'items'}` : null
     const meta = [isCur && !shell.isPhone() ? h('span.ly-cur-word', 'Current') : null, [count, d.updated ? shortDate(d.updated) : null].filter(Boolean).join(' · ') || null]
       .filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]))
-    const more = h('button.ly-more', { type: 'button', 'aria-label': `More for ${pretty(d.name)}`, 'aria-haspopup': 'menu', dataset: { nodrag: '' },
+    const more = h('button.ly-more', { type: 'button', 'aria-label': `More for ${show(d.name)}`, 'aria-haspopup': 'menu', dataset: { nodrag: '' },
       onclick: (e) => {
         e.stopPropagation()
         shell.menu(e.currentTarget, [
           ...(isCur ? [] : [{ label: 'Load', icon: 'layouts', onSelect: () => quiet(load(d.name)) }]),
           { label: 'Save current over it', icon: 'bookmark', onSelect: async () => {
-            if (!isCur && !(await shell.confirm({ title: `Save over ${pretty(d.name)}?`, body: `It becomes the furniture in the scene now (${engine.getItems().length} items).`, confirm: 'Save over it' }))) return
+            if (!isCur && !(await shell.confirm({ title: `Save over ${show(d.name)}?`, body: `It becomes the furniture in the scene now (${engine.getItems().length} items).`, confirm: 'Save over it' }))) return
             quiet(save(d.name))
           } },
           '-', { label: 'Delete…', icon: 'trash', danger: true, onSelect: () => quiet(del(d.name)) },
@@ -168,7 +175,7 @@ export function mount({ engine, scenes, shell, kit, icons }) {
       : h('button.btn.btn-secondary.ly-load', { type: 'button', onclick: (e) => { e.stopPropagation(); quiet(load(d.name)) } }, 'Load')
     return h(`div.ly-row${isCur ? '.is-current' : ''}`, { role: 'listitem', title: d.name },
       h('span.ly-mark', pic(isCur ? 'bookmark-fill' : 'bookmark', { size: 18 })),
-      h('span.ly-text', h('span.ly-name', pretty(d.name)),
+      h('span.ly-text', h('span.ly-name', show(d.name)),
         h('span.ly-meta.tnum', meta)),
       trail, more)
   }

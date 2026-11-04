@@ -658,11 +658,16 @@ export async function smallTargets(page) {
     for (const el of document.querySelectorAll('button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [role="menuitem"], [role="option"], [role="tab"], [role="slider"], [role="switch"], [role="checkbox"], [data-midstudy]')) {
       if (el.disabled || el.closest('[hidden], [aria-hidden="true"], [inert]')) continue
       if (el.matches('input[type="file"]')) continue // opened by its visible button
-      if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue
+      const range = el.matches('input[type="range"]')
+      if (!el.checkVisibility({ opacityProperty: !range, visibilityProperty: true })) continue
       if (el.matches('[data-midstudy]') && !el.matches('button, [role], a[href], input, select, textarea, label') && getComputedStyle(el).cursor !== 'pointer') continue // a label or value, not a target
+      // pointer-events is inherited, so the element's own computed value says whether it takes touches: a container
+      // with pointer-events: none (#layer, #overlays, #pages, #toasts, the phone's #modebar) and children set back to
+      // auto still holds real targets (dialogs, Compare, the viewer, the selection bar), so ancestors don't count here.
+      if (getComputedStyle(el).pointerEvents === 'none') continue
       let p = el, hidden = false
-      while (p && p !== document.body) { const cs = getComputedStyle(p); if (cs.pointerEvents === 'none' || +cs.opacity === 0) { hidden = true; break } p = p.parentElement }
-      if (hidden) continue
+      while (p && p !== document.body) { if (+getComputedStyle(p).opacity === 0) { hidden = true; break } p = p.parentElement }
+      if (hidden && !range) continue // an invisible range input laid over an image is still something a finger hits
       const r = el.getBoundingClientRect()
       if (r.width < 1 || r.height < 1 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue
       let a = el.parentElement, clipped = false

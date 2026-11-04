@@ -206,6 +206,17 @@ for trick in "/./library/costs.csv" "/planner/../library/costs.csv" "/%2e/librar
   check "W4 a dot-segment path ($trick) gets the same 404" '[ "$(curl -s --path-as-is -o /dev/null -w "%{http_code}" "$BASE$trick")" = 404 ]'
 done
 check "assets are served with nosniff" 'curl -s -D - -o /dev/null "$BASE/library/sheen-chair/model.glb" | grep -qi "x-content-type-options: nosniff"'
+# verify round 1: a furniture photo's source.<ext> is the upload as given (EXIF, GPS): never served, any spelling
+check "a photo item's source.jpg is 404 (it keeps the upload's metadata), its thumb.jpg is served" '[ -f "$LIB/phone-chair/source.jpg" ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/phone-chair/source.jpg")" = 404 ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/phone-chair/SOURCE.JPG")" = 404 ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/Library/phone-chair/source.jpg")" = 404 ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/phone-chair/thumb.jpg")" = 200 ]'
+check "the upper-case /Library/costs.csv is 404 too (APFS is case-insensitive)" '[ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/Library/costs.csv")" = 404 ]'
+# verify round 1: what goes to fal for a photo add carries no EXIF/GPS, and is upright
+evals/py evals/lib/metadata.py make --kind gps-jpeg --orientation 6 --from "$IMG" --out "$OUT/gps-chair.jpg" >"$OUT/gps-make.json" 2>&1
+code=$(add gpsphoto image "$OUT/gps-chair.jpg" '{"name": "GPS Chair", "dims_cm": {"w": 75, "d": 80, "h": 95}, "engine": "sam3d"}')
+st=$(wait_job gpsj "$(jid gpsphoto)")
+evals/py evals/lib/metadata.py inspect "$LIB/gps-chair/raw/engine-input.jpg" >"$OUT/gps-sent.json" 2>&1
+check "a photo with EXIF/GPS (orientation 6): what the engine uploads (raw/engine-input.jpg) has no metadata and is turned upright" '[ "$code" = 202 ] && [ "$st" = done ] && python3 -c "
+import json,sys; m=json.loads(open(\"$OUT/gps-make.json\").read().strip().splitlines()[-1]); s=json.loads(open(\"$OUT/gps-sent.json\").read().strip().splitlines()[-1])
+sys.exit(0 if s[\"clean\"] and (s[\"w\"], s[\"h\"]) == (m[\"h\"], m[\"w\"]) else 1)" && grep -q "engine-input.jpg" "$LIB/gps-chair/raw/request.json"' "$code $st $(tail -n 1 "$OUT/gps-sent.json" | head -c 300)"
 check "library.json is still served" '[ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/library.json")" = 200 ]'
 
 # --- argv safety: a name starting with "-" still works ---------------------------------------------------------------------

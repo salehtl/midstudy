@@ -16,12 +16,13 @@ library/costs.csv             one row per paid or mock call: date,id,engine,cost
 library/<id>/model.glb        normalized mesh, always present
 library/<id>/splat.ply        normalized 3DGS splat, optional (kept in the format; the v1 planner draws GLB only)
 library/<id>/thumb.jpg        square thumbnail, optional
-library/<id>/source.<ext>     the input image or model, as given
+library/<id>/source.<ext>     the input image or model, as given (camera metadata included: never served)
 library/<id>/raw/             untouched engine outputs (debugging only, never served)
 library/.trash/<id>-<stamp>/  deleted items (§2.8), never served
 scenes/<name>/...             one scene per uploaded photo (§4.2)
-scenes/.trash/<name>-<stamp>/ deleted scenes, with their layouts
+scenes/.trash/<name>-<stamp>/ deleted scenes, with their layouts and trash.json {name, title, deleted}
 layouts/<scene>/<layout>.json a scene's layouts (layout.schema.json)
+layouts/<scene>/.trash/<layout>-<stamp>.json  deleted layouts
 renders/<name>.jpg ...        renders (§2.6, §4.7)
 ```
 
@@ -51,7 +52,7 @@ python3 planner/serve.py [--port 8765] [--host 127.0.0.1] [--library-dir library
                          [--daily-spend-usd 2] [--allowed-host NAME ...]
 ```
 
-- Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types, `X-Content-Type-Options: nosniff` and no caching. What `/library/` and `/scenes/` serve is limited (§2.8, §4.4).
+- Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types, `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
 - All `/api` responses are JSON (errors are `{"error": "<one sentence>"}`).
 - Removed from nook: `/api/room`, `/api/rooms*`, `--room-file`, `--room-dir`, `--scan-api` and `/api/scan/*`, flat (scene-less) layouts.
 - Evals and agents always start it with `MIDSTUDY_NO_DOTENV=1`, `MIDSTUDY_FAL_MOCK=fixtures/fal` and `--daily-spend-usd 0` (§5.3).
@@ -83,7 +84,7 @@ interface Midstudy {
   selectItem(uid: string | null): void       // as a tap on the item; null clears the selection
   removeItem(uid: string): void
   clearItems(): void
-  saveLayout(name: string): Promise<void>    // PUT /api/layouts/<name>?scene=<open scene>
+  saveLayout(name: string, opts?: { title?: string }): Promise<void>  // PUT /api/layouts/<name>?scene=<open scene>; title: the name as typed
   loadLayout(name: string): Promise<void>    // replaces the current items
   listLayouts(): Promise<string[]>
   getState(): State                          // §4.6
@@ -112,6 +113,7 @@ interface Midstudy {
 
 - `POST /api/render` with `{ "image": "data:image/jpeg;base64,...", "model"?: "kontext" | "nano-banana" | "qwen", "prompt"?: string, "layout"?: string, ...§4.7 }`:
   - Calls fal synchronously (`https://fal.run/<endpoint>`, `Authorization: Key $FAL_KEY`) with the image as a data URI. FAL_KEY comes from the environment or `.env`, same rules as the pipeline (§3.3, including `MIDSTUDY_NO_DOTENV`). The key never reaches the browser.
+  - The image is used without the metadata it may carry (APP1–APP15, comments, anything after EOI are dropped; the image data is not re-encoded): that is what is saved, served and sent to fal. The same holds for `PUT /api/scenes/<name>/thumb`.
   - Saves `<renders>/<name>.jpg` (the result), `<name>-input.jpg` and `<name>.json` (metadata). `<name>` is `render-YYYYMMDD-HHMMSS` (UTC), numeric suffix on collision.
   - Appends a cost row (`engine` = `render:<model>`), even if the download after a billed call fails.
   - `200` with the metadata: `{ name, url, input_url, model, endpoint, cost_usd, mock, prompt, created, layout, width, height, ...§4.7 }`. URLs are site paths (`/renders/<name>.jpg`); renders are served statically.
@@ -132,9 +134,11 @@ interface Midstudy {
 | `GET /api/layouts?scene=<name>` | `200 {"layouts": ["name", ...], "details": [{"name", "items", "updated"}]}`, sorted by name |
 | `GET /api/layouts/<layout>?scene=<name>` | `200` the layout, `404` when absent |
 | `PUT /api/layouts/<layout>?scene=<name>` | Writes `layouts/<scene>/<layout>.json` (layout.schema.json); the server sets `scene_name` and `updated`. `200` the stored layout |
-| `DELETE /api/layouts/<layout>?scene=<name>` | `200 {"ok": true}`, `404` when absent |
+| `DELETE /api/layouts/<layout>?scene=<name>` | `200 {"ok": true, "trash"}`: the file moves to `layouts/<scene>/.trash/<layout>-<UTC stamp>.json` (never listed); `404` when absent |
 
-`<layout>` must be a slug (`400` otherwise). `scene` is required (`400` without it) and must name an existing scene (`404`). A layout saved in one scene is never listed in another. Layout items carry `dims_cm`, so a layout placing a deleted library item still loads with a "missing item" placeholder box at those dims (or 50 cm cubed).
+The planner's Undo of a delete PUTs the layout back as it read it first. A layout may carry `title`, the name as the user typed it ("Phone A", at most 120 characters; `400` otherwise), shown instead of the slug; `details` list it.
+
+`<layout>` must be a slug (`400` otherwise; a slug never ends in a newline: every slug check matches the whole string). `scene` is required (`400` without it) and must name an existing scene (`404`). A layout saved in one scene is never listed in another. Layout items carry `dims_cm`, so a layout placing a deleted library item still loads with a "missing item" placeholder box at those dims (or 50 cm cubed).
 
 ### 2.8 Library API (carried from nook v4)
 
@@ -159,7 +163,9 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 
 **One writer:** every library write takes `<library>/.lock` (`flock`); PATCH, DELETE and restore wait up to 60 s for a running job, then answer `503`.
 
-**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `thumb.jpg`, `source.<ext>`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
+**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `thumb.jpg`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `source.<ext>` (the upload as given: a phone photo's EXIF and GPS), `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
+
+**Privacy:** what an image engine uploads to fal is `raw/engine-input.jpg` (or `.png` with transparency), a copy made by `midstudy-add`: EXIF orientation applied, no EXIF, GPS, XMP, IPTC or comments (the ICC profile stays). `source.<ext>` keeps the original and is never served.
 
 Acceptance (`npm run eval:library`): L8 mock adds of a `.glb`, an OBJ zip, a photo and a URL end `done` and the library validates; L9 delete then restore round-trips byte for byte; L10 bad zips are refused with nothing written; L11 `PATCH dims_cm` refits at $0.
 
@@ -168,12 +174,13 @@ Acceptance (`npm run eval:library`): L8 mock adds of a `.glb`, an OBJ zip, a pho
 These rules apply to every `POST`, `PUT`, `PATCH` and `DELETE` that `serve.py` answers, including the scene routes (§4.4), layouts and `/api/render`.
 
 - **Forged requests:** a mutating request needs `X-Midstudy: 1` and an `Origin` that is absent or equal to the page's own origin. Otherwise `403 {"error": "cross-site request refused"}` and nothing changes.
-- **Host names:** every request must carry a loopback `Host` (`127.0.0.1`, `localhost`, `[::1]`, any port) or one given with `--allowed-host`; otherwise `403`.
+- **Host names:** every request must carry a loopback `Host` (`127.0.0.1`, `localhost`, `[::1]`, any port) or one given with `--allowed-host`, exactly `name[:port]` (`127.0.0.1:80@evil.example` and `[::1]evil.example` don't pass); otherwise `403`.
+- **Framing:** more than one `Content-Length` header is `400`. A `411` or `413` is sent before reading the body (then a short drain, and the connection closes); a connection that stops sending is dropped after 30 s.
 - **Paths:** static paths are normalized (percent-decoding, `.` and `..`) **before** any rule about what is served, so `/./library/costs.csv` gets the same `404` as the plain path. The same holds for `/scenes/`.
-- **Spend cap:** `--daily-spend-usd N` (default `2`; a flag only, no route changes it) covers every paid call: library adds and `/api/render`. Before a paid call the server reserves the estimate against today's (UTC) total from `costs.csv`; a request that would cross the cap gets `402 {"error", "spent_usd", "cap_usd"}` and no call is made. Mock calls cost $0 and count for nothing (unless `MIDSTUDY_FAL_MOCK_COST=1`). `GET /api/spend` → `{"day", "spent_usd", "reserved_usd", "cap_usd"}`. Cost rows are appended under `costs.csv.lock`.
+- **Spend cap:** `--daily-spend-usd N` (default `2`; a flag only, no route changes it) covers every paid call: library adds and `/api/render`. It reads `<library-dir>/costs.csv`, the file `midstudy-add` writes, so a `--costs-file` that isn't that file is refused at startup. A call that costs more than the whole cap gets a `402` that says so. Before a paid call the server reserves the estimate against today's (UTC) total from `costs.csv`; a request that would cross the cap gets `402 {"error", "spent_usd", "cap_usd"}` and no call is made. Mock calls cost $0 and count for nothing (unless `MIDSTUDY_FAL_MOCK_COST=1`). `GET /api/spend` → `{"day", "spent_usd", "reserved_usd", "cap_usd"}`. Cost rows are appended under `costs.csv.lock`.
 - **URL fetches** (from-URL add): the server downloads the image itself (http/https only, host resolved once and pinned, every redirect re-checked, at most 3, 20 s, 20 MB, `image/*` only). Private, loopback, link-local, CGNAT, tailnet and multicast addresses (and their IPv4-mapped forms) are refused with `400`. `MIDSTUDY_FETCH_ALLOW=<host>:<port>` (evals only) exempts exactly one address.
 
-Acceptance: W1 forged mutations get `403` everywhere; W2 with `--daily-spend-usd 0.03` and `MIDSTUDY_FAL_MOCK_COST=1`, the second $0.02 add is `402`; W3 private URLs are refused without a connection; W4 `/library/costs.csv`, `.trash/` and `raw/` are `404`.
+Acceptance: W1 forged mutations get `403` everywhere; W2 with `--daily-spend-usd 0.03` and `MIDSTUDY_FAL_MOCK_COST=1`, the second $0.02 add is `402`; W3 private URLs are refused without a connection; W4 `/library/costs.csv`, `.trash/`, `raw/` and `source.*` are `404`, in any case or spelling.
 
 ### 2.10 Elevation (carried; wall hanging dropped)
 
@@ -197,6 +204,7 @@ uv run --project pipeline midstudy-add --rescale ID [--dims WxDxH] [--yaw 0|90|1
 - `INPUT`: a local image or image URL (`sam3d`, `trellis2`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
 - `--dims`: centimeters `W x D x H` (`x` or `×`, spaces and decimals allowed). Required for adds.
 - `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `sam3d`.
+- Image engines get a metadata-free, upright copy of the photo (`raw/engine-input.<ext>`, §2.8 Privacy); `source.<ext>` keeps the input as given.
 - `--yaw`: extra rotation around Y after the engine's default orientation; positive is counterclockwise seen from above, so `--yaw 90` turns +X into −Z. The planner's `rotation_y_deg` uses the same sign.
 - `--rescale ID` refits an existing item from its normalized assets: no model call, `cost_usd: 0`, no cost row.
 - Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}`. Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
@@ -320,7 +328,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 **Ingest:**
 - Accepts JPEG, PNG, HEIC/HEIF and WebP up to 25 MB, recognized by their bytes, not the name (anything else: exit 1, "that file isn't a JPEG, PNG, HEIC or WebP image").
 - Applies the EXIF orientation, converts to sRGB with the embedded ICC profile (iPhones write Display P3), downsizes to a 2048 px long side, writes `photo.jpg` (q92) with **no metadata at all** (no EXIF, GPS, XMP, ICC, comments): it is served and sent to fal. `source.<ext>` keeps the original bytes and is never served.
-- **Pass-through:** a JPEG that needs none of that (only JFIF/APP0 segments, no EXIF/XMP/ICC/comment, long side ≤ 2048) is copied **byte for byte**, so `photo.jpg`'s SHA-256 equals the upload's. The golden scenes rely on this for the mock (§5.1).
+- **Pass-through:** a JPEG that needs none of that (only JFIF/APP0 segments, no EXIF/XMP/ICC/comment **anywhere in the file**, including between progressive scans, **not one byte after its end-of-image marker**: no appended second image, no padding, long side ≤ 2048) is copied **byte for byte**, so `photo.jpg`'s SHA-256 equals the upload's. Anything else is re-encoded. The golden scenes rely on this for the mock (§5.1).
 
 **EXIF FOV:** read from `source.<ext>` (EXIF `FocalLengthIn35mmFilm`, plus make and model). The 35 mm equivalent refers to the diagonal of the sensor's native **4:3** frame (the full-frame diagonal, 43.27 mm, so a 34.61 × 25.96 mm frame). The photo is the largest crop of that frame with the photo's aspect: wider than 4:3 (16:9) keeps the long side, squarer keeps the short side. The vertical FOV is `2 · atan(v_mm / (2 · f35))` with `v_mm` the crop's extent along the photo's vertical axis. For `fixtures/photos/upper-lounge-camera.jpeg` (14 mm, 16:9 landscape) that is 102.1° horizontal and 69.6° vertical. When MoGe runs, its FOV wins and the EXIF FOV is recorded beside it; a difference over 8° adds `fov_disagreement`.
 
@@ -342,7 +350,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 | Method and path | Request | Response |
 |---|---|---|
-| `GET /api/scenes` | | `200 {"scenes": [scene, ...]}`, newest first (by `created`) |
+| `GET /api/scenes` | | `200 {"scenes": [scene, ...], "trash": [{name, title, created, deleted}, ...]}`, newest first (by `created`, ties by the name's collision suffix as a number: `-10` before `-9`); `trash` lists the deleted scenes |
 | `POST /api/scenes` | raw photo body, `Content-Length` required, `X-Midstudy-Filename` required, optional `X-Midstudy-Meta` (base64 JSON `{title}`) | `202 {job, scene: name}` |
 | `GET /api/scenes/jobs` | | `200 {"jobs": [job, ...]}`, newest first |
 | `GET /api/scenes/jobs/<id>` | | `200` the job object itself, `404` unknown |
@@ -351,6 +359,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 | `PUT /api/scenes/<name>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB | `200 {"ok": true, "thumb_url"}` |
 | `POST /api/scenes/<name>/calibrate` | | `202 {job}`: runs `fit` (or `run` on `source.<ext>` when `photo.jpg` is missing); `409` while one is queued or running for that scene |
 | `DELETE /api/scenes/<name>` | | `200 {"ok": true, "trash": "scenes/.trash/<name>-<stamp>"}`: the folder and `layouts/<name>/` move there; a queued job for it is dropped, a running one's result is ignored |
+| `POST /api/scenes/<name>/restore` | | `200` the scene object: the newest trashed copy and its layouts move back (its renders show again); `404` none in the trash, `409` a scene (or layouts) by that name exists |
 | layouts | | §2.7 (`?scene=`) |
 
 **Upload** (`POST /api/scenes`): `411` without `Content-Length`, `413` over 25 MB, `400` with one sentence when the body isn't a JPEG, PNG, HEIC or WebP (sniffed from its bytes). The body goes to a private temp file, never under a served path. The server then creates `scenes/<name>/scene.json` (`title` from the meta or null, `created` now, `saved` null, the default camera, `camera_source: "default"`, `upload: {filename, ext, bytes}`), queues `<calib> run <temp file> --out scenes/<name>` and answers `202`. The scene exists (and is listed, `calib_status: "pending"`) from that moment.
@@ -376,11 +385,11 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 - **Scenes page** (replaces Rooms): scene thumbnails, newest first, **New scene** (a file input that accepts camera-roll photos on iOS: `accept="image/*"`), per-scene rename and delete. A scene still calibrating shows its photo (once `photo_url` is set) with a spinner and opens when done. `?scene=<name>` opens a scene; without it, the last scene opened on this device, else the Scenes page.
 - **The view:** the photo fills the view, contain-fit with letterbox bars; the 3D canvas is registered to it (same aspect, camera from `scene.json`). The photo is drawn **exactly as is**: no tone mapping, exposure or warmth. Look and ACES apply to the furniture only. Pinch or wheel zoom and two-finger or middle-drag pan are 2D (`setViewOffset`), up to 4×; **Fit** resets them.
-- **Floor check:** when a scene first opens, and whenever **Adjust floor** is on, a 50 cm grid is drawn on y = 0 out to 8 m, fading with distance. Adjust floor has sliders for camera height (cm), field of view (°) and roll (°); dragging the horizon line sets the pitch. An optional two-tap ruler shows a floor distance in cm. **Looks right** saves the scene (`camera_source: "manual"` if anything changed). **Reset** goes back to `calib.json`'s camera (`auto`). A scene whose `floor.found` is false or whose `calib.source` isn't `moge-2` (or `truth`) opens in Adjust floor with a one-line note ("Check the floor").
-- **Items:** as §2.3 and §2.10. A new item lands where the ray through the view center hits the floor (or, if that misses, the ray through the center of the lower third), when that point is 1–6 m from the camera; else 2.5 m straight ahead. Missing library items show a placeholder box.
+- **Floor check:** when a scene first opens, and whenever **Adjust floor** is on, a 50 cm grid is drawn on y = 0 out to 8 m, fading with distance. Adjust floor has sliders for camera height (cm), field of view (°) and roll (°); dragging the horizon line sets the pitch (the line follows the pointer, but at most 0.12° of tilt per CSS pixel on a small photo, so the phone at Fit gets fine control). An optional two-tap ruler shows a floor distance in cm; typing the real length of what it measured (**Set scale**, handles `ruler-true`, `ruler-set`) scales the camera height so it reads that length, which fixes the scene's scale (MoGe's metric scale can be 5–15 % off). **Looks right** saves the scene (`camera_source: "manual"` if anything changed). **Reset** goes back to `calib.json`'s camera (`auto`). A scene whose `floor.found` is false or whose `calib.source` isn't `moge-2` (or `truth`) opens in Adjust floor with a one-line note ("Check the floor").
+- **Items:** as §2.3 and §2.10. A drag keeps the grabbed point of the piece under the pointer (it slides on the horizontal plane through that point); a mouse or pen press on any piece selects and drags it at once, touch keeps "tap, then drag". A new item lands where the ray through the view center hits the floor (or, if that misses, the ray through the center of the lower third), when that point is 1–6 m from the camera; else 2.5 m straight ahead. Missing library items show a placeholder box.
 - **Lighting:** three.js `RoomEnvironment` plus a key light; Look (exposure, warmth) is saved in `scene.json`.
 - **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth. `depth.png` is metric in the calibration's frame, so when the camera's `height_m` differs from `calib.json`'s (Adjust floor), the depth is scaled by `height_m / calib height_m` first; without a measured floor (`floor.found` false, or a fallback source) it is used as it is.
-- **Layouts:** per scene (§2.7), with unsaved-change warnings.
+- **Layouts:** per scene (§2.7), with unsaved-change warnings ("unsaved" means the pieces differ from the layout as saved or loaded, so Remove then Undo isn't). The layout open in a scene is remembered on the device, and the scene reopens with it (a reload, the next visit). Deleting a layout, a scene or a library item can be undone; deleted scenes are listed under Recently deleted on the Scenes page, with Restore.
 - **Render and Compare** (§4.7): in the Renders panel, pick two renders for a full-screen compare: side by side on desktop, a draggable split slider on both, swipe on the phone.
 - **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat drawing, LoD, True colour, Spark.
 
@@ -413,7 +422,7 @@ getState(): {
 }
 ```
 
-Test handles (`data-midstudy`): `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. `scene-card` elements also carry `data-scene="<name>"`.
+Test handles (`data-midstudy`): `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. `scene-card` elements also carry `data-scene="<name>"`.
 
 ### 4.7 Render
 

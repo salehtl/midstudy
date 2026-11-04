@@ -59,32 +59,64 @@ def sniff(head: bytes) -> str | None:
     return None
 
 
-def jpeg_markers(data: bytes) -> list[int] | None:
-    """Segment markers before the image data (SOS), or None when the JPEG structure is broken."""
+def jpeg_walk(data: bytes) -> tuple[list[int], int] | None:
+    """Every segment marker in the whole JPEG (before the first scan, between progressive scans, after the last one)
+    and the offset just past its end-of-image marker; None when the structure is broken or there is no EOI. The
+    entropy-coded data after each SOS runs to the next marker (FF 00 is a stuffed byte, FF D0-D7 a restart)."""
+    n = len(data)
+    if n < 4 or data[:2] != b"\xff\xd8":
+        return None
     i, markers = 2, []
-    while i + 4 <= len(data):
+    while i < n:
         if data[i] != 0xFF:
             return None
-        m = data[i + 1]
-        if m == 0xFF:
+        while i < n and data[i] == 0xFF:  # fill bytes
             i += 1
+        if i >= n:
+            return None
+        m = data[i]
+        i += 1
+        if m == 0xD9:
+            return markers, i
+        if 0xD0 <= m <= 0xD7 or m == 0x01:
             continue
-        if m == 0xDA:
-            return markers
+        if m == 0x00 or i + 2 > n:
+            return None
+        length = int.from_bytes(data[i:i + 2], "big")
+        if length < 2 or i + length > n:
+            return None
         markers.append(m)
-        i += 2 + int.from_bytes(data[i + 2:i + 4], "big")
+        i += length
+        if m == 0xDA:
+            while True:
+                j = data.find(b"\xff", i)
+                if j < 0 or j + 1 >= n:
+                    return None
+                if data[j + 1] == 0x00 or 0xD0 <= data[j + 1] <= 0xD7:
+                    i = j + 2
+                    continue
+                i = j
+                break
     return None
 
 
+def jpeg_markers(data: bytes) -> list[int] | None:
+    """All segment markers of the JPEG (see jpeg_walk), or None when its structure is broken."""
+    walk = jpeg_walk(data)
+    return walk[0] if walk else None
+
+
 def is_clean_jpeg(data: bytes) -> bool:
-    """Only JFIF/APP0 and coding segments: no APP1-APP15 (EXIF, XMP, ICC, MPF, Adobe, IPTC) and no comment, and nothing
-    after the end-of-image marker."""
-    markers = jpeg_markers(data)
-    if markers is None:
+    """Only JFIF/APP0 and coding segments anywhere in the file (no APP1-APP15: EXIF, XMP, ICC, MPF, Adobe, IPTC; no
+    comment), even between progressive scans, and not a single byte after the end-of-image marker (an appended second
+    JPEG, as MPF writes one, carries its own EXIF and GPS; zero padding is refused too)."""
+    walk = jpeg_walk(data)
+    if walk is None:
         return False
+    markers, end = walk
     if any(0xE1 <= m <= 0xEF or m == 0xFE for m in markers):
         return False
-    return data.rstrip(b"\x00")[-2:] == b"\xff\xd9"
+    return end == len(data)
 
 
 def exif_facts(path: Path) -> dict | None:
@@ -226,10 +258,14 @@ def normalize(data: bytes, kind: str) -> tuple[bytes, int, int, list[str]]:
     buf = io.BytesIO()
     im.save(buf, "JPEG", quality=QUALITY, optimize=True)
     out = buf.getvalue()
-    markers = jpeg_markers(out)
-    if markers is None or any(0xE1 <= m <= 0xEF or m == 0xFE for m in markers):  # belt and braces
+    if not is_clean_jpeg(out):  # belt and braces
         raise Fail("photo.jpg would carry metadata; refusing to write it")
     return out, im.size[0], im.size[1], notes
+
+
+def mb_over(n: int) -> str:
+    """A size in MB rounded up, so a file just over the limit never reads as the limit itself ("25.1 MB")."""
+    return f"{math.ceil(n / 2**20 * 10) / 10:.1f} MB"
 
 
 def ingest(upload: Path, out: Path) -> dict:
@@ -237,12 +273,12 @@ def ingest(upload: Path, out: Path) -> dict:
         raise Fail(f"{upload} doesn't exist")
     size = upload.stat().st_size
     if size > MAX_BYTES:
-        raise Fail(f"the photo is {size / 2**20:.1f} MB; the limit is 25 MB")
+        raise Fail(f"the photo is {mb_over(size)}, over the 25 MB limit")
     if size == 0:
         raise Fail("the photo is empty")
     data = upload.read_bytes()
     if len(data) > MAX_BYTES:
-        raise Fail(f"the photo is {len(data) / 2**20:.1f} MB; the limit is 25 MB")
+        raise Fail(f"the photo is {mb_over(len(data))}, over the 25 MB limit")
     kind = sniff(data[:64])
     if kind is None:
         raise Fail(NOT_AN_IMAGE)

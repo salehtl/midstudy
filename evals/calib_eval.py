@@ -506,6 +506,21 @@ def run_mock(cli: Cli, args) -> None:
         check(f"ingest {tag}: the sentence says why ({want})", want.lower() in err.lower() or (tag == "oversize" and "25" in err), err[:200] or "(none)")
         check(f"ingest {tag}: nothing written", not (out / "photo.jpg").exists(), sorted(p.name for p in out.iterdir()) if out.is_dir() else "no folder")
 
+    # verify round 1: metadata hidden after EOI (an appended GPS JPEG, zero padding) or between progressive scans must
+    # not pass through: photo.jpg is re-encoded and carries nothing (contract §4.3 Pass-through)
+    sys.path.insert(0, str(REPO / "evals/lib"))
+    import metadata as md  # noqa: E402 - evals/lib/metadata.py (same Pillow)
+    for kind, what in (("trailing-gps", "a GPS-bearing JPEG after EOI"), ("prog-midscan-gps", "EXIF/GPS between progressive scans"), ("zero-pad", "64 KB of zeros after EOI")):
+        src = OUT / "inputs" / f"{kind}.jpg"
+        md.make(kind, src, None, None)
+        out = scene_dir(f"hidden-{kind}")
+        r = cli(["ingest", src, "--out", out])
+        photo = out / "photo.jpg"
+        got = md.inspect(photo) if photo.is_file() else {"error": "no photo.jpg"}
+        check(f"ingest {kind} ({what}): not passed through; photo.jpg has no metadata anywhere and nothing after EOI",
+              r.get("code") == 0 and photo.is_file() and photo.read_bytes() != src.read_bytes() and got.get("clean") is True,
+              f"{brief(r)}; {json.dumps(got)[:240]}")
+
     # EXIF FOV (contract §4.3) through run with the mock (no MoGe: the default fallback records the EXIF facts)
     mock = str(REPO / "fixtures/calib")
     for tag, src, f35, size in (("large", inputs["large"], 26, (2048, 1536)), ("wide", inputs["wide"], 14, (1920, 1080)), ("tall", inputs["tall"], 26, (1500, 2000))):

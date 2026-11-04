@@ -1,3 +1,10 @@
+# Root files without an extension (Apple Photos exports such as AD9729E1-…_1_201_a, camera originals with GPS) are
+# never committed: ignore every root entry, then re-include names with a dot and folders. These lines come first so
+# that every rule below (.env, .upstream/, node_modules/, the image extensions) still wins over the re-includes.
+/*
+!/*.*
+!/*/
+
 .DS_Store
 .direnv/
 .venv/
@@ -17,7 +24,7 @@ target/
 
 # the user's own room photos (location data in private/): never commit
 fixtures/photos/
-# camera originals dropped at the repo root by hand: never commit
+# camera originals dropped at the repo root by hand: never commit (the extensions are below)
 /*.jpg
 /*.jpeg
 /*.JPG
@@ -27,6 +34,17 @@ fixtures/photos/
 /*.png
 /*.PNG
 /*.webp
+/*.WEBP
+/*.heif
+/*.HEIF
+/*.tif
+/*.tiff
+/*.TIF
+/*.TIFF
+/*.dng
+/*.DNG
+/*.avif
+/*.AVIF
 
 # eval scratch output
 evals/out/

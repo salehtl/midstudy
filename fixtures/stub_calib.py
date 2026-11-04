@@ -86,16 +86,51 @@ def jpeg_size(data: bytes) -> tuple[int, int]:
 
 
 def strip_metadata(data: bytes) -> tuple[bytes, list[str]]:
-    """Drop APP1-APP15 and COM segments; keep SOI, APP0 (JFIF) and everything from the image data on."""
-    out, dropped, end = [data[:2]], [], 2
-    for m, start, p in segments(data):
-        end = start + 4 + len(p)
+    """Drop APP1-APP15 and COM segments wherever they are (before the first scan and between progressive scans) and
+    anything after EOI (an appended second JPEG carries its own EXIF/GPS); keep SOI, APP0 (JFIF) and the image data
+    as it is. The whole file is walked: the entropy-coded data after each SOS runs to the next marker."""
+    n = len(data)
+    out, dropped, i = bytearray(data[:2]), [], 2
+    while i < n:
+        if data[i] != 0xFF:
+            raise Fail("the JPEG is corrupt (bad segment marker)")
+        while i < n and data[i] == 0xFF:
+            i += 1
+        if i >= n:
+            break
+        m = data[i]
+        i += 1
+        if m == 0xD9:
+            out += b"\xff\xd9"
+            if i < n:
+                dropped.append(f"{n - i} bytes after the end of the image")
+            return bytes(out), dropped
+        if 0xD0 <= m <= 0xD7 or m == 0x01:
+            out += bytes((0xFF, m))
+            continue
+        if i + 2 > n:
+            break
+        length = struct.unpack(">H", data[i:i + 2])[0]
+        if length < 2 or i + length > n:
+            break
         if 0xE1 <= m <= 0xEF or m == 0xFE:
             dropped.append({0xE1: "EXIF/XMP", 0xE2: "ICC", 0xED: "IPTC", 0xFE: "comment"}.get(m, f"APP{m - 0xE0}"))
         else:
-            out.append(data[start:end])
-    out.append(data[end:])
-    return b"".join(out), dropped
+            out += bytes((0xFF, m)) + data[i:i + length]
+        i += length
+        if m == 0xDA:
+            j = i
+            while True:
+                j = data.find(b"\xff", j)
+                if j < 0 or j + 1 >= n:
+                    raise Fail("the JPEG is truncated (no end-of-image marker)")
+                if data[j + 1] == 0x00 or 0xD0 <= data[j + 1] <= 0xD7:
+                    j += 2
+                    continue
+                break
+            out += data[i:j]
+            i = j
+    raise Fail("the JPEG is truncated (no end-of-image marker)")
 
 
 def exif_facts(data: bytes) -> dict | None:
@@ -177,7 +212,7 @@ def ingest(upload: Path, out: Path) -> dict:
     if not upload.is_file():
         raise Fail(f"{upload} doesn't exist")
     if upload.stat().st_size > MAX_BYTES:
-        raise Fail(f"the photo is {upload.stat().st_size / 2**20:.1f} MB; the limit is 25 MB")
+        raise Fail(f"the photo is {math.ceil(upload.stat().st_size / 2**20 * 10) / 10:.1f} MB, over the 25 MB limit")
     data = upload.read_bytes()
     kind = sniff(data)
     if kind is None:
