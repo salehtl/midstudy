@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/layout.schema.json",
+  "title": "midstudy layout (layouts/<scene>/<layout>.json, contract §4.4)",
+  "description": "A scene's furniture placement. Every layout belongs to one scene; there are no scene-less layouts. The camera is the scene's (scene.json), not the layout's.",
+  "type": "object",
+  "required": ["version", "name", "scene_name", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "scene_name": { "description": "The scene this layout belongs to (its folder name, e.g. scene-20261104-201500). The server sets it from ?scene=.", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "library": { "description": "Library URL the layout was made with.", "type": ["string", "null"] },
+    "updated": { "description": "Set by the server on PUT, ISO-8601 UTC.", "type": ["string", "null"], "format": "date-time" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["uid", "id", "render", "position", "rotation_y_deg"],
+        "additionalProperties": false,
+        "properties": {
+          "uid": { "type": "string", "minLength": 1 },
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+          "render": { "description": "v1 draws GLB only; splat is accepted and drawn as its GLB.", "enum": ["glb", "splat"] },
+          "position": { "description": "[x, elevation, z] in meters; elevation is the item's bottom above the floor, 0 to 4.", "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "rotation_y_deg": { "type": "number" },
+          "mounted": { "description": "Kept from nook for old files; v1 never hangs on walls.", "enum": ["floor", "wall"] },
+          "dims_cm": { "type": "object", "properties": { "w": { "type": "number" }, "d": { "type": "number" }, "h": { "type": "number" } } }
+        }
+      }
+    },
+    "notes": { "type": ["string", "null"] }
+  }
+}

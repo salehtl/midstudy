@@ -1,3 +1,42 @@
 .DS_Store
 .direnv/
+.venv/
+__pycache__/
+node_modules/
+*.log
 result
+result-*
+build/
+target/
+
+# secrets: the real FAL key lives here
+.env
+
+# nook's source, for reference only (cloned by the foundation agent)
+.upstream/
+
+# the user's own room photos (location data in private/): never commit
+fixtures/photos/
+# camera originals dropped at the repo root by hand: never commit
+/*.jpg
+/*.jpeg
+/*.JPG
+/*.JPEG
+/*.heic
+/*.HEIC
+/*.png
+/*.PNG
+/*.webp
+
+# eval scratch output
+evals/out/
+
+# user data written by the tools; decisions (library.json, costs.csv) are versioned
+library/*/
+library/_inbox/
+library/.lock
+library/.trash/
+library/costs.csv.lock
+/scenes/
+/layouts/
+/renders/

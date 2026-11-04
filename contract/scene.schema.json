@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/scene.schema.json",
+  "title": "midstudy scene (scenes/<name>/scene.json, contract §4.2 and §4.4)",
+  "description": "Written by planner/serve.py: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes.",
+  "type": "object",
+  "required": ["version", "title", "created", "saved", "camera", "camera_source"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "title": { "description": "Free text, set on upload (X-Midstudy-Meta) or by rename; null shows the date.", "type": ["string", "null"], "maxLength": 200 },
+    "created": { "description": "When the upload was accepted, ISO-8601 UTC.", "type": "string", "format": "date-time" },
+    "saved": { "description": "Last PUT that changed more than the title, ISO-8601 UTC; null until then.", "type": ["string", "null"], "format": "date-time" },
+    "camera": {
+      "description": "The camera in use (contract §4.1; same block as calib.schema.json's). Until calibration finishes it is the default camera with camera_source default.",
+      "type": "object",
+      "required": ["fov_y_deg", "height_m", "pitch_deg", "roll_deg"],
+      "additionalProperties": false,
+      "properties": {
+        "fov_y_deg": { "type": "number", "minimum": 20, "maximum": 110 },
+        "height_m": { "type": "number", "minimum": 0.2, "maximum": 3.0 },
+        "pitch_deg": { "type": "number", "minimum": -80, "maximum": 30 },
+        "roll_deg": { "type": "number", "minimum": -20, "maximum": 20 }
+      }
+    },
+    "camera_source": {
+      "description": "auto: copied from calib.json; manual: the user changed it in Adjust floor; default: no calibration yet, or it failed.",
+      "enum": ["auto", "manual", "default"]
+    },
+    "look": {
+      "description": "Applied to the furniture only, never to the photo (contract §4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exposure": { "type": "number", "minimum": 0.25, "maximum": 4 },
+        "warmth": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "upload": {
+      "description": "What was uploaded (set by the server; informational): the original file name, its extension (source.<ext>) and size.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "type": "string" },
+        "ext": { "enum": ["jpg", "png", "heic", "webp"] },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

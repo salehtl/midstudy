@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" data-mode="desktop">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>midstudy planner</title>
+  <meta name="theme-color" content="#131417">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="midstudy">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <link rel="stylesheet" href="./styles/kit.css">
+  <link rel="stylesheet" href="./styles/workspace.css">
+  <link rel="stylesheet" href="./styles/panels.css">
+  <link rel="stylesheet" href="./styles/rooms.css">
+  <link rel="stylesheet" href="./styles/manage.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+      "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.4.0/spark.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- Mount points (ui/shell.js): the 3D view, in-view overlays (labels, loupe), the workspace chrome (top bar, phone
+       tool rail, mode bars), the panel hosts (desktop side panel, phone dock + sheet), pages (Rooms), toasts and the
+       layer for dialogs, menus and tooltips. -->
+  <div id="view"></div>
+  <div id="overlays"></div>
+  <header id="topbar"></header>
+  <div id="rail"></div>
+  <div id="modebar"></div>
+  <aside id="panel"></aside>
+  <nav id="dock" aria-label="Panels"></nav>
+  <section id="sheet"></section>
+  <div id="pages"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <div id="layer"></div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

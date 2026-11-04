@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/calib.schema.json",
+  "title": "midstudy automatic calibration (scenes/<name>/calib.json, contract §4.2-4.3)",
+  "description": "Written by `midstudy-calib fit` (and `run`). `midstudy-calib run` prints the same object plus \"ok\": true as its last stdout line. Keys not listed here are allowed for diagnostics; readers ignore them.",
+  "type": "object",
+  "required": ["version", "source", "model", "image", "camera", "principal", "floor", "depth", "exif", "device", "elapsed_s"],
+  "additionalProperties": true,
+  "properties": {
+    "version": { "const": 1 },
+    "ok": { "description": "Only on the stdout line of `run` / `fit`, never in the file.", "const": true },
+    "source": {
+      "description": "moge-2: MoGe fitted the camera; exif: fallback with the FOV from the EXIF focal length; default: fallback with FOV 55; truth: golden scenes only (fixtures/scenes).",
+      "enum": ["moge-2", "exif", "default", "truth"]
+    },
+    "model": { "description": "The MoGe weights used, e.g. Ruicheng/moge-2-vitl-normal; null when MoGe didn't run.", "type": ["string", "null"] },
+    "image": { "$ref": "#/$defs/size", "description": "photo.jpg's size in pixels (after EXIF orientation and downsizing)." },
+    "camera": { "$ref": "#/$defs/camera" },
+    "principal": {
+      "description": "Principal point as a fraction of width and height. Recorded, but v1 always renders with the image center.",
+      "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 2, "maxItems": 2
+    },
+    "floor": {
+      "type": "object",
+      "required": ["found"],
+      "additionalProperties": true,
+      "properties": {
+        "found": { "type": "boolean" },
+        "inlier_ratio": { "description": "Share of the image's pixels that lie on the fitted floor plane.", "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "rmse_m": { "description": "RMS distance of the inliers to the plane, meters.", "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "depth": {
+      "description": "depth.png next to calib.json: 16-bit grayscale, mm along the camera's view axis, 0 = no occluder (floor within 4 cm of the plane, sky, unknown). Null when there is no depth (fallbacks, --no-depth).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["file", "w", "h", "floor_masked"],
+          "additionalProperties": false,
+          "properties": {
+            "file": { "const": "depth.png" },
+            "w": { "type": "integer", "minimum": 1, "maximum": 1024 },
+            "h": { "type": "integer", "minimum": 1, "maximum": 1024 },
+            "floor_masked": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "exif": {
+      "description": "What the upload's EXIF said, read from source.<ext> (photo.jpg has no metadata). Null without EXIF.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "focal_35mm": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+            "fov_y_deg": { "description": "Vertical FOV from focal_35mm (native 4:3 frame, then the crop that keeps the width).", "type": ["number", "null"] },
+            "make": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    },
+    "fov_disagreement": {
+      "description": "Present when MoGe's and the EXIF vertical FOV differ by more than 8 degrees.",
+      "type": "object",
+      "required": ["moge_deg", "exif_deg"],
+      "properties": { "moge_deg": { "type": "number" }, "exif_deg": { "type": "number" } }
+    },
+    "device": { "enum": ["mps", "cuda", "cpu", null] },
+    "elapsed_s": { "type": "number", "minimum": 0 }
+  },
+  "$defs": {
+    "size": {
+      "type": "object",
+      "required": ["w", "h"],
+      "additionalProperties": false,
+      "properties": { "w": { "type": "integer", "minimum": 1 }, "h": { "type": "integer", "minimum": 1 } }
+    },
+    "camera": {
+      "description": "The camera block (contract §4.1). Ranges are clamped by every writer.",
+      "type": "object",
+      "required": ["fov_y_deg", "height_m", "pitch_deg", "roll_deg"],
+      "additionalProperties": false,
+      "properties": {
+        "fov_y_deg": { "type": "number", "minimum": 20, "maximum": 110 },
+        "height_m": { "type": "number", "minimum": 0.2, "maximum": 3.0 },
+        "pitch_deg": { "type": "number", "minimum": -80, "maximum": 30 },
+        "roll_deg": { "type": "number", "minimum": -20, "maximum": 20 }
+      }
+    }
+  }
+}
