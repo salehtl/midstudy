@@ -1,4 +1,4 @@
-// midstudy planner shell: phone vs desktop chrome, panels (desktop side panel / phone bottom sheets), pages (Rooms),
+// midstudy planner shell: phone vs desktop chrome, panels (desktop side panel / phone bottom sheets), pages (Scenes),
 // toasts, confirm dialogs, "…" menus and tooltips. Area modules (workspace, panels, rooms) build on it; see main.js.
 //
 // createShell({ engine }) → shell
@@ -9,7 +9,8 @@
 // Panels (desktop: rail of section icons + 264 px body; phone: dock → bottom sheet)
 //   registerPanel({ id, label, short?, icon, phoneDetent = 'half', order?, mount(body, api), onOpen(info), onClose() }) → api
 //     api = { id, body, head, actions, setTitle(text), setCount(text), setStatus(node|text|null), open(opts), close(), isOpen(), detent() }
-//     `short` is the dock/rail label ("In room"); `label` is the panel title ("In the room").
+//     `short` is the dock/rail label ("In scene"); `label` is the panel title ("In the scene").
+//   The photo's stage (the part of the window it fits into) is set by the workspace from 'layout' and 'panel' events.
 //   openPanel(id, { detent }), closePanel(), togglePanel(id), getOpenPanel() → { id, detent } | null
 //   setDetent('peek'|'half'|'full')  phone only
 // Pages (phone: full-height sheet; desktop: overlay under the bar, `width` px wide)
@@ -175,10 +176,10 @@ export function createShell({ engine }) {
     sideContent.replaceChildren(p.api.body)
   }
 
-  // Phone dock: the first four panels, the rest under More
+  // Phone dock: up to five panels, more under More
   function buildDock() {
     const list = sorted()
-    const main = list.length <= 4 ? list : list.slice(0, 4)
+    const main = list.length <= 5 ? list : list.slice(0, 4)
     const rest = list.slice(main.length)
     const item = (label, ic, current, onclick) => h('button.dock-item', { type: 'button', 'aria-current': String(current), onclick }, icon(ic, { size: 20 }), h('span', label))
     const items = main.map((p) => item(p.short || p.label, p.icon, openId === p.id && !!detent, () => togglePanel(p.id)))
@@ -280,12 +281,10 @@ export function createShell({ engine }) {
       m.sheetH = detent ? detentPx(detent) + m.safe.bottom : 0
       m.chromeBottom = detent ? m.sheetH : m.safe.bottom + 8 + 64
       m.chromeLeft = 0
-      engine?.setViewInset(0, detent && detent !== 'full' ? m.sheetH : 0, 0)
     } else {
       m.sheetH = 0
       m.chromeBottom = 0
       m.chromeLeft = panels.size ? (collapsed ? 56 : 320) : 0
-      engine?.setViewInset(m.chromeLeft, 0, 52)
     }
     root.style.setProperty('--sheet-h', `${m.sheetH}px`)
     root.style.setProperty('--chrome-bottom', `${m.chromeBottom}px`)
@@ -297,7 +296,7 @@ export function createShell({ engine }) {
   }
   const metrics = () => ({ mode, ...m, safe: { ...m.safe } })
 
-  // --- pages (Rooms) -------------------------------------------------------------------------------------
+  // --- pages (Scenes) -------------------------------------------------------------------------------------
   const pages = new Map()
   let pageOpen = null
   let pageEls = []

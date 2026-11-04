@@ -17,22 +17,21 @@
   <link rel="stylesheet" href="./styles/kit.css">
   <link rel="stylesheet" href="./styles/workspace.css">
   <link rel="stylesheet" href="./styles/panels.css">
-  <link rel="stylesheet" href="./styles/rooms.css">
+  <link rel="stylesheet" href="./styles/scenes.css">
   <link rel="stylesheet" href="./styles/manage.css">
   <script type="importmap">
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
-      "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/2.4.0/spark.module.js"
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
     }
   }
   </script>
 </head>
 <body>
-  <!-- Mount points (ui/shell.js): the 3D view, in-view overlays (labels, loupe), the workspace chrome (top bar, phone
-       tool rail, mode bars), the panel hosts (desktop side panel, phone dock + sheet), pages (Rooms), toasts and the
-       layer for dialogs, menus and tooltips. -->
+  <!-- Mount points (ui/shell.js): the photo and its 3D view, in-view overlays (footprint, grip, horizon, ruler), the
+       workspace chrome (top bar, phone tool row, bars), the panel hosts (desktop side panel, phone dock + sheet), pages
+       (Scenes), toasts and the layer for dialogs, menus and tooltips. -->
   <div id="view"></div>
   <div id="overlays"></div>
   <header id="topbar"></header>

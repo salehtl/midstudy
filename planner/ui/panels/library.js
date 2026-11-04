@@ -1,7 +1,7 @@
 // Panel (area C): Library, the furniture you can add. One list at every detent (bigger thumbnails at full height):
-// thumbnail or monogram, name, W × D × H cm, a Splat tag and an "In room" check. Search plus filter chips
-// All / In the room · n / Has splat · n. Tapping a row adds the piece near the centre on the floor (a wall piece starts
-// in Hang on wall), selects it, drops the phone sheet to peek and toasts "<name> added · Undo". Frames C1 (phone), C6.
+// thumbnail or monogram, name, W × D × H cm and an "In the scene" check. Search plus filter chips All / In the scene · n.
+// Tapping a row adds the piece on the floor in front of the camera (contract §4.5), selects it, drops the phone sheet to
+// peek and toasts "<name> added · Undo". Frames C1 (phone), C6.
 // v4 library manager (§2.8), with a library API on the server: Add (a photo from the phone, an image link or a 3D
 // file; the price and today's budget before you confirm: panels/libsheets.js), the jobs making pieces (progress,
 // Place when ready, failures), "…" per row (Edit, Remove with Undo = restore) and Recently removed (Restore).
@@ -34,8 +34,7 @@ export function mount(ctx) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); clear.click() } })
   const chips = {
     all: chip({ label: 'All', onClick: () => setFilter('all') }),
-    inroom: chip({ label: 'In the room', onClick: () => setFilter('inroom') }),
-    splat: chip({ label: 'Has splat', onClick: () => setFilter('splat') }),
+    inroom: chip({ label: 'In the scene', onClick: () => setFilter('inroom') }),
   }
   const tools = h('div.p-tools.lib-tools', search, h('div.p-chips', { role: 'group', 'aria-label': 'Filter' }, Object.values(chips)))
   const jobsEl = h('section.lib-jobs', { 'aria-label': 'Being made', hidden: true })
@@ -54,15 +53,13 @@ export function mount(ctx) {
   }
 
   async function add(item) {
+    if (!engine.getSceneName()) { shell.toast('Open a scene first, then add furniture to it.', { id: 'no-scene' }); shell.openPage('scenes'); return }
     let uid
     try { uid = await engine.addItemInternal(item.id) } catch { return } // reported (toast)
     engine.select(uid)
     lastAdded = item.id
     const name = item.name || item.id
-    if (item.mount === 'wall') {
-      engine.startHang(uid)
-      shell.toast(`${name} added. Tap a wall to hang it`, { kind: 'ok', id: `added:${uid}`, action: { label: 'Undo', onClick: () => engine.removeItemInternal(uid) } })
-    } else shell.toast(`${name} added`, { kind: 'ok', id: `added:${uid}`, action: { label: 'Undo', onClick: () => engine.removeItemInternal(uid) } })
+    shell.toast(`${name} added`, { kind: 'ok', id: `added:${uid}`, action: { label: 'Undo', onClick: () => engine.removeItemInternal(uid) } })
     if (shell.isPhone()) shell.setDetent('peek')
     render()
     showAdded()
@@ -85,7 +82,7 @@ export function mount(ctx) {
   }
   function itemMenu(item, anchor) {
     shell.menu(anchor, [
-      { label: 'Place in the room', icon: 'plus', onSelect: () => quiet(add(item)) },
+      { label: 'Place in the scene', icon: 'plus', onSelect: () => quiet(add(item)) },
       { label: 'Edit…', icon: 'pencil', onSelect: () => openEditSheet(ctx, item, { onRemove: removeFromLibrary }) },
       '-',
       { label: 'Remove from library', icon: 'trash', danger: true, midstudy: 'lib-remove', onSelect: () => quiet(removeFromLibrary(item)) },
@@ -105,14 +102,12 @@ export function mount(ctx) {
   // --- rows --------------------------------------------------------------------------------------------------------
   function row(item, n, selectedId, manage) {
     const name = item.name || item.id
-    const hasSplat = !!item.assets?.splat
     const inRoom = n > 0
     const meta = [h('span.lib-dims.tnum', dimsText(item.dims_cm))]
-    if (hasSplat) meta.push(h('span.p-tag', 'Splat'))
-    if (item.mount === 'wall') meta.push(h('span.p-tag', 'Wall'))
-    const roomMark = inRoom ? h('span.lib-inroom', { dataset: { tip: n > 1 ? `In the room · ${n}` : 'In the room' } }, pic('check', { size: 14, stroke: 2.2 }), h('span.lib-inroom-word', n > 1 ? `In room · ${n}` : 'In room')) : null
+    if (!item.assets?.glb) meta.push(h('span.p-tag', { dataset: { tip: 'No GLB: shown as a box' } }, 'No GLB'))
+    const roomMark = inRoom ? h('span.lib-inroom', { dataset: { tip: n > 1 ? `In the scene · ${n}` : 'In the scene' } }, pic('check', { size: 14, stroke: 2.2 }), h('span.lib-inroom-word', n > 1 ? `In scene · ${n}` : 'In scene')) : null
     const main = h(`button.lib-row${lastAdded === item.id || selectedId === item.id ? '.is-marked' : ''}`, {
-      type: 'button', dataset: { id: item.id }, 'aria-label': `Add ${name}${inRoom ? ' (in the room)' : ''}`,
+      type: 'button', dataset: { id: item.id }, 'aria-label': `Add ${name}${inRoom ? ' (in the scene)' : ''}`,
       onclick: () => quiet(add(item)),
     },
     itemThumb(engine, item, 'lib-thumb'),
@@ -130,14 +125,14 @@ export function mount(ctx) {
     jobsEl.hidden = !shown.length
     if (!shown.length) { jobsEl.replaceChildren(); return }
     const libItems = engine.getLibrary()
-    jobsEl.replaceChildren(h('div.lib-jobs-head', h('span.caps', 'Being made'), h('span.lib-jobs-note', 'One at a time on homeserver')),
+    jobsEl.replaceChildren(h('div.lib-jobs-head', h('span.caps', 'Being made'), h('span.lib-jobs-note', 'One at a time on the server')),
       ...shown.map((j) => {
         const item = j.item || libItems.find((l) => l.id === j.item_id)
         const title = item?.name || j.item_id
         const kind = j.status === 'done' ? 'ready' : j.status === 'failed' ? 'failed' : j.status === 'running' ? 'running' : 'queued'
         const glyph = kind === 'running' ? ring(null, { size: 20 }) : kind === 'queued' ? pic('clock', { size: 20 }) : kind === 'ready' ? pic('check', { size: 20, stroke: 2 }) : pic('warning', { size: 20 })
         const cost = j.cost_usd ?? j.cost_usd_estimate
-        const what = j.kind === 'rescale' ? 'Refitting to its new size' : kind === 'queued' ? 'Waiting its turn' : kind === 'running' ? (j.message ? j.message[0].toUpperCase() + j.message.slice(1) : 'Making the model') : kind === 'ready' ? 'In the library' : (j.message || 'It stopped on homeserver')
+        const what = j.kind === 'rescale' ? 'Refitting to its new size' : kind === 'queued' ? 'Waiting its turn' : kind === 'running' ? (j.message ? j.message[0].toUpperCase() + j.message.slice(1) : 'Making the model') : kind === 'ready' ? 'In the library' : (j.message || 'It stopped on the server')
         const line = [what, cost > 0 && kind !== 'failed' ? (j.mock ? `${fmtUsd(cost)} (mock, $0)` : fmtUsd(cost)) : null].filter(Boolean).join(' · ')
         const act = kind === 'ready' && item && !item.missing && libItems.some((l) => l.id === item.id)
           ? h('button.btn.btn-primary.lib-job-btn', { type: 'button', onclick: () => { ready.delete(j.id); quiet(add(libItems.find((l) => l.id === item.id))); jobsList() } }, 'Place')
@@ -168,18 +163,14 @@ export function mount(ctx) {
     const n = counts()
     const sel = engine.getItem(engine.getSelected())
     const inRoomCount = all.filter((l) => n.get(l.id)).length
-    const splatCount = all.filter((l) => l.assets?.splat).length
     panel.setCount(all.length ? String(all.length) : '')
     input.placeholder = all.length ? (shell.isPhone() ? `Search ${all.length} items` : 'Search furniture') : 'Search furniture'
     clear.hidden = !input.value
     chips.all.set(filter === 'all')
     chips.inroom.set(filter === 'inroom')
-    chips.splat.set(filter === 'splat')
-    chips.inroom.lastChild.textContent = `${shell.isPhone() ? 'In the room' : 'In room'} · ${inRoomCount}`
-    chips.splat.lastChild.textContent = `Has splat · ${splatCount}`
+    chips.inroom.lastChild.textContent = `In the scene · ${inRoomCount}`
     const shown = all.filter((l) => {
       if (filter === 'inroom' && !n.get(l.id)) return false
-      if (filter === 'splat' && !l.assets?.splat) return false
       if (!query) return true
       return [l.name, l.id, l.category].some((s) => String(s || '').toLowerCase().includes(query))
     })
@@ -190,7 +181,7 @@ export function mount(ctx) {
       none.replaceChildren(h('strong', 'The library is empty.'), manage ? ' Add furniture from a photo, a product image link or a 3D file.' : ' Add furniture with midstudy-add (a photo, a product link or a 3D file), then reload.')
       if (manage) none.append(h('span.lib-none-cta', h('button.btn.btn-primary', { type: 'button', onclick: () => openAdd() }, 'Add furniture')))
     } else if (!shown.length) {
-      none.replaceChildren(query ? `Nothing matches "${input.value.trim()}".` : filter === 'inroom' ? 'Nothing from the library is in the room yet.' : 'No piece has a splat yet.')
+      none.replaceChildren(query ? `Nothing matches "${input.value.trim()}".` : 'Nothing from the library is in this scene yet.')
     }
     jobsList()
     trashList()
@@ -212,7 +203,7 @@ export function mount(ctx) {
   })
   lib.events.addEventListener('job-failed', (e) => {
     const j = e.detail.job
-    shell.toast(`Couldn't make ${j.item?.name || j.item_id}: ${j.message || 'it stopped on homeserver'}`, { kind: 'error', id: `lib-failed-${j.id}` })
+    shell.toast(`Couldn't make ${j.item?.name || j.item_id}: ${j.message || 'it stopped on the server'}`, { kind: 'error', id: `lib-failed-${j.id}` })
   })
   shell.events.addEventListener('mode', render)
   shell.events.addEventListener('panel', (e) => {

@@ -1,7 +1,6 @@
-/* midstudy planner v4: the library manager (add / edit sheets, jobs, recently removed), the retrain sheet, the form sheet
-   they share (ui/sheet.js), the height controls and hanging (§2.10: the phone lift column, the desktop Height group,
-   the guide line), the measured shell (toggle, wall length) and the grouped rooms (-rN versions). Same tokens and
-   sizes as kit.css: desktop 32 px controls / 13 px, phone 44 px targets / 15 px. */
+/* midstudy planner: the library manager (add / edit sheets, jobs, recently removed), the form sheet they share
+   (ui/sheet.js) and the height controls (§2.10: the phone lift column, the desktop Height group, the guide line). Same
+   tokens and sizes as kit.css: desktop 32 px controls / 13 px, phone 44 px targets / 15 px. */
 
 /* --- the form sheet (ui/sheet.js) ------------------------------------------------------------------------- */
 .ms {
@@ -138,42 +137,7 @@
 [data-mode="phone"] .lib-trash-row { min-height: 52px; padding: 4px 8px 4px 12px; }
 .lib-trash-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-muted); }
 
-/* --- retrain sheet ---------------------------------------------------------------------------------------------- */
-.rt-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.rt-loading { grid-column: 1 / -1; padding: 18px 12px; text-align: center; color: var(--color-muted); border-radius: var(--radius-panel); background: var(--color-raised); }
-.rt-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius-panel); background: var(--color-raised); border: 1px solid var(--color-line); min-width: 0; }
-.rt-tile b { font: 600 var(--text-section)/26px var(--font-display); letter-spacing: var(--tracking-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rt-tile span:last-child { color: var(--color-muted); font-size: 12px; line-height: 16px; }
-.rt-tile:nth-child(3) b { color: var(--color-accent); }
-.ms.is-phone .rt-tile b { font-size: 20px; line-height: 24px; }
-.rt-splats { grid-column: 1 / -1; margin: 2px 2px 0; color: var(--color-muted); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
-.ms.is-phone .rt-splats { font-size: 13px; line-height: 18px; }
-.rt-adv { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px 0 6px; border-radius: var(--radius-control); border: 1px solid var(--color-line); font-weight: 600; text-align: left; }
-.ms.is-phone .rt-adv { min-height: 48px; border-radius: var(--radius-panel); padding: 0 14px 0 10px; }
-.rt-adv[aria-expanded="true"] { background: var(--color-raised); }
-.rt-adv-note { margin-left: auto; font-weight: 400; color: var(--color-muted); font-size: 12px; }
-.rt-settings { display: flex; flex-direction: column; gap: 4px; margin-top: -6px; }
-.rt-set { display: grid; grid-template-columns: 1fr 120px; grid-template-areas: "head input" "hint input" "err err"; column-gap: 12px; row-gap: 2px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--color-line); }
-.ms.is-phone .rt-set { grid-template-columns: 1fr 128px; }
-.rt-set-head { grid-area: head; display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.rt-set-label { font-weight: 600; }
-.rt-range { color: var(--color-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.rt-set-hint { grid-area: hint; color: var(--color-muted); font-size: 12px; line-height: 16px; }
-.ms.is-phone .rt-set-hint { font-size: 13px; line-height: 18px; }
-.rt-set .ms-input { grid-area: input; text-align: right; }
-.rt-set.is-changed .ms-input { border-color: color-mix(in srgb, var(--color-accent) 60%, transparent); color: var(--color-accent); }
-.rt-err { grid-area: err; color: var(--color-danger); font-size: 12px; }
-.rt-toggle { padding: 10px 0; border-bottom: 1px solid var(--color-line); }
-.rt-toggle.is-changed .toggle-label { color: var(--color-accent); }
-.rt-reset { align-self: flex-start; margin-top: 6px; color: var(--color-muted); }
-.rt-notkept { display: flex; gap: 12px; padding: 4px 0 8px; color: var(--color-muted); }
-.rt-notkept .icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent); }
-.rt-notkept b { color: var(--color-text); }
-.rt-notkept p { margin: 6px 0 0; }
-.rt-top .icon { color: var(--color-accent); }
-[data-mode="phone"] .rt-top { display: none; }
-
-/* --- height, hanging (§2.10) --------------------------------------------------------------------------------- */
+/* --- height (§2.10) -------- --------------------------------------------------------------------------------- */
 /* phone: the lift column takes the rail's place while a piece is selected */
 [data-mode="phone"][data-ws-bar="select"] #rail { display: none; }
 .ws-lift { display: none; }
@@ -218,16 +182,3 @@
 .ws-guide { stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 3 4; opacity: .75; }
 .ws-guide-dot { fill: #D9A44133; stroke: var(--color-accent); stroke-width: 1.25; }
 .ws-label-up { color: var(--color-accent); }
-
-/* --- measured shell (§2.7 v4) ------------------------------------------------------------------------------- */
-.ws-dim.is-wall line { stroke: var(--color-accent); stroke-width: 2; opacity: 1; }
-.ws-dimtag.is-wall { background: var(--color-accent); color: var(--color-accent-ink); border-color: transparent; font-size: 14px; padding: 5px 10px; box-shadow: 0 6px 18px #00000066; }
-[data-mode="desktop"] .ws-dimtag.is-wall { font-size: 13px; padding: 4px 9px; }
-
-/* --- rooms: -rN versions under their base ------------------------------------------------------------------- */
-.rm-ver { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--color-line); color: var(--color-muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; flex-shrink: 0; margin-right: 6px; vertical-align: 1px; }
-.rm-row.is-version { position: relative; }
-.rm-root.is-phone .rm-row.is-version { padding-left: 32px; }
-.rm-root.is-phone .rm-row.is-version::before { content: ""; position: absolute; left: 20px; top: 0; bottom: 50%; width: 8px; border-left: 1.5px solid var(--color-line); border-bottom: 1.5px solid var(--color-line); border-bottom-left-radius: 6px; }
-.rm-root.is-desktop .rm-row.is-version .rm-title { padding-left: 14px; position: relative; }
-.rm-root.is-desktop .rm-row.is-version .rm-title::before { content: "↳"; position: absolute; left: 0; color: var(--color-muted); }

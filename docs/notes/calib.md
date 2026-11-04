@@ -1,0 +1,247 @@
+# Calib track notes
+
+> **Since integration (see `integrate.md`):** the integration agent kept E2's PLAN.md tolerances and the golden scenes
+> as they are, so E2 real is 53/60 (the 7 golden misses below, plus 3 new scale-free depth checks that pass at
+> 0.7–1.1 %). The depth masking described here (max(4 cm, 1.2 % of depth), below-floor zeroing, unmasked without a
+> floor) is now in contract §4.2/§4.3. The real path (`npm run eval:real`) runs this CLI through `serve.py` on the
+> lounge photos and a HEIC of one; all calibrate with the floor found and agree within 0.5° and 4 mm.
+
+What the calib track built in `calib/` (`midstudy-calib`, contract §4.3), how to run it, what it measured, and what's left.
+Measured on 2026-11-04 on the M3 Max (MPS), MoGe-2 ViT-L.
+
+## Summary
+
+- `midstudy-calib run | ingest | fit | align` works end to end with the contract's stdout/stderr/exit rules, the
+  `MIDSTUDY_CALIB_MOCK` mode, the fallbacks and device selection. 32 unit tests pass; `evals/calib_eval.py` passes
+  27/27 (`--self-test`), 47/47 (`--mock`), and **50/57 with the real model**.
+- **Pitch and roll are right everywhere**, signs included: within 0.7° and 0.2° of truth on all three golden scenes.
+- **MoGe does badly on the synthetic golden scenes for FOV and metric scale, and well on the real photo.** On the
+  golden renders it overestimates the vertical FOV by 3.6–7.5° and underestimates scale by 8–19%. The scale error
+  tracks the focal error almost exactly (ratios 1.18/1.12/1.08 against 1.17/1.11/1.07), and the depth *shape* is
+  right: the median depth error after one global scale is 0.7–1.1%. All 7 failing E2 checks come from this:
+  living-wide FOV, height and depth; portrait FOV, height and depth; steep-roll depth (10.3% against the 10% limit).
+  On the real lounge photo the FOV is 3.1° from the EXIF estimate, and the measured sizes are plausible (see below).
+  I did not edit `fixtures/` or the eval. The integration agent decides whether the golden FOV, height and depth
+  tolerances should change, for example by comparing depth after a global scale.
+
+## What's in `calib/`
+
+| Path | What |
+|---|---|
+| `pyproject.toml`, `uv.lock` | uv project, Python 3.12. Deps: numpy, pillow, pillow-heif, opencv-python-headless, torch (2.15.0 locked), huggingface-hub, and `moge @ git+https://github.com/microsoft/MoGe@07444410f1e33f402353b99d6ccd26bd31e469e8`. Dev deps: pytest, jsonschema. |
+| `src/midstudy_calib/cli.py` | argparse CLI and the output contract. During the work, fd 1 is pointed at stderr, so nothing torch or a C library prints can reach stdout. The final JSON is the only stdout line. A failure exits 1 with `{"ok": false, "error"}` and `midstudy-calib: <sentence>` as the last stderr line. |
+| `src/midstudy_calib/ingest.py` | Sniffs the type, applies the guards, orients, converts to sRGB, downsizes, writes `photo.jpg` with no metadata, passes clean JPEGs through byte for byte, reads EXIF and computes the EXIF FOV. |
+| `src/midstudy_calib/fit.py` | The mock, the MoGe path, the fallbacks, and writing `calib.json` and `depth.png`. |
+| `src/midstudy_calib/floor.py` | numpy only: the RANSAC floor plane, frame conversion, camera from plane, and depth masking. |
+| `src/midstudy_calib/moge_runner.py` | Device pick, model load (on CPU, then moved) and inference. |
+| `src/midstudy_calib/align.py` | Keep-room registration and composite. |
+| `tests/` | `test_floor.py` (conventions against golden truth, steep and through-glass cases), `test_ingest.py`, `test_cli.py` (contract, mock, fallbacks, schema), `test_align.py`. |
+| `scripts/calib_report.py` | The measurement and overlay script behind the numbers below. |
+
+### Pins and checkpoints
+
+- **MoGe commit `07444410f1e33f402353b99d6ccd26bd31e469e8`** (v2.0.0, 2025-11-02), the last code commit before
+  upstream HEAD `74fbce0` ("V3", 2026-08-19). V3 is MoGe-3: it needs CUDA-only `flex-gemm` and Gradio 6, and its uv
+  config only allows Linux and Windows. MoGe-2's own extra dependencies are dropped with
+  `[tool.uv] exclude-dependencies = ["gradio", "opencv-python", "pipeline"]`. The inference path needs none of them,
+  and `opencv-python` would clash with `opencv-python-headless`. `utils3d` stays pinned by MoGe to `3fab839f…`.
+- **Hugging Face checkpoints, checked on 2026-11-04** (`/api/models?author=Ruicheng`): `moge-2-vitl-normal`,
+  `moge-2-vitb-normal`, `moge-2-vits-normal`, `moge-2-vitl` (no normals), the `-onnx` variants, `moge-vitl` (v1), and
+  `moge-3-vitl` / `moge-3-vitg` (need the V3 code). `--model vitl|vitb|vits` maps to
+  `Ruicheng/moge-2-{size}-normal`. **The default is `vitl`** (`Ruicheng/moge-2-vitl-normal`), the one whose sizes
+  are plausible on the real photo (see "Model size" below).
+- Weights go to the Hugging Face cache (`~/.cache/huggingface/hub`, or `HF_HOME`), never into the repo.
+  **The first download of vitl-normal (1.32 GB) took 20.8 s.** Loading from cache takes 3.9 s.
+
+## How to run
+
+```sh
+nix develop -c uv sync --project calib                          # once (about 2.5 min the first time, 944 MB .venv)
+nix develop -c uv run --project calib midstudy-calib run <photo> --out <scene-dir>
+nix develop -c uv run --project calib midstudy-calib fit <scene-dir> [--model vitb] [--device cpu] [--no-depth]
+nix develop -c uv run --project calib midstudy-calib align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>
+MIDSTUDY_CALIB_MOCK=fixtures/calib nix develop -c uv run --project calib midstudy-calib run fixtures/scenes/living-wide/photo.jpg --out /tmp/x
+nix develop -c bash -c 'cd calib && uv run pytest -q'          # 32 tests, about 12 s, no weights needed
+nix develop -c uv run --project calib python calib/scripts/calib_report.py   # golden + real photos -> evals/out/calib/report/, overlays/
+nix develop -c evals/py evals/calib_eval.py [--mock | --self-test]          # the evals track's E2
+```
+
+The server's default `--calib "uv run --project calib midstudy-calib"` works from the repo root. Each call loads
+the model again (about 4 s). A first calibration on a fresh machine also downloads 1.3 GB.
+
+## Behaviour details (beyond or pinning the contract)
+
+- **Frames.** MoGe returns points and normals in the OpenCV camera frame (x right, y down, z forward, z = view-axis
+  depth). I checked this against the golden floors: the median MoGe normal on floor pixels matches
+  `diag(1,−1,−1)·Rᵀ·ŷ`. With `n` the floor's unit normal pointing up and converted to three.js camera axes
+  (`n3 = (n.x, −n.y, −n.z)`), the code uses `pitch = asin(−n3.z)`, `roll = atan2(n3.x, n3.y)` and `height = d` for the
+  plane `n·p + d = 0`. This follows from `R = Rx(pitch)·Rz(roll)`, where world up seen from the camera is
+  `(cos p sin r, cos p cos r, −sin p)`.
+  **Signs were verified on the golden scenes, not only by reasoning.** MoGe gives steep-roll (truth +2°) +1.96°,
+  portrait (truth −1°) −1.19°, and all pitches negative within 0.7°. In `test_floor.py`, exact point maps built
+  from truth.json and depth.png return the truth cameras within 0.1° and 5 mm, and project truth.json's open-floor
+  points within 1 px.
+- **FOV** = `2·atan(0.5 / fy)`, with MoGe's normalized `fy` (units of image height). `principal` is MoGe's `(cx, cy)`,
+  which MoGe-2 always reports as `[0.5, 0.5]`.
+- **Floor RANSAC** (`floor.fit_floor`):
+  - Candidates are pixels whose MoGe normal has `n·(−ŷ_cv) > 0.15`. Any floor passes this for pitch ≥ −80° and
+    |roll| ≤ 20°. Ceilings and walls facing a downward-looking camera fail it.
+  - Hypotheses use 3 points. A hypothesis is kept when the camera is 0.15–3.5 m above the plane, on its up side.
+  - A pixel is an inlier when it is within `max(4 cm, 1.2% of its depth)` of the plane and its own normal is within
+    30° of the plane's.
+  - Each inlier is weighted by `0.2 + (row/h)²`, so the bottom of the image counts about 6× as much as the top. This
+    is how the room's floor beats a lower floor seen through glass (`test_lower_floor_through_glass_loses`).
+  - The winner is refined three times by least squares. `inlier_ratio` is inliers / all pixels at the depth size.
+  - Under 2% inliers means `floor.found: false`.
+- **depth.png** is MoGe's z in mm at photo.jpg's aspect, long side 1024. MoGe runs on that downsized image, about
+  1.8–2.4 s on MPS.
+  - 0 where MoGe's mask says invalid, or the depth is over 65.535 m.
+  - 0 on the floor within `max(4 cm, 1.2% of depth)`. The contract says 4 cm; far away MoGe is noisier.
+  - 0 **below** the floor plane (reflections, the void behind the glass balustrade). The floor is always nearer
+    along those rays, so they could never hide anything standing on it.
+  - On golden: 0.1–0.5% of true non-floor pixels are zeroed, 0.3–0.7% of true floor pixels are left non-zero, and
+    all `floor_points` are 0.
+- **Fallbacks:**
+  - No floor (or under 2% inliers): `source: "moge-2"`, `floor.found: false`, MoGe's FOV, height 1.40, pitch −10,
+    roll 0. depth.png is still written, with `floor_masked: false`.
+  - Model load failure (offline with no cached weights, missing package): `exif` (FOV from EXIF) or `default`
+    (FOV 55), `depth: null`, `fallback_reason` in calib.json. Exit 0 in both cases.
+  - An inference failure on mps/cuda under `--device auto` retries on the CPU before falling back.
+- **Device:** `auto` picks cuda, then mps, then cpu. `PYTORCH_ENABLE_MPS_FALLBACK=1` is set before torch is
+  imported. An explicit device that isn't available uses cpu, with a log line. fp16 autocast runs on cuda and mps,
+  not on cpu.
+- **Mock:** looks up `<dir>/<sha256 photo.jpg>/`, then `<dir>/<sha256 source.*>/`. On a miss it writes the `default`
+  fallback, with the EXIF block when there is one. It never imports torch.
+- **Ingest guards:**
+  - Size: 25 MB, checked before reading.
+  - Type: sniffed from the bytes. JPEG, PNG, WebP, and HEIC/HEIF (ftyp brands `heic heix hevc hevx heim heis hevm
+    hevs`, or `mif1/msf1/mif2/miaf` unless the file is AVIF-only). AVIF and everything else are refused with
+    "that file isn't a JPEG, PNG, HEIC or WebP image".
+  - Pixels: `Image.MAX_IMAGE_PIXELS = 100 MP`, with the bomb warning raised as an error. Over 100 MP is refused
+    with a sentence before decoding.
+  - Truncated or corrupt files are refused.
+  - Nothing is written for a refused upload.
+- **Ingest conversion:**
+  - EXIF orientation is applied (pillow-heif already applies HEIF rotation and resets the tag, so the HEIC and JPEG
+    paths agree).
+  - The ICC profile is converted to sRGB with the perceptual intent (Display P3 → sRGB checked).
+  - Alpha is flattened onto white. 16-bit grey is scaled.
+  - Large JPEGs are decoded with `draft()` first, then resized with Lanczos to a 2048 px long side.
+  - The output is JPEG q92 with `info` cleared, because Pillow would otherwise carry a JPEG comment over. The output
+    is checked to contain only APP0.
+  - **Pass-through:** a JPEG with only JFIF/APP0, no APP1–15 or COM, nothing after EOI, long side ≤ 2048 and RGB is
+    copied byte for byte. A clean greyscale JPEG is re-encoded as RGB.
+- **calib.json extras** (allowed by the schema): `moge {fov_x_deg, fov_y_deg, input, load_s, infer_s, floor_fit_s}`,
+  `floor.normal_camera` (the floor normal in three.js camera axes), and `fallback_reason` on fallbacks.
+  `fov_disagreement` appears when MoGe and EXIF differ by more than 8°. Every camera block is clamped to the
+  contract ranges and logged when clamped.
+- **align** (contract §4.3, §4.7):
+  1. Resizes the output to the photo's size.
+  2. Finds SIFT features outside the mask (eroded 9 px), working at a 1600 px long side.
+  3. Uses a ratio test, then MAGSAC homography (2.5 px), then an ECC homography refinement that is kept only when it
+     agrees with the features.
+  4. Warps, then composites `photo·(1−α) + warped·α`, with α = the mask blurred by σ = 0.4% of the width and zero
+     where the warp has no content.
+  - It refuses with `applied: false`, `reason` and no output file when there are fewer than 40 inliers, the median
+    residual is over 3 px, or a corner moves by more than 10% of the width.
+  - Measured on synthetic nano-banana-like pairs (scaled to 1344 × 768, shifted by 2% / −1.5% and 1%): living-wide
+    has about 700 inliers, residual 0.08–0.10 px and a homography error ≤ 0.05 px. The lounge photo has about 2,300
+    inliers, residual 0.13–0.22 px and an error ≤ 0.42 px. The identity applies, and an unrelated image is refused.
+    It takes 0.2–0.3 s.
+
+## Measurements
+
+### Golden scenes (vitl, MPS): fitted vs truth.json
+
+| scene | fov (truth) | height (truth) | pitch (truth) | roll (truth) | depth median err | after one global scale | floor inliers | runtime |
+|---|---|---|---|---|---|---|---|---|
+| living-wide | 62.46 (55) **+7.46** | 1.185 (1.40) **−15.4%** | −9.32 (−10) +0.68 | −0.05 (0) | **19.2%** | 0.7% | 0.279 | 10.0 s |
+| steep-roll | 68.60 (65) +3.60 | 1.476 (1.60) −7.8% | −25.54 (−25) −0.54 | +1.96 (+2) | **10.3%** | 0.7% | 0.483 | 9.9 s |
+| portrait | 75.85 (70) **+5.85** | 1.114 (1.25) **−10.9%** | −7.95 (−8) +0.05 | −1.19 (−1) | **16.5%** | 1.1% | 0.325 | 9.9 s |
+
+Bold values fail E2 (fov 5°, height 10%, depth 10%). The scale needed to match truth is 1.24, 1.12 and 1.20.
+Floor rmse is 0.5–0.6 cm.
+
+### Real photos (fixtures/photos/, vitl, MPS)
+
+| photo | photo.jpg | fov_y | height | pitch | roll | floor found / inliers / rmse | EXIF fov_y | device | runtime (wall, elapsed_s) |
+|---|---|---|---|---|---|---|---|---|---|
+| upper-lounge-camera.jpeg (P3, EXIF, 5712 × 3213) | 2048 × 1152 | 72.75 | 1.352 | −7.84 | +0.26 | yes / 0.251 / 0.9 cm | 69.63 (14 mm) | mps | 10.4 s, 9.45 s |
+| upper-lounge.jpg (no EXIF) | 2000 × 1125 | 73.06 | 1.356 | −7.92 | +0.28 | yes / 0.251 / 0.8 cm | — | mps | 10.4 s, 9.72 s |
+| upper-lounge-empty-ai.png (AI) | 1671 × 941 | 66.31 | 1.334 | −7.62 | −0.14 | yes / 0.304 / 0.6 cm | — | mps | 10.4 s, 9.74 s |
+
+- **CPU only** (`--device cpu`, upper-lounge.jpg): MoGe inference takes 4.5 s against about 2 s on MPS, and the run
+  takes 12.7 s wall. The result matches MPS within 1 mm and 0.01°.
+- **Runtime breakdown on MPS:** about 3 s Python and torch imports, 3.9 s model load, 1.8–2.4 s inference, 0.06 s
+  floor fit.
+- **Sanity on the lounge** (camera original): points from depth.png and the fitted camera, as heights above the
+  floor.
+  - Coffee table top: 37–39 cm (notes say 35–40).
+  - Sofa seat: 45 cm (about 45).
+  - Wall at the top of the back doorway: 2.16–2.25 m (2.1–2.4).
+  - The rug's near-right corner, mapped photo → floor with the fitted camera, is **89.8°**, so FOV, pitch and roll
+    agree with each other.
+  - The camera original and the metadata-free copy agree within 0.3° and 4 mm. The AI version gives the same camera
+    within 1.8 cm and 0.3°, with a 6.4° narrower FOV (its framing differs).
+- **EXIF FOV passed to MoGe** (an experiment; not what the code does, because the contract says MoGe's FOV wins):
+  height 1.394 and door 2.02 m, against 1.352 and 2.16 m. Both are plausible, so neither is clearly better.
+
+### Model size (all three on all photos)
+
+| | living-wide fov/h | steep-roll fov/h | portrait fov/h | lounge fov (EXIF 69.6) | lounge h (orig/copy/AI) | lounge door top | lounge sofa seat |
+|---|---|---|---|---|---|---|---|
+| vitl (default) | +7.5 / −15% | +3.6 / −8% | +5.9 / −11% | 72.8 | 1.352 / 1.356 / 1.334 | 2.16–2.25 m | 45 cm |
+| vitb | +5.6 / −18% | −2.4 / −9% | +1.8 / −10% | 70.9 | 1.262 / 1.264 / 1.446 | 2.25–2.34 m | 45 cm |
+| vits | +3.7 / −9% | −4.5 / −17% | −2.1 / +5% | 65.9 | 1.330 / 1.341 / 1.460 | 1.88–1.95 m (too low) | 33 cm (too low) |
+
+None passes every golden check. vitl is the most consistent on the real room, so it stays the default. Changing
+`num_tokens` (1200–3600) or flipping the image moves the FOV by 1° at most.
+
+### Overlays (looked at each one)
+
+These are in `evals/out/calib/overlays/` (git-ignored). `*-grid.jpg` is the 50 cm floor grid out to 8 m from the
+fitted camera in cyan, plus the true camera in magenta on golden scenes. `*-depth.jpg` shows depth.png, with zeros
+(masked floor) in green. `-vitb` / `-vits` variants exist too.
+
+- **golden-living-wide:** the cyan grid lies on the floor. Near the bottom it nearly coincides with the truth grid.
+  Further away it pulls apart because of the FOV and scale error: the fitted horizon is lower, and cells are larger
+  in metres per pixel.
+- **golden-steep-roll:** on the floor, close to truth across the rug. The same far-field divergence, smaller.
+- **golden-portrait:** on the floor, close near the camera, diverging toward the back wall.
+- **real-upper-lounge-camera:** **the grid sits on the floor.**
+  - Its transverse lines are parallel to the rug's near edge.
+  - The receding lines run parallel to the stone curb and the rug's right edge, and converge with the corridor.
+  - The depth overlay masks the whole rug and marble floor, including the far corridor floor. The curb, the glass
+    balustrade, the sofa, the table, the stool and the bag are not masked.
+  - The grid continues over the void beyond the glass, as the y = 0 plane should.
+- **real-upper-lounge** (no EXIF): the same as the camera original. The grid sits on the floor.
+- **real-upper-lounge-empty-ai:** the grid sits on the polished floor and follows the corridor and the curb.
+
+## Privacy
+
+- I never opened, listed or read `fixtures/photos/private/`. That is where the user's
+  `AD9729E1-593E-4443-9BCD-B0519A7265F1_1_201_a` original with location data presumably is; I didn't look for it
+  anywhere else either.
+- Nothing from `fixtures/photos/` is copied anywhere tracked. Real-photo outputs live only under `evals/out/calib/`,
+  and `calib_report.py` deletes their `source.*` after each run.
+- `fixtures/photos-public/` was **not created**: `fixtures/photos/` has photos, so no download was needed.
+
+## Left for others / known gaps
+
+- **Golden FOV, scale and depth tolerances:** E2 fails 7 of 57 checks with the real model, all from MoGe's FOV and
+  scale bias on the CG renders. The integration agent decides. Options:
+  - Keep the checks and accept the misses as known.
+  - Loosen FOV and height for golden scenes only.
+  - Compare depth after a global scale (0.7–1.1% here).
+  - Keep golden scenes for convention and signs (pitch, roll, masking), and judge FOV and scale on real photos
+    against EXIF and known sizes.
+- Each `fit` reloads the model (about 4 s). A persistent worker would cut that, but the server's job model is one
+  process per scene.
+- Depth edges are MoGe's bilinear upsampling, so occlusion can halo by a few pixels at object borders (PLAN §11). I
+  didn't add an edge cleanup.
+- Only one real room (three versions of it) was measured. Portrait, steep and rug-heavy real photos are untested
+  beyond the synthetic floor tests.
+- The Hugging Face cache also holds `moge-2-vitb-normal` (400 MB), `moge-2-vits-normal` (134 MB) and `moge-2-vitl`
+  (1.2 GB, no normals), downloaded only for the comparison above. The last one can be deleted.
+- Packaging (PLAN §9): `calib/uv.lock` locks macOS-friendly torch from PyPI. For CUDA on homeserver, the packager needs
+  `torch-bin`. `utils3d` and `moge` are git dependencies (pinned commits above).

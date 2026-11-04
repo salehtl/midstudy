@@ -1,5 +1,9 @@
 # Foundation notes
 
+> **Since integration:** the "known gaps" below about `planner/` still being nook's UI are resolved (the app track
+> rebuilt it; see `app.md` and `integrate.md`). `package.json` now has the §6.2 task evals, `eval:real` and a working
+> `check:scenes`; `evals/README.md` exists again.
+
 What the foundation agent built on branch `v1`, how to run it, and what it left for the next tracks.
 
 ## What's here

@@ -1,90 +1,95 @@
-// midstudy planner input: pointer (mouse, pen, touch) and keyboard handling on top of the engine API (engine.js).
-// installInput(engine) → { enabled: { pointer, keyboard }, setKeyFilter(fn), hold(key, on), held(), onKeys(fn), dispose() }
-//   enabled.pointer / enabled.keyboard   set false to switch these handlers off. OrbitControls stays on.
-//   setKeyFilter(fn)                     fn(keydownEvent) → true to swallow the key (e.g. while a dialog is open).
-//   hold('w'|'a'|'s'|'d', on)            press or release a walk key from the UI (the clickable WASD keycaps)
-//   held() → Set of walk keys down;      onKeys(fn) → unsubscribe; fn(held) whenever it changes
+// midstudy planner input: pointer (mouse, pen, touch), wheel and keyboard handling on top of the engine API (engine.js).
+// installInput(engine) → { enabled: { pointer, keyboard }, setKeyFilter(fn), dispose() }
+//   enabled.pointer / enabled.keyboard   set false to switch these handlers off
+//   setKeyFilter(fn)                     fn(keydownEvent) → true to swallow the key (e.g. while a dialog is open)
+// The camera never moves (contract §4.5): zoom and pan are 2D, inside the photo.
 // Pointer, one gesture at a time: a drag that starts on the selected item (its box on screen, plus 16 px on touch)
-// moves it on its own horizontal plane (a hung item along its wall; Shift+drag: up and down, §2.10); a long press on it
-// (touch) starts Hang on wall; anything else orbits (OrbitControls: one finger turns, two pan and pinch) or, in first
-// person, looks. A tap (no drag, one finger) hangs, picks, measures, selects, or in first person walks there.
-// Keys: R / Shift+R rotate 15°, Delete/Backspace remove, Esc leaves a mode or deselects, M measure, F frame, 1 2 3 views,
-// [ ] scan viewpoints, WASD/arrows walk (Shift faster), PageUp / PageDown raise and lower 1 cm (Shift 10 cm), H hang on
-// wall, hold Shift to snap the rotate grip (15°).
-import { VIEWS } from './engine.js'
+// moves it on its own horizontal plane (Shift+drag: up and down, §2.10); two fingers pinch-zoom and pan; the middle
+// button (or any drag on the photo once zoomed in) pans. A tap (no drag, one finger) selects, deselects or sets a ruler point.
+// Wheel / trackpad pinch: zoom at the pointer, 1× to 4×.
+// Keys: R / Shift+R rotate 15°, Delete/Backspace remove, Esc deselects or leaves the ruler, PageUp / PageDown raise and
+// lower 1 cm (Shift 10 cm), F or 0 fit the photo, + / − zoom.
 
 const TAP_PX = { mouse: 4, pen: 6, touch: 10 }
-const LONG_MS = 550
-const WALK = ['w', 'a', 's', 'd']
 
 export function installInput(engine) {
   const canvas = engine.canvas
   const enabled = { pointer: true, keyboard: true }
   let keyFilter = null
-  const keys = new Set()
-  const ui = new Set() // walk keys held from the UI
-  const keyFns = new Set()
   const off = []
   const on = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); off.push(() => target.removeEventListener(type, fn, opts)) }
 
-  // Walking: recomputed from the held keys whenever they change; the engine applies it every frame.
-  const has = (k) => keys.has(k) || ui.has(k)
-  const held = () => new Set(WALK.filter((k) => has(k) || has({ w: 'arrowup', a: 'arrowleft', s: 'arrowdown', d: 'arrowright' }[k])))
-  const syncMove = () => {
-    const forward = (has('w') || has('arrowup') ? 1 : 0) - (has('s') || has('arrowdown') ? 1 : 0)
-    const side = (has('d') || has('arrowright') ? 1 : 0) - (has('a') || has('arrowleft') ? 1 : 0)
-    engine.setMove({ forward, side, fast: keys.has('shift') })
-    const h = held()
-    for (const fn of keyFns) fn(h)
-  }
-
-  // --- pointer (capture phase on window, so it runs before OrbitControls sees the event on the canvas)
-  const ptrs = new Set()
-  let g = null // the gesture: { id, kind: 'item'|'look'|'other', x0, y0, lx, ly, t0, type, moved, multi }
-  const busy = () => engine.getPick().mode || engine.getMeasureState().active || engine.getHang()
+  // --- pointer (capture phase on window: the overlays above the canvas handle their own pointers)
+  const ptrs = new Map() // id -> { x, y }
+  let g = null // the gesture: { id, kind: 'item'|'pan'|'other'|'pinch', x0, y0, lx, ly, t0, type, moved, multi }
+  let pinch = null // { d0, z0, mx, my }
+  const mid = () => { const p = [...ptrs.values()]; return { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2, d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) } }
   on(window, 'pointerdown', (e) => {
-    if (!enabled.pointer || e.target !== canvas) return
-    if (e.pointerType === 'mouse' && e.button !== 0) return // right button: OrbitControls pans
-    ptrs.add(e.pointerId)
-    if (ptrs.size > 1) { if (g) g.multi = true; return }
+    if (!enabled.pointer || e.target !== canvas || !engine.getSceneName()) return
+    if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 1) return
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (ptrs.size === 2) {
+      if (g?.kind === 'item') engine.endItemDrag()
+      if (g) g.multi = true
+      const m = mid()
+      pinch = { d0: Math.max(1, m.d), z0: engine.getView().zoom, mx: m.x, my: m.y }
+      if (g) g.kind = 'pinch'
+      return
+    }
+    if (ptrs.size > 2) return
+    e.preventDefault()
     g = { id: e.pointerId, kind: 'other', x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, t0: performance.now(), type: e.pointerType, moved: false, multi: false }
     const sel = engine.getSelected()
     const pad = e.pointerType === 'mouse' ? 6 : 16
-    if (sel && !busy() && engine.hitItemAt(sel, e.clientX, e.clientY, pad) && engine.beginItemDrag(sel, e.clientX, e.clientY, { lift: e.shiftKey })) g.kind = 'item'
-    else if (engine.getView() !== 'orbit') g.kind = 'look'
-    if (g.kind !== 'other') canvas.setPointerCapture?.(e.pointerId)
-    // Long press on the selected piece (touch): Hang on wall, then tap a wall.
-    if (g.kind === 'item' && e.pointerType !== 'mouse') {
-      const mine = g
-      g.long = setTimeout(() => {
-        if (g !== mine || mine.moved || mine.multi) return
-        engine.endItemDrag()
-        mine.kind = 'long'
-        engine.startHang(sel)
-      }, LONG_MS)
-    }
+    if (e.button === 1) g.kind = 'pan'
+    else if (sel && !engine.getRuler().active && engine.hitItemAt(sel, e.clientX, e.clientY, pad) && engine.beginItemDrag(sel, e.clientX, e.clientY, { lift: e.shiftKey })) g.kind = 'item'
+    canvas.setPointerCapture?.(e.pointerId)
   }, true)
   on(window, 'pointermove', (e) => {
+    if (!ptrs.has(e.pointerId)) return
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pinch && ptrs.size >= 2) {
+      const m = mid()
+      engine.zoomAt(m.x, m.y, pinch.z0 * (m.d / pinch.d0))
+      engine.panBy(m.x - pinch.mx, m.y - pinch.my)
+      pinch.mx = m.x
+      pinch.my = m.y
+      return
+    }
     if (!g || e.pointerId !== g.id) return
     if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > (TAP_PX[g.type] ?? 6)) g.moved = true
     if (g.kind === 'item') engine.dragTo(e.clientX, e.clientY)
-    else if (g.kind === 'look' && !g.multi && g.moved) engine.lookBy(e.clientX - g.lx, e.clientY - g.ly)
+    else if (g.moved && !g.multi && (g.kind === 'pan' || (g.kind === 'other' && engine.getView().zoom > 1.001))) {
+      g.kind = 'pan'
+      engine.panBy(e.clientX - g.lx, e.clientY - g.ly)
+    }
     g.lx = e.clientX
     g.ly = e.clientY
   }, true)
   const up = (e) => {
-    if (!ptrs.delete(e.pointerId) || !g || ptrs.size) return
+    if (!ptrs.delete(e.pointerId)) return
+    if (ptrs.size < 2) pinch = null
+    if (!g || ptrs.size) return
     const d = g
     g = null
-    clearTimeout(d.long)
     if (d.kind === 'item') engine.endItemDrag()
-    if (d.kind === 'long') return
     const quick = d.type === 'mouse' || performance.now() - d.t0 < 700
-    if (e.type !== 'pointerup' || d.moved || d.multi || !quick) return
+    if (e.type !== 'pointerup' || d.moved || d.multi || !quick || d.kind === 'pan') return
     try { engine.tap(e.clientX, e.clientY) } catch (err) { engine.reportError('Tap failed', err) }
   }
   on(window, 'pointerup', up, true)
   on(window, 'pointercancel', up, true)
+  on(canvas, 'auxclick', (e) => e.preventDefault())
+
+  // --- wheel: zoom at the pointer (a trackpad pinch arrives as a wheel with ctrlKey)
+  on(canvas, 'wheel', (e) => {
+    if (!enabled.pointer || !engine.getSceneName()) return
+    e.preventDefault()
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1
+    const dy = e.deltaY * k
+    const factor = Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015))
+    engine.zoomBy(factor, e.clientX, e.clientY)
+  }, { passive: false })
 
   // --- keyboard
   const typing = (e) => {
@@ -101,13 +106,9 @@ export function installInput(engine) {
       return
     }
     if (e.metaKey || e.ctrlKey || e.altKey) return
-    keys.add(k)
-    syncMove()
     const selected = engine.getSelected()
     if (k === 'escape') {
-      if (engine.getHang()) engine.cancelHang()
-      else if (engine.getPick().mode || engine.getPick().points) engine.cancelPickMode()
-      else if (engine.getMeasureState().active) { engine.clearMeasure(); engine.setMeasureActive(false) }
+      if (engine.getRuler().active) engine.setRulerActive(false)
       else engine.select(null)
     } else if (k === 'delete' || k === 'backspace') {
       if (selected) { e.preventDefault(); engine.removeItemInternal(selected) }
@@ -115,36 +116,20 @@ export function installInput(engine) {
       engine.rotateSelected(e.shiftKey ? -15 : 15)
     } else if (k === 'pageup' || k === 'pagedown') {
       if (selected) { e.preventDefault(); engine.nudgeElevation(selected, (k === 'pageup' ? 1 : -1) * (e.shiftKey ? 0.1 : 0.01)) }
-    } else if (k === 'h') {
-      if (selected) { if (engine.getHang()) engine.cancelHang(); else engine.startHang(selected) }
-    } else if (k === 'm') {
-      const active = !engine.getMeasureState().active
-      if (!active) engine.clearMeasure()
-      engine.setMeasureActive(active)
-    } else if (k === 'f') {
-      if (engine.getView() !== 'orbit') engine.setViewInternal('orbit')
-      engine.frameRoom()
-    } else if (k === '1' || k === '2' || k === '3') {
-      engine.setViewInternal(VIEWS[Number(k) - 1])
-    } else if (k === '[' || k === ']') {
-      engine.stepViewpoint(k === ']' ? 1 : -1, { glide: engine.getView() !== 'orbit' })
+    } else if (k === 'f' || k === '0') {
+      engine.fitView()
+    } else if (k === '+' || k === '=') {
+      engine.zoomBy(1.25)
+    } else if (k === '-' || k === '_') {
+      engine.zoomBy(0.8)
     }
-    if (engine.getView() !== 'orbit' && k.startsWith('arrow')) e.preventDefault()
   })
-  on(window, 'keyup', (e) => {
-    const k = e.key.toLowerCase()
-    keys.delete(k)
-    syncMove()
-    if (k === 'shift') engine.setSnap(false)
-  })
-  on(window, 'blur', () => { keys.clear(); ui.clear(); syncMove(); engine.setSnap(false) })
+  on(window, 'keyup', (e) => { if (e.key.toLowerCase() === 'shift') engine.setSnap(false) })
+  on(window, 'blur', () => engine.setSnap(false))
 
   return {
     enabled,
     setKeyFilter: (fn) => { keyFilter = typeof fn === 'function' ? fn : null },
-    hold: (k, down) => { if (!WALK.includes(k)) return; if (down) ui.add(k); else ui.delete(k); syncMove() },
-    held,
-    onKeys: (fn) => { keyFns.add(fn); return () => keyFns.delete(fn) },
-    dispose: () => { for (const f of off.splice(0)) f(); keys.clear(); ui.clear(); syncMove() },
+    dispose: () => { for (const f of off.splice(0)) f() },
   }
 }

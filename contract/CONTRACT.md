@@ -40,7 +40,7 @@ Both `model.glb` and `splat.ply` are stored **already in the item frame**: no ru
 
 A static web app in `planner/` (three.js `0.180.0` via importmap, no build step) plus `planner/serve.py` (Python stdlib only). Sections 2.1–2.10 keep nook's numbering, which the code's comments cite. What's new for scenes is in §4.
 
-> **State at the foundation commit:** `planner/` is nook's planner with only the renames applied. It still contains rooms, splats, Spark, the shell, hanging, retrain and `--scan-api`. The app track replaces them with §4 and deletes what §4.5 removes.
+> **State since the integration commit:** `planner/` implements §4 (scenes, the locked photo camera, occlusion, Adjust floor, keep-room renders, Compare); rooms, splats, Spark, the shell, hanging, retrain and `--scan-api` are gone.
 
 ### 2.1 Server
 
@@ -159,7 +159,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 
 **One writer:** every library write takes `<library>/.lock` (`flock`); PATCH, DELETE and restore wait up to 60 s for a running job, then answer `503`.
 
-**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `thumb.jpg`, `source.<ext>`) and `library.json`. `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
+**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `thumb.jpg`, `source.<ext>`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
 
 Acceptance (`npm run eval:library`): L8 mock adds of a `.glb`, an OBJ zip, a photo and a URL end `done` and the library validates; L9 delete then restore round-trips byte for byte; L10 bad zips are refused with nothing written; L11 `PATCH dims_cm` refits at $0.
 
@@ -263,7 +263,7 @@ scenes/<name>/source.<ext>   the upload as given (jpg, png, heic or webp, from i
 scenes/<name>/photo.jpg      normalized: EXIF orientation applied, sRGB JPEG q92, long side ≤ 2048 px, no metadata
 scenes/<name>/calib.json     the automatic calibration (calib.schema.json), written by midstudy-calib
 scenes/<name>/depth.png      optional: 16-bit grayscale PNG, mm along the view axis (§4.1's d), long side ≤ 1024 px,
-                             same aspect as photo.jpg; 0 = no occluder (floor within 4 cm of the plane, sky, unknown)
+                             same aspect as photo.jpg; 0 = no occluder (the floor, below the floor, sky, unknown: §4.3 Fit)
 scenes/<name>/scene.json     scene.schema.json: version, title, created, saved, camera (in use), camera_source, look, upload
 scenes/<name>/thumb.jpg      thumbnail (made by the planner)
 scenes/.trash/<name>-<UTC stamp>/          a deleted scene; its layouts move inside it as layouts/
@@ -324,7 +324,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **EXIF FOV:** read from `source.<ext>` (EXIF `FocalLengthIn35mmFilm`, plus make and model). The 35 mm equivalent refers to the diagonal of the sensor's native **4:3** frame (the full-frame diagonal, 43.27 mm, so a 34.61 × 25.96 mm frame). The photo is the largest crop of that frame with the photo's aspect: wider than 4:3 (16:9) keeps the long side, squarer keeps the short side. The vertical FOV is `2 · atan(v_mm / (2 · f35))` with `v_mm` the crop's extent along the photo's vertical axis. For `fixtures/photos/upper-lounge-camera.jpeg` (14 mm, 16:9 landscape) that is 102.1° horizontal and 69.6° vertical. When MoGe runs, its FOV wins and the EXIF FOV is recorded beside it; a difference over 8° adds `fov_disagreement`.
 
-**Fit:** MoGe-2 gives a metric point map, normals and intrinsics. Fit the floor with RANSAC over points whose normal points up relative to the camera and that lie below it; prefer the largest such plane in the lower part of the image (beware reflective floors and floors seen through glass: the real lounge photo has both). The plane gives `height_m`, `pitch_deg`, `roll_deg` (in §4.1's convention: the camera is re-expressed so the floor normal is world +Y and yaw is 0); the intrinsics give `fov_y_deg`. `depth.png` holds MoGe's depth along the view axis with floor pixels (within 4 cm of the plane) set to 0. `inlier_ratio` is the share of image pixels on the plane.
+**Fit:** MoGe-2 gives a metric point map, normals and intrinsics. Fit the floor with RANSAC over points whose normal points up relative to the camera and that lie below it; prefer the largest such plane in the lower part of the image (beware reflective floors and floors seen through glass: the real lounge photo has both). The plane gives `height_m`, `pitch_deg`, `roll_deg` (in §4.1's convention: the camera is re-expressed so the floor normal is world +Y and yaw is 0); the intrinsics give `fov_y_deg`. `depth.png` holds MoGe's depth along the view axis with floor pixels set to 0: at least those within 4 cm of the plane (the tool uses max(4 cm, 1.2 % of the depth), as MoGe is noisier far away), plus every pixel below the plane (reflections in a shiny floor, a lower floor seen through glass), which could never hide anything standing on the floor. With no floor found, `depth.png` is MoGe's depth unmasked (`floor_masked: false`). `inlier_ratio` is the share of image pixels on the plane.
 
 **Fallbacks:** no floor → `floor.found: false`, MoGe's FOV, height 1.40, pitch −10, roll 0. MoGe unavailable or failed → `source: "exif"` (FOV from EXIF) or `"default"` (FOV 55), height 1.40, pitch −10, `depth: null`.
 
@@ -379,7 +379,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 - **Floor check:** when a scene first opens, and whenever **Adjust floor** is on, a 50 cm grid is drawn on y = 0 out to 8 m, fading with distance. Adjust floor has sliders for camera height (cm), field of view (°) and roll (°); dragging the horizon line sets the pitch. An optional two-tap ruler shows a floor distance in cm. **Looks right** saves the scene (`camera_source: "manual"` if anything changed). **Reset** goes back to `calib.json`'s camera (`auto`). A scene whose `floor.found` is false or whose `calib.source` isn't `moge-2` (or `truth`) opens in Adjust floor with a one-line note ("Check the floor").
 - **Items:** as §2.3 and §2.10. A new item lands where the ray through the view center hits the floor (or, if that misses, the ray through the center of the lower third), when that point is 1–6 m from the camera; else 2.5 m straight ahead. Missing library items show a placeholder box.
 - **Lighting:** three.js `RoomEnvironment` plus a key light; Look (exposure, warmth) is saved in `scene.json`.
-- **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth.
+- **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth. `depth.png` is metric in the calibration's frame, so when the camera's `height_m` differs from `calib.json`'s (Adjust floor), the depth is scaled by `height_m / calib height_m` first; without a measured floor (`floor.found` false, or a fallback source) it is used as it is.
 - **Layouts:** per scene (§2.7), with unsaved-change warnings.
 - **Render and Compare** (§4.7): in the Renders panel, pick two renders for a full-screen compare: side by side on desktop, a draggable split slider on both, swipe on the phone.
 - **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat drawing, LoD, True colour, Spark.
@@ -456,7 +456,7 @@ Files in `fixtures/scenes/<id>/`:
 - `npm run eval:library` (`evals/library_api.sh`): the library API, URL fetch rules and spend cap (§2.8–2.9), mocked, $0. Picks free ports unless `MIDSTUDY_EVAL_LIBRARY_PORT` is set.
 - `evals/validate_library.py <library.json>` checks any library against §1 and the schema; `evals/py` runs these helpers with pinned deps.
 
-The evals track adds PLAN.md §6.2 (`eval:scenes-api`, `eval:calib`, `eval:planner`, `eval:occlusion`, `eval:floor`, `eval:render`, `eval:phone`, `eval:all`).
+The evals track added PLAN.md §6.2 (`eval:scenes-api`, `eval:calib`, `eval:planner`, `eval:occlusion`, `eval:floor`, `eval:render`, `eval:phone`, `eval:all`; see `evals/README.md`). `npm run eval:real` (`evals/real_path.mjs`, not in `eval:all`) is the real path on this Mac: the default `--calib` (real MoGe-2) on the photos in `fixtures/photos/`, the real `midstudy-add` (GLB), fal mocked.
 
 ### 5.3 Rules every eval and agent follows
 

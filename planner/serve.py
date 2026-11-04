@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """midstudy planner server (stdlib only).
 
-Serves the repo root as static files and a tiny JSON API for the room config, the rooms (every scan in the room
-dir, each with its own config, thumbnail and layouts), layouts, "Render this view" (a paid fal image edit of a
-planner screenshot) and the furniture library (adds through `midstudy-add`, edits, trash and restore). Every request
-needs a loopback Host (or one given with --allowed-host), every mutation needs `X-Midstudy: 1` and a same-origin (or
-absent) Origin, and paid calls stay under a daily spend cap.
-See contract/CONTRACT.md §2.1, §2.6, §2.7, §2.8 and §2.9.
+Serves the planner and a JSON API: scenes (one uploaded room photo each, calibrated by `midstudy-calib` in a job
+queue), each scene's layouts, "Render" (a paid fal image edit of the photo with the furniture, with the scene photo as
+a reference and an optional keep-room composite) and the furniture library (adds through `midstudy-add`, edits, trash
+and restore). Every request needs a loopback Host (or one given with --allowed-host), every mutation needs
+`X-Midstudy: 1` and a same-origin (or absent) Origin, and paid calls stay under a daily spend cap.
+See contract/CONTRACT.md §2 (carried from nook) and §4.4 / §4.7 (scenes, render).
 
-    python3 planner/serve.py [--port 8765] [--room-dir room] [--room-file <room-dir>/room.json] [--layouts-dir layouts]
+    python3 planner/serve.py [--port 8765] [--host 127.0.0.1] [--scenes-dir scenes] [--layouts-dir layouts]
                              [--renders-dir renders] [--library-dir library] [--costs-file <library-dir>/costs.csv]
-                             [--midstudy-add "uv run --project pipeline midstudy-add"] [--daily-spend-usd 2] [--scan-api URL]
+                             [--calib "uv run --project calib midstudy-calib"]
+                             [--midstudy-add "uv run --project pipeline midstudy-add"] [--daily-spend-usd 2]
                              [--allowed-host NAME ...]
 
-Relative paths are resolved against the repo root. FAL_KEY comes from the environment, else from
-<repo>/.env (unless MIDSTUDY_NO_DOTENV=1). With MIDSTUDY_FAL_MOCK set, /api/render makes no network calls (and midstudy-add
-replays recorded responses). MIDSTUDY_FETCH_ALLOW=<host>:<port> (evals only) lets the URL fetcher reach that one address.
+Relative paths are resolved against the repo root. FAL_KEY comes from the environment, else from <repo>/.env (unless
+MIDSTUDY_NO_DOTENV=1). With MIDSTUDY_FAL_MOCK set, /api/render makes no network calls (and midstudy-add replays
+recorded responses). MIDSTUDY_FETCH_ALLOW=<host>:<port> (evals only) lets the URL fetcher reach that one address.
+--calib and --midstudy-add are split like a shell would (shlex) once at startup and always run as an argument list,
+never through a shell; nothing a client sends ever becomes part of a command (only paths the server made).
 """
 import argparse
 import contextlib
@@ -27,6 +30,7 @@ import csv
 import io
 import ipaddress
 import json
+import math
 import os
 import posixpath
 import queue
@@ -36,6 +40,7 @@ import shlex
 import socket
 import ssl
 import stat
+import struct
 import subprocess
 import sys
 import shutil
@@ -55,11 +60,8 @@ from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 
 REPO = Path(__file__).resolve().parent.parent
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-PLACEHOLDER_ROOM = {"version": 1, "placeholder": {"w": 3.5, "d": 4, "h": 2.7}}
 MAX_BODY = 32 * 1024 * 1024
-SCAN_EXTS = (".spz", ".ply")  # a room's scan; .spz wins when both exist (contract §2.7)
 MAX_THUMB = 2 * 1024 * 1024
-rooms_lock = threading.RLock()  # room-dir writes (adoption, save, thumbnail, delete) one at a time
 
 # --- render this view (contract §2.6) -------------------------------------------------------
 RENDER_MODELS = {
@@ -71,6 +73,14 @@ DEFAULT_RENDER_PROMPT = (
     "Turn this 3D planning render into a photorealistic interior photograph. Keep the exact camera angle, "
     "room geometry, and every piece of furniture with its position, size, shape and color. Realistic materials, "
     "soft natural daylight, subtle contact shadows. Do not add, remove or move anything."
+)
+# nano-banana with the scene photo as image 2 (contract §4.7)
+REFERENCE_RENDER_PROMPT = (
+    "Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. "
+    "Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, "
+    "reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in "
+    "it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or "
+    "move anything."
 )
 RENDER_NAME = re.compile(r"^render-\d{8}-\d{6}(-\d+)?$")
 COSTS_HEADER = ["date", "id", "engine", "cost_usd", "mock", "input"]
@@ -196,7 +206,7 @@ def download(url: str) -> bytes:
         return res.read()
 
 
-# --- rooms (contract §2.7) ----------------------------------------------------------------------
+# --- small helpers ----------------------------------------------------------------------------------------
 def iso_utc(t: float | None = None) -> str:
     dt = datetime.fromtimestamp(t, timezone.utc) if t is not None else datetime.now(timezone.utc)
     return dt.isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -209,34 +219,6 @@ def read_json_file(path: Path):
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
 
-
-def splat_stem(config) -> str | None:
-    """The basename stem of a config's `splat` (room/scan-1.spz -> scan-1): how room.json and layouts name a room."""
-    splat = config.get("splat") if isinstance(config, dict) else None
-    if not isinstance(splat, str) or not splat:
-        return None
-    return PurePosixPath(urlsplit(splat).path).stem or None
-
-
-def splat_url(scan: Path, room_dir: Path) -> str:
-    """Same rule as the trainer (scan/src/nook_scan/room.py): relative to the repo root, or to room-dir's parent
-    when room-dir is outside the repo."""
-    scan = scan.resolve()
-    base = REPO if REPO in scan.parents else room_dir.resolve().parent
-    return scan.relative_to(base).as_posix()
-
-
-def list_scans(room_dir: Path) -> dict[str, Path]:
-    """{name: scan file} for every slug-named .spz/.ply in room-dir (dotfiles and .trash ignored)."""
-    scans: dict[str, Path] = {}
-    if not room_dir.is_dir():
-        return scans
-    for p in room_dir.iterdir():
-        if p.name.startswith(".") or p.suffix not in SCAN_EXTS or not SLUG.match(p.stem) or not p.is_file():
-            continue
-        if p.stem not in scans or p.suffix == ".spz":
-            scans[p.stem] = p
-    return scans
 
 
 # --- library API (contract §2.8) and money (§2.9) ------------------------------------------------------------
@@ -823,25 +805,372 @@ def atomic_write_json(path: Path, data) -> None:
         raise
 
 
+
+# --- scenes (contract §4.2, §4.4) -----------------------------------------------------------------------------
+MAX_SCENE_UPLOAD = 25 * 1024 * 1024
+CALIB_TIMEOUT = 600   # s, one calibration job (§4.4)
+ALIGN_TIMEOUT = 180   # s, one keep-room align (§4.7)
+DEFAULT_CALIB = "uv run --project calib midstudy-calib"
+DEFAULT_CAMERA = {"fov_y_deg": 55.0, "height_m": 1.40, "pitch_deg": -10.0, "roll_deg": 0.0}
+CAMERA_RANGE = {"fov_y_deg": (20.0, 110.0), "height_m": (0.2, 3.0), "pitch_deg": (-80.0, 30.0), "roll_deg": (-20.0, 20.0)}
+LOOK_RANGE = {"exposure": (0.25, 4.0), "warmth": (-1.0, 1.0)}
+SCENE_ASSET = re.compile(r"^([a-z0-9][a-z0-9-]{0,63})/(photo\.jpg|depth\.png|thumb\.jpg)$")
+UPLOAD_EXT = {"jpeg": "jpg", "png": "png", "heic": "heic", "webp": "webp"}
+LAYOUT_KEYS = ("version", "name", "scene_name", "library", "updated", "items", "notes")
+LAYOUT_ITEM_KEYS = ("uid", "id", "render", "position", "rotation_y_deg", "mounted", "dims_cm")
+NOT_IMAGE = "that file isn't a JPEG, PNG, HEIC or WebP image"
+
+
+def is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def clamp_camera(cam: dict) -> dict:
+    """The camera block with every value clamped to its range (contract §4.1), as floats."""
+    out = {}
+    for k, (lo, hi) in CAMERA_RANGE.items():
+        v = cam.get(k, DEFAULT_CAMERA[k]) if isinstance(cam, dict) else DEFAULT_CAMERA[k]
+        out[k] = round(min(hi, max(lo, float(v))), 6) if is_num(v) else DEFAULT_CAMERA[k]
+    return out
+
+
+def png_size(data: bytes):
+    """(width, height) from a PNG's IHDR, or None."""
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        return None
+    return struct.unpack(">II", data[16:24])
+
+
+def file_jpeg_size(path: Path):
+    """(w, h) of a JPEG on disk from its first 512 KB (photo.jpg carries no metadata, so the frame header is early)."""
+    try:
+        with open(path, "rb") as f:
+            return jpeg_size(f.read(512 * 1024))
+    except OSError:
+        return None
+
+
+def decode_data_uri(value, kinds: tuple[str, ...]) -> bytes | None:
+    """The bytes of a base64 data URI whose type is one of `kinds` (e.g. ("jpeg",) or ("png",)), else None."""
+    if not isinstance(value, str):
+        return None
+    pattern = "|".join(re.escape(k) for k in kinds).replace("jpeg", "jpe?g")
+    m = re.fullmatch(rf"data:image/(?:{pattern});base64,([A-Za-z0-9+/=\s]+)", value)
+    if not m:
+        return None
+    try:
+        return base64.b64decode(re.sub(r"\s", "", m.group(1)), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def last_json_line(text: str):
+    """The last non-empty stdout line parsed as JSON, or None (contract §4.3: the tools' output contract)."""
+    for line in reversed([ln.strip() for ln in (text or "").splitlines() if ln.strip()]):
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def tool_error(proc, out, tool: str) -> str:
+    """The one-sentence error of a failed midstudy-calib run: its JSON `error`, else its last `midstudy-calib: …`
+    stderr line, else the exit code."""
+    if isinstance(out, dict) and isinstance(out.get("error"), str) and out["error"].strip():
+        return out["error"].strip()
+    err = [ln.strip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
+    mine = [ln.removeprefix("midstudy-calib:").strip() for ln in err if ln.startswith("midstudy-calib:")]
+    return (mine or err or [f"{tool} exited with code {proc.returncode}"])[-1]
+
+
+class SceneService:
+    """Scenes on disk (contract §4.2) and their calibration jobs: one queue, one job at a time, in memory, separate
+    from the library's queue. Scene folder writes (scene.json, create, delete) happen under one lock."""
+
+    def __init__(self, scenes_dir: Path, layouts_dir: Path, calib: list[str]):
+        self.dir = scenes_dir
+        self.layouts_dir = layouts_dir
+        self.calib = calib
+        self.lock = threading.RLock()
+        self.jobs: dict[str, dict] = {}
+        self.order: list[str] = []
+        self.private: dict[str, dict] = {}   # job id -> {cmd, cleanup}
+        self.last: dict[str, str] = {}       # scene -> its newest job id
+        self.queue: queue.Queue = queue.Queue()
+        threading.Thread(target=self.worker, name="midstudy-calib-jobs", daemon=True).start()
+
+    # --- files ------------------------------------------------------------------------------------------------
+    def path(self, name: str) -> Path:
+        return self.dir / name
+
+    def exists(self, name: str) -> bool:
+        return isinstance(name, str) and bool(SLUG.match(name)) and (self.dir / name / "scene.json").is_file()
+
+    def read(self, name: str) -> dict | None:
+        data = read_json_file(self.dir / name / "scene.json") if SLUG.match(name or "") else None
+        return data if isinstance(data, dict) else None
+
+    def write(self, name: str, data: dict) -> None:
+        atomic_write_json(self.dir / name / "scene.json", data)
+
+    def names(self) -> list[str]:
+        if not self.dir.is_dir():
+            return []
+        return [p.name for p in self.dir.iterdir() if SLUG.match(p.name) and (p / "scene.json").is_file()]
+
+    def calib_json(self, name: str) -> dict | None:
+        data = read_json_file(self.dir / name / "calib.json")
+        return data if isinstance(data, dict) else None
+
+    def layout_count(self, name: str) -> int:
+        d = self.layouts_dir / name
+        return sum(1 for p in d.glob("*.json") if SLUG.match(p.stem) and p.is_file()) if d.is_dir() else 0
+
+    # --- the scene object (§4.4) -----------------------------------------------------------------------------
+    def status(self, name: str, has_calib: bool) -> tuple[str, str | None]:
+        with self.lock:
+            job = self.jobs.get(self.last.get(name, ""))
+            job = dict(job) if job else None
+        if job and job["status"] in ("queued", "running"):
+            return ("pending" if job["status"] == "queued" else "running"), None
+        if job and job["status"] == "failed":
+            return "failed", job.get("message")
+        if has_calib:
+            return "done", None
+        return "failed", "the calibration didn't finish (the server restarted): calibrate it again"
+
+    def scene_object(self, name: str, data: dict | None = None) -> dict | None:
+        data = self.read(name) if data is None else data
+        if data is None:
+            return None
+        d = self.dir / name
+        url = lambda f: f"/scenes/{name}/{f}?v={int((d / f).stat().st_mtime)}" if (d / f).is_file() else None
+        size = file_jpeg_size(d / "photo.jpg") if (d / "photo.jpg").is_file() else None
+        calib = self.calib_json(name)
+        floor = calib.get("floor") if isinstance(calib, dict) else None
+        found = floor.get("found") if isinstance(floor, dict) else None
+        status, error = self.status(name, calib is not None)
+        title = data.get("title")
+        return {
+            "name": name, "title": title if isinstance(title, str) and title.strip() else None,
+            "created": data.get("created"), "saved": data.get("saved"),
+            "photo_url": url("photo.jpg"), "thumb_url": url("thumb.jpg"), "depth_url": url("depth.png"),
+            "w": size[0] if size else None, "h": size[1] if size else None,
+            "camera_source": data.get("camera_source") or "default",
+            "floor_found": found if isinstance(found, bool) else None,
+            "layouts": self.layout_count(name), "calib_status": status, "calib_error": error,
+        }
+
+    def full(self, name: str) -> dict | None:
+        """GET /api/scenes/<name>: scene.json, the scene object's fields and `calib` (calib.json or null)."""
+        data = self.read(name)
+        if data is None:
+            return None
+        return {**data, **self.scene_object(name, data), "camera": clamp_camera(data.get("camera") or {}),
+                "calib": self.calib_json(name)}
+
+    def all(self) -> list[dict]:
+        out = [s for s in (self.scene_object(n) for n in self.names()) if s]
+        out.sort(key=lambda s: (str(s.get("created") or ""), s["name"]), reverse=True)
+        return out
+
+    # --- create, update, delete -------------------------------------------------------------------------------
+    def create(self, upload: Path, tmp: Path, filename: str, ext: str, size: int, title: str | None):
+        """Make scenes/<name>/scene.json and queue `<calib> run <upload> --out scenes/<name>`. The job owns tmp."""
+        now = datetime.now(timezone.utc)
+        base = f"scene-{now:%Y%m%d-%H%M%S}"
+        with self.lock:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            name, n = base, 1
+            while (self.dir / name).exists():
+                n += 1
+                name = f"{base}-{n}"
+            (self.dir / name).mkdir()
+            self.write(name, {"version": 1, "title": title, "created": iso_utc(), "saved": None,
+                              "camera": dict(DEFAULT_CAMERA), "camera_source": "default",
+                              "upload": {"filename": filename, "ext": ext, "bytes": size}})
+            job = self.queue_job(name, [*self.calib, "run", str(upload), "--out", str((self.dir / name).resolve())], tmp)
+        return name, job
+
+    def queue_job(self, name: str, cmd: list[str], cleanup: Path | None) -> dict:
+        now = datetime.now(timezone.utc)
+        job_id = f"c-{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+        job = {"id": job_id, "kind": "calibrate", "scene": name, "status": "queued", "created": iso_utc(),
+               "started": None, "finished": None, "message": "waiting for the calibration queue", "calib": None}
+        with self.lock:
+            self.jobs[job_id] = job
+            self.order.append(job_id)
+            self.private[job_id] = {"cmd": cmd, "cleanup": cleanup}
+            self.last[name] = job_id
+            snapshot = dict(job)
+        self.queue.put(job_id)
+        return snapshot
+
+    def busy(self, name: str) -> bool:
+        with self.lock:
+            job = self.jobs.get(self.last.get(name, ""))
+            return bool(job) and job["status"] in ("queued", "running")
+
+    def calibrate(self, name: str):
+        """POST …/calibrate: `fit` on photo.jpg, or `run` on a copy of source.<ext> when photo.jpg is missing.
+        Returns (job, None) or (None, (status, message))."""
+        with self.lock:
+            if not self.exists(name):
+                return None, (HTTPStatus.NOT_FOUND, f"no scene named {name!r}: GET /api/scenes lists them")
+            if self.busy(name):
+                return None, (HTTPStatus.CONFLICT, "this scene is already calibrating: wait for it to finish")
+            d = self.dir / name
+            if (d / "photo.jpg").is_file():
+                return self.queue_job(name, [*self.calib, "fit", str(d.resolve())], None), None
+            sources = sorted(d.glob("source.*"))
+            if not sources:
+                return None, (HTTPStatus.CONFLICT, "this scene has no photo to calibrate: make a new scene from the photo")
+            tmp = Path(tempfile.mkdtemp(prefix="midstudy-scene-"))
+            copy = tmp / f"upload{sources[0].suffix.lower()}"
+            shutil.copyfile(sources[0], copy)
+            return self.queue_job(name, [*self.calib, "run", str(copy), "--out", str(d.resolve())], tmp), None
+
+    def update(self, name: str, patch: dict) -> dict:
+        """PUT /api/scenes/<name> (validated by the handler): merge, clamp, stamp `saved` unless only the title came."""
+        with self.lock:
+            data = self.read(name)
+            if data is None:
+                raise KeyError(name)
+            if "title" in patch:
+                data["title"] = patch["title"]
+            if "camera" in patch:
+                data["camera"] = clamp_camera({**clamp_camera(data.get("camera") or {}), **patch["camera"]})
+            if "camera_source" in patch:
+                data["camera_source"] = patch["camera_source"]
+            if "look" in patch:
+                look = dict(data.get("look") or {}) if isinstance(data.get("look"), dict) else {}
+                for k, (lo, hi) in LOOK_RANGE.items():
+                    if k in patch["look"]:
+                        look[k] = round(min(hi, max(lo, float(patch["look"][k]))), 6)
+                data["look"] = look
+            if set(patch) - {"title"}:
+                data["saved"] = iso_utc()
+            data.setdefault("version", 1)
+            self.write(name, data)
+        return data
+
+    def delete(self, name: str) -> str:
+        """Move scenes/<name>/ (and layouts/<name>/ inside it as layouts/) to scenes/.trash/<name>-<stamp>/. A queued
+        job for it is dropped, a running one's result is ignored."""
+        with self.lock:
+            if not self.exists(name):
+                raise KeyError(name)
+            for job_id in self.order:
+                job = self.jobs[job_id]
+                if job["scene"] == name and job["status"] in ("queued", "running"):
+                    job["dropped"] = True
+                    if job["status"] == "queued":
+                        job.update(status="failed", finished=iso_utc(), message="the scene was deleted")
+            base = f"{name}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
+            trash, n = self.dir / ".trash" / base, 1
+            while trash.exists():
+                n += 1
+                trash = self.dir / ".trash" / f"{base}-{n}"
+            trash.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(self.dir / name), str(trash))
+            layouts = self.layouts_dir / name
+            if layouts.is_dir():
+                shutil.move(str(layouts), str(trash / "layouts"))
+        return f"{self.dir.name}/.trash/{trash.name}"
+
+    # --- jobs -------------------------------------------------------------------------------------------------
+    def list_jobs(self) -> list[dict]:
+        with self.lock:
+            return [{k: v for k, v in self.jobs[j].items() if k != "dropped"} for j in reversed(self.order)]
+
+    def get_job(self, job_id: str) -> dict | None:
+        with self.lock:
+            job = self.jobs.get(job_id)
+            return {k: v for k, v in job.items() if k != "dropped"} if job else None
+
+    def worker(self) -> None:
+        while True:
+            job_id = self.queue.get()
+            try:
+                self.run(job_id)
+            except Exception as e:  # noqa: BLE001 - one bad job never stops the queue
+                with self.lock:
+                    self.jobs[job_id].update(status="failed", finished=iso_utc(),
+                                             message=f"the server failed to run the calibration ({type(e).__name__}: {e})")
+            finally:
+                with self.lock:
+                    extra = self.private.pop(job_id, {})
+                if extra.get("cleanup"):
+                    shutil.rmtree(extra["cleanup"], ignore_errors=True)
+
+    def run(self, job_id: str) -> None:
+        with self.lock:
+            job = self.jobs[job_id]
+            if job["status"] != "queued":  # dropped while it waited (the scene was deleted)
+                return
+            cmd = self.private[job_id]["cmd"]
+            name = job["scene"]
+            job.update(status="running", started=iso_utc(), message="calibrating the photo")
+        try:
+            proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=CALIB_TIMEOUT,
+                                  stdin=subprocess.DEVNULL)
+        except FileNotFoundError:
+            return self.finish(job_id, False, f"the calibration tool isn't installed here ({cmd[0]} not found): set --calib")
+        except subprocess.TimeoutExpired:
+            return self.finish(job_id, False, f"the calibration ran for more than {CALIB_TIMEOUT // 60} minutes and was stopped")
+        out = last_json_line(proc.stdout)
+        if proc.returncode != 0 or not isinstance(out, dict) or out.get("ok") is not True:
+            if proc.returncode == 0 and not isinstance(out, dict):
+                return self.finish(job_id, False, "midstudy-calib finished without its JSON result line")
+            return self.finish(job_id, False, tool_error(proc, out, "midstudy-calib"))
+        with self.lock:
+            dropped = job.get("dropped")
+            if dropped:
+                # The tool may have re-created the folder after the delete moved it: remove what it left.
+                left = self.dir / name
+                if left.is_dir() and not (left / "scene.json").exists():
+                    shutil.rmtree(left, ignore_errors=True)
+                job.update(status="failed", finished=iso_utc(), message="the scene was deleted")
+                return
+            calib = self.calib_json(name) or {k: v for k, v in out.items() if k != "ok"}
+            data = self.read(name)
+            if data is not None and data.get("camera_source") in ("auto", "default", None):
+                data["camera"] = clamp_camera(calib.get("camera") or {})
+                data["camera_source"] = "auto"
+                self.write(name, data)
+            src = calib.get("source")
+            floor = calib.get("floor") if isinstance(calib.get("floor"), dict) else {}
+            note = "" if src in ("moge-2", "truth") and floor.get("found") else " · check the floor"
+            job.update(status="done", finished=iso_utc(), calib=calib, message=f"calibrated ({src or 'unknown'}){note}")
+
+    def finish(self, job_id: str, ok: bool, message: str) -> None:
+        with self.lock:
+            job = self.jobs[job_id]
+            if job.get("dropped"):
+                left = self.dir / job["scene"]
+                if left.is_dir() and not (left / "scene.json").exists():
+                    shutil.rmtree(left, ignore_errors=True)
+                message = "the scene was deleted"
+            job.update(status="done" if ok else "failed", finished=iso_utc(), message=message)
+
+
+
 class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map, **MIME, "": "application/octet-stream"}
 
-    def __init__(self, *args, room_file: Path, layouts_dir: Path, renders_dir: Path, costs_file: Path,
-                 room_dir: Path | None = None, library_dir: Path | None = None, scan_api: str | None = None,
-                 library: "LibraryService | None" = None, allowed_hosts: tuple[str, ...] = (), **kwargs):
-        self.room_file = room_file
+    def __init__(self, *args, layouts_dir: Path, renders_dir: Path, costs_file: Path, scenes: "SceneService",
+                 library_dir: Path | None = None, library: "LibraryService | None" = None,
+                 allowed_hosts: tuple[str, ...] = (), **kwargs):
         self.hosts = {*LOOPBACK, *(host_name(h) for h in allowed_hosts)}  # §2.9 Host names
-        self.room_dir = room_dir or (REPO / "room")  # where the rooms live (served as /room/)
         self.layouts_dir = layouts_dir
         self.renders_dir = renders_dir
         self.costs_file = costs_file
+        self.scenes = scenes
         self.library_dir = library_dir or (REPO / "library")
         if library is None:  # main() always passes one; this is for embedding the handler elsewhere
             library = LibraryService(self.library_dir, costs_file, shlex.split(DEFAULT_MIDSTUDY_ADD), 2.0)
         self.library = library
-        # Writable data outside the code (on homeserver the code is in the read-only Nix store).
-        self.mounts = {"/room/": room_dir, "/library/": self.library_dir}
-        self.scan_api = scan_api
         self.body_done = False
         super().__init__(*args, directory=str(REPO), **kwargs)
 
@@ -856,80 +1185,34 @@ class Handler(SimpleHTTPRequestHandler):
             if not name or "/" in name or "\\" in name or name.startswith("."):
                 return str(self.renders_dir / ".missing")
             return str(self.renders_dir / name)
+        if p == "/scenes" or p.startswith("/scenes/"):
+            # photo.jpg, depth.png and thumb.jpg only: never source.*, calib.json, scene.json, .trash or a listing (§4.4).
+            m = SCENE_ASSET.match(p[len("/scenes/"):])
+            return str(self.scenes.dir / m.group(1) / m.group(2)) if m else str(self.scenes.dir / ".missing")
         if p.startswith("/library/"):
             # Item assets and library.json only: never raw/, .trash/, .lock, costs.csv or a listing (§2.8).
             rel = p[len("/library/"):]
             if rel != "library.json" and not LIBRARY_ASSET.match(rel):
                 return str(self.library_dir / ".missing")
-        for prefix, base in self.mounts.items():
-            if base is not None and p.startswith(prefix):
-                return str(base.joinpath(*[x for x in p[len(prefix):].split("/") if x]))
-        return str(REPO.joinpath(*[x for x in p.split("/") if x]))
+            return str(self.library_dir.joinpath(*[x for x in rel.split("/") if x]))
+        # The user's own photos are never served: fixtures/photos/ (location data in private/) and camera originals
+        # dropped at the repo root (git-ignored, CLAUDE.md).
+        parts = [x for x in p.split("/") if x]
+        if parts[:2] == ["fixtures", "photos"] or (len(parts) == 1 and PurePosixPath(parts[0]).suffix.lower() in IMAGE_EXTS):
+            return str(REPO / ".missing")
+        return str(REPO.joinpath(*parts))
 
     def list_directory(self, path):
         """No directory listings anywhere (they'd show library/_inbox, raw/ and the like): a folder is a 404."""
         self.send_error(HTTPStatus.NOT_FOUND, "File not found")
         return None
 
-    # --- /api/scan/* -> nook-scan jobs server (contract §2.1 --scan-api, §5) ---------------------
-    def is_scan(self) -> bool:
-        path = unquote(urlsplit(self.path).path)
-        return bool(self.scan_api) and (path == "/api/scan" or path.startswith("/api/scan/"))
-
-    def proxy_scan(self):
-        """Stream the request to the jobs server and its answer back (uploads are hundreds of MB)."""
-        target = urlsplit(self.scan_api)
-        length = self.headers.get("Content-Length")
-        if self.chunked():  # only Content-Length bodies are forwarded; never leave a chunked one unread on the connection
-            self.close_connection = True
-            return self.error_json(HTTPStatus.LENGTH_REQUIRED, "Content-Length is required: send the body with its length")
-        if self.command == "POST" and length is None and urlsplit(self.path).path.rstrip("/").endswith("/captures"):
-            return self.error_json(HTTPStatus.LENGTH_REQUIRED, "Content-Length is required: upload the zip as a file")
-        try:
-            left = int(length or 0)
-        except ValueError:
-            self.close_connection = True
-            return self.error_json(HTTPStatus.BAD_REQUEST, "Content-Length is not a number")
-        conn = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=600)
-        try:
-            # A loopback Host, whatever this request's: the jobs server only answers loopback names (§2.9 Host names).
-            conn.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
-            conn.putheader("Host", f"127.0.0.1:{target.port or 80}")
-            # X-Midstudy goes through (§5.1, the jobs server checks it too); Origin was checked here and stays here.
-            for h in ("Content-Type", "Content-Length", "X-Midstudy-Name", "X-Midstudy", "Accept"):
-                if self.headers.get(h) is not None:
-                    conn.putheader(h, self.headers[h])
-            conn.endheaders()
-            self.body_done = True
-            while left > 0:
-                chunk = self.rfile.read(min(left, 1 << 20))
-                if not chunk:
-                    break
-                left -= len(chunk)
-                conn.send(chunk)
-            resp = conn.getresponse()
-        except OSError as e:
-            conn.close()
-            if left > 0:  # the rest of the body is still on the connection: don't read it as the next request
-                self.close_connection = True
-            return self.error_json(HTTPStatus.BAD_GATEWAY, f"the nook-scan jobs server at {self.scan_api} isn't answering ({e})")
-        if left > 0:
-            self.close_connection = True
-        self.send_response(resp.status)
-        for h in ("Content-Type", "Content-Length"):
-            if resp.getheader(h) is not None:
-                self.send_header(h, resp.getheader(h))
-        self.end_headers()
-        while chunk := resp.read(1 << 16):
-            self.wfile.write(chunk)
-        conn.close()
-
     # --- plumbing --------------------------------------------------------
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
-        if (clean_path(self.path) or "").startswith(("/library/", "/api/library")):
+        if (clean_path(self.path) or "").startswith(("/library/", "/api/library", "/scenes/", "/api/scenes", "/renders/")):
             self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
@@ -1023,6 +1306,11 @@ class Handler(SimpleHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         return path if path == "/api" or path.startswith("/api/") else None
 
+    def query(self, key: str) -> str | None:
+        """The ?<key>= of this request, or None when there is none."""
+        values = parse_qs(urlsplit(self.path).query).get(key)
+        return values[0] if values else None
+
     # --- static ----------------------------------------------------------
     def hidden(self) -> bool:
         """Never serve dotfiles/dirs (.env holds FAL_KEY, .git, .venv), however the path is spelled."""
@@ -1030,8 +1318,6 @@ class Handler(SimpleHTTPRequestHandler):
         return p is None or any(x.startswith(".") for x in p.split("/"))
 
     def do_GET(self):
-        if self.is_scan():
-            return self.proxy_scan()
         api = self.api_path()
         if api is not None:
             return self.handle_api_get(api)
@@ -1043,6 +1329,10 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if self.hidden():
             return self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+        if clean_path(self.path) == "/library/library.json" and not (self.library_dir / "library.json").is_file():
+            # A library dir nothing has been added to yet (a fresh --library-dir): an empty library (§2.2), not a 404
+            # that the browser logs as a console error on every page load.
+            return self.send_json(HTTPStatus.OK, {"version": 1, "items": []})
         return super().do_HEAD() if self.command == "HEAD" else super().do_GET()
 
     do_HEAD = do_GET  # same routing; send_json and super().do_HEAD() skip the body
@@ -1050,23 +1340,19 @@ class Handler(SimpleHTTPRequestHandler):
     def do_PUT(self):
         if self.forged():
             return
-        if self.is_scan():
-            return self.proxy_scan()
         api = self.api_path()
         if api is None:
             return self.error_json(HTTPStatus.METHOD_NOT_ALLOWED, "PUT is only supported under /api")
         try:
-            if api == "/api/room":
-                return self.put_room()
-            m = re.fullmatch(r"/api/rooms/([^/]*)/thumb", api)
+            m = re.fullmatch(r"/api/scenes/([^/]*)/thumb", api)
             if m:
-                return self.put_room_thumb(m.group(1))
-            m = re.fullmatch(r"/api/rooms/([^/]*)", api)
+                return self.put_scene_thumb(m.group(1))
+            m = re.fullmatch(r"/api/scenes/([^/]*)", api)
+            if m and m.group(1) != "jobs":
+                return self.put_scene(m.group(1))
+            m = re.fullmatch(r"/api/layouts/([^/]*)", api)
             if m:
-                return self.put_room_config(m.group(1))
-            m = re.fullmatch(r"/api/layouts/(.*)", api)
-            if m:
-                return self.put_room_layout(m.group(1)) if self.room_query() is not None else self.put_layout(m.group(1))
+                return self.put_layout(m.group(1))
             return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: PUT {api}")
         except Exception as e:  # keep the server alive and answer in JSON
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}")
@@ -1074,12 +1360,15 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.forged():
             return
-        if self.is_scan():
-            return self.proxy_scan()
         api = self.api_path()
         try:
             if api == "/api/render":
                 return self.post_render()
+            if api == "/api/scenes":
+                return self.post_scene()
+            m = re.fullmatch(r"/api/scenes/([^/]*)/calibrate", api or "")
+            if m:
+                return self.calibrate_scene(m.group(1))
             if api == "/api/library/items":
                 return self.post_library_upload()
             if api == "/api/library/items/from-url":
@@ -1096,8 +1385,6 @@ class Handler(SimpleHTTPRequestHandler):
     def do_PATCH(self):
         if self.forged():
             return
-        if self.is_scan():
-            return self.proxy_scan()
         api = self.api_path()
         try:
             m = re.fullmatch(r"/api/library/items/([^/]*)", api or "")
@@ -1112,21 +1399,17 @@ class Handler(SimpleHTTPRequestHandler):
     def do_DELETE(self):
         if self.forged():
             return
-        if self.is_scan():
-            return self.proxy_scan()
         api = self.api_path()
         try:
             m = re.fullmatch(r"/api/library/items/([^/]*)", api or "")
             if m:
                 return self.delete_library_item(m.group(1))
-            m = re.fullmatch(r"/api/rooms/([^/]*)", api or "")
+            m = re.fullmatch(r"/api/scenes/([^/]*)", api or "")
+            if m and m.group(1) != "jobs":
+                return self.delete_scene(m.group(1))
+            m = re.fullmatch(r"/api/layouts/([^/]*)", api or "")
             if m:
-                return self.delete_room(m.group(1))
-            m = re.fullmatch(r"/api/layouts/(.*)", api or "")
-            if m and self.room_query() is not None:
-                return self.delete_room_layout(m.group(1))
-            if m:
-                return self.error_json(HTTPStatus.BAD_REQUEST, "only a room's layouts can be deleted: add ?room=<name>")
+                return self.delete_layout(m.group(1))
         except Busy:
             return self.library_busy()
         except Exception as e:
@@ -1136,14 +1419,25 @@ class Handler(SimpleHTTPRequestHandler):
     # --- api -------------------------------------------------------------
     def handle_api_get(self, api: str):
         try:
-            if api == "/api/room":
-                return self.get_room()
+            if api == "/api/scenes":
+                return self.send_json(HTTPStatus.OK, {"scenes": self.scenes.all()})
+            if api == "/api/scenes/jobs":
+                return self.send_json(HTTPStatus.OK, {"jobs": self.scenes.list_jobs()})
+            m = re.fullmatch(r"/api/scenes/jobs/([^/]*)", api)
+            if m:
+                job = self.scenes.get_job(m.group(1))
+                return self.send_json(HTTPStatus.OK, job) if job else self.error_json(
+                    HTTPStatus.NOT_FOUND, f"no calibration job {m.group(1)!r}: GET /api/scenes/jobs lists them")
+            m = re.fullmatch(r"/api/scenes/([^/]*)", api)
+            if m:
+                return self.get_scene(m.group(1))
             if api == "/api/layouts":
-                return self.list_room_layouts() if self.room_query() is not None else self.list_layouts()
+                return self.list_layouts()
+            m = re.fullmatch(r"/api/layouts/([^/]*)", api)
+            if m:
+                return self.get_layout(m.group(1))
             if api == "/api/renders":
                 return self.list_renders()
-            if api == "/api/rooms":
-                return self.list_rooms()
             if api == "/api/library":
                 return self.get_library()
             if api == "/api/library/jobs":
@@ -1155,314 +1449,259 @@ class Handler(SimpleHTTPRequestHandler):
                     HTTPStatus.NOT_FOUND, f"no library job {m.group(1)!r}: GET /api/library/jobs lists them")
             if api == "/api/spend":
                 return self.send_json(HTTPStatus.OK, self.library.spend())
-            m = re.fullmatch(r"/api/rooms/([^/]*)", api)
-            if m:
-                return self.get_room_config(m.group(1))
-            m = re.fullmatch(r"/api/layouts/(.*)", api)
-            if m:
-                return self.get_room_layout(m.group(1)) if self.room_query() is not None else self.get_layout(m.group(1))
             return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: GET {api}")
         except Exception as e:
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}")
 
-    def get_room(self):
-        if not self.room_file.exists():
-            return self.send_json(HTTPStatus.OK, PLACEHOLDER_ROOM)
-        try:
-            data = json.loads(self.room_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
-            return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"room file {self.room_file} is unreadable: {e}")
-        return self.send_json(HTTPStatus.OK, data)
+    # --- scenes (contract §4.4) ---------------------------------------------
+    def no_scene(self, name: str):
+        if not SLUG.match(name or ""):
+            return self.error_json(HTTPStatus.NOT_FOUND, f"no scene named {name!r} (scene names are slugs: a-z, 0-9, -)")
+        return self.error_json(HTTPStatus.NOT_FOUND, f"no scene named {name!r}: GET /api/scenes lists them")
 
-    def put_room(self):
+    def get_scene(self, name: str):
+        data = self.scenes.full(name) if SLUG.match(name) else None
+        return self.send_json(HTTPStatus.OK, data) if data else self.no_scene(name)
+
+    def post_scene(self):
+        length = self.headers.get("Content-Length")
+        if self.chunked() or length is None or not length.strip().isdigit():
+            self.close_connection = True
+            return self.error_json(HTTPStatus.LENGTH_REQUIRED, "Content-Length is required: send the photo as the request body")
+        length = int(length)
+        if length > MAX_SCENE_UPLOAD:
+            return self.error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                                   f"that photo is {length / 2**20:.1f} MB: a scene photo can be at most 25 MB")
+        filename = PurePosixPath((self.headers.get("X-Midstudy-Filename") or "").replace("\\", "/")).name.strip()
+        if not filename:
+            return self.error_json(HTTPStatus.BAD_REQUEST, "X-Midstudy-Filename is required (the photo's name, e.g. IMG_0042.HEIC)")
+        title = None
+        raw_meta = self.headers.get("X-Midstudy-Meta")
+        if raw_meta:
+            try:
+                meta = json.loads(base64.b64decode(raw_meta, validate=True).decode("utf-8"))
+            except (binascii.Error, ValueError, UnicodeDecodeError):
+                meta = None
+            if not isinstance(meta, dict) or not (meta.get("title") is None or isinstance(meta.get("title"), str)):
+                return self.error_json(HTTPStatus.BAD_REQUEST, 'X-Midstudy-Meta must be base64 of a JSON object like {"title": "Lounge"}')
+            t = (meta.get("title") or "").strip()
+            if len(t) > 200:
+                return self.error_json(HTTPStatus.BAD_REQUEST, "the title can be at most 200 characters")
+            title = t or None
+        if length == 0:
+            return self.error_json(HTTPStatus.BAD_REQUEST, NOT_IMAGE)
+        tmp = Path(tempfile.mkdtemp(prefix="midstudy-scene-"))  # private, never under a served path
         try:
-            data = self.read_json_body()
+            part = tmp / "upload.part"
+            with open(part, "wb") as f:
+                left = length
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 1 << 20))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    left -= len(chunk)
+            self.body_done = True
+            if left > 0:
+                raise ValueError("the upload stopped before the end: try again")
+            with open(part, "rb") as f:
+                kind = image_kind(f.read(16))
+            if kind is None:
+                raise ValueError(NOT_IMAGE)
+            ext = UPLOAD_EXT[kind]
+            upload = tmp / f"upload.{ext}"
+            part.rename(upload)
         except ValueError as e:
+            shutil.rmtree(tmp, ignore_errors=True)
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
-        if not isinstance(data, dict) or "version" not in data:
-            return self.error_json(HTTPStatus.BAD_REQUEST, "room must be a JSON object with a 'version' field")
-        with rooms_lock:
-            atomic_write_json(self.room_file, data)
-            name = splat_stem(data)
-            if name and name in list_scans(self.room_dir):  # keep that room's own config in step (§2.7)
-                atomic_write_json(self.room_dir / f"{name}.room.json", data)
-        return self.send_json(HTTPStatus.OK, {"ok": True})
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        name, job = self.scenes.create(upload, tmp, filename[:200], ext, length, title)
+        return self.send_json(HTTPStatus.ACCEPTED, {"job": job, "scene": name})
 
-    def list_layouts(self):
-        names = []
-        if self.layouts_dir.is_dir():
-            names = sorted(p.stem for p in self.layouts_dir.glob("*.json") if SLUG.match(p.stem))
-        return self.send_json(HTTPStatus.OK, {"layouts": names})
-
-    def get_layout(self, name: str):
-        if not SLUG.match(name):
-            return self.error_json(HTTPStatus.NOT_FOUND, f"no layout named {name!r} (names are slugs: a-z, 0-9, -)")
-        path = self.layouts_dir / f"{name}.json"
-        if not path.is_file():
-            return self.error_json(HTTPStatus.NOT_FOUND, f"no layout named {name!r}")
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
-            return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"layout {name!r} is unreadable: {e}")
-        return self.send_json(HTTPStatus.OK, data)
-
-    def put_layout(self, name: str):
-        if not SLUG.match(name):
-            return self.error_json(HTTPStatus.BAD_REQUEST, f"layout name must be a slug (a-z, 0-9, -): {name!r}")
-        try:
-            data = self.read_json_body()
-        except ValueError as e:
-            return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
-        if not isinstance(data, dict):
-            return self.error_json(HTTPStatus.BAD_REQUEST, "layout must be a JSON object")
-        atomic_write_json(self.layouts_dir / f"{name}.json", data)
-        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name})
-
-    # --- rooms (contract §2.7) ---------------------------------------------
-    def room_query(self) -> str | None:
-        """The ?room=<name> of this request, or None when there is none."""
-        values = parse_qs(urlsplit(self.path).query).get("room")
-        return values[0] if values else None
-
-    def current_room(self, scans: dict[str, Path]) -> str | None:
-        """The room room.json points at (matched by the basename stem of its splat), or None."""
-        name = splat_stem(read_json_file(self.room_file))
-        return name if name in scans else None
-
-    def room_config(self, name: str, scan: Path, current: str | None) -> dict:
-        """<name>.room.json; else room.json when it points at this room (adopted: copied to <name>.room.json);
-        else the identity config. `splat` is always the room's scan. Call with rooms_lock held."""
-        own = self.room_dir / f"{name}.room.json"
-        config = read_json_file(own)
-        if not isinstance(config, dict):
-            config = None
-            if name == current:
-                legacy = read_json_file(self.room_file)
-                if isinstance(legacy, dict):
-                    config = dict(legacy, splat=splat_url(scan, self.room_dir))
-                    atomic_write_json(own, config)
-        if config is None:
-            config = {"version": 1}
-        config["splat"] = splat_url(scan, self.room_dir)
-        return config
-
-    def room_layouts(self, name: str) -> list[dict]:
-        """The room's layouts plus the v1 layouts made for its scan (legacy), as {name, items, updated, legacy}."""
-        found: dict[str, dict] = {}
-
-        def add(path: Path, legacy: bool, data=None):
-            data = read_json_file(path) if data is None else data
-            items = data.get("items") if isinstance(data, dict) else None
-            found[path.stem] = {"name": path.stem, "items": len(items) if isinstance(items, list) else 0,
-                                "updated": iso_utc(path.stat().st_mtime), "legacy": legacy}
-
-        own = self.layouts_dir / name
-        if own.is_dir():
-            for p in own.glob("*.json"):
-                if SLUG.match(p.stem) and p.is_file():
-                    add(p, False)
-        if self.layouts_dir.is_dir():
-            for p in self.layouts_dir.glob("*.json"):
-                if not SLUG.match(p.stem) or p.stem in found or not p.is_file():
-                    continue
-                data = read_json_file(p)
-                if isinstance(data, dict) and splat_stem(data.get("room")) == name:
-                    add(p, True, data)
-        return [found[k] for k in sorted(found)]
-
-    def find_room(self, name: str):
-        """(scans, scan) for a known room, or (scans, None)."""
-        scans = list_scans(self.room_dir)
-        return scans, scans.get(name) if SLUG.match(name) else None
-
-    def no_room(self, name: str):
-        if not SLUG.match(name):
-            return self.error_json(HTTPStatus.NOT_FOUND, f"no room named {name!r} (room names are slugs: a-z, 0-9, -)")
-        return self.error_json(HTTPStatus.NOT_FOUND, f"no room named {name!r}: GET /api/rooms lists the rooms in {self.room_dir}")
-
-    def room_captures(self) -> dict[str, str]:
-        """{room: kept capture} from the jobs API (§5.1 GET /api/scan/captures); {} without --scan-api or an answer."""
-        if not self.scan_api:
-            return {}
-        try:
-            port = urlsplit(self.scan_api).port or 80
-            req = urllib.request.Request(self.scan_api.rstrip("/") + "/api/scan/captures", headers={"Host": f"127.0.0.1:{port}"})
-            with urllib.request.urlopen(req, timeout=3) as res:
-                captures = json.loads(res.read().decode("utf-8")).get("captures") or []
-        except (OSError, ValueError, AttributeError):
-            return {}
-        out = {}
-        for c in captures:  # newest first: the newest capture wins a room listed twice
-            if isinstance(c, dict) and isinstance(c.get("name"), str):
-                for room in c.get("rooms") or []:
-                    if isinstance(room, str):
-                        out.setdefault(room, c["name"])
-        return out
-
-    def list_rooms(self):
-        captures = self.room_captures()
-        with rooms_lock:
-            scans = list_scans(self.room_dir)
-            current = self.current_room(scans)
-            rooms = []
-            for name, scan in scans.items():
-                config = self.room_config(name, scan, current)
-                st = scan.stat()
-                title = config.get("title")
-                parent = config.get("parent")
-                rooms.append({
-                    "name": name, "title": title if isinstance(title, str) and title else None,
-                    "splat": config["splat"], "created": iso_utc(st.st_mtime), "size_bytes": st.st_size,
-                    "thumb_url": f"/room/{name}.jpg" if (self.room_dir / f"{name}.jpg").is_file() else None,
-                    "aligned": bool(config.get("saved")), "layouts": len(self.room_layouts(name)),
-                    "current": name == current,
-                    "roomplan_url": f"/room/{name}.roomplan.json" if (self.room_dir / f"{name}.roomplan.json").is_file() else None,
-                    "capture": captures.get(name),
-                    "parent": parent if isinstance(parent, str) and SLUG.match(parent) else None,
-                    "_mtime": st.st_mtime,
-                })
-        rooms.sort(key=lambda r: (-r.pop("_mtime"), r["name"]))
-        return self.send_json(HTTPStatus.OK, {"rooms": rooms, "current": current})
-
-    def get_room_config(self, name: str):
-        with rooms_lock:
-            scans, scan = self.find_room(name)
-            if scan is None:
-                return self.no_room(name)
-            return self.send_json(HTTPStatus.OK, self.room_config(name, scan, self.current_room(scans)))
-
-    def put_room_config(self, name: str):
-        if not SLUG.match(name):
-            return self.error_json(HTTPStatus.BAD_REQUEST, f"room name must be a slug (a-z, 0-9, -): {name!r}")
-        try:
-            data = self.read_json_body()
-        except ValueError as e:
-            return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
-        if not isinstance(data, dict) or "version" not in data:
-            return self.error_json(HTTPStatus.BAD_REQUEST, "room must be a JSON object with a 'version' field")
-        with rooms_lock:
-            scans, scan = self.find_room(name)
-            if scan is None:
-                return self.no_room(name)
-            current = self.current_room(scans)
-            # A rename (only `title` differs) keeps the old `saved` time, so it doesn't mark the room aligned.
-            before = self.room_config(name, scan, current)
-            same = lambda c: {k: v for k, v in c.items() if k not in ("title", "saved", "splat")}
-            saved = before.get("saved") if same(data) == same(before) else iso_utc()
-            config = dict(data, splat=splat_url(scan, self.room_dir), saved=saved)
-            atomic_write_json(self.room_dir / f"{name}.room.json", config)
-            if name == current:
-                atomic_write_json(self.room_file, config)
-        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "saved": config["saved"], "current": name == current})
-
-    def put_room_thumb(self, name: str):
-        if not SLUG.match(name):
-            return self.error_json(HTTPStatus.BAD_REQUEST, f"room name must be a slug (a-z, 0-9, -): {name!r}")
+    def put_scene(self, name: str):
+        if not self.scenes.exists(name):
+            return self.no_scene(name)
         try:
             body = self.read_json_body()
         except ValueError as e:
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
-        image = body.get("image") if isinstance(body, dict) else None
-        m = re.fullmatch(r"data:image/jpe?g;base64,([A-Za-z0-9+/=\s]+)", image) if isinstance(image, str) else None
-        data = None
-        if m:
-            try:
-                data = base64.b64decode(re.sub(r"\s", "", m.group(1)), validate=True)
-            except (binascii.Error, ValueError):
-                data = None
+        if not isinstance(body, dict) or not body:
+            return self.error_json(HTTPStatus.BAD_REQUEST, "the body must be a JSON object with any of title, camera, camera_source, look")
+        unknown = sorted(set(body) - {"title", "camera", "camera_source", "look"})
+        if unknown:
+            return self.error_json(HTTPStatus.BAD_REQUEST, f"{', '.join(unknown)} can't be set: use title, camera, camera_source or look")
+        patch = {}
+        if "title" in body:
+            t = body["title"]
+            if t is not None and not isinstance(t, str):
+                return self.error_json(HTTPStatus.BAD_REQUEST, "title must be text or null")
+            t = (t or "").strip()
+            if len(t) > 200:
+                return self.error_json(HTTPStatus.BAD_REQUEST, "the title can be at most 200 characters")
+            patch["title"] = t or None
+        if "camera" in body:
+            cam = body["camera"]
+            if not isinstance(cam, dict) or not cam:
+                return self.error_json(HTTPStatus.BAD_REQUEST, 'camera must be an object like {"fov_y_deg": 55, "height_m": 1.4, "pitch_deg": -10, "roll_deg": 0}')
+            bad = sorted(set(cam) - set(CAMERA_RANGE))
+            if bad:
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"camera has unknown fields ({', '.join(bad)}): use fov_y_deg, height_m, pitch_deg, roll_deg")
+            notnum = sorted(k for k, v in cam.items() if not is_num(v))
+            if notnum:
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"camera {', '.join(notnum)} must be a number")
+            patch["camera"] = cam
+        if "camera_source" in body:
+            if body["camera_source"] not in ("auto", "manual", "default"):
+                return self.error_json(HTTPStatus.BAD_REQUEST, "camera_source must be auto, manual or default")
+            patch["camera_source"] = body["camera_source"]
+        if "look" in body:
+            look = body["look"]
+            if not isinstance(look, dict):
+                return self.error_json(HTTPStatus.BAD_REQUEST, 'look must be an object like {"exposure": 1, "warmth": 0}')
+            bad = sorted(set(look) - set(LOOK_RANGE))
+            if bad or any(not is_num(v) for v in look.values()):
+                return self.error_json(HTTPStatus.BAD_REQUEST, "look takes exposure (0.25 to 4) and warmth (-1 to 1), as numbers")
+            patch["look"] = look
+        try:
+            self.scenes.update(name, patch)
+        except KeyError:
+            return self.no_scene(name)
+        return self.send_json(HTTPStatus.OK, self.scenes.full(name))
+
+    def put_scene_thumb(self, name: str):
+        if not self.scenes.exists(name):
+            return self.no_scene(name)
+        try:
+            body = self.read_json_body()
+        except ValueError as e:
+            return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
+        data = decode_data_uri(body.get("image") if isinstance(body, dict) else None, ("jpeg",))
         if not data or data[:3] != b"\xff\xd8\xff":
             return self.error_json(HTTPStatus.BAD_REQUEST, "image must be a JPEG data URI (data:image/jpeg;base64,...)")
         if len(data) > MAX_THUMB:
             return self.error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "thumbnail is over 2 MB: send a smaller JPEG")
-        with rooms_lock:
-            _, scan = self.find_room(name)
-            if scan is None:
-                return self.no_room(name)
-            atomic_write_bytes(self.room_dir / f"{name}.jpg", data)
-        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "thumb_url": f"/room/{name}.jpg"})
+        with self.scenes.lock:
+            if not self.scenes.exists(name):
+                return self.no_scene(name)
+            atomic_write_bytes(self.scenes.path(name) / "thumb.jpg", data)
+        return self.send_json(HTTPStatus.OK, {"ok": True, "thumb_url": self.scenes.scene_object(name)["thumb_url"]})
 
-    def delete_room(self, name: str):
-        with rooms_lock:
-            scans, scan = self.find_room(name)
-            if scan is None:
-                return self.no_room(name)
-            current = self.current_room(scans)
-            self.room_config(name, scan, current)  # adopt room.json first, so its alignment goes to the trash too
-            base = f"{name}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
-            trash, n = self.room_dir / ".trash" / base, 1
-            while trash.exists():
-                n += 1
-                trash = self.room_dir / ".trash" / f"{base}-{n}"
-            trash.mkdir(parents=True)
-            for p in sorted(self.room_dir.glob(f"{name}.*")):  # scan(s), <name>.room.json, <name>.jpg
-                if p.is_file():
-                    shutil.move(str(p), str(trash / p.name))
-            layouts = self.layouts_dir / name
-            if layouts.is_dir():
-                shutil.move(str(layouts), str(trash / "layouts"))
-            if name == current:
-                left = list_scans(self.room_dir)
-                if left:
-                    newest = max(left, key=lambda k: (left[k].stat().st_mtime, k))
-                    atomic_write_json(self.room_file, self.room_config(newest, left[newest], None))
-                elif self.room_file.exists():
-                    shutil.move(str(self.room_file), str(trash / "room.json"))  # kept, never removed
-        return self.send_json(HTTPStatus.OK, {"ok": True, "trash": trash.relative_to(self.room_dir).as_posix()})
-
-    def layout_room(self):
-        """(room name, None) for a known ?room=, else (None, error already sent)."""
-        name = self.room_query()
+    def calibrate_scene(self, name: str):
         if not SLUG.match(name):
-            self.error_json(HTTPStatus.BAD_REQUEST, f"room name must be a slug (a-z, 0-9, -): {name!r}")
+            return self.no_scene(name)
+        job, refused = self.scenes.calibrate(name)
+        if refused:
+            return self.error_json(*refused)
+        return self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
+    def delete_scene(self, name: str):
+        if not self.scenes.exists(name):
+            return self.no_scene(name)
+        try:
+            trash = self.scenes.delete(name)
+        except KeyError:
+            return self.no_scene(name)
+        return self.send_json(HTTPStatus.OK, {"ok": True, "trash": trash})
+
+    # --- layouts, per scene (contract §2.7) ---------------------------------------------------------------------
+    def layout_scene(self):
+        """The ?scene= of a layouts request when it names a scene, else None (the error already sent)."""
+        name = self.query("scene")
+        if name is None or name == "":
+            self.error_json(HTTPStatus.BAD_REQUEST, "add ?scene=<name>: layouts belong to a scene")
             return None
-        if self.find_room(name)[1] is None:
-            self.no_room(name)
+        if not SLUG.match(name):
+            self.error_json(HTTPStatus.BAD_REQUEST, f"scene must be a slug (a-z, 0-9, -): {name!r}")
+            return None
+        if not self.scenes.exists(name):
+            self.no_scene(name)
             return None
         return name
 
-    def list_room_layouts(self):
-        room = self.layout_room()
-        if room is None:
-            return
-        details = self.room_layouts(room)
-        return self.send_json(HTTPStatus.OK, {"layouts": [d["name"] for d in details], "details": details})
+    def bad_layout_name(self, name: str) -> bool:
+        if SLUG.match(name or ""):
+            return False
+        self.error_json(HTTPStatus.BAD_REQUEST, f"layout name must be a slug like \"reading-corner\" (a-z, 0-9, -): {name!r}")
+        return True
 
-    def get_room_layout(self, name: str):
-        room = self.layout_room()
-        if room is None:
+    def list_layouts(self):
+        scene = self.layout_scene()
+        if scene is None:
             return
-        path = self.layouts_dir / room / f"{name}.json"
-        if not SLUG.match(name) or not path.is_file():
-            return self.get_layout(name)  # v1 fallback (and its 404s)
+        details = []
+        d = self.layouts_dir / scene
+        if d.is_dir():
+            for p in sorted(d.glob("*.json")):
+                if not SLUG.match(p.stem) or not p.is_file():
+                    continue
+                data = read_json_file(p)
+                items = data.get("items") if isinstance(data, dict) else None
+                updated = data.get("updated") if isinstance(data, dict) else None
+                details.append({"name": p.stem, "items": len(items) if isinstance(items, list) else 0,
+                                "updated": updated if isinstance(updated, str) else iso_utc(p.stat().st_mtime)})
+        return self.send_json(HTTPStatus.OK, {"layouts": [x["name"] for x in details], "details": details})
+
+    def get_layout(self, name: str):
+        scene = self.layout_scene()
+        if scene is None or self.bad_layout_name(name):
+            return
+        path = self.layouts_dir / scene / f"{name}.json"
+        if not path.is_file():
+            return self.error_json(HTTPStatus.NOT_FOUND, f"scene {scene!r} has no layout named {name!r}")
         data = read_json_file(path)
         if data is None:
-            return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"layout {name!r} of room {room!r} is unreadable: fix or delete it")
+            return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"layout {name!r} of scene {scene!r} is unreadable: fix or delete it")
         return self.send_json(HTTPStatus.OK, data)
 
-    def put_room_layout(self, name: str):
-        room = self.layout_room()
-        if room is None:
+    def put_layout(self, name: str):
+        scene = self.layout_scene()
+        if scene is None or self.bad_layout_name(name):
             return
-        if not SLUG.match(name):
-            return self.error_json(HTTPStatus.BAD_REQUEST, f"layout name must be a slug (a-z, 0-9, -): {name!r}")
         try:
-            data = self.read_json_body()
+            body = self.read_json_body()
         except ValueError as e:
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
-        if not isinstance(data, dict):
-            return self.error_json(HTTPStatus.BAD_REQUEST, "layout must be a JSON object")
-        atomic_write_json(self.layouts_dir / room / f"{name}.json", dict(data, room_name=room))
-        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "room": room})
+        if not isinstance(body, dict) or not isinstance(body.get("items"), list):
+            return self.error_json(HTTPStatus.BAD_REQUEST, 'a layout must be a JSON object with an "items" array')
+        items = []
+        for i, it in enumerate(body["items"]):
+            if not isinstance(it, dict) or not isinstance(it.get("id"), str) or not SLUG.match(it["id"]):
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"item {i} needs an id (a library item's slug)")
+            pos = it.get("position")
+            if not (isinstance(pos, list) and len(pos) == 3 and all(is_num(v) for v in pos)):
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"item {i} ({it['id']}) needs a position [x, elevation, z] in meters")
+            rot = it.get("rotation_y_deg", 0)
+            if not is_num(rot):
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"item {i} ({it['id']}): rotation_y_deg must be a number")
+            uid = it.get("uid") if isinstance(it.get("uid"), str) and it.get("uid") else f"{it['id']}-{i + 1}"
+            out = {"uid": uid, "id": it["id"], "render": it.get("render") if it.get("render") in ("glb", "splat") else "glb",
+                   "position": [float(v) for v in pos], "rotation_y_deg": float(rot)}
+            if it.get("mounted") in ("floor", "wall"):
+                out["mounted"] = it["mounted"]
+            dims = it.get("dims_cm")
+            if isinstance(dims, dict) and all(is_num(dims.get(k)) for k in "wdh"):
+                out["dims_cm"] = {k: dims[k] for k in "wdh"}
+            items.append(out)
+        lib = body.get("library")
+        notes = body.get("notes")
+        doc = {"version": 1, "name": name, "scene_name": scene, "library": lib if isinstance(lib, str) else None,
+               "updated": iso_utc(), "items": items}
+        if isinstance(notes, str):
+            doc["notes"] = notes
+        atomic_write_json(self.layouts_dir / scene / f"{name}.json", doc)
+        return self.send_json(HTTPStatus.OK, doc)
 
-    def delete_room_layout(self, name: str):
-        room = self.layout_room()
-        if room is None:
+    def delete_layout(self, name: str):
+        scene = self.layout_scene()
+        if scene is None or self.bad_layout_name(name):
             return
-        path = self.layouts_dir / room / f"{name}.json"
-        if not SLUG.match(name) or not path.is_file():
-            return self.error_json(HTTPStatus.NOT_FOUND, f"room {room!r} has no layout named {name!r} (v1 layouts aren't deleted)")
+        path = self.layouts_dir / scene / f"{name}.json"
+        if not path.is_file():
+            return self.error_json(HTTPStatus.NOT_FOUND, f"scene {scene!r} has no layout named {name!r}")
         path.unlink()
-        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "room": room})
+        return self.send_json(HTTPStatus.OK, {"ok": True, "name": name, "scene": scene})
 
     # --- library (contract §2.8) ------------------------------------------------------------------
     def library_busy(self):
@@ -1700,8 +1939,10 @@ class Handler(SimpleHTTPRequestHandler):
             shutil.rmtree(trash, ignore_errors=True)
         return self.send_json(HTTPStatus.OK, entry)
 
-    # --- render this view ------------------------------------------------
+
+    # --- render (contract §2.6, §4.7) ------------------------------------------------
     def list_renders(self):
+        scene = self.query("scene")
         renders = []
         if self.renders_dir.is_dir():
             for p in self.renders_dir.glob("render-*.json"):
@@ -1711,7 +1952,7 @@ class Handler(SimpleHTTPRequestHandler):
                     meta = json.loads(p.read_text(encoding="utf-8"))
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                     continue
-                if isinstance(meta, dict):
+                if isinstance(meta, dict) and (scene is None or meta.get("scene") == scene):
                     renders.append(meta)
         renders.sort(key=lambda m: (str(m.get("created", "")), str(m.get("name", ""))), reverse=True)
         return self.send_json(HTTPStatus.OK, {"renders": renders, "mock": fal_mock()})
@@ -1721,7 +1962,7 @@ class Handler(SimpleHTTPRequestHandler):
         with render_lock:
             n, name = 1, base
             while name in reserved_names or any(
-                    (self.renders_dir / f"{name}{ext}").exists() for ext in (".jpg", "-input.jpg", ".json")):
+                    (self.renders_dir / f"{name}{ext}").exists() for ext in (".jpg", "-input.jpg", "-raw.jpg", ".json")):
                 n += 1
                 name = f"{base}-{n}"
             reserved_names.add(name)
@@ -1734,24 +1975,40 @@ class Handler(SimpleHTTPRequestHandler):
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
         if not isinstance(body, dict):
             return self.error_json(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
-        image = body.get("image")
-        m = re.fullmatch(r"data:image/jpe?g;base64,([A-Za-z0-9+/=\s]+)", image) if isinstance(image, str) else None
-        data = None
-        if m:
-            try:
-                data = base64.b64decode(re.sub(r"\s", "", m.group(1)), validate=True)
-            except (binascii.Error, ValueError):
-                data = None
+        data = decode_data_uri(body.get("image"), ("jpeg",))
         if not data or data[:3] != b"\xff\xd8\xff":
             return self.error_json(HTTPStatus.BAD_REQUEST, "image must be a JPEG data URI (data:image/jpeg;base64,...)")
         model = body.get("model") or "nano-banana"
         if model not in RENDER_MODELS:
             return self.error_json(HTTPStatus.BAD_REQUEST, f"unknown model {model!r} (choose from {', '.join(RENDER_MODELS)})")
-        prompt = body.get("prompt") or DEFAULT_RENDER_PROMPT
-        if not isinstance(prompt, str):
+        prompt = body.get("prompt")
+        if prompt is not None and not isinstance(prompt, str):
             return self.error_json(HTTPStatus.BAD_REQUEST, "prompt must be a string")
-        view = body.get("view") if isinstance(body.get("view"), str) else None
-        layout = body.get("layout") if isinstance(body.get("layout"), str) else None
+        scene = body.get("scene")
+        if scene is not None and (not isinstance(scene, str) or not self.scenes.exists(scene)):
+            return self.no_scene(scene if isinstance(scene, str) else "")
+        layout = body.get("layout") if isinstance(body.get("layout"), str) and SLUG.match(body.get("layout")) else None
+        keep_room = body.get("keep_room") is True
+        mask = None
+        photo = None
+        if scene:
+            photo_path = self.scenes.path(scene) / "photo.jpg"
+            if not photo_path.is_file():
+                return self.error_json(HTTPStatus.CONFLICT, "this scene has no photo yet: wait for it to finish calibrating")
+            photo = photo_path.read_bytes()
+        if keep_room:
+            if not scene:
+                return self.error_json(HTTPStatus.BAD_REQUEST, "keep_room needs the scene: send scene with it")
+            mask = decode_data_uri(body.get("mask"), ("png",))
+            if not mask or png_size(mask) is None:
+                return self.error_json(HTTPStatus.BAD_REQUEST, "keep_room needs a mask: a PNG data URI (data:image/png;base64,...) at the photo's size")
+            psize = jpeg_size(photo)
+            if psize and tuple(png_size(mask)) != tuple(psize):
+                w, h = png_size(mask)
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"the mask is {w} x {h}, but it must be the photo's size ({psize[0]} x {psize[1]})")
+        reference = model == "nano-banana" and photo is not None
+        if not prompt or not prompt.strip():
+            prompt = REFERENCE_RENDER_PROMPT if reference else DEFAULT_RENDER_PROMPT
         spec = RENDER_MODELS[model]
         size = jpeg_size(data)
         megapixels = (size[0] * size[1] / 1e6) if size else 1.0
@@ -1769,25 +2026,30 @@ class Handler(SimpleHTTPRequestHandler):
                 reserved_names.discard(name)
             return self.send_json(HTTPStatus.PAYMENT_REQUIRED, refused)
         try:
-            return self.render(body, data, model, prompt, view, layout, spec, size, price, mock, key, now, name)
+            return self.render(data, model, prompt, scene, layout, photo if reference else None, keep_room, mask,
+                               spec, size, price, mock, key, now, name)
         finally:
             self.library.release(name)
 
-    def render(self, body, data, model, prompt, view, layout, spec, size, price, mock, key, now, name):
+    def render(self, data, model, prompt, scene, layout, reference, keep_room, mask, spec, size, price, mock, key, now, name):
         cost = price if mock and mock_cost() else 0.0
+        stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         if mock:
             result = data  # mock: the "render" is the input, $0 (or its real price with MIDSTUDY_FAL_MOCK_COST=1), no network
         else:
-            data_uri = "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
-            args = {spec["image_key"]: [data_uri] if spec["image_key"] == "image_urls" else data_uri,
-                    "prompt": prompt, "output_format": "jpeg"}
+            uri = lambda b: "data:image/jpeg;base64," + base64.b64encode(b).decode("ascii")
+            if spec["image_key"] == "image_urls":
+                image_arg = [uri(data)] + ([uri(reference)] if reference else [])
+            else:
+                image_arg = uri(data)
+            args = {spec["image_key"]: image_arg, "prompt": prompt, "output_format": "jpeg"}
             try:
                 out = fal_call(spec["endpoint"], args, key)
             except FalError as e:
                 return self.error_json(HTTPStatus.BAD_GATEWAY, str(e))
             # fal has returned, so the call is billed: record it even if the download below fails.
             cost = price
-            append_cost(self.costs_file, now.strftime("%Y-%m-%dT%H:%M:%SZ"), name, f"render:{model}", cost, False, view or "")
+            append_cost(self.costs_file, stamp, name, f"render:{model}", cost, False, scene or "")
             images = out.get("images") if isinstance(out, dict) else None
             url = images[0].get("url") if isinstance(images, list) and images and isinstance(images[0], dict) else None
             if not url:
@@ -1796,29 +2058,82 @@ class Handler(SimpleHTTPRequestHandler):
                 result = download(url)
             except Exception as e:  # noqa: BLE001 - any download failure is a 502
                 return self.error_json(HTTPStatus.BAD_GATEWAY, f"could not download the render ({e}); ${fmt_cost(cost)} recorded")
+        atomic_write_bytes(self.renders_dir / f"{name}-input.jpg", data)
+        aligned = None
+        if keep_room:
+            atomic_write_bytes(self.renders_dir / f"{name}-raw.jpg", result)
+            aligned = self.align(scene, name, mask)
+            if not aligned["applied"]:
+                atomic_write_bytes(self.renders_dir / f"{name}.jpg", result)
+        else:
+            atomic_write_bytes(self.renders_dir / f"{name}.jpg", result)
+        final = (self.renders_dir / f"{name}.jpg").read_bytes()
+        out_size = jpeg_size(final)
         meta = {
             "name": name,
             "url": f"/renders/{name}.jpg",
             "input_url": f"/renders/{name}-input.jpg",
+            "raw_url": f"/renders/{name}-raw.jpg" if keep_room else None,
             "model": model,
             "endpoint": spec["endpoint"],
             "cost_usd": cost,
             "mock": mock,
             "prompt": prompt,
             "created": now.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-            "view": view,
+            "scene": scene,
             "layout": layout,
+            "reference": reference is not None,
+            "keep_room": keep_room,
+            "aligned": aligned,
             "width": size[0] if size else None,
             "height": size[1] if size else None,
+            "out_w": out_size[0] if out_size else None,
+            "out_h": out_size[1] if out_size else None,
         }
-        atomic_write_bytes(self.renders_dir / f"{name}-input.jpg", data)
-        atomic_write_bytes(self.renders_dir / f"{name}.jpg", result)
         atomic_write_json(self.renders_dir / f"{name}.json", meta)
         if mock:
-            append_cost(self.costs_file, now.strftime("%Y-%m-%dT%H:%M:%SZ"), name, f"render:{model}", cost, True, view or "")
+            append_cost(self.costs_file, stamp, name, f"render:{model}", cost, True, scene or "")
         with render_lock:
             reserved_names.discard(name)  # the files now hold the name; after a failure it stays reserved
         return self.send_json(HTTPStatus.OK, meta)
+
+    def align(self, scene: str, name: str, mask: bytes) -> dict:
+        """Keep room exact (§4.7): `<calib> align <scene photo.jpg> <name>-raw.jpg <mask.png> --out <name>.jpg`. The
+        tool writes to a temp name that is renamed into place only when it applied; any failure (no calib/, a bad
+        exit) counts as not applied, with the reason."""
+        photo = (self.scenes.path(scene) / "photo.jpg").resolve()
+        raw = (self.renders_dir / f"{name}-raw.jpg").resolve()
+        tmp = Path(tempfile.mkdtemp(prefix="midstudy-align-"))
+        out = self.renders_dir / f".{name}.aligned.jpg"
+        try:
+            (tmp / "mask.png").write_bytes(mask)
+            cmd = [*self.scenes.calib, "align", str(photo), str(raw), str(tmp / "mask.png"), "--out", str(out.resolve())]
+            try:
+                proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=ALIGN_TIMEOUT, stdin=subprocess.DEVNULL)
+            except FileNotFoundError:
+                return {"applied": False, "inliers": None, "residual_px": None,
+                        "reason": f"the calibration tool isn't installed here ({cmd[0]} not found): set --calib"}
+            except subprocess.TimeoutExpired:
+                return {"applied": False, "inliers": None, "residual_px": None,
+                        "reason": f"align ran for more than {ALIGN_TIMEOUT} s and was stopped"}
+            res = last_json_line(proc.stdout)
+            if proc.returncode != 0 or not isinstance(res, dict) or res.get("ok") is not True:
+                return {"applied": False, "inliers": None, "residual_px": None,
+                        "reason": tool_error(proc, res, "midstudy-calib align")}
+            inliers = res.get("inliers") if is_num(res.get("inliers")) else None
+            residual = res.get("residual_px") if is_num(res.get("residual_px")) else None
+            if res.get("applied") is True and out.is_file():
+                os.replace(out, self.renders_dir / f"{name}.jpg")
+                return {"applied": True, "inliers": inliers, "residual_px": residual}
+            reason = res.get("reason") if isinstance(res.get("reason"), str) else (
+                "align said it applied but wrote no image" if res.get("applied") is True else "align did not apply")
+            return {"applied": False, "inliers": inliers, "residual_px": residual, "reason": reason}
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+            try:
+                out.unlink()
+            except OSError:
+                pass
 
 
 def resolve(p: str) -> Path:
@@ -1830,14 +2145,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="midstudy planner server")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--room-file", default=None, help="default: <room-dir>/room.json")
-    ap.add_argument("--room-dir", default=None, help="serve /room/ from here (default: the repo's room/)")
+    ap.add_argument("--scenes-dir", default="scenes", help="the scenes (one folder per uploaded photo; default: the repo's scenes/)")
     ap.add_argument("--library-dir", default=None, help="serve /library/ from here (default: the repo's library/)")
-    ap.add_argument("--scan-api", default=None, help="proxy /api/scan/* to this nook-scan jobs server, e.g. http://127.0.0.1:8095")
     ap.add_argument("--layouts-dir", default="layouts")
     ap.add_argument("--renders-dir", default="renders")
     ap.add_argument("--costs-file", default=None,
                     help="default: <library-dir>/costs.csv, where midstudy-add writes; with --library-dir it must be that file")
+    ap.add_argument("--calib", default=DEFAULT_CALIB,
+                    help=f"the calibration command, run as an argument list (default: {DEFAULT_CALIB})")
     ap.add_argument("--midstudy-add", default=DEFAULT_MIDSTUDY_ADD,
                     help=f"the command that adds furniture, run with --library <library-dir> (default: {DEFAULT_MIDSTUDY_ADD})")
     ap.add_argument("--allowed-host", action="append", default=[], metavar="NAME",
@@ -1847,9 +2162,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.daily_spend_usd < 0:
         ap.error("--daily-spend-usd can't be negative")
+    calib = shlex.split(args.calib)
+    if not calib:
+        ap.error("--calib can't be empty")
 
-    room_dir = resolve(args.room_dir) if args.room_dir else None
-    room_file = resolve(args.room_file) if args.room_file else (room_dir or resolve("room")) / "room.json"
     library_dir = resolve(args.library_dir or "library")
     costs_file = resolve(args.costs_file) if args.costs_file else library_dir / "costs.csv"
     # midstudy-add always writes <library-dir>/costs.csv, so the cap would miss its rows if this read another file.
@@ -1858,13 +2174,13 @@ def main(argv=None):
         sys.exit(f"midstudy planner: --costs-file {costs_file} isn't {library_dir / 'costs.csv'}, where midstudy-add writes "
                  "its costs: drop --costs-file (it defaults to <library-dir>/costs.csv)")
     library = LibraryService(library_dir, costs_file, shlex.split(args.midstudy_add), args.daily_spend_usd)
-    handler = partial(Handler, room_file=room_file, layouts_dir=resolve(args.layouts_dir),
-                      renders_dir=resolve(args.renders_dir), costs_file=costs_file, room_dir=room_dir,
-                      library_dir=library_dir, scan_api=args.scan_api, library=library,
-                      allowed_hosts=tuple(args.allowed_host))
+    layouts_dir = resolve(args.layouts_dir)
+    scenes = SceneService(resolve(args.scenes_dir), layouts_dir, calib)
+    handler = partial(Handler, layouts_dir=layouts_dir, renders_dir=resolve(args.renders_dir), costs_file=costs_file,
+                      scenes=scenes, library_dir=library_dir, library=library, allowed_hosts=tuple(args.allowed_host))
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer((args.host, args.port), handler)
-    print(f"midstudy planner: http://{args.host}:{args.port}/planner/  (serving {REPO})", flush=True)
+    print(f"midstudy planner: http://{args.host}:{httpd.server_address[1]}/planner/  (serving {REPO})", flush=True)
     if fal_mock():
         print("midstudy planner: MIDSTUDY_FAL_MOCK is set, so Render makes no fal calls and costs $0", flush=True)
     try:

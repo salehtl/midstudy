@@ -45,8 +45,11 @@ Only phase-boundary agents commit; nothing is pushed.
 
 ## Evals
 
-- `nix develop -c npm run eval:pipeline`: `midstudy-add` against the fal mock, offline, $0.
-- `nix develop -c npm run eval:library`: the library API, URL-fetch rules and spend cap, mocked, $0.
-- `nix develop -c node fixtures/make_scene.mjs` regenerates the golden scenes; `nix develop -c evals/py fixtures/check_scenes.py` checks them (and pins the camera convention).
+`evals/README.md` describes each one; `docs/notes/*.md` say where things stand. All are $0 (fal mocked) and set the mock variables themselves.
+
+- `nix develop -c npm run eval:all`: E1 and E3–E9 (scenes API, planner, occlusion, floor, render, library, pipeline, phone), one after another; `-- --with-calib` adds E2.
+- `nix develop -c npm run eval:calib`: E2, real MoGe-2 on the golden scenes and `fixtures/photos/` (`-- --mock` checks ingest only).
+- `nix develop -c npm run eval:real`: the real path on this Mac (real MoGe-2, a photo from `fixtures/photos/`, GLB add, renders, Compare); not in `eval:all`.
+- `nix develop -c npm run eval:selftest`: the eval machinery itself.
+- `nix develop -c node fixtures/make_scene.mjs` regenerates the golden scenes; `nix develop -c npm run check:scenes` checks them (and pins the camera convention).
 - `evals/validate_library.py <library.json>` checks a library against the contract.
-- PLAN.md §6.2 lists the task evals the evals track adds (`eval:scenes-api` … `eval:all`).

@@ -1,0 +1,33 @@
+[project]
+name = "midstudy-calib"
+version = "0.1.0"
+description = "midstudy-calib: ingest a room photo and fit the scene camera (MoGe-2 floor plane), plus keep-room alignment"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.0",
+    "pillow>=11.0",
+    "pillow-heif>=0.18",
+    "opencv-python-headless>=4.10",
+    "torch>=2.5",
+    "huggingface-hub>=0.25",
+    # MoGe-2 (v2.0.0), the last code commit before the MoGe-3 rewrite (74fbce0), which needs CUDA-only flex-gemm.
+    "moge @ git+https://github.com/microsoft/MoGe@07444410f1e33f402353b99d6ccd26bd31e469e8",
+]
+
+[project.scripts]
+midstudy-calib = "midstudy_calib.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "jsonschema>=4"]
+
+[tool.uv]
+# MoGe lists its demo and training extras as hard dependencies. The inference path needs none of them, and
+# opencv-python would clash with opencv-python-headless (both install cv2).
+exclude-dependencies = ["gradio", "opencv-python", "pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"

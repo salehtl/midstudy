@@ -1,7 +1,7 @@
 {
   "name": "midstudy planner",
   "short_name": "midstudy",
-  "description": "Plan the reading room in its own scan.",
+  "description": "Place real-size furniture on a photo of your room.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

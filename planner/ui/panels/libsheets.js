@@ -1,7 +1,7 @@
 // Library manager sheets (§2.8): Add furniture (a photo from the phone, an image link, or a 3D file) with the price
 // shown before you confirm and today's remaining fal budget, and Edit (name, category, size, turn, shows as, wall).
 // Both are ui/sheet.js sheets; the jobs they start show in the Library panel. Styles: styles/manage.css.
-import { h, segmented, toggle } from '../kit.js'
+import { h, segmented } from '../kit.js'
 import { openSheet, formRow, textInput } from '../sheet.js'
 import { pic } from './common.js'
 import { estimateCost, LIB_PRICE } from '../../data.js'
@@ -60,8 +60,6 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const name = textInput({ placeholder: 'Oak reading chair', maxLength: 120, label: 'Name', onInput: () => sync() })
   const dims = dimsFields(null, () => sync())
   const category = textInput({ placeholder: 'chair, lamp, shelf…', maxLength: 40, label: 'Category' })
-  const mount = toggle({ label: 'Hangs on a wall', hint: 'Paintings, mirrors, shelves: it starts on a wall', checked: false, onChange: (on) => { st.mount = on } })
-  mount.classList.add('ms-toggle')
   const engineSeg = segmented([{ value: 'sam3d', label: `SAM 3D · ${usd(LIB_PRICE.sam3d)}` }, { value: 'trellis2', label: `TRELLIS 2 · from ${usd(LIB_PRICE.trellis2[512])}` }], st.engine,
     (v) => { st.engine = v; sync() }, { label: 'Model' })
   engineSeg.classList.add('ms-seg')
@@ -81,7 +79,7 @@ export function openAddSheet(ctx, { onAdded } = {}) {
     formRow('Name', name),
     h('div.ms-row', h('span.ms-label', 'Real size · W × D × H'), dims, h('span.ms-hint', 'Measure the piece, or take it from the product page: the model is fitted to exactly this.')),
     formRow('Category', category, 'Optional'),
-    mount, engineRow, resRow, cost, errEl)
+    engineRow, resRow, cost, errEl)
   const cancel = h('button.btn.btn-secondary.ms-btn', { type: 'button', onclick: () => sheet.close() }, 'Cancel')
   const go = h('button.btn.btn-primary.ms-btn.ms-primary', { type: 'button', onclick: () => submit() })
   const sheet = openSheet(shell, { title: 'Add furniture', sub: 'Made at its real size from a photo, an image link or a 3D file.', body, actions: [cancel, go], cls: 'ms-add', onClose: () => { if (preview) URL.revokeObjectURL(preview) } })
@@ -109,7 +107,6 @@ export function openAddSheet(ctx, { onAdded } = {}) {
     const id = slug(m.name)
     if (id) m.id = id
     if (category.value.trim()) m.category = category.value.trim()
-    if (st.mount) m.mount = 'wall'
     if (kind() === 'image') { m.engine = st.engine; if (st.engine === 'trellis2') m.resolution = st.resolution }
     return m
   }
@@ -173,20 +170,14 @@ export function openEditSheet(ctx, item, { onRemove } = {}) {
   const dims = dimsFields(item.dims_cm, () => sync())
   const turn = segmented([0, 90, 180, 270].map((d) => ({ value: String(d), label: d ? `${d}°` : 'As is' })), '0', (v) => { st.turn = Number(v); sync() }, { label: 'Turn the model' })
   turn.classList.add('ms-seg')
-  const hasSplat = !!item.assets?.splat
-  const showAs = segmented([{ value: 'glb', label: 'GLB' }, { value: 'splat', label: 'Splat' }], st.render, (v) => { st.render = v; sync() }, { label: 'Shows as' })
-  showAs.classList.add('ms-seg')
-  const mount = toggle({ label: 'Hangs on a wall', hint: 'New placements start on a wall', checked: st.mount, onChange: (on) => { st.mount = on; sync() } })
-  mount.classList.add('ms-toggle')
-  const refit = h('p.ms-note', { hidden: true }, pic('info', { size: 16 }), h('span', 'A new size or turn refits the model to it on homeserver. No model call, $0. Pieces already in a room update after a reload.'))
+  const refit = h('p.ms-note', { hidden: true }, pic('info', { size: 16 }), h('span', 'A new size or turn refits the model to it on the server. No model call, $0. Pieces already in a scene update after a reload.'))
   const errEl = h('p.ms-error', { role: 'alert', hidden: true })
   const body = h('div.ms-form',
     formRow('Name', name),
     formRow('Category', category),
     h('div.ms-row', h('span.ms-label', 'Real size · W × D × H'), dims),
     h('div.ms-row', h('span.ms-label', 'Turn the model'), turn, h('span.ms-hint', 'If its front doesn’t face you when placed: turns it for good, relative to now.')),
-    hasSplat ? h('div.ms-row', h('span.ms-label', 'Shows as'), showAs) : null,
-    mount, refit, errEl)
+    refit, errEl)
   const remove = h('button.btn.btn-quiet.ms-btn.ms-remove', { type: 'button', dataset: { midstudy: 'lib-remove' }, onclick: () => { sheet.close(); onRemove?.(item) } }, pic('trash', { size: 18 }), h('span', 'Remove'))
   const cancel = h('button.btn.btn-secondary.ms-btn', { type: 'button', onclick: () => sheet.close() }, 'Cancel')
   const save = h('button.btn.btn-primary.ms-btn.ms-primary', { type: 'button', onclick: () => submit() }, 'Save')
@@ -201,8 +192,6 @@ export function openEditSheet(ctx, item, { onRemove } = {}) {
     const d = dims.value()
     if (d && ['w', 'd', 'h'].some((k) => Math.abs(d[k] - (item.dims_cm?.[k] ?? 0)) > 1e-6)) p.dims_cm = d
     if (st.turn) p.yaw = st.turn
-    if (hasSplat && st.render !== (item.default_render || 'glb')) p.default_render = st.render
-    if (st.mount !== (item.mount === 'wall')) p.mount = st.mount ? 'wall' : 'floor'
     return p
   }
   function sync() {

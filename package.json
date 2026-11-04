@@ -4,10 +4,20 @@
   "type": "module",
   "scripts": {
     "serve": "python3 planner/serve.py",
-    "eval:pipeline": "bash evals/pipeline_offline.sh",
+    "eval:scenes-api": "node evals/scenes_api.mjs",
+    "eval:calib": "evals/py evals/calib_eval.py",
+    "eval:planner": "node evals/planner_scene.mjs",
+    "eval:occlusion": "node evals/occlusion.mjs",
+    "eval:floor": "node evals/floor.mjs",
+    "eval:render": "node evals/render.mjs",
     "eval:library": "bash evals/library_api.sh",
+    "eval:pipeline": "bash evals/pipeline_offline.sh",
+    "eval:phone": "node evals/phone.mjs",
+    "eval:all": "node evals/all.mjs",
+    "eval:real": "node evals/real_path.mjs",
+    "eval:selftest": "node evals/harness_selftest.mjs",
     "fixtures:scenes": "node fixtures/make_scene.mjs",
-    "check:scenes": "node fixtures/check_scenes.mjs"
+    "check:scenes": "evals/py fixtures/check_scenes.py"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

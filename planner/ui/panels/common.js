@@ -1,5 +1,5 @@
-// Shared bits for the area C panels (Library, In the room, Layouts, Room, Renders): thumbnails, empty states,
-// dates, money, steppers, and the "homeserver isn't answering" check. Styles: styles/panels.css.
+// Shared bits for the area C panels (Library, In the scene, Layouts, Scene, Renders): thumbnails, empty states,
+// dates, money, steppers, and the "the server isn't answering" check. Styles: styles/panels.css.
 import { h } from '../kit.js'
 import { icon } from '../icons.js'
 import { RENDER_MODELS } from '../../engine.js'
@@ -53,9 +53,9 @@ export function emptyState({ icon: ic, title, body, action }) {
   return h('div.p-empty', h('span.p-empty-icon', pic(ic, { size: 20 })), h('h3.p-empty-title', title), body ? h('p.p-empty-body', body) : null, action || null)
 }
 
-// Errors from fetch() failing (no HTTP status): the engine words them "homeserver isn't answering".
+// Errors from fetch() failing (no HTTP status): the engine words them "the server isn't answering".
 export const isOffline = (err) => /isn't answering|could not reach|Failed to fetch|NetworkError/i.test(err?.message || String(err || ''))
-export const OFFLINE_BODY = "Your changes stay in this tab. Check you're on home Wi-Fi or Tailscale, then retry."
+export const OFFLINE_BODY = "Your changes stay in this tab. Check the server is running and you're on its network, then retry."
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']

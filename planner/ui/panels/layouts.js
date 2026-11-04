@@ -1,16 +1,17 @@
-// Panel (area C): Layouts, the saved arrangements of furniture for the open room. A "Now in the room" card (Save
-// layout, Save as new… with a name check, the save-failed state with Retry), then the room's layouts: item count, saved
-// date, the current one marked, Load (asks first when the furniture has unsaved changes), and a "…" menu with Save
-// current over it and Delete…. Older (v1) layouts are marked and can't be deleted. Frames C3 (phone) and C6 sections.
+// Panel (area C): Layouts, the saved arrangements of furniture for the open scene (contract §2.7, per scene). A "Now in
+// the scene" card (Save layout, Save as new… with a name check, the save-failed state with Retry), then the scene's
+// layouts: item count, saved date, the current one marked, Load (asks first when the furniture has unsaved changes),
+// and a "…" menu with Save current over it and Delete…. Frames C3 (phone) and C6 sections.
 import { SLUG, quiet } from '../../engine.js'
 import { pic, withIcon, shortDate, isOffline, OFFLINE_BODY } from './common.js'
+import { sceneTitle } from '../../data.js'
 
 export const slugify = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '')
 // "evening-two-chairs" → "Evening two chairs"
 export const pretty = (name) => { const s = String(name || '').replace(/-/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1) }
 
-export function mount({ engine, data, shell, kit, icons }) {
+export function mount({ engine, scenes, shell, kit, icons }) {
   const { h, button } = kit
   const panel = shell.registerPanel({ id: 'layouts', label: 'Layouts', icon: 'layouts', phoneDetent: 'half', mount: () => {} })
   let asking = false   // the Save as new form is open
@@ -57,7 +58,7 @@ export function mount({ engine, data, shell, kit, icons }) {
       ]
       const v = await shell.confirm({
         title: `Load ${pretty(name)}?`, icon: 'warning',
-        body: cur ? `The furniture has changes that aren't saved to ${pretty(cur)}. Loading replaces it.` : "The furniture in the room isn't saved as a layout. Loading replaces it.",
+        body: cur ? `The furniture has changes that aren't saved to ${pretty(cur)}. Loading replaces it.` : "The furniture in the scene isn't saved as a layout. Loading replaces it.",
         actions: shell.isPhone() ? acts : [acts[2], acts[1], acts[0]],
       })
       if (v == null) return
@@ -72,7 +73,7 @@ export function mount({ engine, data, shell, kit, icons }) {
 
   async function del(name) {
     const ok = await shell.confirm({ title: `Delete ${pretty(name)}?`, icon: 'trash', danger: true, confirm: 'Delete',
-      body: "It's removed from homeserver. The furniture in the room stays as it is." })
+      body: "It's removed from the server. The furniture in the scene stays as it is." })
     if (!ok) return
     try { await engine.deleteLayoutInternal(name) } catch { return }
     shell.toast(`${pretty(name)} deleted`, { id: 'layout-deleted' })
@@ -100,16 +101,16 @@ export function mount({ engine, data, shell, kit, icons }) {
     const n = engine.getItems().length
     const cur = current()
     const dirty = engine.isLayoutDirty()
-    const title = cur ? pretty(cur) : n ? 'Not saved as a layout' : 'Empty room'
+    const title = cur ? pretty(cur) : n ? 'Not saved as a layout' : 'Nothing placed'
     const metaText = `${n} ${n === 1 ? 'item' : 'items'} · ${cur ? (dirty ? 'changed since saved' : 'saved') : n ? 'not saved yet' : 'add furniture first'}`
     const head = [
-      h('span.caps', 'Now in the room'),
+      h('span.caps', 'Now in the scene'),
       h('h3.ly-card-title', { title: cur || null }, title),
       h('span.ly-card-meta.tnum', dirty && n ? icons.unsavedGlyph(14) : null, h('span', metaText)),
     ]
     if (failure) {
       return [head,
-        h('div.p-fail', { role: 'alert' }, h('span.p-fail-title', pic('warning', { size: 16 }), h('span', failure.offline ? "Not saved · homeserver isn't answering" : 'Not saved')),
+        h('div.p-fail', { role: 'alert' }, h('span.p-fail-title', pic('warning', { size: 16 }), h('span', failure.offline ? "Not saved · the server isn't answering" : 'Not saved')),
           h('span.p-fail-body', failure.offline ? OFFLINE_BODY : failure.message)),
         h('div.ly-actions', withIcon(button({ label: 'Retry', kind: 'primary', block: true, disabled: busy, onClick: () => failure?.retry() }), 'retry'),
           shell.isPhone() ? null : button({ label: 'Cancel', kind: 'quiet', onClick: () => { failure = null; render() } }))]
@@ -156,10 +157,10 @@ export function mount({ engine, data, shell, kit, icons }) {
         shell.menu(e.currentTarget, [
           ...(isCur ? [] : [{ label: 'Load', icon: 'layouts', onSelect: () => quiet(load(d.name)) }]),
           { label: 'Save current over it', icon: 'bookmark', onSelect: async () => {
-            if (!isCur && !(await shell.confirm({ title: `Save over ${pretty(d.name)}?`, body: `It becomes the furniture in the room now (${engine.getItems().length} items).`, confirm: 'Save over it' }))) return
+            if (!isCur && !(await shell.confirm({ title: `Save over ${pretty(d.name)}?`, body: `It becomes the furniture in the scene now (${engine.getItems().length} items).`, confirm: 'Save over it' }))) return
             quiet(save(d.name))
           } },
-          ...(d.legacy || !engine.getRoomName() ? [] : ['-', { label: 'Delete…', icon: 'trash', danger: true, onSelect: () => quiet(del(d.name)) }]),
+          '-', { label: 'Delete…', icon: 'trash', danger: true, onSelect: () => quiet(del(d.name)) },
         ], { align: 'end' })
       } }, pic('more', { size: 18 }))
     const trail = isCur
@@ -167,7 +168,7 @@ export function mount({ engine, data, shell, kit, icons }) {
       : h('button.btn.btn-secondary.ly-load', { type: 'button', onclick: (e) => { e.stopPropagation(); quiet(load(d.name)) } }, 'Load')
     return h(`div.ly-row${isCur ? '.is-current' : ''}`, { role: 'listitem', title: d.name },
       h('span.ly-mark', pic(isCur ? 'bookmark-fill' : 'bookmark', { size: 18 })),
-      h('span.ly-text', h('span.ly-name', pretty(d.name), d.legacy ? h('span.p-tag', { dataset: { tip: 'Saved before rooms had their own layouts' } }, 'Older') : null),
+      h('span.ly-text', h('span.ly-name', pretty(d.name)),
         h('span.ly-meta.tnum', meta)),
       trail, more)
   }
@@ -179,19 +180,20 @@ export function mount({ engine, data, shell, kit, icons }) {
     card.classList.toggle('is-failed', !!failure)
     const typing = asking && card.contains(document.activeElement) && document.activeElement.tagName === 'INPUT'
     if (!typing) card.replaceChildren(...cardView().flat())
-    const room = engine.getRoomName()
-    const roomTitle = room ? data.getRoom(room)?.title || room : null
-    note.replaceChildren(h('span.dot'), h('span', roomTitle ? `Saved with ${roomTitle}. Other rooms keep their own.` : 'Layouts for the placeholder room and dropped scans are shared.'))
+    const name = engine.getSceneName()
+    const title = name ? sceneTitle(scenes.getScene(name) || engine.getScene()) : null
+    note.hidden = !name
+    note.replaceChildren(h('span.dot'), h('span', title ? `Saved with ${title}. Other scenes keep their own.` : ''))
     list.replaceChildren(...details.map((d) => rowView(d, cur)))
     none.hidden = details.length > 0
-    none.textContent = 'No layouts for this room yet. Arrange some furniture, then Save layout.'
+    none.textContent = name ? 'No layouts for this scene yet. Place some furniture, then Save layout.' : 'Open a scene to see its layouts.'
   }
 
   engine.events.addEventListener('layouts', render)
   engine.events.addEventListener('dirty', render)
   engine.events.addEventListener('items', (e) => { if (e.detail.change !== 'move') render() })
-  engine.events.addEventListener('room', (e) => { if (['loaded', 'title', 'missing'].includes(e.detail.phase)) { failure = null; render() } })
-  data.events.addEventListener('rooms', render)
+  engine.events.addEventListener('scene', (e) => { if (['opened', 'closed', 'title'].includes(e.detail.phase)) { failure = null; asking = false; render() } })
+  scenes.events.addEventListener('scenes', render)
   shell.events.addEventListener('mode', render)
   render()
 }

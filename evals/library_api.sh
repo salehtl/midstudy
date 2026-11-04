@@ -88,7 +88,7 @@ WEB_PID=$!
 SERVER_PID=""
 start_server() {  # start_server [serve.py args...]
   env -u FAL_KEY MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 MIDSTUDY_FAL_MOCK=fixtures/fal MIDSTUDY_FETCH_ALLOW="127.0.0.1:$IMGPORT" ${MIDSTUDY_FAL_MOCK_COST:+MIDSTUDY_FAL_MOCK_COST=1} \
-    python3 planner/serve.py --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --room-dir "$OUT/room" \
+    python3 planner/serve.py --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --scenes-dir "$OUT/scenes" \
     --layouts-dir "$OUT/layouts" --renders-dir "$OUT/renders" "$@" >>"$OUT/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 50); do curl -sf "$BASE/api/library" >/dev/null && return 0; sleep 0.2; done
