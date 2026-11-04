@@ -59,10 +59,11 @@ def sniff(head: bytes) -> str | None:
     return None
 
 
-def jpeg_walk(data: bytes) -> tuple[list[int], int] | None:
+def jpeg_walk(data: bytes, app0: list | None = None) -> tuple[list[int], int] | None:
     """Every segment marker in the whole JPEG (before the first scan, between progressive scans, after the last one)
     and the offset just past its end-of-image marker; None when the structure is broken or there is no EOI. The
-    entropy-coded data after each SOS runs to the next marker (FF 00 is a stuffed byte, FF D0-D7 a restart)."""
+    entropy-coded data after each SOS runs to the next marker (FF 00 is a stuffed byte, FF D0-D7 a restart). With
+    `app0`, each APP0 segment (its length bytes and payload) is appended to it."""
     n = len(data)
     if n < 4 or data[:2] != b"\xff\xd8":
         return None
@@ -86,6 +87,8 @@ def jpeg_walk(data: bytes) -> tuple[list[int], int] | None:
         if length < 2 or i + length > n:
             return None
         markers.append(m)
+        if m == 0xE0 and app0 is not None:
+            app0.append(data[i:i + length])
         i += length
         if m == 0xDA:
             while True:
@@ -106,15 +109,24 @@ def jpeg_markers(data: bytes) -> list[int] | None:
     return walk[0] if walk else None
 
 
+def plain_jfif(seg: bytes) -> bool:
+    """An APP0 segment (length bytes + payload) that is a plain JFIF header: exactly 16 bytes, no thumbnail."""
+    return len(seg) == 16 and seg[:2] == b"\x00\x10" and seg[2:7] == b"JFIF\x00" and seg[14:16] == b"\x00\x00"
+
+
 def is_clean_jpeg(data: bytes) -> bool:
-    """Only JFIF/APP0 and coding segments anywhere in the file (no APP1-APP15: EXIF, XMP, ICC, MPF, Adobe, IPTC; no
-    comment), even between progressive scans, and not a single byte after the end-of-image marker (an appended second
+    """Only plain JFIF APP0 headers and coding segments anywhere in the file (no APP1-APP15: EXIF, XMP, ICC, MPF, Adobe,
+    IPTC; no comment; no JFIF thumbnail and no JFXX extension, whose payload can be a whole JPEG with its own EXIF and
+    GPS), even between progressive scans, and not a single byte after the end-of-image marker (an appended second
     JPEG, as MPF writes one, carries its own EXIF and GPS; zero padding is refused too)."""
-    walk = jpeg_walk(data)
+    app0: list[bytes] = []
+    walk = jpeg_walk(data, app0)
     if walk is None:
         return False
     markers, end = walk
     if any(0xE1 <= m <= 0xEF or m == 0xFE for m in markers):
+        return False
+    if not all(plain_jfif(seg) for seg in app0):
         return False
     return end == len(data)
 

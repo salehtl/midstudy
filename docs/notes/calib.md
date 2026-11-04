@@ -1,5 +1,13 @@
 # Calib track notes
 
+> **Since verify round 2 (see `verify-fix-2.md`):** with an EXIF focal length within 8° of MoGe's FOV, `fit` uses the
+> EXIF FOV, keeps MoGe's pitch and roll, multiplies the height by `k = tan(fov_moge/2) / tan(fov_exif/2)` and scales
+> `depth.png` to agree with that camera's floor (`fov_source`, `moge.{height_m, scale, depth_scale}` in calib.json).
+> On the golden scenes given their true FOV as EXIF: height within 2 %, depth within 5 %, furniture drawn within 3 % of
+> its size (was 7–10 % too big). Lounge: FOV 69.63 (EXIF), height 1.432 (MoGe 1.352). Ingest passes a JPEG through only
+> with plain 16-byte JFIF APP0s (a JFXX or JFIF thumbnail is re-encoded away). PLAN.md §4.3 and contract §4.3 changed
+> with it. The golden scenes themselves (no EXIF) still miss E2's FOV/height/depth tolerances: nothing to correct with.
+
 > **Since verify round 1 (see `verify-fix-1.md`):** ingest's pass-through walks the whole JPEG (between progressive
 > scans too) and requires nothing after EOI, so an appended GPS JPEG, mid-scan EXIF or padding are re-encoded (5 new
 > pytest cases, 3 new E2 `--mock` checks); the over-25 MB message reads "the photo is 25.1 MB, over the 25 MB limit".

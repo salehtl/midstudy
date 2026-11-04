@@ -72,12 +72,19 @@
 [data-mode="phone"] .ws-adj-pitch { display: none; }
 [data-mode="phone"] .ws-adj-tools .ws-adj-btn { padding: 0 10px; }
 /* the ruler's real length: sets the scale (camera height) */
-.ws-adj-truerow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; line-height: 18px; color: var(--color-muted); }
-.ws-adj-truerow[hidden] { display: none; }
-.ws-adj-true-field { display: inline-flex; align-items: center; gap: 6px; }
+/* the ruler's row: one fixed height for the instruction and for "Know its real length? [ ] cm · Set scale", so the
+   card (and the photo above it) stays put between the two taps */
+.ws-adj-truerow { display: flex; align-items: center; min-height: 32px; font-size: 13px; line-height: 18px; color: var(--color-muted); }
+.ws-adj-truerow[hidden], .ws-adj-rhint[hidden], .ws-adj-truebox[hidden] { display: none; }
+.ws-adj-rhint { color: var(--color-accent); font-weight: 600; min-width: 0; }
+.ws-adj-truebox { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.ws-adj-true-field { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .ws-adj-true { width: 84px; height: 32px; padding: 0 8px; text-align: right; }
-[data-mode="phone"] .ws-adj-truerow { font-size: var(--text-body-phone); }
-[data-mode="phone"] .ws-adj-true { width: 96px; height: 44px; font-size: var(--text-body-phone); }
+[data-mode="phone"] .ws-adj-truerow { min-height: 44px; font-size: var(--text-body-phone); line-height: 22px; }
+[data-mode="phone"] .ws-adj-true-cap { display: none; }
+[data-mode="phone"] .ws-adj-true-field { flex: 1 1 auto; }
+[data-mode="phone"] .ws-adj-true { flex: 1 1 auto; width: auto; min-width: 0; height: 44px; font-size: var(--text-body-phone); text-align: left; }
+[data-mode="phone"] .ws-adj-ruler { display: none; } /* the pill on the photo shows the length; the row the instruction */
 
 /* the horizon line and its handle */
 .ws-horizon { stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 8 6; }
@@ -192,7 +199,7 @@
 .cv-title { margin: 0; font: 600 var(--text-body-phone)/20px var(--font-text); }
 .cv-swap { white-space: nowrap; }
 .rn-modal.is-phone .cv-head { padding: 0 6px 0 16px; gap: 8px; }
-.rn-modal.is-phone .cv-swap { display: none; }
+.rn-modal.is-phone .cv-swap { width: 44px; height: 44px; padding: 0; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
 .rn-modal.is-phone .cv-head .seg-sm { height: 50px; padding: 3px; }
 .rn-modal.is-phone .cv-head .seg-sm > button { height: 44px; padding: 0 14px; font-size: var(--text-body-phone); }
 .rn-modal.is-phone .rv-close { width: 44px; height: 44px; }
@@ -225,5 +232,9 @@
 /* the gesture hint sits above the tool row */
 [data-mode="phone"] .ws-hint { bottom: calc(var(--safe-bottom) + 8px + 64px + 8px + 56px + 8px); }
 [data-mode="phone"][data-ws-bar]:not([data-ws-bar=""]) .ws-hint { display: none; }
+/* phone toasts with a sheet open: at the top, over the scene switcher, not over the photo just above the sheet, where
+   the piece just placed or saved usually is (the stage starts 60 px down, so the photo stays clear) */
+[data-mode="phone"][data-sheet]:not([data-sheet=""]) #toasts { top: calc(var(--safe-top) + 3px); bottom: auto; width: calc(100vw - var(--safe-left) - var(--safe-right) - 24px); flex-direction: column; transition: none; }
+[data-mode="phone"][data-sheet]:not([data-sheet=""]) #toasts .toast { min-height: 52px; padding-top: 3px; padding-bottom: 3px; } /* ends above 60 px */
 /* phone toasts clear the tool row while it shows (no sheet, no bar in the dock's place) */
 [data-mode="phone"][data-sheet=""][data-ws-bar=""] #toasts { bottom: calc(var(--chrome-bottom) + 8px + 56px + 10px); }

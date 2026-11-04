@@ -57,6 +57,19 @@ else
   bad "midstudy-add runs on photos with GPS — $(tail -n 2 "$OUT/gpsjpg.err" "$OUT/gpspng.err" 2>/dev/null | tr '\n' ' ')"
 fi
 
+# verify round 2: a user's own GLB can embed a geotagged photo as a texture; model.glb is served, so its textures lose
+# their EXIF/GPS (APP1-15, COM, JFXX; PNG eXIf/tEXt), the image data kept as it is. source.glb keeps the upload.
+evals/py evals/lib/metadata.py make --kind gps-glb --out "$OUT/gps-texture.glb" >"$OUT/gps-glb-make.json" 2>&1
+if run gpsglb "$OUT/gps-texture.glb" --engine glb --name "GPS Texture" --id gps-texture --dims 50x50x50 --library "$LIB"; then
+  evals/py evals/lib/metadata.py inspect "$LIB/gps-texture/model.glb" >"$OUT/gps-glb-served.json" 2>&1
+  check "a GLB whose texture is a JPEG with EXIF/GPS: model.glb's texture carries none of it (and still decodes)" 'grep -q "\"canary\": true" "$OUT/gps-glb-make.json" && node -e "
+const s=JSON.parse(require(\"fs\").readFileSync(\"$OUT/gps-glb-served.json\",\"utf8\").trim().split(\"\\n\").pop());
+process.exit(s.clean && s.glb_images.length===1 && s.glb_images[0].w===64 && !s.glb_images[0].error ? 0 : 1)" && cmp -s "$OUT/gps-texture.glb" "$LIB/gps-texture/source.glb"' "$(tail -n 1 "$OUT/gps-glb-served.json" | head -c 300)"
+  check "…and the item still validates (bounds, dims)" 'evals/py evals/validate_library.py "$LIB/library.json" 2>&1 | grep -q "ok   gps-texture"'
+else
+  bad "midstudy-add runs on a GLB with a GPS texture — $(tail -n 2 "$OUT/gpsglb.err" | tr '\n' ' ')"
+fi
+
 if run trellis "$IMG" --engine trellis2 --name "Mock Trellis Chair" --id mock-trellis --dims "75 × 60.5 × 80" --library "$LIB"; then
   ok "trellis2 run succeeds (dims with spaces, ×, decimals)"
   check "trellis2 writes model.glb and no splat" '[ -f $LIB/mock-trellis/model.glb ] && [ ! -f $LIB/mock-trellis/splat.ply ]'

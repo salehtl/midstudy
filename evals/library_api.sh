@@ -218,6 +218,13 @@ check "a photo with EXIF/GPS (orientation 6): what the engine uploads (raw/engin
 import json,sys; m=json.loads(open(\"$OUT/gps-make.json\").read().strip().splitlines()[-1]); s=json.loads(open(\"$OUT/gps-sent.json\").read().strip().splitlines()[-1])
 sys.exit(0 if s[\"clean\"] and (s[\"w\"], s[\"h\"]) == (m[\"h\"], m[\"w\"]) else 1)" && grep -q "engine-input.jpg" "$LIB/gps-chair/raw/request.json"' "$code $st $(tail -n 1 "$OUT/gps-sent.json" | head -c 300)"
 check "library.json is still served" '[ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/library.json")" = 200 ]'
+# verify round 2: a GLB upload whose texture is a geotagged JPEG: the served model.glb carries no EXIF/GPS
+evals/py evals/lib/metadata.py make --kind gps-glb --out "$OUT/gps-texture.glb" >/dev/null 2>&1
+code=$(add gpsglb model "$OUT/gps-texture.glb" '{"name": "Glb Tex", "dims_cm": {"w": 50, "d": 50, "h": 50}, "engine": "glb"}')
+st=$(wait_job gpsglbj "$(jid gpsglb)")
+curl -s "$BASE/library/glb-tex/model.glb" -o "$OUT/glb-tex-served.glb"
+evals/py evals/lib/metadata.py inspect "$OUT/glb-tex-served.glb" >"$OUT/glb-tex-served.json" 2>&1
+check "a GLB with a GPS-tagged JPEG texture: /library/<id>/model.glb is served without the EXIF/GPS" '[ "$code" = 202 ] && [ "$st" = done ] && grep -q "\"clean\": true" "$OUT/glb-tex-served.json" && grep -q "\"glb_images\": \[{" "$OUT/glb-tex-served.json"' "$code $st $(tail -n 1 "$OUT/glb-tex-served.json" | head -c 300)"
 
 # --- argv safety: a name starting with "-" still works ---------------------------------------------------------------------
 code=$(add dash model fixtures/models/arrow.glb '{"name": "-Shelf", "id": "dash-shelf", "dims_cm": {"w": 40, "d": 20, "h": 10}}')

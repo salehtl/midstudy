@@ -9,7 +9,14 @@ looking for that string as well as by walking the file's structure.
               prog-midscan-gps    a progressive JPEG with an APP1 EXIF/GPS segment between its first two scans
               zero-pad            a clean JPEG followed by 64 KB of zeros
               gps-png             a PNG with an eXIf chunk (GPS) and a tEXt comment
-    metadata.py inspect F       → {format, size, canary, exif, gps, app_markers, com, after_eoi, png_chunks}
+              jfxx-gps            a clean JPEG plus a JFXX APP0 extension whose thumbnail is a JPEG with EXIF/GPS
+                                  (verify round 2: APP0 is metadata too, unless it is a plain 16-byte JFIF header)
+              gps-glb             a GLB box whose base-colour texture is a JPEG with EXIF/GPS (a user's own model)
+              big12mp             a 4000 x 3000 JPEG (no metadata)
+              big12mp-rst         the same with a parameterless RST0 marker right after SOI (Pillow still reads
+                                  it): its size must still be read from the frame header (qwen is priced by size)
+    metadata.py inspect F       → {format, size, canary, exif, gps, app_markers, app0_extra, com, after_eoi,
+                                   png_chunks, glb_images}
 
 Each prints one JSON object as its last stdout line.
 """
@@ -75,10 +82,86 @@ def make(kind: str, out: Path, src: Path | None, orientation: int | None) -> dic
         chunk = struct.pack(">I", len(text)) + b"tEXt" + text + struct.pack(">I", zlib.crc32(b"tEXt" + text) & 0xFFFFFFFF)
         iend = png.rindex(b"IEND") - 4
         data = png[:iend] + chunk + png[iend:]
+    elif kind == "jfxx-gps":
+        clean = jpeg(im)
+        i = 4 + int.from_bytes(clean[4:6], "big")  # past SOI and the JFIF APP0
+        thumb = jpeg(im.resize((64, 48)), exif=gps_exif())
+        payload = b"JFXX\x00\x10" + thumb
+        data = clean[:i] + b"\xff\xe0" + struct.pack(">H", len(payload) + 2) + payload + clean[i:]
+    elif kind == "gps-glb":
+        data = gps_glb(jpeg(im.resize((64, 64)), exif=gps_exif()))
+    elif kind in ("big12mp", "big12mp-rst"):
+        big = base_image(None, 4000, 3000)
+        data = jpeg(big)
+        if kind == "big12mp-rst":
+            data = data[:2] + b"\xff\xd0" + data[2:]
     else:
         raise SystemExit(f"unknown kind {kind}")
     out.write_bytes(data)
     return {"ok": True, "out": str(out), "bytes": len(data), **inspect(out)}
+
+
+def gps_glb(texture: bytes) -> bytes:
+    """A 0.5 m textured box as a GLB (positions, UVs, indices, one material whose base colour is `texture`)."""
+    pos, uv, idx = [], [], []
+    for axis in range(3):
+        for sign in (-1, 1):
+            base = len(pos)
+            a, b = [(axis + 1) % 3, (axis + 2) % 3]
+            for (s, t) in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                v = [0.0, 0.0, 0.0]
+                v[axis], v[a], v[b] = 0.25 * sign, 0.25 * s, 0.25 * t
+                v[1] += 0.25
+                pos.append(v)
+                uv.append([(s + 1) / 2, (t + 1) / 2])
+            idx += [base, base + 1, base + 2, base, base + 2, base + 3] if sign > 0 else [base, base + 2, base + 1, base, base + 3, base + 2]
+    pb = b"".join(struct.pack("<3f", *v) for v in pos)
+    ub = b"".join(struct.pack("<2f", *v) for v in uv)
+    ib = b"".join(struct.pack("<H", i) for i in idx)
+    ib += b"\0" * (-len(ib) % 4)
+    tex = texture + b"\0" * (-len(texture) % 4)
+    blob = pb + ub + ib + tex
+    o_u, o_i, o_t = len(pb), len(pb) + len(ub), len(pb) + len(ub) + len(ib)
+    doc = {
+        "asset": {"version": "2.0", "generator": "midstudy evals/lib/metadata.py"},
+        "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0, "name": "box"}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2, "material": 0}]}],
+        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0}}],
+        "textures": [{"source": 0}], "images": [{"bufferView": 3, "mimeType": "image/jpeg"}],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": len(pos), "type": "VEC3",
+             "min": [min(v[k] for v in pos) for k in range(3)], "max": [max(v[k] for v in pos) for k in range(3)]},
+            {"bufferView": 1, "componentType": 5126, "count": len(uv), "type": "VEC2"},
+            {"bufferView": 2, "componentType": 5123, "count": len(idx), "type": "SCALAR"}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(pb)}, {"buffer": 0, "byteOffset": o_u, "byteLength": len(ub)},
+                        {"buffer": 0, "byteOffset": o_i, "byteLength": len(idx) * 2}, {"buffer": 0, "byteOffset": o_t, "byteLength": len(texture)}],
+        "buffers": [{"byteLength": len(blob)}],
+    }
+    j = json.dumps(doc).encode()
+    j += b" " * (-len(j) % 4)
+    body = struct.pack("<II", len(j), 0x4E4F534A) + j + struct.pack("<II", len(blob), 0x004E4942) + blob
+    return b"glTF" + struct.pack("<II", 2, 12 + len(body)) + body
+
+
+def glb_images(data: bytes) -> list[bytes]:
+    """The images embedded in a GLB's binary chunk (by bufferView)."""
+    if data[:4] != b"glTF":
+        return []
+    off, doc, blob = 12, None, b""
+    while off + 8 <= len(data):
+        n, kind = struct.unpack_from("<II", data, off)
+        chunk = data[off + 8:off + 8 + n]
+        if kind == 0x4E4F534A:
+            doc = json.loads(chunk)
+        elif kind == 0x004E4942:
+            blob = chunk
+        off += 8 + n
+    out = []
+    for im in (doc or {}).get("images", []):
+        if "bufferView" in im:
+            v = doc["bufferViews"][im["bufferView"]]
+            out.append(bytes(blob[v.get("byteOffset", 0):v.get("byteOffset", 0) + v["byteLength"]]))
+    return out
 
 
 def jpeg_walk(data: bytes):
@@ -115,9 +198,40 @@ def jpeg_walk(data: bytes):
     return None
 
 
+def app0_extras(data: bytes) -> int:
+    """APP0 segments before the first scan that aren't a plain 16-byte JFIF header (a JFXX extension, a thumbnail)."""
+    n, i, extra = len(data), 2, 0
+    while i + 4 <= n and data[i] == 0xFF:
+        m = data[i + 1]
+        if m == 0xFF:
+            i += 1
+            continue
+        if m == 0xDA or m == 0xD9:
+            break
+        if 0xD0 <= m <= 0xD7 or m in (0x01, 0xD8):
+            i += 2
+            continue
+        length = int.from_bytes(data[i + 2:i + 4], "big")
+        seg = data[i + 2:i + 2 + length]
+        if m == 0xE0 and not (length == 16 and seg[2:7] == b"JFIF\x00" and seg[14:16] == b"\x00\x00"):
+            extra += 1
+        i += 2 + length
+    return extra
+
+
 def inspect(path: Path) -> dict:
     data = path.read_bytes()
     out = {"size": len(data), "canary": CANARY in data, "exif": False, "gps": False}
+    if data[:4] == b"glTF":
+        out["format"] = "glb"
+        out["glb_images"] = []
+        for k, img in enumerate(glb_images(data)):
+            f = path.with_name(f"{path.name}.image{k}")
+            f.write_bytes(img)
+            out["glb_images"].append(inspect(f))
+            f.unlink()
+        out["clean"] = not out["canary"] and all(x.get("clean") for x in out["glb_images"])
+        return out
     if data[:2] == b"\xff\xd8":
         out["format"] = "jpeg"
         walk = jpeg_walk(data)
@@ -126,6 +240,7 @@ def inspect(path: Path) -> dict:
         else:
             markers, end = walk
             out["app_markers"] = sorted({f"APP{m - 0xE0}" for m in markers if 0xE0 <= m <= 0xEF})
+            out["app0_extra"] = app0_extras(data)
             out["com"] = sum(1 for m in markers if m == 0xFE)
             out["after_eoi"] = len(data) - end
     elif data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -147,7 +262,7 @@ def inspect(path: Path) -> dict:
             out["orientation"] = ex.get(0x0112)
     except Exception as e:  # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"
-    out["clean"] = (not out["canary"] and not out["exif"] and not out["gps"]
+    out["clean"] = (not out["canary"] and not out["exif"] and not out["gps"] and not out.get("app0_extra")
                     and not [m for m in out.get("app_markers", []) if m != "APP0"] and not out.get("com")
                     and not out.get("after_eoi") and not set(out.get("png_chunks", [])) & {"eXIf", "tEXt", "iTXt", "zTXt"})
     return out

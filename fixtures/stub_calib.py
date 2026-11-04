@@ -87,7 +87,7 @@ def jpeg_size(data: bytes) -> tuple[int, int]:
 
 def strip_metadata(data: bytes) -> tuple[bytes, list[str]]:
     """Drop APP1-APP15 and COM segments wherever they are (before the first scan and between progressive scans) and
-    anything after EOI (an appended second JPEG carries its own EXIF/GPS); keep SOI, APP0 (JFIF) and the image data
+    anything after EOI (an appended second JPEG carries its own EXIF/GPS); keep SOI, a plain JFIF APP0 and the image data
     as it is. The whole file is walked: the entropy-coded data after each SOS runs to the next marker."""
     n = len(data)
     out, dropped, i = bytearray(data[:2]), [], 2
@@ -115,6 +115,17 @@ def strip_metadata(data: bytes) -> tuple[bytes, list[str]]:
             break
         if 0xE1 <= m <= 0xEF or m == 0xFE:
             dropped.append({0xE1: "EXIF/XMP", 0xE2: "ICC", 0xED: "IPTC", 0xFE: "comment"}.get(m, f"APP{m - 0xE0}"))
+        elif m == 0xE0:
+            # APP0 only as a plain 16-byte JFIF header: a JFIF thumbnail or a JFXX extension (a whole JPEG, which can
+            # carry its own EXIF and GPS) is dropped.
+            seg = data[i:i + length]
+            if seg[2:7] == b"JFIF\x00" and len(seg) >= 16:
+                plain = b"\x00\x10" + seg[2:14] + b"\x00\x00"
+                out += b"\xff\xe0" + plain
+                if plain != seg:
+                    dropped.append("JFIF thumbnail")
+            else:
+                dropped.append("APP0 extension (JFXX)")
         else:
             out += bytes((0xFF, m)) + data[i:i + length]
         i += length

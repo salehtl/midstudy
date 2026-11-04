@@ -74,6 +74,13 @@ const cam = calib?.camera
 ev.note(`camera ${fmt(cam)}; EXIF ${fmt(calib?.exif)}; fov_disagreement ${fmt(calib?.fov_disagreement ?? null)}`)
 ev.check('the camera is plausible for a hand-held phone: height 1.1–1.6 m, pitch −20…0°, |roll| < 3°, FOV within 8° of the EXIF 69.6°',
   cam && cam.height_m > 1.1 && cam.height_m < 1.6 && cam.pitch_deg < 0 && cam.pitch_deg > -20 && Math.abs(cam.roll_deg) < 3 && Math.abs(cam.fov_y_deg - 69.63) <= 8, fmt(cam))
+// verify round 2 (contract §4.3 Fit): the EXIF focal length agrees with MoGe within 8°, so the camera takes the EXIF FOV
+// and MoGe's height times k = tan(fov_moge/2) / tan(fov_exif/2); MoGe's own estimates stay in calib.moge.
+const mo = calib?.moge || {}
+const kExif = mo.fov_y_deg ? Math.tan((mo.fov_y_deg * Math.PI) / 360) / Math.tan((69.63 * Math.PI) / 360) : null
+ev.check('the camera uses the EXIF FOV (fov_source exif, 69.63°) and MoGe\'s height corrected by the focal ratio',
+  calib?.fov_source === 'exif' && Math.abs(cam.fov_y_deg - 69.63) < 0.05 && kExif && Math.abs(cam.height_m - mo.height_m * kExif) < 0.003,
+  `fov_source ${calib?.fov_source}; fov ${cam?.fov_y_deg} (MoGe ${mo.fov_y_deg}); height ${cam?.height_m} = ${mo.height_m} × ${kExif?.toFixed(4)}; depth × ${mo.depth_scale}`)
 ev.check('scene.json took the calibrated camera (camera_source auto) and has depth', done?.camera_source === 'auto' && !!done?.depth_url, `${done?.camera_source}; depth ${done?.depth_url}`)
 const opened = NAME ? await waitFor(async () => (await state(page))?.scene?.name === NAME, { timeoutMs: 30000 }) : null
 let openHow = 'opened by itself when calibrated'
@@ -108,7 +115,9 @@ ev.check('Adjust floor opens on it, and Looks right without a change keeps camer
 
 // --- the copy without EXIF, and the same as HEIC, land on a similar camera -------------------------------------------------------
 ev.section('upper-lounge.jpg (no EXIF) and a HEIC of it through POST /api/scenes')
-const near = (c2) => cam && c2 ? { fov: c2.fov_y_deg - cam.fov_y_deg, height_cm: 100 * (c2.height_m - cam.height_m), pitch: c2.pitch_deg - cam.pitch_deg, roll: c2.roll_deg - cam.roll_deg } : null
+// The copies have no EXIF, so they keep MoGe's own FOV and scale: compare them with the original's MoGe estimate.
+const camMoge = cam && calib?.fov_source === 'exif' ? { ...cam, fov_y_deg: mo.fov_y_deg, height_m: mo.height_m } : cam
+const near = (c2) => camMoge && c2 ? { fov: c2.fov_y_deg - camMoge.fov_y_deg, height_cm: 100 * (c2.height_m - camMoge.height_m), pitch: c2.pitch_deg - camMoge.pitch_deg, roll: c2.roll_deg - camMoge.roll_deg } : null
 const close = (d) => d && Math.abs(d.fov) <= 1.5 && Math.abs(d.height_cm) <= 5 && Math.abs(d.pitch) <= 1.5 && Math.abs(d.roll) <= 1.5
 if (fs.existsSync(COPY)) {
   const up = await uploadScene(srv.base, fs.readFileSync(COPY), { filename: 'upper-lounge.jpg', title: 'Lounge (no EXIF)' })
@@ -117,7 +126,7 @@ if (fs.existsSync(COPY)) {
   const c2 = d2?.calib?.camera
   ev.check('JPEG without EXIF: 202, calibrates with the floor found, exif null', up.status === 202 && d2?.calib_status === 'done' && d2?.calib?.floor?.found === true && d2?.calib?.exif == null,
     `${up.status}; ${d2?.calib_status}; ${d2?.w} × ${d2?.h}; floor ${fmt(d2?.calib?.floor)}; elapsed_s ${d2?.calib?.elapsed_s}`)
-  ev.check('…its camera is within 1.5° and 5 cm of the camera original\'s', close(near(c2)), `${fmt(c2)}; Δ ${fmt(near(c2))}`)
+  ev.check('…its camera (MoGe\'s own FOV, no EXIF) is within 1.5° and 5 cm of MoGe\'s estimate for the camera original', close(near(c2)), `${fmt(c2)}; Δ ${fmt(near(c2))}`)
   // The phone's own format: HEIC (made here with macOS sips from the metadata-free copy; deleted afterwards).
   const heic = path.join(ev.out, 'upper-lounge.heic')
   const { spawnSync } = await import('node:child_process')
@@ -131,7 +140,7 @@ if (fs.existsSync(COPY)) {
     const src3 = n3 ? fs.readdirSync(path.join(srv.dirs.scenes, n3)).filter((f) => f.startsWith('source.')) : []
     ev.check('HEIC: 202, source.heic kept, photo.jpg written, calibrates with the floor found', uh.status === 202 && d3?.calib_status === 'done' && d3?.calib?.floor?.found === true && src3.includes('source.heic') && d3?.w === 2000,
       `${uh.status}; ${d3?.calib_status}; ${d3?.w} × ${d3?.h}; ${src3.join(',')}; floor ${fmt(d3?.calib?.floor)}; ${d3?.calib_error || ''}`)
-    ev.check('…its camera is within 1.5° and 5 cm of the camera original\'s', close(near(c3)), `${fmt(c3)}; Δ ${fmt(near(c3))}`)
+    ev.check('…its camera (MoGe\'s own FOV, no EXIF) is within 1.5° and 5 cm of MoGe\'s estimate for the camera original', close(near(c3)), `${fmt(c3)}; Δ ${fmt(near(c3))}`)
   } else ev.skip('HEIC upload', `sips could not make a HEIC: ${sp.stderr || sp.error}`)
 } else ev.skip('no-EXIF copy and HEIC', `${path.relative(REPO, COPY)} is missing`)
 

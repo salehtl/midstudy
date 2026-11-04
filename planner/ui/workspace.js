@@ -337,8 +337,8 @@ export function mount(ctx) {
     const pitch = h('span.ws-adj-pitch.tnum')
     const rulerBtn = h('button.ws-adj-btn.is-quiet', { type: 'button', 'aria-pressed': 'false', onclick: () => engine.setRulerActive(!engine.getRuler().active) }, glyph(G.ruler, 18), h('span', 'Ruler'))
     const rulerText = h('span.ws-adj-ruler.tnum')
-    // A known length fixes the scale: "Really [ ] cm · Set scale" scales the camera height (engine.setRulerTrueLength).
-    const trueInput = h('input.input.ws-adj-true.tnum', { type: 'text', inputmode: 'decimal', enterkeyhint: 'done', autocomplete: 'off', spellcheck: false, placeholder: 'e.g. 200', 'aria-label': 'Its real length, cm', dataset: { midstudy: 'ruler-true' } })
+    // A known length fixes the scale: "[ ] cm · Set scale" scales the camera height (engine.setRulerTrueLength).
+    const trueInput = h('input.input.ws-adj-true.tnum', { type: 'text', inputmode: 'decimal', enterkeyhint: 'done', autocomplete: 'off', spellcheck: false, placeholder: phone() ? 'Real length' : 'e.g. 200', 'aria-label': 'Its real length, cm', dataset: { midstudy: 'ruler-true' } })
     const applyTrue = () => {
       const cm = parseFloat(String(trueInput.value).replace(',', '.'))
       if (!(cm > 0)) { trueInput.focus(); return }
@@ -349,9 +349,14 @@ export function mount(ctx) {
       shell.toast(exact ? `Scale set from ${Math.round(cm)} cm: camera height ${hcm} cm. Looks right saves it.` : `Camera height is at its limit (${hcm} cm): measure a longer length.`, { kind: exact ? 'ok' : 'info', id: 'ruler-scale', ms: 5000 })
     }
     trueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyTrue() } })
-    const trueRow = h('div.ws-adj-truerow', { hidden: true },
+    // The ruler's row shows while the ruler is on, at one fixed height: the instruction until two points are down, then
+    // "Know its real length? [ ] cm · Set scale". So the card (and with it the photo above) doesn't move between the
+    // taps, and on the phone the instruction has a whole line instead of hiding behind Reset.
+    const rulerHint = h('span.ws-adj-rhint', { role: 'status' })
+    const trueBox = h('div.ws-adj-truebox', { hidden: true },
       h('span.ws-adj-true-cap', 'Know its real length?'), h('label.ws-adj-true-field', trueInput, h('span', 'cm')),
       h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'ruler-set', tip: 'Scale the room so the ruler reads this length' }, onclick: applyTrue }, 'Set scale'))
+    const trueRow = h('div.ws-adj-truerow', { hidden: true }, rulerHint, trueBox)
     const reset = h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'floor-reset', tip: 'Back to the automatic camera' }, onclick: () => engine.resetCamera() }, 'Reset')
     const ok = h('button.ws-adj-btn.is-primary', { type: 'button', dataset: { midstudy: 'floor-ok' }, onclick: () => quiet(looksRight()) }, 'Looks right')
     const close = h('button.ws-adj-close', { type: 'button', 'aria-label': 'Close Adjust floor', onclick: () => setAdjust(false) }, icon('close', { size: 16, stroke: 2 }))
@@ -371,9 +376,13 @@ export function mount(ctx) {
       pitch.textContent = `Tilt ${fmt1(engine.getCamera().pitch_deg)}°`
       const r = engine.getRuler()
       rulerBtn.setAttribute('aria-pressed', String(r.active))
-      rulerText.textContent = r.active ? (r.meters != null ? `${Math.round(r.meters * 100)} cm` : r.points.length ? 'Tap the other end' : 'Tap two points on the floor') : ''
-      const showTrue = r.active && r.meters != null
-      if (trueRow.hidden === showTrue) { trueRow.hidden = !showTrue; requestAnimationFrame(syncStage) }
+      rulerText.textContent = r.active && r.meters != null ? `${Math.round(r.meters * 100)} cm` : ''
+      const measured = r.active && r.meters != null
+      const tap = phone() ? 'Tap' : 'Click'
+      rulerHint.textContent = r.active && !measured ? (r.points.length ? `${tap} the other end` : `${tap} two points on the floor, the ends of something you can measure`) : ''
+      rulerHint.hidden = measured
+      trueBox.hidden = !measured
+      if (trueRow.hidden === r.active) { trueRow.hidden = !r.active; requestAnimationFrame(syncStage) }
       reset.disabled = false
     }
     adjustCard.sync()
@@ -614,7 +623,9 @@ export function mount(ctx) {
         const top = Math.min(...f.box.map((p) => engine.worldToScreen(p).y))
         ly = top - lh - 10
       }
-      px(label, Math.max(8, Math.min(vw() - lw - 8, lx)), Math.max(8, Math.min(vh() - lh - 8, ly)))
+      // ...and left of the phone's lift column, so the name and size never run under it (a zoomed piece at the right).
+      const rightEdge = liftR && liftR.width ? Math.min(vw() - 8, liftR.left - 8) : vw() - 8
+      px(label, Math.max(8, Math.min(rightEdge - lw, lx)), Math.max(8, Math.min(vh() - lh - 8, ly)))
       fpPoly.style.display = fpStem.style.display = ''
       label.hidden = grip.hidden = false
     } else {

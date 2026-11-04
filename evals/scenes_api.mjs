@@ -467,6 +467,95 @@ if (srv3.up) {
   await srv3.stop()
 }
 
+// --- verify round 2: privacy and framing (docs/notes/verify-fix-2.md) -----------------------------------------------------------
+// A raw TCP exchange that waits for the server to close the connection (or waitMs): {text, ms to the first byte, closedMs}.
+const tcpClose = (port, payload, { waitMs = 15000 } = {}) => new Promise((resolve) => {
+  const sock = net.connect(port, '127.0.0.1'), t0 = Date.now()
+  let got = '', first = null, closed = null
+  const timer = setTimeout(() => { sock.destroy(); resolve({ text: got, ms: first, closedMs: closed }) }, waitMs)
+  sock.on('data', (d) => { if (first == null) first = Date.now() - t0; got += d.toString('latin1') })
+  const end = () => { if (closed == null) closed = Date.now() - t0; clearTimeout(timer); sock.destroy(); resolve({ text: got, ms: first, closedMs: closed }) }
+  sock.on('end', end)
+  sock.on('close', end)
+  sock.on('error', end)
+  sock.write(typeof payload === 'string' ? Buffer.from(payload, 'latin1') : payload)
+})
+const line1 = (t) => clip((t.text || '').split('\r\n')[0], 60)
+
+ev.section('verify round 2: APP0 extensions, camera make and model, unreadable sizes')
+const srv4 = await startServer(ev, { env: { MIDSTUDY_SOCKET_TIMEOUT: '2' } })
+ev.check('a fourth server (stub calibration; MIDSTUDY_SOCKET_TIMEOUT=2 so a stalled body is dropped in 2 s)', srv4.up, srv4.up ? srv4.base : srv4.why)
+if (srv4.up) {
+  const B4 = srv4.base
+  const jfxx = fs.readFileSync(makeImg('jfxx-gps'))
+  const up = await uploadScene(B4, jfxx, { filename: 'jfxx.jpg' })
+  const s4 = await waitScene(B4, up.json?.scene || '_', 30000)
+  const served = s4?.photo_url ? await raw(B4, 'GET', s4.photo_url.split('?')[0]) : null
+  if (served?.status === 200) fs.writeFileSync(path.join(META, 'served-jfxx.jpg'), served.buf)
+  const sInfo = served?.status === 200 ? meta('inspect', path.join(META, 'served-jfxx.jpg')) : { error: served?.status }
+  ev.check('a JPEG with a JFXX APP0 whose thumbnail carries EXIF/GPS: photo.jpg is not passed through and has no APP0 extension (stub ingest)',
+    sInfo.clean === true && sInfo.app0_extra === 0 && served && Buffer.compare(served.buf, jfxx) !== 0, fmt(sInfo))
+  let r = await api.send(B4, 'PUT', `/api/scenes/${s4?.name}/thumb`, { image: dataUri('image/jpeg', jfxx) })
+  const tInfo = r.status === 200 ? (fs.writeFileSync(path.join(META, 'thumb-jfxx.jpg'), (await raw(B4, 'GET', `/scenes/${s4.name}/thumb.jpg`)).buf), meta('inspect', path.join(META, 'thumb-jfxx.jpg'))) : { error: r.status }
+  ev.check('…a thumbnail with it is stored and served without the JFXX segment', tInfo.clean === true && tInfo.app0_extra === 0, fmt(tInfo))
+  r = await api.send(B4, 'POST', '/api/render', { image: dataUri('image/jpeg', jfxx), scene: s4?.name })
+  const rInfo = r.json?.name ? ['', '-input'].map((x) => meta('inspect', path.join(srv4.dirs.renders, `${r.json.name}${x}.jpg`))) : []
+  ev.check('…a render composite with it: -input.jpg and the (mock) result carry none of it', r.status === 200 && rInfo.length === 2 && rInfo.every((x) => x.clean && x.app0_extra === 0), fmt({ status: r.status, rInfo }))
+
+  // calib.json keeps the camera's make and model on disk; the API serves neither (the stub's default fallback records them)
+  const gps = fs.readFileSync(makeImg('gps-jpeg', ['--from', LIVING.photo]))
+  const upG = await uploadScene(B4, gps, { filename: 'IMG_0002.JPG' })
+  const G = upG.json?.scene
+  await waitScene(B4, G || '_', 30000)
+  const disk = (() => { try { return JSON.parse(fs.readFileSync(path.join(srv4.dirs.scenes, G, 'calib.json'), 'utf8')) } catch { return null } })()
+  const gotScene = await api.get(B4, `/api/scenes/${G}`)
+  const jobsTxt = (await raw(B4, 'GET', '/api/scenes/jobs')).text || ''
+  ev.check('the scene API serves no camera make or model (calib.exif without make/model, in GET /api/scenes/<n> and the jobs); calib.json on disk keeps them',
+    disk?.exif?.model === 'TestCam GPS' && gotScene.status === 200 && gotScene.json?.calib && !('make' in (gotScene.json.calib.exif || {})) && !('model' in (gotScene.json.calib.exif || {}))
+      && !/TestCam/.test(JSON.stringify(gotScene.json)) && !/TestCam/.test(jobsTxt),
+    fmt({ disk: disk?.exif, served: gotScene.json?.calib?.exif, jobsLeak: /TestCam/.test(jobsTxt) }))
+
+  // framing
+  let t = await tcpClose(srv4.port, `POST /api/scenes HTTP/1.1\r\nHost: 127.0.0.1:${srv4.port}\r\nX-Midstudy: 1\r\nX-Midstudy-Filename: a.jpg\r\nContent-Length: \xb2\r\nConnection: close\r\n\r\n`, { waitMs: 6000 })
+  ev.check('Content-Length "²" (a latin-1 digit) → 400 with one sentence, not a 500 with a Python exception', /^HTTP\/1\.[01] 400/.test(t.text) && !/ValueError|invalid literal/.test(t.text), `${line1(t)} ${clip(t.text.split('\r\n\r\n')[1], 100)}`)
+  const libMeta = Buffer.from(JSON.stringify({ name: 'Box', dims_cm: { w: 1, d: 1, h: 1 }, engine: 'glb' })).toString('base64')
+  t = await tcpClose(srv4.port, `POST /api/library/items HTTP/1.1\r\nHost: 127.0.0.1:${srv4.port}\r\nX-Midstudy: 1\r\nX-Midstudy-Kind: model\r\nX-Midstudy-Filename: a.glb\r\nX-Midstudy-Meta: ${libMeta}\r\nContent-Length: \xb9\r\nConnection: close\r\n\r\n`, { waitMs: 6000 })
+  ev.check('…the same on POST /api/library/items ("¹")', /^HTTP\/1\.[01] 400/.test(t.text) && !/ValueError/.test(t.text), line1(t))
+  t = await tcpClose(srv4.port, Buffer.concat([Buffer.from(`POST /api/scenes HTTP/1.1\r\nHost: 127.0.0.1:${srv4.port}\r\nX-Midstudy: 1\r\nX-Midstudy-Filename: a.jpg\r\nContent-Length: 1000\r\n\r\n`), livingBytes.subarray(0, 10)]), { waitMs: 8000 })
+  ev.check('an upload that stalls (10 of 1000 bytes) is dropped after the socket timeout with a 408 sentence, not a 500', /^HTTP\/1\.[01] 408/.test(t.text) && !/TimeoutError/.test(t.text) && t.closedMs != null && t.closedMs < 6000,
+    `${line1(t)} after ${t.ms} ms, closed at ${t.closedMs} ms; ${clip(t.text.split('\r\n\r\n')[1], 100)}`)
+  t = await tcpClose(srv4.port, 'GET /api/spend HTTP/1.0\r\n\r\n', { waitMs: 4000 })
+  ev.check('a request with no Host header → 403', /^HTTP\/1\.[01] 403/.test(t.text), line1(t))
+  await srv4.stop()
+}
+
+const srv5 = await startServer(ev, { spendUsd: '0.05', mockCost: true })
+ev.check('a fifth server: --daily-spend-usd 0.05, MIDSTUDY_FAL_MOCK_COST=1 (mocked, $0 really), default 30 s socket timeout', srv5.up, srv5.up ? srv5.base : srv5.why)
+if (srv5.up) {
+  const B5 = srv5.base
+  const costs0 = fs.readFileSync(srv5.dirs.costs, 'utf8')
+  const big = fs.readFileSync(makeImg('big12mp')), bigRst = fs.readFileSync(makeImg('big12mp-rst'))
+  let r = await api.send(B5, 'POST', '/api/render', { image: dataUri('image/jpeg', big), model: 'qwen' })
+  ev.check('qwen on a 4000 × 3000 composite costs $0.36: more than the $0.05 cap → 402', r.status === 402 && /0\.36/.test(r.json?.error || ''), st(r))
+  r = await api.send(B5, 'POST', '/api/render', { image: dataUri('image/jpeg', bigRst), model: 'qwen' })
+  ev.check('…the same JPEG with a parameterless RST0 after SOI is still read as 12 MP → 402 (not priced at 1 MP)', r.status === 402 && /0\.36/.test(r.json?.error || ''), st(r))
+  const noSof = Buffer.from(big)
+  const sof = noSof.indexOf(Buffer.from([0xff, 0xc0]))
+  noSof[sof + 1] = 0xe5 // the frame header becomes an APP5 segment, which the server drops: no size to read
+  r = await api.send(B5, 'POST', '/api/render', { image: dataUri('image/jpeg', noSof), model: 'qwen' })
+  ev.check('a composite whose size can\'t be read from its frame header → 400, no call', r.status === 400 && /size/.test(r.json?.error || ''), st(r))
+  ev.check('no cost rows, no render files from these', fs.readFileSync(srv5.dirs.costs, 'utf8') === costs0 && fs.readdirSync(srv5.dirs.renders).length === 0, fmt(fs.readdirSync(srv5.dirs.renders)))
+  const t = await tcpClose(srv5.port, `POST /api/scenes HTTP/1.1\r\nHost: 127.0.0.1:${srv5.port}\r\nX-Midstudy: 1\r\nX-Midstudy-Filename: big.jpg\r\nContent-Length: ${25 * 1024 * 1024 + 1}\r\n\r\n`, { waitMs: 20000 })
+  ev.check('after an early 413 to a client that then sends nothing, the server closes within the 5 s drain (not the 30 s socket timeout)',
+    /^HTTP\/1\.[01] 413/.test(t.text) && t.ms < 2500 && t.closedMs != null && t.closedMs < 7500, `${line1(t)} at ${t.ms} ms, closed at ${t.closedMs} ms`)
+  await srv5.stop()
+}
+
+const bad = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--allowed-host', 'https://midstudy.example.com', '--calib', 'python3 fixtures/stub_calib.py'],
+  { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })
+ev.check('a malformed --allowed-host (a URL) is refused at startup (it would have allowed a missing or malformed Host)', bad.status !== 0 && bad.signal == null && /allowed-host/.test(bad.stderr || ''),
+  `exit ${bad.status ?? bad.signal}: ${clip((bad.stderr || '').trim().split('\n').at(-1), 200)}`)
+
 ev.section('verify round 1: the spend cap reads the file midstudy-add writes')
 const other = path.join(ev.out, 'other-costs.csv')
 const run = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--costs-file', other, '--calib', 'python3 fixtures/stub_calib.py'],

@@ -118,7 +118,7 @@ export function mount(ctx) {
     root.className = `sc-root ${shell.isPhone() ? 'is-phone' : 'is-desktop'}`
     renderUpload()
     if (!list.length && !uploading) {
-      root.replaceChildren(st.loaded ? h('div.sc-empty',
+      fill(st.loaded ? h('div.sc-empty',
         h('span.sc-empty-ic', icon('image', { size: 32 })),
         h('h3', 'No scenes yet'),
         h('p', 'A scene is one photo of a room, taken from where you would stand to look at it. Wide (0.5×) is fine. The floor should be visible.'),
@@ -127,11 +127,13 @@ export function mount(ctx) {
         : h('div.sc-loading', ring(null, { size: 24 }), h('span', 'Loading scenes…')), st.loaded ? trashView() : null)
       return
     }
-    root.replaceChildren(
+    fill(
       h('p.sc-hint', shell.isPhone() ? 'Tap a scene to open it.' : 'Click a scene to open it. Each scene keeps its own layouts and renders.'),
       h('div.sc-grid', { role: 'list' }, upEl, list.map(card)),
       trashView())
   }
+  // replaceChildren() turns null into the text "null" (h() drops it; this doesn't): no Recently deleted, no node.
+  function fill(...kids) { root.replaceChildren(...kids.filter((k) => k != null && k !== false)) }
   // Recently deleted: scenes the server keeps in scenes/.trash, each with Restore (its layouts and renders come back).
   function trashView() {
     const trash = engine.getScenesTrash()

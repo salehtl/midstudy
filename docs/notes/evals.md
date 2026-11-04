@@ -1,5 +1,12 @@
 # Evals track notes
 
+> **Since verify round 2 (see `verify-fix-2.md`):** new `evals/ux_round2.mjs` (**E12**, `npm run eval:ux2`, part of
+> `eval:all`). E1 has a "verify round 2" section (JFXX APP0, camera make/model, Content-Length "²", a stalled body →
+> 408, no Host → 403, qwen 12 MP with RST0 → 402, unreadable size → 400, the early-413 drain, a bad `--allowed-host`);
+> E2 real adds a golden-with-EXIF variant per scene and an "as the user sees it" measure; E7 and E8 add a GLB whose
+> texture carries GPS. `evals/lib/metadata.py` makes `jfxx-gps`, `gps-glb`, `big12mp`, `big12mp-rst` and inspects GLB
+> textures and APP0 extensions. `serve.py` honours `MIDSTUDY_SOCKET_TIMEOUT` (evals only).
+
 > **Since verify round 1 (see `verify-fix-1.md`):** new `evals/ux_fixes.mjs` (**E11**, `npm run eval:ux`, part of
 > `eval:all`) and `evals/lib/metadata.py` (synthetic GPS photos and a whole-file inspector). E1, E2 `--mock`, E7, E8 and
 > E9 gained checks for the security and privacy fixes. **The 44 px audit (`smallTargets`) was wrong:** it skipped every

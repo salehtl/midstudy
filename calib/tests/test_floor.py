@@ -82,6 +82,23 @@ def test_golden_truth_round_trip(sid):
     assert mm[int(fy * dh / H), int(fx * dw / W)] > 0
 
 
+@pytest.mark.parametrize("sid", SCENES)
+def test_floor_depth_is_the_contract_projection(sid):
+    """floor_depth (used to make depth.png agree with the floor a corrected camera draws) is §4.1's ray-plane depth:
+    on truth.json's open-floor points it equals their view-axis depth from the true camera."""
+    truth = json.loads((REPO / f"fixtures/scenes/{sid}/truth.json").read_text())
+    cam, W, H = truth["camera"], truth["image"]["w"], truth["image"]["h"]
+    zf = fl.floor_depth(cam, W, H)
+    world = np.array([p["world"] for p in truth["floor_points"]], float)
+    pc = (world - np.array([0.0, cam["height_m"], 0.0])) @ rotation(cam)
+    want = -pc[:, 2]
+    px = project(cam, W, H, world)
+    got = np.array([zf[int(y), int(x)] for x, y in px])
+    # the pixel centre is up to 0.7 px from the point: allow the depth change across one pixel there
+    assert np.all(np.abs(got - want) / want < 0.01), (got, want)
+    assert np.isnan(zf[0, 0]) or zf[0, 0] > 0
+
+
 @pytest.mark.parametrize("pitch,roll", [(-10, 0), (-25, 2), (-8, -1), (-60, 12), (5, -15), (-79, 19)])
 def test_plane_camera_inverse(pitch, roll):
     n, d = fl.plane_from_camera(1.5, pitch, roll)

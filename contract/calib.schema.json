@@ -63,6 +63,14 @@
         }
       ]
     },
+    "fov_source": {
+      "description": "Whose FOV the camera uses: the photo's EXIF focal length (when it agrees with MoGe's within 8 degrees; MoGe's scale is then corrected by the focal ratio, contract §4.3 Fit) or MoGe's own. Absent on mock, fallback and truth calibrations.",
+      "enum": ["exif", "moge"]
+    },
+    "moge": {
+      "description": "MoGe-2's own estimates and timings (fov_x_deg, fov_y_deg, input, load_s, infer_s, floor_fit_s) and, with fov_source exif, the correction: height_m (MoGe's own), scale (tan(fov_moge/2) / tan(fov_exif/2)), depth_scale.",
+      "type": "object"
+    },
     "fov_disagreement": {
       "description": "Present when MoGe's and the EXIF vertical FOV differ by more than 8 degrees.",
       "type": "object",

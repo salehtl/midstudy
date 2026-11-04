@@ -107,9 +107,13 @@ const BAR = new THREE.Color(0x0e0f11) // letterbox bars
 // --- events, errors + toasts ------------------------------------------------
 const events = new EventTarget()
 const emit = (name, detail = {}) => { wake(); events.dispatchEvent(new CustomEvent(name, { detail })) }
-// On-demand rendering: draw while something changes (input, any engine event) and for a short tail after.
+// On-demand rendering: draw while something changes (input, any engine event) and for a short tail after. A wake
+// always gets at least one frame, however late the browser's next frame comes (a slow GPU, or software rendering
+// where one frame can take longer than the tail): otherwise a change made just before a slow frame (Set scale, a
+// toast, a layout loading) stayed undrawn until the pointer moved.
 let awakeUntil = 0
-function wake(ms = 400) { awakeUntil = Math.max(awakeUntil, performance.now() + ms) }
+let framePending = false
+function wake(ms = 400) { awakeUntil = Math.max(awakeUntil, performance.now() + ms); framePending = true }
 for (const t of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'keyup', 'resize', 'touchmove']) window.addEventListener(t, () => wake(), { passive: true, capture: true })
 const errors = []
 function toast(text, kind = 'info', ms = 6000) { emit('toast', { text, kind, ms }) }
@@ -588,6 +592,67 @@ async function readLibrary() {
   }
   library = list
   emit('library', { items: library.slice() })
+  quiet(makeMissingThumbs())
+}
+
+// --- thumbnails for pieces added from a 3D file ----------------------------------------------------------------------
+// A GLB or OBJ add has no photo, so midstudy-add writes no thumb.jpg and the library showed initials. The planner
+// renders one (front three-quarter view, the room's lighting, 256 px), and PUT /api/library/items/<id>/thumb stores it
+// next to the model, so every device gets it. One at a time, once per item per page load; only for the server's own
+// library (a ?library= elsewhere is read-only). Its own small WebGL renderer, so the photo view is never disturbed.
+const OWN_LIBRARY = (() => { const u = new URL(LIBRARY_URL, location.href); return u.origin === location.origin && u.pathname === '/library/library.json' })()
+const thumbTried = new Set()
+let thumbsRunning = false
+async function makeMissingThumbs() {
+  if (!OWN_LIBRARY || thumbsRunning) return
+  thumbsRunning = true
+  try {
+    for (;;) {
+      const lib = library.find((l) => l.assets?.glb && !l.assets?.thumb && !l.missing && !thumbTried.has(l.id))
+      if (!lib) break
+      thumbTried.add(lib.id)
+      let image
+      try { image = await modelThumbnail(lib) } catch (e) { console.warn('[midstudy] no thumbnail for', lib.id, e); continue }
+      try {
+        const item = await apiJson(`/api/library/items/${encodeURIComponent(lib.id)}/thumb`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image }) })
+        const cur = library.find((l) => l.id === lib.id)
+        if (cur && item?.assets?.thumb) { cur.assets = { ...cur.assets, thumb: item.assets.thumb }; emit('library', { items: library.slice() }) }
+      } catch (e) { console.warn('[midstudy] could not store the thumbnail of', lib.id, e) }
+    }
+  } finally { thumbsRunning = false }
+}
+async function modelThumbnail(lib, size = 256) {
+  const t = await loadGlbTemplate(assetUrl(lib.assets.glb))
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true })
+  try {
+    r.setPixelRatio(1)
+    r.setSize(size, size, false)
+    r.toneMapping = THREE.ACESFilmicToneMapping
+    r.outputColorSpace = THREE.SRGBColorSpace
+    const sc = new THREE.Scene()
+    sc.background = new THREE.Color(0xe7e4df)
+    const pm = new THREE.PMREMGenerator(r)
+    sc.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture
+    const key = new THREE.DirectionalLight(0xffffff, 1.2)
+    key.position.set(2, 4, 3)
+    sc.add(key, t.scene.clone(true))
+    // the item frame: footprint centre at the origin, on the floor, front +Z; seen from front-right, a little above
+    const b = t.box, c = b.getCenter(new THREE.Vector3()), radius = Math.max(1e-3, b.getSize(new THREE.Vector3()).length() / 2)
+    const cam = new THREE.PerspectiveCamera(30, 1, radius / 100, radius * 100)
+    const dir = new THREE.Vector3(0.55, 0.42, 1).normalize()
+    cam.position.copy(c).addScaledVector(dir, (radius / Math.sin((30 * DEG) / 2)) * 1.02)
+    cam.lookAt(c)
+    r.render(sc, cam)
+    const url = canvas.toDataURL('image/jpeg', 0.88)
+    pm.dispose()
+    sc.environment?.dispose()
+    return url
+  } finally {
+    r.dispose()
+    r.forceContextLoss()
+  }
 }
 
 function loadGlbTemplate(url) {
@@ -1251,17 +1316,16 @@ async function openScene(name) {
     emit('grid', { visible: true })
     emitView()
     emit('scene', { phase: 'opened', name })
-    // The layout that was open here last time (on this device) comes back with the scene, so the furniture isn't lost
-    // on a reload; then the layouts and renders lists.
-    const remembered = store.get(layoutKey(name))
-    if (remembered && SLUG.test(remembered)) {
-      await Promise.all([refreshLayouts(), libraryLoading.catch(() => {})])
+    // The scene comes back with its layout (layoutToOpen: what this device had open, or the one saved last on any
+    // device), so the furniture isn't lost on a reload or on the other device; then the renders list. The library
+    // must be read first, or the pieces would load as missing.
+    await Promise.all([refreshLayouts(), libraryLoading.catch(() => {})])
+    if (token !== sceneToken) return
+    const pick = layoutToOpen(name, layoutDetails)
+    if (pick) {
+      try { await loadLayoutInternal(pick) } catch { /* reported */ }
       if (token !== sceneToken) return
-      if (layoutNames.includes(remembered)) {
-        try { await loadLayoutInternal(remembered) } catch { /* reported */ }
-        if (token !== sceneToken) return
-      } else store.set(layoutKey(name), null)
-    } else quiet(refreshLayouts())
+    }
     quiet(listRendersInternal())
     wake(1500)
     await nextFrame()
@@ -1461,9 +1525,37 @@ function layoutDisplayName(name) {
   const d = layoutDetails.find((x) => x.name === name)
   return (d && typeof d.title === 'string' && d.title.trim()) || prettyLayout(name)
 }
-// The layout open in each scene, remembered on this device, so the scene reopens with it (a reload, the next visit).
+// Which layout a scene opens with (§4.5). This device remembers the layout it last had open in each scene, with when
+// it chose it ({name, at}: saved, loaded, or none after deleting it). The scene reopens with that layout, unless a
+// layout was saved after that moment on another device (the server's `updated`), or this device has never had the
+// scene open: then it opens with the most recently saved layout. So a reload keeps what this device had, and the
+// phone opens a scene with the layout the desktop just saved, and the other way round.
 const layoutKey = (scene) => `midstudy.layout.${scene}`
-const rememberLayout = (name) => { if (sceneName) store.set(layoutKey(sceneName), name || null) }
+function rememberLayout(name, at = null) {
+  if (!sceneName) return
+  const t = Date.parse(at || '') || Date.now()
+  store.set(layoutKey(sceneName), JSON.stringify({ name: name || null, at: new Date(t).toISOString() }))
+}
+function recalledLayout(scene) {
+  const raw = store.get(layoutKey(scene))
+  if (!raw) return null
+  if (SLUG.test(raw)) return { name: raw, at: 0 } // the plain name stored before round 2: any later save wins
+  try {
+    const v = JSON.parse(raw)
+    if (v && typeof v === 'object') return { name: typeof v.name === 'string' && SLUG.test(v.name) ? v.name : null, at: Date.parse(v.at) || 0 }
+  } catch { /* unreadable: as if nothing were remembered */ }
+  return null
+}
+function layoutToOpen(scene, details) {
+  const saved = (d) => Date.parse(d?.updated || '') || 0
+  const newest = details.reduce((a, d) => (!a || saved(d) > saved(a) ? d : a), null)
+  const mine = recalledLayout(scene)
+  if (mine && (!newest || mine.at >= saved(newest))) {
+    if (!mine.name) return null                                      // this device closed it (deleted it) last
+    if (details.some((d) => d.name === mine.name)) return mine.name
+  }
+  return newest ? newest.name : null
+}
 const layoutQuery = () => `?scene=${encodeURIComponent(sceneName || '')}`
 function layoutDoc(name, title = null) {
   return {
@@ -1483,13 +1575,14 @@ async function saveLayoutInternal(name, opts = {}) {
   const given = typeof opts?.title === 'string' && opts.title.trim() ? opts.title.trim().slice(0, 120) : null
   const kept = name === layoutName ? layoutTitle : layoutDetails.find((d) => d.name === name)?.title
   const title = given || (typeof kept === 'string' && kept.trim() ? kept.trim() : null)
+  let stored
   try {
-    await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(layoutDoc(name, title)) })
+    stored = await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(layoutDoc(name, title)) })
   } catch (e) {
     throw reportError(e.status ? `Could not save layout "${name}"` : `Layout "${name}" not saved: the server isn't answering`, e)
   }
   setLayoutName(name, title)
-  rememberLayout(name)
+  rememberLayout(name, stored?.updated) // the server's clock, as other devices compare against it
   markLayoutClean()
   emit('layouts', { name })
   await refreshLayouts()
@@ -1538,10 +1631,11 @@ async function restoreLayoutInternal(doc) {
   if (!doc || typeof doc.name !== 'string' || !SLUG.test(doc.name) || !Array.isArray(doc.items)) throw reportError('Nothing to restore')
   if (!sceneName || (doc.scene_name && doc.scene_name !== sceneName)) throw reportError('That layout belongs to another scene')
   const body = { version: 1, name: doc.name, title: doc.title ?? null, scene_name: sceneName, library: doc.library ?? LIBRARY_URL, items: doc.items, ...(typeof doc.notes === 'string' ? { notes: doc.notes } : {}) }
+  let stored
   try {
-    await apiJson(`/api/layouts/${doc.name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    stored = await apiJson(`/api/layouts/${doc.name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   } catch (e) { throw reportError(`Could not restore layout "${doc.name}"`, e) }
-  if (doc.wasCurrent && !layoutName) { setLayoutName(doc.name, doc.title); rememberLayout(doc.name); emit('layouts', { name: doc.name }) }
+  if (doc.wasCurrent && !layoutName) { setLayoutName(doc.name, doc.title); rememberLayout(doc.name, stored?.updated); emit('layouts', { name: doc.name }) }
   await refreshLayouts()
 }
 async function listLayoutsInternal() {
@@ -1769,7 +1863,8 @@ let renderErrorReported = false
 renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(clock.getDelta(), 0.1)
-    if (performance.now() > awakeUntil) return
+    if (performance.now() > awakeUntil && !framePending) return
+    framePending = false
     renderFrame()
     for (const fn of frameFns) fn(dt)
   } catch (e) {

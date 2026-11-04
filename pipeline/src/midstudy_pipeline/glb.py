@@ -125,6 +125,112 @@ def load_model(path: Path) -> tuple[dict, bytes | None]:
     return doc, bytes(out)
 
 
+# --- textures without camera metadata (contract §2.8 Privacy) ---------------------------------------------------------
+# A model.glb is served (/library/<id>/model.glb). A GLB the user exported can embed photos as textures, with their EXIF
+# and GPS. The image data is kept as it is (no re-encode); only the metadata segments and chunks go.
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+_PNG_DROP = {b"eXIf", b"tEXt", b"iTXt", b"zTXt", b"tIME"}
+
+
+def clean_jpeg(data: bytes) -> bytes | None:
+    """The JPEG without APP1-APP15 (EXIF, GPS, XMP, ICC, ...), comments, JFIF thumbnails or JFXX extensions, and
+    nothing after EOI; the coded image is copied as it is. None when it isn't a well-formed JPEG."""
+    n = len(data)
+    if n < 4 or data[:2] != b"\xff\xd8":
+        return None
+    out, i = bytearray(b"\xff\xd8"), 2
+    while i < n:
+        if data[i] != 0xFF:
+            return None
+        while i < n and data[i] == 0xFF:
+            i += 1
+        if i >= n:
+            return None
+        m = data[i]
+        i += 1
+        if m == 0xD9:
+            return bytes(out + b"\xff\xd9")
+        if 0xD0 <= m <= 0xD7 or m == 0x01:
+            out += bytes((0xFF, m))
+            continue
+        if m == 0x00 or i + 2 > n:
+            return None
+        length = (data[i] << 8) | data[i + 1]
+        if length < 2 or i + length > n:
+            return None
+        seg = data[i:i + length]
+        if m == 0xE0:
+            if seg[2:7] == b"JFIF\x00" and length >= 16:
+                out += b"\xff\xe0\x00\x10" + seg[2:14] + b"\x00\x00"
+        elif not (0xE1 <= m <= 0xEF or m == 0xFE):
+            out += bytes((0xFF, m)) + seg
+        i += length
+        if m == 0xDA:
+            j = i
+            while True:
+                j = data.find(b"\xff", j)
+                if j < 0 or j + 1 >= n:
+                    return None
+                if data[j + 1] == 0x00 or 0xD0 <= data[j + 1] <= 0xD7:
+                    j += 2
+                    continue
+                break
+            out += data[i:j]
+            i = j
+    return None
+
+
+def clean_png(data: bytes) -> bytes | None:
+    """The PNG without eXIf, text or time chunks and nothing after IEND. None when it isn't a well-formed PNG."""
+    if data[:8] != _PNG_SIG:
+        return None
+    out, i = bytearray(_PNG_SIG), 8
+    while i + 12 <= len(data):
+        size = struct.unpack(">I", data[i:i + 4])[0]
+        kind = data[i + 4:i + 8]
+        end = i + 12 + size
+        if end > len(data):
+            return None
+        if kind not in _PNG_DROP:
+            out += data[i:end]
+        i = end
+        if kind == b"IEND":
+            return bytes(out)
+    return None
+
+
+def _clean_image(data: bytes) -> bytes | None:
+    return clean_jpeg(data) if data[:2] == b"\xff\xd8" else clean_png(data) if data[:8] == _PNG_SIG else None
+
+
+def scrub_images(doc: dict, blob: bytes | None) -> tuple[bytes | None, int]:
+    """Strip camera metadata from every embedded texture (bufferView or data: URI). A cleaned image is written at its
+    bufferView's start, the view's byteLength shrinks and the bytes it no longer covers are zeroed, so no other view
+    moves. Returns the new binary chunk and how many images changed."""
+    buf = bytearray(blob) if blob is not None else None
+    views = doc.get("bufferViews", [])
+    changed = 0
+    for im in doc.get("images", []):
+        if isinstance(im.get("bufferView"), int) and buf is not None and 0 <= im["bufferView"] < len(views):
+            view = views[im["bufferView"]]
+            off, ln = view.get("byteOffset", 0), view.get("byteLength", 0)
+            data = bytes(buf[off:off + ln])
+            clean = _clean_image(data)
+            if clean is not None and clean != data:
+                buf[off:off + len(clean)] = clean
+                buf[off + len(clean):off + ln] = b"\0" * (ln - len(clean))
+                view["byteLength"] = len(clean)
+                changed += 1
+        elif isinstance(im.get("uri"), str) and im["uri"].startswith("data:") and ";base64," in im["uri"]:
+            head, _, payload = im["uri"].partition(",")
+            data = base64.b64decode(payload)
+            clean = _clean_image(data)
+            if clean is not None and clean != data:
+                im["uri"] = f"{head},{base64.b64encode(clean).decode('ascii')}"
+                changed += 1
+    return (bytes(buf) if buf is not None else None), changed
+
+
 def measure(path: Path) -> np.ndarray:
     """Axis-aligned bounds [[x0,y0,z0],[x1,y1,z1]] in meters, as evals/validate_library.py computes them."""
     try:
@@ -168,6 +274,9 @@ def normalize(src: Path, rotation: np.ndarray, dims_m: np.ndarray, out: Path) ->
     """
     doc, blob = load_model(src)
     doc = copy.deepcopy(doc)
+    blob, scrubbed = scrub_images(doc, blob)  # model.glb is served: no camera metadata in its textures
+    if scrubbed:
+        logging.getLogger("midstudy").info("removed camera metadata from %d texture(s)", scrubbed)
     nodes = doc.setdefault("nodes", [])
     scenes = doc.setdefault("scenes", [])
     if not scenes:

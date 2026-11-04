@@ -115,18 +115,29 @@ def fal_key() -> str | None:
 
 
 def jpeg_size(data: bytes):
-    """(width, height) from a JPEG's SOF marker, or None."""
+    """(width, height) from a JPEG's frame header (SOF), or None. Fill bytes and the markers that carry no length
+    (TEM, RST0-7, a stray SOI) are stepped over, as decoders do; the frame header must come before the first scan."""
+    if len(data) < 4 or data[:2] != b"\xff\xd8":
+        return None
     i = 2
-    while i + 9 < len(data):
+    while i + 1 < len(data):
         if data[i] != 0xFF:
             return None
         marker = data[i + 1]
         if marker == 0xFF:  # fill byte
             i += 1
             continue
+        if marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:  # standalone: no length
+            i += 2
+            continue
+        if marker in (0xD9, 0xDA) or i + 9 >= len(data):  # EOI or a scan before any frame header, or truncated
+            return None
         length = (data[i + 2] << 8) | data[i + 3]
+        if length < 2:
+            return None
         if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
-            return (data[i + 7] << 8) | data[i + 8], (data[i + 5] << 8) | data[i + 6]
+            w, h = (data[i + 7] << 8) | data[i + 8], (data[i + 5] << 8) | data[i + 6]
+            return (w, h) if w and h else None
         i += 2 + length
     return None
 
@@ -228,7 +239,8 @@ MAX_IMAGE = 20 * 1024 * 1024
 MAX_DRAIN = 256 * 1024 * 1024  # an early error reads (and drops) a body up to this, so the client sees the answer
 DRAIN_SECONDS = 60             # ...for at most this long
 EARLY_DRAIN_SECONDS = 5        # after a 411/413 that was already sent
-SOCKET_TIMEOUT = 30            # s one read or write on a connection may block (a client that stops sending is dropped)
+SOCKET_TIMEOUT = float(os.environ.get("MIDSTUDY_SOCKET_TIMEOUT") or 30)  # s one read or write may block (a client that
+                                                                             # stops sending is dropped); the env var is for evals
 ENGINE_PRICE = {"sam3d": lambda res: 0.02, "trellis2": lambda res: {512: 0.25, 1024: 0.30, 1536: 0.35}[res],
                 "glb": lambda res: 0.0}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
@@ -245,7 +257,8 @@ UNKNOWN_HOST = "unknown host name: add it with --allowed-host"
 DEFAULT_MIDSTUDY_ADD = "uv run --project pipeline midstudy-add"
 
 
-HOST_RE = re.compile(r"(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(\d{1,5}))?\Z")
+HOST_RE = re.compile(r"(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?\Z")
+CONTENT_LENGTH = re.compile(r"[0-9]{1,15}")  # ASCII digits (\d would take any Unicode digit)
 
 
 def host_name(host: str) -> str:
@@ -885,9 +898,19 @@ def decode_data_uri(value, kinds: tuple[str, ...]) -> bytes | None:
         return None
 
 
+def plain_jfif(seg: bytes) -> bytes:
+    """An APP0 segment (its length bytes and payload) as a plain 16-byte JFIF header with no thumbnail, or b"" (drop
+    it): a JFIF thumbnail, or a JFXX extension (whose payload can be a whole JPEG with its own EXIF and GPS), is an
+    embedded image that carries what the main one was cleaned of."""
+    if len(seg) >= 16 and seg[2:7] == b"JFIF\x00":
+        return b"\xff\xe0\x00\x10" + seg[2:14] + b"\x00\x00"
+    return b""
+
+
 def clean_jpeg(data: bytes) -> bytes | None:
     """The JPEG without its metadata: APP1–APP15 (EXIF, GPS, XMP, ICC, …) and COM segments dropped wherever they are
-    (before the first scan or between progressive scans), and nothing after EOI. The image data is copied as it is
+    (before the first scan or between progressive scans), APP0 kept only as a plain JFIF header (plain_jfif), and
+    nothing after EOI. The image data is copied as it is
     (no re-encode). None when it isn't a well-formed JPEG. Used on JPEGs a client sends (the render composite, the
     thumbnail), which the server stores, serves and sends to fal: none of that may carry camera metadata."""
     n = len(data)
@@ -915,7 +938,9 @@ def clean_jpeg(data: bytes) -> bytes | None:
         length = (data[i] << 8) | data[i + 1]
         if length < 2 or i + length > n:
             return None
-        if not (0xE1 <= m <= 0xEF or m == 0xFE):
+        if m == 0xE0:
+            out += plain_jfif(data[i:i + length])  # JFIF without its thumbnail; JFXX and other APP0s are dropped
+        elif not (0xE1 <= m <= 0xEF or m == 0xFE):
             out += bytes((0xFF, m)) + data[i:i + length]
         i += length
         if m == 0xDA:  # SOS: the entropy-coded data runs to the next marker (FF 00 is a stuffed byte, FF D0–D7 a restart)
@@ -932,6 +957,16 @@ def clean_jpeg(data: bytes) -> bytes | None:
             out += data[i:j]
             i = j
     return None
+
+
+def public_calib(calib: dict | None) -> dict | None:
+    """calib.json as the API serves it: without the camera's make and model (contract §4.4). They stay in calib.json
+    on disk, beside the focal length and the EXIF FOV, which are all the planner needs; what the server serves carries
+    no camera metadata."""
+    if not isinstance(calib, dict) or not isinstance(calib.get("exif"), dict):
+        return calib
+    exif = {k: v for k, v in calib["exif"].items() if k not in ("make", "model")}
+    return {**calib, "exif": exif}
 
 
 def last_json_line(text: str):
@@ -1044,7 +1079,7 @@ class SceneService:
         if data is None:
             return None
         return {**data, **self.scene_object(name, data), "camera": clamp_camera(data.get("camera") or {}),
-                "calib": self.calib_json(name)}
+                "calib": public_calib(self.calib_json(name))}
 
     def all(self) -> list[dict]:
         """Newest first by `created`; ties (uploads in the same second) by the name's collision suffix as a number, so
@@ -1264,7 +1299,7 @@ class SceneService:
             src = calib.get("source")
             floor = calib.get("floor") if isinstance(calib.get("floor"), dict) else {}
             note = "" if src in ("moge-2", "truth") and floor.get("found") else " · check the floor"
-            job.update(status="done", finished=iso_utc(), calib=calib, message=f"calibrated ({src or 'unknown'}){note}")
+            job.update(status="done", finished=iso_utc(), calib=public_calib(calib), message=f"calibrated ({src or 'unknown'}){note}")
 
     def finish(self, job_id: str, ok: bool, message: str) -> None:
         with self.lock:
@@ -1285,7 +1320,7 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, layouts_dir: Path, renders_dir: Path, costs_file: Path, scenes: "SceneService",
                  library_dir: Path | None = None, library: "LibraryService | None" = None,
                  allowed_hosts: tuple[str, ...] = (), **kwargs):
-        self.hosts = {*LOOPBACK, *(host_name(h) for h in allowed_hosts)}  # §2.9 Host names
+        self.hosts = {*LOOPBACK, *(host_name(h) for h in allowed_hosts)} - {""}  # §2.9 Host names (never "")
         self.layouts_dir = layouts_dir
         self.renders_dir = renders_dir
         self.costs_file = costs_file
@@ -1353,6 +1388,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.close_connection = True
             self.error_json(HTTPStatus.BAD_REQUEST, "the request has more than one Content-Length header")
             return False
+        length = self.headers.get("Content-Length")
+        if length is not None and not CONTENT_LENGTH.fullmatch(length.strip()):
+            # ASCII digits only: str.isdigit() takes "²" and int() then fails (a 500); a sign or a space frames nothing.
+            self.body_done = True
+            self.close_connection = True
+            self.error_json(HTTPStatus.BAD_REQUEST, "the Content-Length header isn't a number of bytes")
+            return False
         return True
 
     def chunked(self) -> bool:
@@ -1385,15 +1427,24 @@ class Handler(SimpleHTTPRequestHandler):
                 self.close_connection = True
                 return
             while left > 0:
-                if time.monotonic() > deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     self.close_connection = True
                     return
+                # A read blocks for at most what is left of the drain (not the connection's 30 s), so a client that
+                # sends nothing after an early 411/413 is dropped after EARLY_DRAIN_SECONDS.
+                self.connection.settimeout(max(0.05, min(remaining, SOCKET_TIMEOUT)))
                 chunk = self.rfile.read(min(left, 1 << 20))
                 if not chunk:
                     break
                 left -= len(chunk)
-        except (ValueError, OSError):
+        except (ValueError, OSError):  # TimeoutError is an OSError
             self.close_connection = True
+        finally:
+            try:
+                self.connection.settimeout(SOCKET_TIMEOUT)
+            except OSError:
+                pass
 
     def forged(self) -> bool:
         """§2.9: a mutation needs X-Midstudy: 1 and an Origin that's absent or this page's own. Answers 403 itself."""
@@ -1434,6 +1485,17 @@ class Handler(SimpleHTTPRequestHandler):
 
     def error_json(self, status: int, message: str) -> None:
         self.send_json(status, {"error": message})
+
+    def body_stalled(self, e: BaseException) -> None:
+        """A request body stopped arriving (the socket timed out) or the client went away while sending it: one
+        sentence (408) if the client can still read it, and the connection closes. Never a 500 with the exception."""
+        self.body_done = True
+        self.close_connection = True
+        if isinstance(e, TimeoutError):
+            try:
+                self.error_json(HTTPStatus.REQUEST_TIMEOUT, f"the request body stopped arriving (nothing for {SOCKET_TIMEOUT:g} s): send it again")
+            except OSError:
+                pass
 
     def read_json_body(self):
         try:
@@ -1502,7 +1564,14 @@ class Handler(SimpleHTTPRequestHandler):
             m = re.fullmatch(r"/api/layouts/([^/]*)", api)
             if m:
                 return self.put_layout(m.group(1))
+            m = re.fullmatch(r"/api/library/items/([^/]*)/thumb", api)
+            if m:
+                return self.put_library_thumb(m.group(1))
             return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: PUT {api}")
+        except Busy:
+            return self.library_busy()
+        except (TimeoutError, ConnectionError) as e:
+            return self.body_stalled(e)
         except Exception as e:  # keep the server alive and answer in JSON
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}")
 
@@ -1530,6 +1599,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.restore_library_item(m.group(1))
         except Busy:
             return self.library_busy()
+        except (TimeoutError, ConnectionError) as e:
+            return self.body_stalled(e)
         except Exception as e:
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}")
         return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: POST {api or urlsplit(self.path).path}")
@@ -1544,6 +1615,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.patch_library_item(m.group(1))
         except Busy:
             return self.library_busy()
+        except (TimeoutError, ConnectionError) as e:
+            return self.body_stalled(e)
         except Exception as e:
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}")
         return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: PATCH {api or urlsplit(self.path).path}")
@@ -1618,7 +1691,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def post_scene(self):
         length = self.headers.get("Content-Length")
-        if self.chunked() or length is None or not length.strip().isdigit():
+        if self.chunked() or length is None or not CONTENT_LENGTH.fullmatch(length.strip()):
             self.close_connection = True
             return self.error_json(HTTPStatus.LENGTH_REQUIRED, "Content-Length is required: send the photo as the request body")
         length = int(length)
@@ -1955,7 +2028,7 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError as e:
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
         length = self.headers.get("Content-Length")
-        if self.chunked() or length is None or not length.strip().isdigit():
+        if self.chunked() or length is None or not CONTENT_LENGTH.fullmatch(length.strip()):
             self.close_connection = True
             return self.error_json(HTTPStatus.LENGTH_REQUIRED, "Content-Length is required: send the file as the request body")
         length = int(length)
@@ -2083,6 +2156,34 @@ class Handler(SimpleHTTPRequestHandler):
         job, _ = self.library.new_job("rescale", item_id, "glb", 0.0, cmd, None)
         return self.send_json(HTTPStatus.ACCEPTED, {"job": job})
 
+    def put_library_thumb(self, item_id: str):
+        """PUT /api/library/items/<id>/thumb {"image": JPEG data URI} (≤ 2 MB): the planner's rendering of a piece added
+        from a 3D file (midstudy-add makes thumbnails from photos only). Stored without metadata as <id>/thumb.jpg and
+        set as assets.thumb; 200 the item."""
+        try:
+            body = self.read_json_body()
+        except ValueError as e:
+            return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
+        data = decode_data_uri(body.get("image") if isinstance(body, dict) else None, ("jpeg",))
+        if data and len(data) > MAX_THUMB:
+            return self.error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "thumbnail is over 2 MB: send a smaller JPEG")
+        data = clean_jpeg(data) if data and data[:3] == b"\xff\xd8\xff" else None  # served: no metadata
+        if not data or not jpeg_size(data):
+            return self.error_json(HTTPStatus.BAD_REQUEST, "image must be a JPEG data URI (data:image/jpeg;base64,...)")
+        with self.library.locked():
+            lib = self.library.read()
+            item = self.library.item(item_id, lib) if SLUG.match(item_id) else None
+            if item is None:
+                return self.error_json(HTTPStatus.NOT_FOUND, f"no library item {item_id!r}: GET /api/library lists them")
+            folder = self.library_dir / item_id
+            if not folder.is_dir():
+                return self.error_json(HTTPStatus.CONFLICT, f"library item {item_id!r} has no folder: add it again")
+            atomic_write_bytes(folder / "thumb.jpg", data)
+            assets = item.get("assets") if isinstance(item.get("assets"), dict) else {}
+            item["assets"] = {**assets, "thumb": f"{item_id}/thumb.jpg"}
+            self.library.write(lib)
+        return self.send_json(HTTPStatus.OK, item)
+
     def delete_library_item(self, item_id: str):
         with self.library.locked():
             data = self.library.read()
@@ -2196,7 +2297,11 @@ class Handler(SimpleHTTPRequestHandler):
             prompt = REFERENCE_RENDER_PROMPT if reference else DEFAULT_RENDER_PROMPT
         spec = RENDER_MODELS[model]
         size = jpeg_size(data)
-        megapixels = (size[0] * size[1] / 1e6) if size else 1.0
+        if not size:
+            # The price can depend on the size (qwen: $0.03 a megapixel), so a composite whose frame header can't be
+            # read isn't guessed at 1 MP against the cap: it is refused (§2.6, §2.9).
+            return self.error_json(HTTPStatus.BAD_REQUEST, "the image's size can't be read from its JPEG frame header: send a plain baseline or progressive JPEG")
+        megapixels = size[0] * size[1] / 1e6
         mock = fal_mock()
         key = None if mock else fal_key()
         if not mock and not key:
@@ -2350,6 +2455,11 @@ def main(argv=None):
     calib = shlex.split(args.calib)
     if not calib:
         ap.error("--calib can't be empty")
+    for h in args.allowed_host:
+        # The same rule as a Host header (§2.9): exactly name[:port]. A URL or a typo would otherwise add "" to the
+        # allowlist, which a request with no Host, or a malformed one, would match.
+        if not host_name(h):
+            ap.error(f"--allowed-host {h!r} isn't a host name: give it as name or name:port (e.g. midstudy.example.com)")
 
     library_dir = resolve(args.library_dir or "library")
     costs_file = resolve(args.costs_file) if args.costs_file else library_dir / "costs.csv"

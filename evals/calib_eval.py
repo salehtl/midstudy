@@ -207,6 +207,59 @@ def depth_error(pred_png: Path, truth_png: Path) -> dict:
             "mode": mode, "size": list(size)}
 
 
+def _rot(cam: dict) -> np.ndarray:
+    p, r = math.radians(cam["pitch_deg"]), math.radians(cam["roll_deg"])
+    rx = np.array([[1, 0, 0], [0, math.cos(p), -math.sin(p)], [0, math.sin(p), math.cos(p)]])
+    rz = np.array([[math.cos(r), -math.sin(r), 0], [math.sin(r), math.cos(r), 0], [0, 0, 1]])
+    return rx @ rz
+
+
+def _project(cam: dict, w: int, h: int, pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Contract §4.1: world points (n, 3) → photo pixels (n, 2) and view-axis depth (n,)."""
+    pc = (pts - np.array([0.0, cam["height_m"], 0.0])) @ _rot(cam)
+    d = -pc[:, 2]
+    f = (h / 2) / math.tan(math.radians(cam["fov_y_deg"]) / 2)
+    return np.stack([w / 2 + f * pc[:, 0] / d, h / 2 - f * pc[:, 1] / d], 1), d
+
+
+def _floor_at(cam: dict, w: int, h: int, px: np.ndarray) -> np.ndarray:
+    """Contract §4.1 inverse: photo pixels → floor points (nan at or above the horizon)."""
+    f = (h / 2) / math.tan(math.radians(cam["fov_y_deg"]) / 2)
+    dc = np.stack([(px[:, 0] - w / 2) / f, -(px[:, 1] - h / 2) / f, -np.ones(len(px))], 1)
+    dw = dc @ _rot(cam).T
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = -cam["height_m"] / dw[:, 1]
+    out = np.array([0.0, cam["height_m"], 0.0]) + t[:, None] * dw
+    out[dw[:, 1] >= 0] = np.nan
+    return out
+
+
+def as_seen(cam: dict, truth: dict, w: int, h: int) -> dict:
+    """What the user sees with a fitted camera on a golden photo (round 2): `grid_px`, the median distance between
+    where the planner draws floor points 1–7 m away and where they truly are in the photo; `size`, how tall a 1 m
+    stick is drawn on floor pixels of the lower half of the photo against its true height there (1.0 = right size;
+    furniture placed there is drawn this much too big)."""
+    xs, zs = np.meshgrid(np.linspace(-3, 3, 13), np.linspace(-1, -7, 13))
+    pts = np.stack([xs.ravel(), np.zeros(xs.size), zs.ravel()], 1)
+    pt, dt = _project(truth, w, h, pts)
+    pe, _ = _project(cam, w, h, pts)
+    ok = (dt > 0.3) & (pt[:, 0] >= 0) & (pt[:, 0] < w) & (pt[:, 1] >= 0) & (pt[:, 1] < h)
+    gx, gy = np.meshgrid(np.linspace(0.1 * w, 0.9 * w, 9), np.linspace(0.55 * h, 0.95 * h, 9))
+    px = np.stack([gx.ravel(), gy.ravel()], 1)
+    ft, fe = _floor_at(truth, w, h, px), _floor_at(cam, w, h, px)
+    good = ~np.isnan(ft).any(1) & ~np.isnan(fe).any(1)
+    st = _project(truth, w, h, ft[good] + [0, 1, 0])[0][:, 1]
+    se = _project(cam, w, h, fe[good] + [0, 1, 0])[0][:, 1]
+    ratio = (px[good, 1] - se) / (px[good, 1] - st)
+    return {"grid_px": float(np.median(np.linalg.norm(pt[ok] - pe[ok], axis=1))), "size": float(np.median(ratio)),
+            "size_lo": float(ratio.min()), "size_hi": float(ratio.max())}
+
+
+def f35_for(vfov: float, w: int, h: int) -> int:
+    """The whole-millimetre 35 mm equivalent (EXIF stores an integer) closest to a vertical FOV, per fov_from_35mm."""
+    return min(range(8, 200), key=lambda f: abs(fov_from_35mm(f, w, h) - vfov))
+
+
 def validate(obj, schema_name: str) -> list[str]:
     try:
         import jsonschema
@@ -286,6 +339,11 @@ def run_real(cli: Cli, args) -> None:
         check(f"{sid}: depth.png shape: median error ≤ 3 % after one global scale (extra, not a PLAN tolerance)",
               e["median_rel_scaled"] is not None and e["median_rel_scaled"] <= TOL["depth_shape_rel"],
               f"median {100 * (e['median_rel_scaled'] or 0):.1f} % after scaling by 1/{e['scale'] or 0:.3f}")
+        seen = as_seen(calib["camera"], truth["camera"], truth["image"]["w"], truth["image"]["h"])
+        info(f"{sid}: as the user sees it (MoGe's own FOV, no EXIF): floor drawn {seen['grid_px']:.0f} px from where it is, "
+             f"furniture drawn x{seen['size']:.3f} (x{seen['size_lo']:.3f}..x{seen['size_hi']:.3f})")
+        if not mock:
+            golden_with_exif(cli, sid, sdir, truth)
 
     if args.no_real_photos:
         skip("real photos", "--no-real-photos")
@@ -333,10 +391,14 @@ def run_real(cli: Cli, args) -> None:
                 ce = calib.get("exif") or {}
                 check(f"{name}: calib.json records the EXIF facts (focal_35mm, its fov_y_deg)", ce.get("focal_35mm") == f35 and abs((ce.get("fov_y_deg") or 0) - exif_fov) <= 0.5,
                       f"exif {ce}, expected focal {f35} fov {exif_fov:.2f}")
-                disagree = abs(got - exif_fov) > 8
+                moge_fov = (calib.get("moge") or {}).get("fov_y_deg", got)
+                disagree = abs(moge_fov - exif_fov) > 8
                 if calib.get("source") == "moge-2":
                     check(f"{name}: fov_disagreement present only when MoGe and EXIF differ by more than 8°", ("fov_disagreement" in calib) == disagree,
-                          f"diff {abs(got - exif_fov):.1f}°, fov_disagreement {calib.get('fov_disagreement')}")
+                          f"MoGe {moge_fov:.2f}° vs EXIF {exif_fov:.2f}° (diff {abs(moge_fov - exif_fov):.1f}°), fov_disagreement {calib.get('fov_disagreement')}")
+                    check(f"{name}: the camera uses the EXIF FOV (round 2: it agrees with MoGe's within 8°)",
+                          calib.get("fov_source") == ("moge" if disagree else "exif") and (disagree or abs(got - exif_fov) <= 0.05),
+                          f"fov_source {calib.get('fov_source')}, camera fov {got:.2f}°, height {calib['camera']['height_m']} (MoGe's own {(calib.get('moge') or {}).get('height_m')}), depth x{(calib.get('moge') or {}).get('depth_scale')}")
             else:
                 check(f"{name}: FOV within 8° of its EXIF estimate", False, f"focal_35mm {f35}, photo.jpg {'present' if photo.is_file() else 'missing'}")
     if len(cams) >= 2:
@@ -345,6 +407,51 @@ def run_real(cli: Cli, args) -> None:
     for d in (OUT / "real").glob("*"):
         for s in d.glob("source.*"):
             s.unlink()
+
+
+def golden_with_exif(cli: "Cli", sid: str, sdir: Path, truth: dict) -> None:
+    """Verify round 2: a phone photo carries its focal length, and with it (contract §4.3 Fit) the FOV is the EXIF one
+    and MoGe's scale is corrected. The golden photo with EXIF FocalLengthIn35mmFilm for its true FOV (rounded to a
+    whole mm, as EXIF stores it): the camera, the depth and what the user sees must then be close to the truth."""
+    w, h = truth["image"]["w"], truth["image"]["h"]
+    f35 = f35_for(truth["camera"]["fov_y_deg"], w, h)
+    exif_fov = fov_from_35mm(f35, w, h)
+    out = OUT / "golden-exif" / sid
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    src = out.parent / f"{sid}-exif.jpg"
+    e = Image.Exif()
+    e[0x010F], e[0x0110] = "EvalCam", "Eval Phone 1"
+    e.get_ifd(0x8769)[0xA405] = f35
+    with Image.open(sdir / "photo.jpg") as im:
+        im.save(src, quality=95, exif=e)
+    r = cli(["run", src, "--out", out])
+    calib = check_calib_files(f"{sid} + EXIF {f35} mm", out, r)
+    tag = f"{sid} + EXIF {f35} mm ({exif_fov:.2f}°)"
+    if not calib:
+        check(f"{tag}: calibrated", False, r.get("error") or "no calib.json")
+        return
+    cam = calib["camera"]
+    d = compare_camera(cam, truth["camera"])
+    check(f"{tag}: the FOV is the EXIF one (fov_source exif), MoGe's own recorded beside it",
+          calib.get("fov_source") == "exif" and abs(cam["fov_y_deg"] - exif_fov) <= 0.05 and isinstance((calib.get("moge") or {}).get("fov_y_deg"), (int, float)),
+          f"fov_source {calib.get('fov_source')}, fov {cam['fov_y_deg']} (EXIF {exif_fov:.2f}, MoGe {(calib.get('moge') or {}).get('fov_y_deg')}, truth {truth['camera']['fov_y_deg']})")
+    check(f"{tag}: height within 5 % (MoGe's scale corrected by the focal ratio)", d["height_rel"] <= 0.05,
+          f"height {cam['height_m']} vs truth {truth['camera']['height_m']} ({100 * d['height_rel']:.1f} %; MoGe's own {(calib.get('moge') or {}).get('height_m')})")
+    check(f"{tag}: pitch within 3°, roll within 2°", d["pitch"] <= TOL["pitch_deg"] and d["roll"] <= TOL["roll_deg"], f"|Δpitch| {d['pitch']:.2f}°, |Δroll| {d['roll']:.2f}°")
+    dp = out / "depth.png"
+    if dp.is_file():
+        de = depth_error(dp, sdir / "depth.png")
+        check(f"{tag}: depth.png median error ≤ 10 % on non-floor pixels", de["median_rel"] is not None and de["median_rel"] <= TOL["depth_rel"],
+              f"median {100 * (de['median_rel'] or 0):.1f} % (depth scale {(calib.get('moge') or {}).get('depth_scale')})")
+    else:
+        check(f"{tag}: depth.png median error ≤ 10 % on non-floor pixels", False, "no depth.png")
+    seen = as_seen(cam, truth["camera"], w, h)
+    check(f"{tag}: furniture is drawn within 5 % of its true size on the floor", abs(seen["size"] - 1) <= 0.05,
+          f"x{seen['size']:.3f} (x{seen['size_lo']:.3f}..x{seen['size_hi']:.3f})")
+    check(f"{tag}: the floor is drawn within 25 px of where it is (median, floor 1–7 m)", seen["grid_px"] <= 25, f"{seen['grid_px']:.1f} px on a {w} × {h} photo")
+    for x in out.glob("source.*"):
+        x.unlink()
 
 
 # --- mock mode (ingest, mocked fit) ----------------------------------------------------------------------------------
@@ -510,7 +617,9 @@ def run_mock(cli: Cli, args) -> None:
     # not pass through: photo.jpg is re-encoded and carries nothing (contract §4.3 Pass-through)
     sys.path.insert(0, str(REPO / "evals/lib"))
     import metadata as md  # noqa: E402 - evals/lib/metadata.py (same Pillow)
-    for kind, what in (("trailing-gps", "a GPS-bearing JPEG after EOI"), ("prog-midscan-gps", "EXIF/GPS between progressive scans"), ("zero-pad", "64 KB of zeros after EOI")):
+    # (verify round 2: a JFXX APP0 extension whose thumbnail is a JPEG with EXIF/GPS, too)
+    for kind, what in (("trailing-gps", "a GPS-bearing JPEG after EOI"), ("prog-midscan-gps", "EXIF/GPS between progressive scans"), ("zero-pad", "64 KB of zeros after EOI"),
+                       ("jfxx-gps", "a JFXX APP0 whose thumbnail has EXIF/GPS")):
         src = OUT / "inputs" / f"{kind}.jpg"
         md.make(kind, src, None, None)
         out = scene_dir(f"hidden-{kind}")
@@ -623,6 +732,18 @@ def run_self_test() -> None:
         check(f"self-test {sid}: the fixture calib.json validates", not errs, errs or "valid")
         meta = metadata_in(sdir / "photo.jpg")
         check(f"self-test {sid}: the metadata detector passes the clean golden photo", not meta, meta or "JFIF only")
+        w, h = truth["image"]["w"], truth["image"]["h"]
+        same = as_seen(truth["camera"], truth["camera"], w, h)
+        check(f"self-test {sid}: as_seen of the truth camera: floor 0 px off, furniture x1.000", same["grid_px"] < 1e-6 and abs(same["size"] - 1) < 1e-9, same)
+        low = as_seen(dict(truth["camera"], height_m=truth["camera"]["height_m"] / 1.1), truth["camera"], w, h)
+        # about x1.1 (not exactly: the stick's top is seen at a different tilt from a lower eye)
+        check(f"self-test {sid}: a camera 10 % too low draws furniture about x1.1", abs(low["size"] - 1.1) < 0.03 and low["size_lo"] > 1.09, low)
+        sp = _project(truth["camera"], w, h, np.array(truth["objects"]["sofa"]["corners"], float))[0]
+        check(f"self-test {sid}: _project puts the sofa corners on truth.json's corner_px (≤ 0.01 px)",
+              float(np.abs(sp - np.array(truth["objects"]["sofa"]["corner_px"], float)).max()) < 0.01, float(np.abs(sp - np.array(truth["objects"]["sofa"]["corner_px"], float)).max()))
+        f35 = f35_for(truth["camera"]["fov_y_deg"], w, h)
+        check(f"self-test {sid}: the whole-mm EXIF focal for the true FOV is within 1° of it", abs(fov_from_35mm(f35, w, h) - truth["camera"]["fov_y_deg"]) < 1.0,
+              f"{f35} mm → {fov_from_35mm(f35, w, h):.2f}° (truth {truth['camera']['fov_y_deg']})")
     inputs = make_inputs(OUT / "selftest-inputs")
     meta = metadata_in(inputs["large"])
     check("self-test: the metadata detector finds EXIF, XMP and the comment in a tagged JPEG", {"APP1:Exif", "APP1:XMP", "COM"} <= set(meta), meta)

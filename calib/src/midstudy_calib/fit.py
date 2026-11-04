@@ -117,27 +117,51 @@ def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: st
     calib = _base(w, h, exif)
     calib.update({"source": "moge-2", "model": out["repo"], "device": dev,
                   "principal": [round(float(K[0, 2]), 4), round(float(K[1, 2]), 4)]})
+    # A known FOV (the photo's EXIF focal length, when it agrees with MoGe's within FOV_DISAGREE_DEG) replaces MoGe's,
+    # and MoGe's metric scale is corrected with it. MoGe's FOV runs wide (3.6-7.5 deg on the golden renders, 3.1 deg
+    # over EXIF on the real lounge photo) and its scale is short by the same focal ratio, while its pitch and roll are
+    # right (contract §4.3 Fit). So: FOV from EXIF, pitch and roll from MoGe's floor, height times
+    # k = f_exif / f_moge, and depth.png scaled to agree with the floor that camera draws. Measured on the golden scenes
+    # with their true FOV given: height within 2 %, depth within 5 %, the floor grid within 2-13 px (was 32-73 px).
+    exif_fov = exif.get("fov_y_deg") if exif else None
+    use_exif = bool(exif_fov) and abs(fov_y - exif_fov) <= FOV_DISAGREE_DEG
+    fov_cam = float(exif_fov) if use_exif else fov_y
+    k = math.tan(math.radians(fov_y) / 2) / math.tan(math.radians(fov_cam) / 2)
+    depth_scale = 1.0
     if floor is not None and floor["inlier_ratio"] >= MIN_INLIER_RATIO:
         height, pitch, roll = fl.camera_from_plane(floor["n"], floor["d"])
-        calib["camera"] = camera_block(fov_y, height, pitch, roll)
+        calib["camera"] = camera_block(fov_cam, height * k, pitch, roll)
+        if use_exif:
+            # depth.png must agree with the floor the planner draws (furniture stands on it, and occlusion compares
+            # the two): the median ratio between that floor's depth and MoGe's own over MoGe's floor pixels.
+            zf = fl.floor_depth(calib["camera"], dw, dh)
+            z = pts[..., 2]
+            on = floor["inliers"] & np.isfinite(zf) & np.isfinite(z) & (z > 0)
+            depth_scale = float(np.median(zf[on] / z[on])) if on.sum() >= 100 else k
+            log(f"FOV {fov_cam:.2f} from EXIF (MoGe's {fov_y:.2f}): height x {k:.3f}, depth x {depth_scale:.3f}")
         n3 = floor["n"] * fl.CV_TO_THREE
         calib["floor"] = {"found": True, "inlier_ratio": round(floor["inlier_ratio"], 4), "rmse_m": round(floor["rmse_m"], 4),
                           "normal_camera": [round(float(v), 5) for v in n3]}
         log(f"floor: height {height:.3f} m, pitch {pitch:.2f}, roll {roll:.2f}, inliers {floor['inlier_ratio']:.1%}, "
             f"rmse {floor['rmse_m'] * 100:.1f} cm")
     else:
-        calib["camera"] = camera_block(fov_y, 1.40, -10.0, 0.0)
+        calib["camera"] = camera_block(fov_cam, 1.40, -10.0, 0.0)
         calib["floor"] = {"found": False, "inlier_ratio": round(floor["inlier_ratio"], 4) if floor else None,
                           "rmse_m": round(floor["rmse_m"], 4) if floor else None}
-        log("no floor plane found: MoGe's FOV with height 1.40, pitch -10, roll 0")
+        log(f"no floor plane found: {'the EXIF' if use_exif else 'MoGe'}'s FOV with height 1.40, pitch -10, roll 0")
         floor = None
+        depth_scale = k if use_exif else 1.0
+    calib["fov_source"] = "exif" if use_exif else "moge"
     calib["moge"] = {"fov_x_deg": round(fov_x, 2), "fov_y_deg": round(fov_y, 2), "input": [dw, dh],
                      "load_s": round(out["load_s"], 2), "infer_s": round(out["infer_s"], 2), "floor_fit_s": round(fit_s, 2)}
+    if use_exif:
+        calib["moge"].update({"height_m": round(float(calib["camera"]["height_m"]) / k, 4) if calib["floor"]["found"] else None,
+                              "scale": round(k, 4), "depth_scale": round(depth_scale, 4)})
     if exif and exif.get("fov_y_deg") and abs(fov_y - exif["fov_y_deg"]) > FOV_DISAGREE_DEG:
         calib["fov_disagreement"] = {"moge_deg": round(fov_y, 2), "exif_deg": exif["fov_y_deg"]}
-        log(f"MoGe's FOV {fov_y:.1f} and the EXIF FOV {exif['fov_y_deg']:.1f} differ by more than {FOV_DISAGREE_DEG:g} degrees")
+        log(f"MoGe's FOV {fov_y:.1f} and the EXIF FOV {exif['fov_y_deg']:.1f} differ by more than {FOV_DISAGREE_DEG:g} degrees: MoGe's is used")
     if not no_depth:
-        mm, masked = fl.depth_mm(pts, valid, floor)
+        mm, masked = fl.depth_mm(pts, valid, floor, depth_scale)
         write_atomic(scene / "depth.png", _png16(mm))
         calib["depth"] = {"file": "depth.png", "w": dw, "h": dh, "floor_masked": masked}
     return calib

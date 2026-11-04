@@ -156,13 +156,27 @@ def fit_floor(points: np.ndarray, normals: np.ndarray | None, valid: np.ndarray,
     }
 
 
-def depth_mm(points: np.ndarray, valid: np.ndarray, floor: dict | None) -> tuple[np.ndarray, bool]:
+def floor_depth(camera: dict, w: int, h: int) -> np.ndarray:
+    """The view-axis depth (m) of the floor plane y = 0 under each pixel centre of a w x h image, for a contract §4.1
+    camera block (the same projection the planner draws with); nan at or above the horizon."""
+    f = (h / 2) / math.tan(math.radians(camera["fov_y_deg"]) / 2)
+    u, v = np.meshgrid(np.arange(w) + 0.5, np.arange(h) + 0.5)
+    p, r = math.radians(camera["pitch_deg"]), math.radians(camera["roll_deg"])
+    # world y of the ray direction R @ ((u - w/2)/f, -(v - h/2)/f, -1), R = Rx(p) Rz(r): its second row
+    row = np.array([math.cos(p) * math.sin(r), math.cos(p) * math.cos(r), -math.sin(p)])
+    dy = row[0] * (u - w / 2) / f - row[1] * (v - h / 2) / f - row[2]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(dy < 0, camera["height_m"] / -dy, np.nan)
+
+
+def depth_mm(points: np.ndarray, valid: np.ndarray, floor: dict | None, scale: float = 1.0) -> tuple[np.ndarray, bool]:
     """depth.png's content: uint16 mm along the view axis (OpenCV z), 0 where unknown, on the floor (within 4 cm of the
     plane, a little more far away where MoGe is noisier) or below it (reflections, a lower floor seen through glass:
-    the floor plane is always nearer along those rays, so they can never hide anything standing on it)."""
+    the floor plane is always nearer along those rays, so they can never hide anything standing on it). The floor is
+    found in MoGe's own frame; `scale` then multiplies every depth (a known FOV rescales MoGe's metric scale)."""
     z = points[..., 2]
     ok = valid & np.isfinite(z) & (z > 0)
-    mm = np.where(ok, np.rint(z * 1000.0), 0)
+    mm = np.where(ok, np.rint(z * scale * 1000.0), 0)
     mm[mm > 65535] = 0
     masked = False
     if floor is not None:

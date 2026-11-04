@@ -300,7 +300,11 @@ export function mount(ctx) {
         h('span.tnum', [layoutOf(r) || null, dayDate(r.created), phone ? null : modelShort(r.model)].filter(Boolean).join(' · ')))
       const closeBtn = h('button.btn.btn-icon.rv-close', { type: 'button', 'aria-label': 'Close', onclick: close }, pic('close', { size: 16 }))
       const seg = segmented(modes, mode, (v) => { mode = v; m.rerender() }, { small: true, label: 'Compare as' })
-      const swap = h('button.btn.btn-quiet.cv-swap', { type: 'button', onclick: () => { [ra, rb] = [rb, ra]; m.rerender() } }, 'Swap A and B')
+      // Swap A and B: a labelled button on the desktop, an icon button (44 px) in the phone's narrower header.
+      const doSwap = () => { [ra, rb] = [rb, ra]; m.rerender() }
+      const swap = phone
+        ? h('button.btn.btn-icon.btn-quiet.cv-swap.is-icon', { type: 'button', 'aria-label': 'Swap A and B', dataset: { midstudy: 'compare-swap' }, onclick: doSwap }, pic('swap', { size: 20 }))
+        : h('button.btn.btn-quiet.cv-swap', { type: 'button', dataset: { midstudy: 'compare-swap' }, onclick: doSwap }, 'Swap A and B')
       let stage
       if (mode === 'side') {
         stage = h('div.cv-side', pair.map((r, i) => h('figure', h('div.cv-frame', h('img', { src: r.url, alt: `Render ${i ? 'B' : 'A'}` })), h('figcaption', tag(r, i)))))

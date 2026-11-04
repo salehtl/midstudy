@@ -74,6 +74,34 @@ def app1_after_first_scan(prog: bytes, payload: bytes) -> bytes:
     return prog[:second] + seg + prog[second:]
 
 
+def with_app0(clean: bytes, payload: bytes) -> bytes:
+    """`clean` with an extra APP0 segment (payload after the length) right after its JFIF header."""
+    i = 2 + 2 + int.from_bytes(clean[4:6], "big")  # past SOI and the JFIF APP0
+    return clean[:i] + b"\xff\xe0" + struct.pack(">H", len(payload) + 2) + payload + clean[i:]
+
+
+@pytest.mark.parametrize("case", ["jfxx_gps_thumbnail", "jfif_thumbnail"])
+def test_no_pass_through_with_an_app0_thumbnail(tmp_path, case):
+    """Verify round 2: an APP0 that isn't a plain 16-byte JFIF header (a JFXX extension holding a whole JPEG with EXIF
+    and GPS, or a JFIF thumbnail) is an embedded image: no pass-through, and photo.jpg has none of it."""
+    clean = plain_jpeg()
+    if case == "jfxx_gps_thumbnail":
+        data = with_app0(clean, b"JFXX\x00\x10" + gps_jpeg(32, 24))
+    else:  # a JFIF APP0 with a 2 x 1 RGB thumbnail
+        i = 4
+        n = int.from_bytes(clean[i:i + 2], "big")
+        thumb = b"\x02\x01" + b"\x10\x20\x30\x40\x50\x60"
+        data = clean[:i] + struct.pack(">H", n - 2 + len(thumb)) + clean[i + 2:i + n - 2] + thumb + clean[i + n:]
+        assert data[6:11] == b"JFIF\x00"
+    assert jpeg_markers(data) is not None and not is_clean_jpeg(data)
+    up = tmp_path / "up.jpg"
+    up.write_bytes(data)
+    ingest(up, tmp_path / "s")
+    photo = (tmp_path / "s/photo.jpg").read_bytes()
+    assert photo != data and is_clean_jpeg(photo)
+    assert b"TestCam" not in photo and b"JFXX" not in photo and b"Exif" not in photo
+
+
 @pytest.mark.parametrize("case", ["trailing_jpeg", "zero_padding", "html_trailer", "app1_between_scans", "com_between_scans"])
 def test_no_pass_through_with_hidden_metadata(tmp_path, case):
     """Contract §4.3: pass-through only when nothing follows EOI and no APP1-APP15 or COM appears anywhere."""

@@ -1,5 +1,15 @@
 # App track notes (planner/ and planner/serve.py)
 
+> **Since verify round 2 (see `verify-fix-2.md`):** the Scenes page no longer shows a stray "null" (scenes.js filtered
+> nothing into `replaceChildren`); a scene opens with its layout on any device (this device's own choice, else the
+> layout saved last anywhere); a wake always gets one frame (Set scale redrew only on the next pointer move in slow
+> software rendering); the ruler has its own fixed-height row (no photo jump, the phone's instruction readable); the
+> selection label stays left of the phone's lift column; phone toasts sit at the top while a sheet is open; phone
+> Compare has Swap A and B; pieces added from a 3D file get a rendered thumbnail (`PUT /api/library/items/<id>/thumb`).
+> `serve.py`: APP0 kept only as plain JFIF in client JPEGs, `jpeg_size` steps over RSTn/TEM and an unreadable render
+> size is 400, ASCII-only `Content-Length`, a stalled body is 408, the early-413 drain ends in 5 s, a malformed
+> `--allowed-host` is refused, the scene API leaves out the camera make and model.
+
 > **Since verify round 1 (see `verify-fix-1.md`):** `serve.py` serves an allowlist only (`/planner/`, `/library/`
 > assets, `/scenes/` photo/depth/thumb, `/renders/`), never `/library/<id>/source.*`; strips metadata from client JPEGs
 > (render, thumb); restores deleted scenes (`POST /api/scenes/<name>/restore`, `trash` in `GET /api/scenes`); trashes
