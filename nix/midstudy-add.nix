@@ -2,6 +2,7 @@
 # pipeline allows >=3.12,<3.14). planner/serve.py runs it for library jobs (§2.8) with --library <library-dir>.
 # Keeps pipeline/pyproject.toml next to the source, so midstudy-add finds its root the way it does in git; it never
 # writes there (the server always passes --library), and FAL_KEY comes from the environment (services.midstudy.falKeyFile).
+# Pure Python, so it builds on the Mac too (aarch64-darwin), where it was checked; homeserver runs the x86_64-linux one.
 {
   lib,
   stdenvNoCC,
@@ -53,6 +54,6 @@ stdenvNoCC.mkDerivation {
   meta = {
     description = "midstudy-add: a furniture photo or model to a normalized midstudy library item";
     mainProgram = "midstudy-add";
-    platforms = lib.platforms.linux;
+    platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 }
