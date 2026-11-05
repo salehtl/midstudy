@@ -220,15 +220,16 @@ nix develop -c node scripts/check-ownership.mjs server-core --base 979677c
 
 ## TScert
 
-`nix develop -c npm run check:tscert`: **115/115 certified, all 115 baselined still certify** (15 files, 17 s, at load 7;
-`tscert/baseline.json` holds all 115: every function and module initialization of `server/src/logic/` and
-`common/logic/`). The first run certified
-107/111 at once; the four refusals were rewritten (a function passed as `map`'s callback, an object spread, a write to an
-array index, `concat`, a `for…of` over a union array, an index read of it), each a pattern tscert/README.md lists.
-Under this machine's load (20–48 during the session) TScert's verifier steps timed out (no verdict, "tool error") even
-with a 900 s step limit, on units that certify in seconds when the machine is quiet; at load 7 the default 180 s gave
-the verdicts above. A gate that meets a tool error should simply run again. Everything in `server/src/logic/` and `common/logic/` is pure (no Node, no
-DOM), including `String.prototype.normalize` in `slugify` and `String.fromCodePoint` in the UTF-8 decoder, which certify.
+`nix develop -c npm run check:tscert`: **115/115 certified, all 115 baselined still certify** (15 files, 17 s, at load
+7). `tscert/baseline.json` holds all 115: every function and module initialization of `server/src/logic/` and
+`common/logic/`. The first run certified 107/111; the refusals, and three more in the reshaped `parseCli`, were rewritten
+around patterns tscert/README.md lists: a named function passed as `map`'s callback, an object spread, a write at an
+array index, `concat`, and a `for…of`, a closure and an index read over an array of a union type. Everything in
+`server/src/logic/` and `common/logic/` is pure (no Node, no DOM); `String.prototype.normalize` (in `slugify`),
+`String.fromCodePoint` (the UTF-8 decoder), regexes with Unicode property escapes (`pyRepr`) and `BigInt` (`pyFixed`
+above 1e21) certify. Under this machine's load (20–48 during the session) TScert's verifier steps timed out ("tool
+error", no verdict) even with a 900 s step limit, on units that certify in seconds when it is quiet; at load 7 the
+default 180 s gave the verdicts above. A gate that meets a tool error should run again.
 
 ## Decisions and deviations from v1
 
