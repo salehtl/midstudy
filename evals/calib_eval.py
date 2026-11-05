@@ -17,6 +17,12 @@ pixels (truth depth > 0). Without EXIF, MoGe-2's own FOV and scale are used, and
 wide and 8–15 % short, so that run checks pitch within 3°, roll within 2° and the depth shape (≤ 3 % after one global
 scale) strictly, and FOV, height and absolute depth only against regression guard bands (10°, 20 %, 25 %).
 upper-lounge-camera.jpeg's FOV within 8° of its EXIF estimate.
+Lighting (contract §4.8, added 2026-11-05): lighting.json on the five golden scenes (the three above plus living-cool
+and living-warm, the living-wide camera under other lights) against their known lights (truth.json `lights`): the key
+light's direction within 25°, confidence ≥ 0.5, the mean irradiance over the normals a piece shows within 0.75–1.33×,
+the light's colour temperature within 30 mired, the cool and warm scenes shifted the right way by at least half the
+true shift, the fit within 2 s; on the lounge photo: written, valid and plausible. Measured on 2026-11-05: direction
+1.7–15.1°, irradiance 0.93–1.15×, colour +11…+23 mired (the room's beige and oak read as a warmer light), fit 0.3 s.
 Real photos come only from the three files named in fixtures/photos/notes.md; fixtures/photos/private/ is never opened.
 Their scene folders under evals/out/calib/ lose source.* at the end (the camera original keeps EXIF).
 Prints one PASS/FAIL line per check with the measured value; exits 1 on any FAIL.
@@ -53,7 +59,9 @@ NO_EXIF_BAND = {"fov_y_deg": 10.0, "height_rel": 0.20, "depth_rel": 0.25}
 NO_EXIF_NAMES = ("fov within 10° (no EXIF: MoGe's own FOV, regression band)", "height within 20 % (no EXIF: MoGe's own scale, regression band)",
                  "depth.png median error ≤ 25 % on non-floor pixels (no EXIF: MoGe's own scale, regression band)")
 P3_ICC = Path("/System/Library/ColorSync/Profiles/Display P3.icc")
-ALLOWED_FILES = {"source.jpg", "source.png", "source.heic", "source.webp", "photo.jpg", "calib.json", "depth.png"}
+ALLOWED_FILES = {"source.jpg", "source.png", "source.heic", "source.webp", "photo.jpg", "calib.json", "depth.png", "lighting.json"}
+LIGHT_GOLDEN = GOLDEN + ["living-cool", "living-warm"]
+LIGHT_TOL = {"dir_deg": 25.0, "conf": 0.5, "level": (0.75, 1.33), "mired": 30.0, "shift_frac": 0.5, "elapsed_s": 2.0}
 
 results: list[dict] = []
 t_start = time.monotonic()
@@ -284,6 +292,123 @@ def mean_abs(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.abs(a.astype(np.float64) - b.astype(np.float64)).mean())
 
 
+# --- lighting (contract §4.8) --------------------------------------------------------------------------------------------
+REF_NORMALS = np.array([[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [1, 0, 1], [-1, 0, 1]], float)
+REF_NORMALS /= np.linalg.norm(REF_NORMALS, axis=1, keepdims=True)
+
+
+def hex_linear(h: int) -> np.ndarray:
+    c = np.array([(h >> 16) & 255, (h >> 8) & 255, h & 255]) / 255.0
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def cct_k(rgb) -> float:
+    """CCT of a linear sRGB colour (CIE xy, McCamy)."""
+    X, Y, Z = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]) @ np.maximum(np.asarray(rgb, float), 1e-9)
+    x, y = X / (X + Y + Z), Y / (X + Y + Z)
+    n = (x - 0.3320) / (0.1858 - y)
+    return float(449 * n ** 3 + 3525 * n ** 2 + 6823.3 * n + 5520.33)
+
+
+def light_E(lj: dict, cam: dict, n_world: np.ndarray) -> np.ndarray:
+    """Total irradiance (RGB) at a world normal from a lighting.json, turned to the world by `cam` (§4.8: ambient SH
+    bands 0-1 through three.js's shGetIrradianceAt, plus the key light's clamped cosine)."""
+    R = _rot(cam)
+    nc = R.T @ n_world
+    sh = np.array(lj["ambient"]["sh"], float)
+    x, y, z = nc
+    E = sh[0] * 0.886227 + 2 * 0.511664 * (sh[1] * y + sh[2] * z + sh[3] * x)
+    E = E + sh[4] * 2 * 0.429043 * x * y + sh[5] * 2 * 0.429043 * y * z + sh[6] * (0.743125 * z * z - 0.247708) + sh[7] * 2 * 0.429043 * x * z + sh[8] * 0.429043 * (x * x - y * y)
+    l = R @ np.array(lj["key"]["direction"], float)
+    return E + lj["key"]["intensity"] * np.array(lj["key"]["color"], float) * max(0.0, float(n_world @ l))
+
+
+def truth_E(lights: dict, n_world: np.ndarray) -> np.ndarray:
+    """The golden scenes' hemisphere light and sun (truth.json `lights`, three.js units) at a world normal."""
+    S, G, I = hex_linear(lights["hemi"]["sky"]), hex_linear(lights["hemi"]["ground"]), lights["hemi"]["intensity"]
+    sun = lights["sun"]
+    l = np.array(sun["position"], float) - np.array(sun["target"], float)
+    l /= np.linalg.norm(l)
+    return I * (G + (S - G) * (0.5 + 0.5 * n_world[1])) + sun["intensity"] * hex_linear(sun["color"]) * max(0.0, float(n_world @ l))
+
+
+def sun_dir(lights: dict) -> np.ndarray:
+    l = np.array(lights["sun"]["position"], float) - np.array(lights["sun"]["target"], float)
+    return l / np.linalg.norm(l)
+
+
+def angle_deg(a: np.ndarray, b: np.ndarray) -> float:
+    return math.degrees(math.acos(max(-1.0, min(1.0, float(a @ b / np.linalg.norm(a) / np.linalg.norm(b))))))
+
+
+def az_el(l: np.ndarray) -> str:
+    return f"az {math.degrees(math.atan2(l[0], -l[2])):.0f}° el {math.degrees(math.asin(max(-1, min(1, l[1])))):.0f}°"
+
+
+def check_lighting_file(tag: str, scene_dir: Path) -> dict | None:
+    p = scene_dir / "lighting.json"
+    if not p.is_file():
+        check(f"{tag}: lighting.json written and valid (lighting.schema.json, source photo, camera frame)", False, "no lighting.json")
+        return None
+    lj = json.loads(p.read_text())
+    errs = validate(lj, "lighting.schema.json")
+    check(f"{tag}: lighting.json written and valid (lighting.schema.json, source photo, camera frame)",
+          not errs and lj.get("source") == "photo" and lj.get("frame") == "camera", errs or f"source {lj.get('source')} frame {lj.get('frame')}")
+    return lj
+
+
+def run_lighting(cli: "Cli", args) -> None:
+    """Contract §4.8 on the golden scenes: lighting.json against the known lights."""
+    ids = [s for s in (args.only.split(",") if args.only else LIGHT_GOLDEN) if s in LIGHT_GOLDEN]
+    got = {}
+    for sid in ids:
+        sdir = REPO / "fixtures/scenes" / sid
+        truth = json.loads((sdir / "truth.json").read_text())
+        out = OUT / "golden" / sid
+        if not (out / "calib.json").is_file():  # the three camera scenes ran above; the lighting-only ones run here
+            shutil.rmtree(out, ignore_errors=True)
+            out.mkdir(parents=True)
+            r = cli(["run", sdir / "photo.jpg", "--out", out], mock=args.calib_mock)
+            info(f"{sid}: midstudy-calib run took {r['elapsed']:.1f} s ({brief(r)})")
+            check_calib_files(sid, out, r)
+        calib = json.loads((out / "calib.json").read_text()) if (out / "calib.json").is_file() else None
+        tag = f"{sid} (lighting)"
+        lj = check_lighting_file(tag, out)
+        if not lj or not calib or "lights" not in truth:
+            for name in ("key direction within 25° of the sun", "confidence ≥ 0.5", "irradiance level within 0.75–1.33×", "colour within 30 mired", "fit within 2 s"):
+                check(f"{tag}: {name}", False, "no lighting.json, calib.json or truth lights")
+            continue
+        cam = calib["camera"]
+        key = _rot(cam) @ np.array(lj["key"]["direction"], float)
+        sun = sun_dir(truth["lights"])
+        err = angle_deg(key, sun)
+        check(f"{tag}: key direction within {LIGHT_TOL['dir_deg']:g}° of the sun (world frame, with the calibrated camera)", err <= LIGHT_TOL["dir_deg"],
+              f"{err:.1f}° (got {az_el(key)}, sun {az_el(sun)}; confidence {lj['key'].get('confidence')}, creases {(lj.get('fit') or {}).get('pairs')})")
+        check(f"{tag}: confidence ≥ {LIGHT_TOL['conf']} (one clear key light)", lj["key"]["confidence"] >= LIGHT_TOL["conf"], f"{lj['key']['confidence']}, softness {lj['key']['softness']}")
+        Ei = np.array([light_E(lj, cam, n) for n in REF_NORMALS])
+        Et = np.array([truth_E(truth["lights"], n) for n in REF_NORMALS])
+        Y = np.array([0.2126, 0.7152, 0.0722])
+        level = float((Ei @ Y).mean() / (Et @ Y).mean())
+        lo, hi = LIGHT_TOL["level"]
+        check(f"{tag}: irradiance level within {lo}–{hi}× (mean over the normals a piece shows)", lo <= level <= hi,
+              f"x{level:.2f} (per normal {np.round((Ei @ Y) / (Et @ Y), 2).tolist()})")
+        k_in, k_t = cct_k(Ei.mean(0)), cct_k(Et.mean(0))
+        dm = 1e6 / k_in - 1e6 / k_t
+        check(f"{tag}: light colour within {LIGHT_TOL['mired']:g} mired of the true light's", abs(dm) <= LIGHT_TOL["mired"],
+              f"{k_in:.0f} K vs {k_t:.0f} K ({dm:+.1f} mired; white_balance.cct_k {lj['white_balance'].get('cct_k')})")
+        el = (lj.get("fit") or {}).get("elapsed_s")
+        check(f"{tag}: fit within {LIGHT_TOL['elapsed_s']:g} s (fit.elapsed_s)", isinstance(el, (int, float)) and el <= LIGHT_TOL["elapsed_s"], f"{el} s")
+        got[sid] = (k_in, k_t)
+    if {"living-wide", "living-cool", "living-warm"} <= set(got):
+        w, c, m = got["living-wide"], got["living-cool"], got["living-warm"]
+        mi = lambda k: 1e6 / k  # noqa: E731
+        cool_shift, cool_true = mi(w[0]) - mi(c[0]), mi(w[1]) - mi(c[1])
+        warm_shift, warm_true = mi(m[0]) - mi(w[0]), mi(m[1]) - mi(w[1])
+        check("same room, three lights: the colour shifts the right way, by at least half the true shift (cool and warm vs daylight)",
+              cool_shift >= LIGHT_TOL["shift_frac"] * cool_true and warm_shift >= LIGHT_TOL["shift_frac"] * warm_true,
+              f"cool {cool_shift:.1f} mired (true {cool_true:.1f}), warm {warm_shift:.1f} mired (true {warm_true:.1f}); {c[0]:.0f} K / {w[0]:.0f} K / {m[0]:.0f} K")
+
+
 # --- real mode -------------------------------------------------------------------------------------------------------
 def check_calib_files(tag: str, scene_dir: Path, r: dict, photo_size_expected: tuple[int, int] | None = None) -> dict | None:
     js = r.get("json") or {}
@@ -355,6 +480,7 @@ def run_real(cli: Cli, args) -> None:
         if not mock:
             golden_with_exif(cli, sid, sdir, truth)
 
+    run_lighting(cli, args)
     if args.no_real_photos:
         skip("real photos", "--no-real-photos")
         return
@@ -375,6 +501,15 @@ def run_real(cli: Cli, args) -> None:
             check(f"{name}: floor.found reported, runtime logged", isinstance(fl.get("found"), bool) and isinstance(calib.get("elapsed_s"), (int, float)),
                   f"floor {fl}, elapsed_s {calib.get('elapsed_s')}, wall {r['elapsed']:.1f} s, source {calib.get('source')}, device {calib.get('device')}, camera {calib.get('camera')}")
             cams[name] = calib
+            if name == "upper-lounge-camera.jpeg" and calib.get("source") == "moge-2":
+                lj = check_lighting_file(name, out)
+                if lj:
+                    key = _rot(calib["camera"]) @ np.array(lj["key"]["direction"], float)
+                    k = lj["white_balance"].get("cct_k")
+                    el = (lj.get("fit") or {}).get("elapsed_s")
+                    check(f"{name}: the light is plausible (key above the horizon, 2500–8000 K, fit within 2 s)",
+                          key[1] > 0.05 and isinstance(k, (int, float)) and 2500 <= k <= 8000 and isinstance(el, (int, float)) and el <= 2,
+                          f"key {az_el(key)}, confidence {lj['key']['confidence']}, softness {lj['key']['softness']}, {k} K, intensity {lj['key']['intensity']}, fit {el} s")
         photo = out / "photo.jpg"
         if photo.is_file():
             meta = metadata_in(photo)
@@ -658,6 +793,7 @@ def run_mock(cli: Cli, args) -> None:
     check("run with MIDSTUDY_CALIB_MOCK, unknown photo: the default fallback (exit 0, source default, camera 55/1.40/−10/0, depth null, no depth.png)",
           r.get("code") == 0 and c.get("source") == "default" and c.get("camera") == DEFAULT_CAMERA and c.get("depth") is None and not (out / "depth.png").exists()
           and c.get("floor", {}).get("found") is False, f"{brief(r)}; source {c.get('source')} camera {c.get('camera')} depth {c.get('depth')} floor {c.get('floor')}")
+    check("run unknown: no lighting.json (no light without MoGe or a mock, contract §4.8)", not (out / "lighting.json").exists(), sorted(p.name for p in out.iterdir()))
     errs = validate(json.loads((out / "calib.json").read_text()), "calib.schema.json") if (out / "calib.json").is_file() else ["no calib.json"]
     check("run unknown: calib.json valid", not errs, errs or "valid")
     # mock hit: the golden calibration and depth are copied (contract §4.3 Mock)
@@ -674,6 +810,8 @@ def run_mock(cli: Cli, args) -> None:
         check(f"run {sid} with MIDSTUDY_CALIB_MOCK: the golden calib.json and depth.png", r.get("code") == 0 and c.get("camera") == truth["camera"] and c.get("source") == "truth" and depth_same,
               f"{brief(r)}; camera {c.get('camera')} source {c.get('source')} depth {'identical' if depth_same else 'missing or different'}")
         names = sorted(p.name for p in out.iterdir())
+        light_same = (out / "lighting.json").is_file() and (out / "lighting.json").read_bytes() == (sdir / "lighting.json").read_bytes()
+        check(f"run {sid} with MIDSTUDY_CALIB_MOCK: the golden lighting.json too (contract §4.8)", light_same, "identical" if light_same else names)
         check(f"run {sid}: writes only source/photo/calib/depth, leaves scene.json and thumb.jpg alone, no temp files",
               set(names) - {"scene.json", "thumb.jpg"} <= ALLOWED_FILES and (out / "scene.json").read_text() == '{"keep": "me"}' and (out / "thumb.jpg").read_bytes() == b"thumb", names)
     # fit --no-depth removes a stale depth.png (contract §4.3 Files)
@@ -754,6 +892,23 @@ def run_self_test() -> None:
         f35 = f35_for(truth["camera"]["fov_y_deg"], w, h)
         check(f"self-test {sid}: the whole-mm EXIF focal for the true FOV is within 1° of it", abs(fov_from_35mm(f35, w, h) - truth["camera"]["fov_y_deg"]) < 1.0,
               f"{f35} mm → {fov_from_35mm(f35, w, h):.2f}° (truth {truth['camera']['fov_y_deg']})")
+    for sid in LIGHT_GOLDEN:
+        sdir = REPO / "fixtures/scenes" / sid
+        truth = json.loads((sdir / "truth.json").read_text())
+        lj = json.loads((sdir / "lighting.json").read_text())
+        errs = validate(lj, "lighting.schema.json")
+        key = _rot(truth["camera"]) @ np.array(lj["key"]["direction"], float)
+        dE = max(float(np.abs(light_E(lj, truth["camera"], n) - truth_E(truth["lights"], n)).max()) for n in REF_NORMALS)
+        check(f"self-test {sid}: the truth lighting.json validates, its key turned by the true camera is the sun, and it gives the lights' irradiance",
+              not errs and lj.get("source") == "truth" and angle_deg(key, sun_dir(truth["lights"])) < 1e-3 and dE < 1e-4,
+              errs or f"key {angle_deg(key, sun_dir(truth['lights'])):.5f}° from the sun, max |ΔE| {dE:.2e}")
+        k = cct_k(np.mean([truth_E(truth["lights"], n) for n in REF_NORMALS], 0))
+        check(f"self-test {sid}: the truth white balance is the lights' colour temperature", abs(k - lj["white_balance"]["cct_k"]) <= 1, f"{k:.1f} K vs {lj['white_balance']['cct_k']} K")
+    bad = json.loads((REPO / "fixtures/scenes/living-cool/lighting.json").read_text())
+    bad["key"]["direction"] = [-v for v in bad["key"]["direction"][:2]] + bad["key"]["direction"][2:]
+    lc = json.loads((REPO / "fixtures/scenes/living-cool/truth.json").read_text())
+    check("self-test: a key mirrored left-right and up-down fails the 25° direction check", angle_deg(_rot(lc["camera"]) @ np.array(bad["key"]["direction"]), sun_dir(lc["lights"])) > LIGHT_TOL["dir_deg"],
+          f"{angle_deg(_rot(lc['camera']) @ np.array(bad['key']['direction']), sun_dir(lc['lights'])):.1f}°")
     inputs = make_inputs(OUT / "selftest-inputs")
     meta = metadata_in(inputs["large"])
     check("self-test: the metadata detector finds EXIF, XMP and the comment in a tagged JPEG", {"APP1:Exif", "APP1:XMP", "COM"} <= set(meta), meta)

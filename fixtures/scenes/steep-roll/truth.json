@@ -612,5 +612,38 @@
         518.968
       ]
     }
-  ]
+  ],
+  "lights": {
+    "hemi": {
+      "sky": 16774890,
+      "ground": 12166284,
+      "intensity": 1.9
+    },
+    "sun": {
+      "color": 16773599,
+      "intensity": 2.2,
+      "position": [
+        3.2,
+        5,
+        1.5
+      ],
+      "target": [
+        -0.4,
+        0,
+        -3
+      ],
+      "shadow_radius": 6
+    },
+    "lamp": {
+      "color": 16767392,
+      "intensity": 1.6,
+      "position": [
+        1.95,
+        1.5,
+        -3.9
+      ],
+      "distance": 4,
+      "decay": 2
+    }
+  }
 }

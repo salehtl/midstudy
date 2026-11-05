@@ -6,6 +6,9 @@
     images.py align-synth --scene-dir fixtures/scenes/living-wide --out DIR [--shift-frac 0.02]
     images.py align-measure --photo P --final F --rect x0,y0,x1,y1
     images.py align-selftest --out DIR
+    images.py lighting --composite C.jpg --photo P.jpg --camera J --box '[[min],[max]]' [--lighting L.json --albedo 0.5
+                       --strength 1 --ambient 1] [--light '[x,y,z]'] [--exclude '[[[min],[max]], ...]'] [--debug out.png]
+                       a lit box's faces (measured vs what lighting.json predicts) and its shadow on the floor (§4.8)
 
 Each prints one JSON object as its last stdout line.
 """
@@ -22,6 +25,175 @@ from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 MAGENTA = (220, 30, 220)
+
+
+# --- §4.8 lighting ---------------------------------------------------------------------------------------------------
+ACES_IN = np.array([[0.59719, 0.35458, 0.04823], [0.07600, 0.90834, 0.01566], [0.02840, 0.13383, 0.83777]])
+ACES_OUT = np.array([[1.60475, -0.53108, -0.07367], [-0.10208, 1.10813, -0.00605], [-0.00327, -0.07276, 1.07602]])
+FACES = {"right": (0, 1), "left": (0, -1), "top": (1, 1), "bottom": (1, -1), "front": (2, 1), "back": (2, -1)}
+
+
+def aces(x: np.ndarray) -> np.ndarray:
+    """three.js ACESFilmicToneMapping at exposure 1 (linear radiance -> display-linear)."""
+    v = (np.asarray(x, float) / 0.6) @ ACES_IN.T
+    v = (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081)
+    return np.clip(v @ ACES_OUT.T, 0, 1)
+
+
+def aces_inverse(y: np.ndarray) -> np.ndarray:
+    """aces()'s inverse below the shoulder (display-linear -> linear radiance)."""
+    y = np.clip(np.asarray(y, float) @ np.linalg.inv(ACES_OUT).T, 0, 0.995)
+    qa, qb, qc = 1 - y * 0.983729, 0.0245786 - y * 0.4329510, -(0.000090537 + y * 0.238081)
+    v = (-qb + np.sqrt(np.maximum(qb * qb - 4 * qa * qc, 0))) / (2 * qa)
+    return np.maximum(v @ np.linalg.inv(ACES_IN).T, 0) * 0.6
+
+
+def to_srgb8(x: np.ndarray) -> np.ndarray:
+    x = np.clip(x, 0, 1)
+    return 255 * np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+
+
+def from_srgb8(u: np.ndarray) -> np.ndarray:
+    c = np.asarray(u, float) / 255
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def cam_R(cam: dict) -> np.ndarray:
+    p, r = math.radians(cam["pitch_deg"]), math.radians(cam["roll_deg"])
+    return np.array([[1, 0, 0], [0, math.cos(p), -math.sin(p)], [0, math.sin(p), math.cos(p)]]) @ \
+        np.array([[math.cos(r), -math.sin(r), 0], [math.sin(r), math.cos(r), 0], [0, 0, 1]])
+
+
+def lighting_E(lj: dict, cam: dict, n: np.ndarray, strength=1.0, ambient=1.0) -> tuple[np.ndarray, np.ndarray]:
+    """(ambient, key) irradiance (RGB, three.js units) at world normal n from a lighting.json (§4.8), turned to the world
+    with `cam`."""
+    R = cam_R(cam)
+    x, y, z = R.T @ n
+    sh = np.array(lj["ambient"]["sh"], float)
+    amb = sh[0] * 0.886227 + 2 * 0.511664 * (sh[1] * y + sh[2] * z + sh[3] * x) + sh[4] * 2 * 0.429043 * x * y + \
+        sh[5] * 2 * 0.429043 * y * z + sh[6] * (0.743125 * z * z - 0.247708) + sh[7] * 2 * 0.429043 * x * z + sh[8] * 0.429043 * (x * x - y * y)
+    l = R @ np.array(lj["key"]["direction"], float)
+    key = lj["key"]["intensity"] * np.array(lj["key"]["color"], float) * max(0.0, float(n @ l))
+    return amb * ambient, key * strength
+
+
+def box_faces(cam: dict, W: int, H: int, bmin, bmax):
+    """Per pixel: the view-axis depth where the ray enters the axis-aligned box (inf where it misses) and which face
+    it enters through (index into FACES' order, -1 where it misses)."""
+    d = world_rays(cam, W, H)
+    C = np.array([0.0, cam["height_m"], 0.0])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t1 = (np.array(bmin) - C) / d
+        t2 = (np.array(bmax) - C) / d
+    tn = np.minimum(t1, t2)
+    tmin, tmax = np.nanmax(tn, axis=-1), np.nanmin(np.maximum(t1, t2), axis=-1)
+    hit = (tmax >= np.maximum(tmin, 0)) & np.isfinite(tmin) & (tmin > 0)
+    axis = np.nanargmax(np.where(np.isfinite(tn), tn, -np.inf), axis=-1)
+    sign = -np.sign(np.take_along_axis(d, axis[..., None], -1)[..., 0])
+    names = list(FACES)
+    face = np.full((H, W), -1)
+    for i, (ax, sg) in enumerate(FACES.values()):
+        face[hit & (axis == ax) & (sign == sg)] = i
+    return np.where(hit, tmin, np.inf), face, names
+
+
+def erode(m: np.ndarray, r: int) -> np.ndarray:
+    out = m.copy()
+    for dy in range(-r, r + 1):
+        for dx in (-r, 0, r):
+            out &= np.roll(np.roll(m, dy, 0), dx, 1)
+    return out
+
+
+def dilate(m: np.ndarray, r: int) -> np.ndarray:
+    out = m.copy()
+    for dy in range(-r, r + 1, max(1, r // 2)):
+        for dx in range(-r, r + 1, max(1, r // 2)):
+            out |= np.roll(np.roll(m, dy, 0), dx, 1)
+    return out
+
+
+def cmd_lighting(a):
+    cam, (bmin, bmax) = json.loads(a.camera), json.loads(a.box)
+    photo, (W, H) = load_rgb(Path(a.photo))
+    comp, csize = load_rgb(Path(a.composite), (W, H))
+    depth, face, names = box_faces(cam, W, H, bmin, bmax)
+    others = np.zeros((H, W), bool)
+    for omin, omax in json.loads(a.exclude or "[]"):
+        others |= np.isfinite(box_faces(cam, W, H, omin, omax)[0])
+    out = {"composite_size": list(csize), "photo_size": [W, H], "faces": {}}
+    lj = json.loads(Path(a.lighting).read_text()) if a.lighting else None
+    for i, name in enumerate(names):
+        m = erode(face == i, 3) & ~others
+        if m.sum() < 80:
+            continue
+        rgb = comp[m].mean(0)
+        f = {"n_px": int(m.sum()), "rgb": [round(float(v), 1) for v in rgb]}
+        if lj:
+            ax, sg = FACES[name]
+            n = np.zeros(3)
+            n[ax] = sg
+            amb, key = lighting_E(lj, cam, n, a.strength, a.ambient)
+            exp = to_srgb8(aces(a.albedo / math.pi * (amb + key)))
+            f["expected_rgb"] = [round(float(v), 1) for v in exp]
+            f["expected_ambient_only_rgb"] = [round(float(v), 1) for v in to_srgb8(aces(a.albedo / math.pi * amb))]
+            Y = np.array([0.2126, 0.7152, 0.0722])
+            # in radiance (ACES undone), measured / expected: the face's albedo over --albedo when the light is right
+            f["ratio"] = round(float((aces_inverse(from_srgb8(rgb)) @ Y) / max(float(aces_inverse(from_srgb8(exp)) @ Y), 1e-9)), 4)
+            f["max_abs_diff"] = round(float(np.abs(rgb - exp).max()), 1)
+        out["faces"][name] = f
+    # the floor around the box: where the composite is darker than the photo (its shadow), and where the shadow should be
+    silhouette = dilate(np.isfinite(depth) | others, 6)
+    d = world_rays(cam, W, H)
+    C = np.array([0.0, cam["height_m"], 0.0])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = -C[1] / d[..., 1]
+    floor = (d[..., 1] < 0) & ~silhouette
+    P = C + t[..., None] * d
+    centre = (np.array(bmin) + np.array(bmax)) / 2
+    near = floor & (np.hypot(P[..., 0] - centre[0], P[..., 2] - centre[2]) < 3.0)
+    Y = np.array([0.2126, 0.7152, 0.0722])
+    lp, lc = from_srgb8(photo) @ Y, from_srgb8(comp) @ Y
+    ratio = np.where(lp > 0.01, lc / np.maximum(lp, 1e-6), 1.0)
+    dark = near & (ratio < a.dark)
+    wts = np.clip(1 - ratio, 0, 1) * dark
+    sh = {"n_near": int(near.sum()), "n_dark": int(dark.sum()), "n_dark_2pct": int((near & (ratio < 0.98)).sum()),
+          "mean_ratio_dark": round(float(ratio[dark].mean()), 4) if dark.any() else None}
+    if dark.any():
+        cx, cz = (P[..., 0] * wts).sum() / wts.sum(), (P[..., 2] * wts).sum() / wts.sum()
+        sh["centroid_floor"] = [round(float(cx), 4), round(float(cz), 4)]
+        sh["offset"] = [round(float(cx - centre[0]), 4), round(float(cz - centre[2]), 4)]
+    if a.light:
+        l = np.array(json.loads(a.light), float)
+        l /= np.linalg.norm(l)
+        # the hard shadow: floor points whose ray to the light passes through the box
+        Pt = np.where(floor[..., None], P, np.nan)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s1 = (np.array(bmin) - Pt) / l
+            s2 = (np.array(bmax) - Pt) / l
+        smin, smax = np.nanmax(np.minimum(s1, s2), -1), np.nanmin(np.maximum(s1, s2), -1)
+        exp = floor & (smax >= np.maximum(smin, 0)) & (smax > 0)
+        sh["expected_px"] = int(exp.sum())
+        ex_d = dilate(exp, 10)
+        sh["dark_inside_expected"] = round(float(dark[ex_d].sum() / max(int(dark.sum()), 1)), 4)
+        sh["expected_darkened"] = round(float((dark & exp).sum() / max(int(exp.sum()), 1)), 4)
+        lh = np.array([l[0], l[2]])
+        if "offset" in sh and np.linalg.norm(lh) > 1e-6:
+            off = np.array(sh["offset"])
+            sh["offset_vs_light_deg"] = round(math.degrees(math.acos(max(-1, min(1, float(off @ -lh) / max(np.linalg.norm(off) * np.linalg.norm(lh), 1e-9))))), 1)
+    out["shadow"] = sh
+    if a.debug:
+        dbg = comp.copy().astype(np.uint8)
+        dbg[dark] = (dbg[dark] * 0.4 + np.array([255, 40, 40]) * 0.6).astype(np.uint8)
+        if a.light:
+            edge = exp & ~erode(exp, 1)
+            dbg[edge] = (0, 255, 255)
+        for i in range(len(names)):
+            e = (face == i) & ~erode(face == i, 1)
+            dbg[e] = (255, 255, 0)
+        Image.fromarray(dbg).save(a.debug)
+        out["debug"] = a.debug
+    return out
 
 
 # --- §4.1 ------------------------------------------------------------------------------------------------------------
@@ -252,11 +424,24 @@ def main(argv):
     p = sub.add_parser("align-measure")
     for k in ("--photo", "--final", "--rect"):
         p.add_argument(k, required=True)
+    p = sub.add_parser("lighting")
+    p.add_argument("--composite", required=True)
+    p.add_argument("--photo", required=True)
+    p.add_argument("--camera", required=True)
+    p.add_argument("--box", required=True)
+    p.add_argument("--lighting")
+    p.add_argument("--albedo", type=float, default=0.5)
+    p.add_argument("--strength", type=float, default=1.0)
+    p.add_argument("--ambient", type=float, default=1.0)
+    p.add_argument("--light")
+    p.add_argument("--exclude")
+    p.add_argument("--dark", type=float, default=0.93)
+    p.add_argument("--debug")
     p = sub.add_parser("align-selftest")
     p.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     fn = {"occlusion": cmd_occlusion, "synth-composite": cmd_synth_composite, "align-synth": cmd_align_synth,
-          "align-measure": cmd_align_measure, "align-selftest": cmd_align_selftest}[a.cmd]
+          "align-measure": cmd_align_measure, "align-selftest": cmd_align_selftest, "lighting": cmd_lighting}[a.cmd]
     print(json.dumps(fn(a)))
 
 

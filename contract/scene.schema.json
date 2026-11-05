@@ -28,12 +28,20 @@
       "enum": ["auto", "manual", "default"]
     },
     "look": {
-      "description": "Applied to the furniture only, never to the photo (contract §4.5).",
+      "description": "Applied to the furniture only, never to the photo (contract §4.5), and the lighting controls (contract §4.8). Every key is optional; a missing key takes its default.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "exposure": { "type": "number", "minimum": 0.25, "maximum": 4 },
-        "warmth": { "type": "number", "minimum": -1, "maximum": 1 }
+        "warmth": { "type": "number", "minimum": -1, "maximum": 1 },
+        "contact_shadows": { "description": "The soft dark patch under each piece on the floor (default true).", "type": "boolean" },
+        "auto_light": { "description": "Auto lighting (default true): the key light's direction and softness follow lighting.json, or the v1 key light without one.", "type": "boolean" },
+        "light_azimuth_deg": { "description": "Where the key light comes from, world frame, seen from above: 0 from straight ahead (-Z), 90 from the right (+X), ±180 from behind the camera. Used when auto_light is false.", "type": "number", "minimum": -180, "maximum": 180 },
+        "light_elevation_deg": { "description": "The key light's height above the horizon. Used when auto_light is false.", "type": "number", "minimum": 5, "maximum": 90 },
+        "light_softness": { "description": "Shadow softness, 0 hard to 1 very soft. Used when auto_light is false.", "type": "number", "minimum": 0, "maximum": 1 },
+        "light_strength": { "description": "Multiplies the key light's intensity (default 1).", "type": "number", "minimum": 0, "maximum": 3 },
+        "ambient": { "description": "Multiplies the ambient light (default 1).", "type": "number", "minimum": 0, "maximum": 3 },
+        "cast_shadows": { "description": "The key light's shadow on the floor (default: on with lighting.json, off without).", "type": "boolean" }
       }
     },
     "upload": {

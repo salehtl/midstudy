@@ -10,8 +10,8 @@
   upload to source.jpg and writes photo.jpg with every metadata segment removed (APP1-APP15, COM: EXIF, GPS, XMP, ICC),
   so a clean JPEG (JFIF only, like the golden scenes) is copied byte for byte. It can't rotate, resize or convert
   colour: a photo with an EXIF orientation other than 1 is refused; a larger photo or an ICC profile only warns.
-- fit: with MIDSTUDY_CALIB_MOCK=<dir> (e.g. fixtures/calib), copies <dir>/<sha256 of photo.jpg>/calib.json and
-  depth.png (falling back to the SHA-256 of source.<ext>); otherwise writes the "default" fallback (FOV 55,
+- fit: with MIDSTUDY_CALIB_MOCK=<dir> (e.g. fixtures/calib), copies <dir>/<sha256 of photo.jpg>/calib.json,
+  depth.png and lighting.json (falling back to the SHA-256 of source.<ext>); otherwise writes the "default" fallback (FOV 55,
   height 1.40, pitch -10, no depth, floor not found). EXIF facts are read from source.<ext>.
 - align: the stub can't register images: it writes nothing and answers applied: false (exit 0).
 
@@ -265,6 +265,7 @@ def fit(scene: Path, no_depth: bool) -> dict:
 
     mock = os.environ.get("MIDSTUDY_CALIB_MOCK")
     calib = None
+    light = None
     if mock:
         keys = [hashlib.sha256(data).hexdigest()] + ([hashlib.sha256(src.read_bytes()).hexdigest()] if src else [])
         for key in keys:
@@ -280,6 +281,8 @@ def fit(scene: Path, no_depth: bool) -> dict:
                     os.replace(scene / ".depth.png.tmp", scene / "depth.png")
                 else:
                     calib["depth"] = None
+                if (d / "lighting.json").is_file():
+                    light = (d / "lighting.json").read_bytes()
                 break
         else:
             log(f"fit: no mock for photo.jpg in {mock}: writing the default fallback")
@@ -289,6 +292,10 @@ def fit(scene: Path, no_depth: bool) -> dict:
                  "depth": None, "exif": exif, "device": None, "elapsed_s": 0}
     if calib.get("depth") is None and (scene / "depth.png").exists():
         (scene / "depth.png").unlink()
+    if light is not None:  # contract §4.8: the mock's lighting.json, else none
+        write_atomic(scene / "lighting.json", light)
+    elif (scene / "lighting.json").exists():
+        (scene / "lighting.json").unlink()
     calib["elapsed_s"] = round(time.monotonic() - t0, 3)
     write_atomic(scene / "calib.json", (json.dumps(calib, indent=2) + "\n").encode())
     return {**calib, "ok": True}

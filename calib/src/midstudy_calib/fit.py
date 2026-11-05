@@ -68,8 +68,13 @@ def _mock(scene: Path, mock_dir: Path, w: int, h: int, exif: dict | None, no_dep
                 write_atomic(scene / "depth.png", (d / "depth.png").read_bytes())
             else:
                 calib["depth"] = None
+            if (d / "lighting.json").is_file():
+                write_atomic(scene / "lighting.json", (d / "lighting.json").read_bytes())
+            else:
+                (scene / "lighting.json").unlink(missing_ok=True)
             return calib
     log(f"no mock for photo.jpg in {mock_dir}: writing the default fallback")
+    (scene / "lighting.json").unlink(missing_ok=True)
     calib = _base(w, h, exif)
     calib["fallback_reason"] = "MIDSTUDY_CALIB_MOCK has no calibration for this photo"
     return calib
@@ -164,6 +169,23 @@ def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: st
         mm, masked = fl.depth_mm(pts, valid, floor, depth_scale)
         write_atomic(scene / "depth.png", _png16(mm))
         calib["depth"] = {"file": "depth.png", "w": dw, "h": dh, "floor_masked": masked}
+    # the room's light (contract §4.8): ~1 s on MoGe's output, nothing else to load
+    from . import lighting as lt
+
+    try:
+        light = lt.fit(rgb, pts, nrm if nrm is not None else np.full_like(pts, np.nan), valid, calib["camera"],
+                       floor["inliers"] if floor is not None else None, {"w": w, "h": h})
+    except Exception as e:  # noqa: BLE001 - the light is a bonus: a failure here never fails the calibration
+        log(f"lighting fit failed ({type(e).__name__}: {e}); the planner keeps its default lights")
+        light = None
+    if light is not None:
+        write_atomic(scene / "lighting.json", (json.dumps(light, indent=2) + "\n").encode())
+        f, k = light["fit"], light["key"]
+        log(f"light: key from azimuth {f['world_key']['azimuth_deg']:.0f}, elevation {f['world_key']['elevation_deg']:.0f} "
+            f"(confidence {k['confidence']:.2f}, {f['pairs']} creases), {light['white_balance']['cct_k']} K, in {f['elapsed_s']:.2f} s")
+    else:
+        (scene / "lighting.json").unlink(missing_ok=True)
+        log("light: too little to go on; no lighting.json")
     return calib
 
 
@@ -185,6 +207,7 @@ def fit(scene: Path, model: str = "vitl", device: str = "auto", no_depth: bool =
             calib = _moge(scene, w, h, exif, model, device, no_depth)
         except Exception as e:
             calib = fallback(w, h, exif, f"MoGe unavailable or failed ({type(e).__name__}: {str(e).splitlines()[0][:200] if str(e) else ''})")
+            (scene / "lighting.json").unlink(missing_ok=True)
     if calib.get("depth") is None:
         (scene / "depth.png").unlink(missing_ok=True)
     calib["elapsed_s"] = round(time.monotonic() - t0, 2)

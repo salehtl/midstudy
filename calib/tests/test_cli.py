@@ -39,10 +39,12 @@ def test_mock_run_copies_the_golden_calibration(tmp_path):
     got = json.loads((tmp_path / "s/calib.json").read_text())
     assert got["camera"] == want["camera"] and "ok" not in got
     assert (tmp_path / "s/depth.png").read_bytes() == (GOLDEN / "depth.png").read_bytes()
-    assert sorted(p.name for p in (tmp_path / "s").iterdir()) == ["calib.json", "depth.png", "photo.jpg", "source.jpg"]
-    # --no-depth removes the stale depth.png
+    assert sorted(p.name for p in (tmp_path / "s").iterdir()) == ["calib.json", "depth.png", "lighting.json", "photo.jpg", "source.jpg"]
+    assert (tmp_path / "s/lighting.json").read_bytes() == (GOLDEN / "lighting.json").read_bytes()  # contract §4.8
+    # --no-depth removes the stale depth.png and keeps the light
     code, res, _ = cli("fit", tmp_path / "s", "--no-depth", env={"MIDSTUDY_CALIB_MOCK": str(REPO / "fixtures/calib")})
     assert code == 0 and res["depth"] is None and not (tmp_path / "s/depth.png").exists()
+    assert (tmp_path / "s/lighting.json").is_file()
 
 
 def test_mock_miss_writes_the_default_fallback(tmp_path):
@@ -51,6 +53,7 @@ def test_mock_miss_writes_the_default_fallback(tmp_path):
     assert code == 0 and res["source"] == "default" and res["floor"]["found"] is False and res["depth"] is None
     assert res["camera"] == {"fov_y_deg": 55.0, "height_m": 1.4, "pitch_deg": -10.0, "roll_deg": 0.0}
     assert valid_calib(tmp_path / "s")["source"] == "default"
+    assert not (tmp_path / "s/lighting.json").exists()  # no light without MoGe (contract §4.8)
 
 
 def test_failure_contract(tmp_path):

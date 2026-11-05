@@ -257,7 +257,8 @@ def check_scene(d: Path) -> None:
 
 def main() -> int:
     scenes = sorted(p for p in (REPO / "fixtures/scenes").iterdir() if (p / "truth.json").is_file())
-    check("three golden scenes exist", {p.name for p in scenes} == {"living-wide", "steep-roll", "portrait"}, ", ".join(p.name for p in scenes))
+    check("the five golden scenes exist (three cameras, and living-wide's under two more lights)",
+          {p.name for p in scenes} == {"living-wide", "steep-roll", "portrait", "living-cool", "living-warm"}, ", ".join(p.name for p in scenes))
     for d in scenes:
         check_scene(d)
     failed = sum(1 for _, ok in results if not ok)

@@ -4,7 +4,7 @@ The shared spec between the **planner** (`planner/`, with its server `planner/se
 
 Sections 1–3 are nook's contract with the scan, rooms, iOS, Spark and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals.
 
-Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json).
+Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json), [lighting.schema.json](lighting.schema.json).
 
 ---
 
@@ -276,9 +276,12 @@ Pixel coordinates are continuous, with (0, 0) at the **top-left corner** of the 
 scenes/<name>/source.<ext>   the upload as given (jpg, png, heic or webp, from its bytes): never served
 scenes/<name>/photo.jpg      normalized: EXIF orientation applied, sRGB JPEG q92, long side ≤ 2048 px, no metadata
 scenes/<name>/calib.json     the automatic calibration (calib.schema.json), written by midstudy-calib
+scenes/<name>/lighting.json  optional: the room's light inferred from the photo (lighting.schema.json, §4.8), written by
+                             midstudy-calib with calib.json; absent after a fallback calibration (no MoGe)
 scenes/<name>/depth.png      optional: 16-bit grayscale PNG, mm along the view axis (§4.1's d), long side ≤ 1024 px,
                              same aspect as photo.jpg; 0 = no occluder (the floor, below the floor, sky, unknown: §4.3 Fit)
-scenes/<name>/scene.json     scene.schema.json: version, title, created, saved, camera (in use), camera_source, look, upload
+scenes/<name>/scene.json     scene.schema.json: version, title, created, saved, camera (in use), camera_source, look
+                             (furniture look and lighting controls, §4.8), upload
 scenes/<name>/thumb.jpg      thumbnail (made by the planner)
 scenes/.trash/<name>-<UTC stamp>/          a deleted scene; its layouts move inside it as layouts/
 layouts/<name>/<layout>.json               the scene's layouts (layout.schema.json, scene_name = <name>)
@@ -331,7 +334,7 @@ midstudy-calib align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>   # keep
 
 A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the last stdout line and `midstudy-calib: <the same sentence>` as the last stderr line. The server shows that sentence. A fallback calibration is a success (exit 0).
 
-**Files:** `--out` may already exist (the server creates the scene folder first). The tool writes only `source.<ext>`, `photo.jpg`, `calib.json` and `depth.png` there, each atomically (temp file + rename), and never touches `scene.json`, `thumb.jpg` or anything else. `fit` without depth removes a stale `depth.png`. `run` writes `photo.jpg` before it starts the model, so the planner can show the photo while it calibrates.
+**Files:** `--out` may already exist (the server creates the scene folder first). The tool writes only `source.<ext>`, `photo.jpg`, `calib.json`, `depth.png` and `lighting.json` there, each atomically (temp file + rename), and never touches `scene.json`, `thumb.jpg` or anything else. `fit` without depth removes a stale `depth.png`; a fit that can't infer the light (a fallback without MoGe, or too few usable pixels) removes a stale `lighting.json`. `--no-depth` doesn't affect `lighting.json`. `run` writes `photo.jpg` before it starts the model, so the planner can show the photo while it calibrates.
 
 **Ingest:**
 - Accepts JPEG, PNG, HEIC/HEIF and WebP up to 25 MB, recognized by their bytes, not the name (anything else: exit 1, "that file isn't a JPEG, PNG, HEIC or WebP image").
@@ -348,9 +351,11 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **Align** (opencv-python-headless): resize the model output to the photo's size, estimate a homography from the output to the photo from features outside the mask (ORB + RANSAC, or ECC), warp, composite `photo × (1 − mask) + warped × mask` with the mask feathered, write `<final.jpg>`. Fewer than 40 inliers or a median residual over 3 px: write nothing, `applied: false` with a `reason`, exit 0. Always runs for real (an identical image is the identity and must apply).
 
-**Mock:** with `MIDSTUDY_CALIB_MOCK=<dir>` (e.g. `fixtures/calib`), `fit` never loads MoGe: it looks up `<dir>/<sha256 of photo.jpg>/`, then `<dir>/<sha256 of source.<ext>>/`, and copies that `calib.json` and `depth.png`; with no match it writes the `default` fallback. `ingest` and `align` still run for real.
+**Mock:** with `MIDSTUDY_CALIB_MOCK=<dir>` (e.g. `fixtures/calib`), `fit` never loads MoGe: it looks up `<dir>/<sha256 of photo.jpg>/`, then `<dir>/<sha256 of source.<ext>>/`, and copies that `calib.json`, `depth.png` and `lighting.json` (each when present); with no match it writes the `default` fallback and no `lighting.json`. `ingest` and `align` still run for real.
 
-**Stub:** `fixtures/stub_calib.py` (stdlib only) has the same CLI and output contract for development and fast evals: JPEG only, strips metadata without re-encoding (can't rotate, resize or convert colour), mock or `default` fit, and `align` answers `applied: false`. Run the server with `--calib "python3 fixtures/stub_calib.py"`.
+**Stub:** `fixtures/stub_calib.py` (stdlib only) has the same CLI and output contract for development and fast evals: JPEG only, strips metadata without re-encoding (can't rotate, resize or convert colour), mock (including `lighting.json`) or `default` fit, and `align` answers `applied: false`. Run the server with `--calib "python3 fixtures/stub_calib.py"`.
+
+**Lighting** (§4.8): after the floor fit, `fit` infers the room's light from the photo's pixels and MoGe's normals and writes `lighting.json`. It runs on MoGe's output at depth size, needs no other model, costs nothing and adds about a second.
 
 ### 4.4 Server additions (`planner/serve.py`, stdlib only)
 
@@ -362,8 +367,8 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 | `POST /api/scenes` | raw photo body, `Content-Length` required, `X-Midstudy-Filename` required, optional `X-Midstudy-Meta` (base64 JSON `{title}`) | `202 {job, scene: name}` |
 | `GET /api/scenes/jobs` | | `200 {"jobs": [job, ...]}`, newest first |
 | `GET /api/scenes/jobs/<id>` | | `200` the job object itself, `404` unknown |
-| `GET /api/scenes/<name>` | | `200` scene.json + the scene object's fields + `calib` (calib.json without `exif.make`/`exif.model`, or null); `404` unknown |
-| `PUT /api/scenes/<name>` | JSON with any of `title`, `camera`, `camera_source`, `look` | `200` as GET; `saved` stamped unless only `title` changed; camera values clamped; unknown keys or bad values `400` |
+| `GET /api/scenes/<name>` | | `200` scene.json + the scene object's fields + `calib` (calib.json without `exif.make`/`exif.model`, or null) + `lighting` (lighting.json as it is, or null without one); `404` unknown |
+| `PUT /api/scenes/<name>` | JSON with any of `title`, `camera`, `camera_source`, `look` | `200` as GET; `saved` stamped unless only `title` changed; camera values and look numbers clamped (§4.8); a `look` replaces only the keys it carries, and a key set to null is removed; unknown keys or bad values `400` |
 | `PUT /api/scenes/<name>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB | `200 {"ok": true, "thumb_url"}` |
 | `POST /api/scenes/<name>/calibrate` | | `202 {job}`: runs `fit` (or `run` on `source.<ext>` when `photo.jpg` is missing); `409` while one is queued or running for that scene |
 | `DELETE /api/scenes/<name>` | | `200 {"ok": true, "trash": "scenes/.trash/<name>-<stamp>"}`: the folder and `layouts/<name>/` move there; a queued job for it is dropped, a running one's result is ignored |
@@ -387,7 +392,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 `photo_url` is null until `photo.jpg` exists; `w`/`h` are `photo.jpg`'s size. `floor_found` is `calib.json`'s `floor.found` (null without one). `calib_status`: `pending` while a job is queued, `running` while it runs, else `done` when `calib.json` exists and the last job (if any) succeeded, else `failed` (including a calibration lost to a restart). Asset URLs may carry a `?v=<mtime>` cache buster.
 
-**Static:** `/scenes/<name>/photo.jpg`, `depth.png` and `thumb.jpg` are served (`nosniff`). Everything else under `/scenes/` gets `404`: `source.*`, `calib.json` (use the API), `scene.json`, `.trash/`, folder listings, and the same paths spelled with `.`/`..`/percent-encoding (§2.9 Paths).
+**Static:** `/scenes/<name>/photo.jpg`, `depth.png` and `thumb.jpg` are served (`nosniff`). Everything else under `/scenes/` gets `404`: `source.*`, `calib.json` and `lighting.json` (use the API), `scene.json`, `.trash/`, folder listings, and the same paths spelled with `.`/`..`/percent-encoding (§2.9 Paths).
 
 ### 4.5 Planner
 
@@ -395,7 +400,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 - **The view:** the photo fills the view, contain-fit with letterbox bars; the 3D canvas is registered to it (same aspect, camera from `scene.json`). The photo is drawn **exactly as is**: no tone mapping, exposure or warmth. Look and ACES apply to the furniture only. Pinch or wheel zoom and two-finger or middle-drag pan are 2D (`setViewOffset`), up to 4×; **Fit** resets them.
 - **Floor check:** when a scene first opens, and whenever **Adjust floor** is on, a 50 cm grid is drawn on y = 0 out to 8 m, fading with distance. Adjust floor has sliders for camera height (cm), field of view (°) and roll (°); dragging the horizon line sets the pitch (the line follows the pointer, but at most 0.12° of tilt per CSS pixel on a small photo, so the phone at Fit gets fine control). An optional two-tap ruler shows a floor distance in cm; typing the real length of what it measured (**Set scale**, handles `ruler-true`, `ruler-set`) scales the camera height so it reads that length, which fixes the scene's scale (MoGe's metric scale can be 5–15 % off without an EXIF focal length). While the ruler is on, its row (the instruction, then the length field) keeps one height, so the photo doesn't move between the taps. **Looks right** saves the scene (`camera_source: "manual"` if anything changed). **Reset** goes back to `calib.json`'s camera (`auto`). A scene whose `floor.found` is false or whose `calib.source` isn't `moge-2` (or `truth`) opens in Adjust floor with a one-line note ("Check the floor").
 - **Items:** as §2.3 and §2.10. A drag keeps the grabbed point of the piece under the pointer (it slides on the horizontal plane through that point); a mouse or pen press on any piece selects and drags it at once, touch keeps "tap, then drag". A new item lands where the ray through the view center hits the floor (or, if that misses, the ray through the center of the lower third), when that point is 1–6 m from the camera; else 2.5 m straight ahead. Missing library items show a placeholder box.
-- **Lighting:** three.js `RoomEnvironment` plus a key light; Look (exposure, warmth) is saved in `scene.json`.
+- **Lighting** (§4.8): a scene with `lighting.json` lights the furniture with the light inferred from its photo (ambient light probe, key light, a soft floor shadow that falls on the photo); one without keeps the v1 lights (three.js `RoomEnvironment` plus a key light, no cast shadow). Scene › Look has the controls; Look is saved in `scene.json`.
 - **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth. `depth.png` is metric in the calibration's frame, so when the camera's `height_m` differs from `calib.json`'s (Adjust floor), the depth is scaled by `height_m / calib height_m` first; without a measured floor (`floor.found` false, or a fallback source) it is used as it is.
 - **Layouts:** per scene (§2.7), with unsaved-change warnings ("unsaved" means the pieces differ from the layout as saved or loaded, so Remove then Undo isn't). A scene opens with a layout: each device remembers the layout it last had open in each scene and when it chose it (saved, loaded, or none after deleting it); the scene reopens with that one, unless a layout was saved later on any device (`updated`), or the device has never had the scene open: then it opens with the most recently saved layout. So a reload keeps this device's choice, and the phone opens a scene with the layout the desktop just saved. Deleting a layout, a scene or a library item can be undone; deleted scenes are listed under Recently deleted on the Scenes page, with Restore.
 - **Render and Compare** (§4.7): in the Renders panel, pick two renders for a full-screen compare: side by side on desktop, a draggable split slider on both, swipe on the phone, and Swap A and B on both (`compare-swap`).
@@ -422,6 +427,9 @@ photoToFloor(px: number, py: number): [x, 0, z] | null   // §4.1 inverse; null 
 floorToPhoto([x, y, z]): [px, py]                   // §4.1 projection (any point, despite the name)
 renderView(opts?: { model?: string, prompt?: string, keepRoom?: boolean }): Promise<RenderMeta>
 compare(a: string, b: string): void                 // opens Compare with two render names
+getLighting(): Lighting                            // §4.8
+setLighting(partial: Partial<LookSettings>): void  // §4.8; live, clamped; saved by saveScene() (the Look panel saves itself)
+resetLighting(): void                              // §4.8: back to the inferred light
 getState(): {
   scene: { name, title, camera: Camera, camera_source, floor_found, hasDepth, occlusion, adjustFloor } | null,
   items: Array<{ uid, id, render: 'glb', position: [x, y, z], rotation_y_deg, worldBounds: { min, max }, missing?: boolean }>,
@@ -430,7 +438,7 @@ getState(): {
 }
 ```
 
-Test handles (`data-midstudy`): `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. `scene-card` elements also carry `data-scene="<name>"`.
+Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. `scene-card` elements also carry `data-scene="<name>"`.
 
 ### 4.7 Render
 
@@ -442,30 +450,103 @@ Test handles (`data-midstudy`): `scene-new`, `scene-file`, `scene-card`, `scene-
 - **Meta** gains `scene`, `layout`, `reference: bool` (the scene photo was sent), `keep_room: bool`, `aligned: {applied, inliers, residual_px, reason?} | null` (null without keep-room), `raw_url` (null without keep-room), `out_w`, `out_h` (the result's size). `GET /api/renders?scene=<name>` lists one scene's renders.
 - **Mock:** the result is a copy of the input, $0, so align sees the identity and must apply.
 
+### 4.8 Lighting inferred from the photo (added 2026-11-05)
+
+Furniture is lit by the light of the room in the photo: an ambient light probe, one key light with a soft shadow on the floor, and simple controls. Mesh pieces are lit by it; splat pieces (their light is baked into their colours) are colour-matched to it and cast the shadow of their hidden box.
+
+**`lighting.json`** (lighting.schema.json), written by `midstudy-calib fit`/`run` next to `calib.json` (§4.3), rewritten by every recalibration, removed by one that can't infer it:
+
+```json
+{ "version": 1,
+  "source": "photo" | "truth",
+  "frame": "camera",
+  "image": { "w": 2048, "h": 1152 },
+  "camera": { …the camera block the fit used (calib.json's)… },
+  "ambient": { "sh": [[r, g, b], … 9 rows] },
+  "key": { "direction": [x, y, z], "color": [r, g, b], "intensity": 2.1, "softness": 0.35, "confidence": 0.8 },
+  "white_balance": { "rgb": [r, g, b], "cct_k": 4700 },
+  "floor": { "radiance": [r, g, b] },
+  "fit": { …diagnostics, free-form… } }
+```
+
+- **Units:** three.js 0.180 light units in linear sRGB, for the planner's furniture pipeline (ACES Filmic, exposure 1, then sRGB). A diffuse surface of albedo ρ lit by `ambient` (a `THREE.LightProbe` with these coefficients, intensity 1) and `key` (a `THREE.DirectionalLight(color, intensity)` shining from `direction`) looks as it would in the photo. `source: "truth"` (golden scenes only) is the scenes' own lights.
+- **Frame: the camera's**, three.js axes (x right, y up, z towards the viewer, so the camera looks along −z). World = R · camera with R = Rx(pitch) · Rz(roll) of the scene's **current** camera (§4.1). So after Adjust floor the planner rotates the same light again and nothing is rewritten; `camera` only records what the fit used.
+- **`ambient.sh`**: 9 RGB coefficients in three.js `SphericalHarmonics3` order, [L00, L1−1 (y), L10 (z), L11 (x), L2−2 (xy), L2−1 (yz), L20 (3z² − 1), L21 (xz), L22 (x² − y²)]: the radiance coefficients `LightProbe` takes (three.js turns them into irradiance with `shGetIrradianceAt`). The key light isn't in it. To the world frame: L00 stays; band 1 is the vector (x: L11, y: L1−1, z: L10) and turns with R; band 2 (zero in v1 fits, but readers must handle it) can be rotated by evaluating the probe's irradiance at a fixed set of directions, turning them, and refitting.
+- **`key`**: `direction` is the unit vector **towards** the light (a DirectionalLight's position minus its target), camera frame. `color` is linear RGB with its largest component 1; `intensity` the DirectionalLight intensity. `softness` (0–1) is how soft its shadow is: 0 a hard sun edge, 1 a very diffuse light with only a faint shadow close under the piece. `confidence` (0–1) is how clearly the photo shows one directional light; when it is low the fit has already moved the direction towards overhead and raised `softness`, so the planner uses `key` as given.
+- **`white_balance`**: the room light's overall colour (linear RGB, luminance 1) and its correlated colour temperature, for the Look panel's readout and for colour-matching splats. **`floor`** (optional): the median linear radiance of the floor's pixels.
+
+**How the fit works** (calib track; details in `calib/src/midstudy_calib/lighting.py`): the photo is linearised and taken back through ACES Filmic; over-exposed and near-black pixels are dropped. Pairs of pixels on the two sides of a crease in MoGe's geometry (a box's top and front, two walls at a corner; same depth, similar colour, so most likely the same material) give brightness ratios that depend only on the light. A hemisphere-like ambient (brighter from above than from below) plus one key light is fitted to those ratios over a grid of directions, with weak priors on the ambient's up/down gradient and the key's elevation (shading alone barely tells "key high above" from "fill brighter from above"). Level and colour then come from the pixels with two assumptions about rooms: the brighter surfaces (walls, ceiling) have an albedo near 0.7, and the room's materials average out to grey (shades of grey). Measured on the golden scenes and the lounge: `docs/notes/lighting.md`.
+
+**Look** (`scene.json` `look`, saved by `PUT /api/scenes/<name>`; every key optional, missing keys take the default; the server clamps numbers and refuses other keys and types with `400`):
+
+| key | type, range | default | what it does |
+|---|---|---|---|
+| `exposure` | 0.25–4 | 1 | furniture exposure (v1) |
+| `warmth` | −1–1 | 0 | furniture warm/cool tint (v1) |
+| `contact_shadows` | bool | true | the soft dark patch under each piece on the floor (v1, now saved) |
+| `auto_light` | bool | true | **Auto lighting**: the key's direction and softness follow `lighting.json` (or the v1 key light without one) |
+| `light_azimuth_deg` | −180–180 | inferred | where the key light comes from, world frame, seen from above: 0 from straight ahead (the far side of the photo, −Z), 90 from the right (+X), ±180 from behind the camera. Used when `auto_light` is false |
+| `light_elevation_deg` | 5–90 | inferred | the key light's height above the floor's horizon. Used when `auto_light` is false |
+| `light_softness` | 0–1 | inferred | shadow softness. Used when `auto_light` is false |
+| `light_strength` | 0–3 | 1 | multiplies the key light's intensity |
+| `ambient` | 0–3 | 1 | multiplies the ambient light (the light probe, or the v1 environment and hemisphere lights) |
+| `cast_shadows` | bool | true with `lighting.json`, false without | the key light's shadow on the floor |
+
+Moving the light direction or softness turns `auto_light` off and saves the values it set. **Reset** (`light-reset`) is `resetLighting()`: `auto_light` true, `light_strength` 1, `ambient` 1, `exposure` 1, `warmth` 0, `cast_shadows` and `contact_shadows` back to their defaults, and the stored direction and softness removed.
+
+**Planner:**
+- **Meshes:** with `lighting.json`, the light probe (rotated to the world frame) replaces `RoomEnvironment` and the hemisphere light, and one `DirectionalLight` comes from the key's world direction with its colour and intensity (times `light_strength`). Its shadow falls on an invisible floor at y = 0 (a shadow catcher: three.js `ShadowMaterial` or the same idea) composited over the photo with the furniture, so the photo's own pixels are only ever darkened where a piece's shadow falls and are otherwise exactly as they are (§4.5). Real things in the photo nearer than the floor hide the shadow as they hide the furniture (Occlusion). Contact shadows stay, as an option. Materials keep their own maps; only lit materials are affected. **Unlit materials** (KHR_materials_unlit, the Flat rug's top, the eval probe) keep exactly their colours, whatever the lighting settings (they may still cast a shadow).
+- **Splats** (Gaussian splats carry their source photo's light): colour-matched to the room instead of lit: exposure and white balance (`white_balance`, the ambient level), at most a weak directional term, using what the pinned Spark version supports. Their hidden mesh or stand-in box casts the floor shadow and receives no light.
+- **Without `lighting.json`** (an older scene, a fallback calibration): the v1 lights exactly, no cast shadow unless `cast_shadows` is turned on; the controls still work on those lights (`auto_light` then means the v1 key direction).
+- **Scene › Look** has: Auto lighting (`light-auto`) with Reset (`light-reset`), the light direction as a draggable sun handle or compass (`light-dir`: drag sets azimuth and elevation; it also works by touch), sliders for strength (`light-strength`), softness (`light-softness`), ambient (`light-ambient`), exposure (`look-exposure`) and warmth (`look-warmth`), and toggles for the floor shadow (`light-shadows`) and contact shadows (`contact-shadows`). Changes apply live and are saved with the scene. On the phone (390 × 844) every control is reachable by touch with targets ≥ 44 px and no sideways scroll.
+
+**Hook** (§4.6):
+
+```ts
+type LookSettings = { exposure, warmth, contact_shadows, auto_light, light_azimuth_deg, light_elevation_deg, light_softness,
+                      light_strength, ambient, cast_shadows }        // as the table above
+type Lighting = LookSettings & {
+  source: 'photo' | 'truth' | 'default',     // lighting.json's source, or 'default' without one
+  inferred: { azimuth_deg, elevation_deg, softness, direction: [x, y, z], color: [r, g, b], intensity, cct_k: number | null } | null,
+                                              // lighting.json's key in the world frame of the current camera (null without one)
+  key: { azimuth_deg, elevation_deg, direction: [x, y, z], color: [r, g, b], intensity, softness },  // in use, world frame
+}
+getLighting(): Lighting          // light_azimuth_deg etc. are the values in use (inferred ones while auto_light is on)
+setLighting(partial): void       // live; light_azimuth_deg, light_elevation_deg or light_softness turn auto_light off unless it is given too
+resetLighting(): void
+```
+
+`getRenderSettings()` keeps its v1 fields; `setRenderSettings({contactShadows})` is the same as `setLighting({contact_shadows})`.
+
 ---
 
 ## 5. Fixtures and evals
 
 ### 5.1 Golden scenes (`fixtures/scenes/`, `fixtures/calib/`)
 
-`fixtures/make_scene.mjs` renders one textured room (oak plank floor, plaster walls, rug, door with casing, window, painting, floor lamp) with three.js 0.180.0 in headless Helium from a known camera. Each scene has a box **sofa** (2.0 × 0.82 × 0.9 m) and a **table** (1.0 × 0.42 × 0.55 m, top and four legs, turned 12°) at known positions. Same room and objects, three cameras:
+`fixtures/make_scene.mjs` renders one textured room (oak plank floor, plaster walls, rug, door with casing, window, painting, floor lamp) with three.js 0.180.0 in headless Helium from a known camera under known lights. Each scene has a box **sofa** (2.0 × 0.82 × 0.9 m) and a **table** (1.0 × 0.42 × 0.55 m, top and four legs, turned 12°) at known positions. Same room and objects, three cameras, and two more lightings with the living-wide camera:
 
 | id | size | camera |
 |---|---|---|
 | `living-wide` | 1600 × 1200 | fov 55, height 1.40, pitch −10, roll 0 |
 | `steep-roll` | 1600 × 1200 | fov 65, height 1.60, pitch −25, roll 2 |
 | `portrait` | 1200 × 1600 | fov 70, height 1.25, pitch −8, roll −1 |
+| `living-cool` | 1600 × 1200 | as living-wide; cool daylight key from the far left, in front of the camera (shadows fall towards the camera); lamp off |
+| `living-warm` | 1600 × 1200 | as living-wide; warm evening key from the right, high; dim warm fill; lamp off |
+
+The first three are lit by `DAYLIGHT` (`make_scene.mjs`): a hemisphere light (sky `0xfff6ea`, ground `0xb9a48c`, 1.9), a sun `DirectionalLight(0xfff1df, 2.2)` from (3.2, 5.0, 1.5) towards (−0.4, 0, −3.0) with soft shadows, and a warm lamp `PointLight(0xffd9a0, 1.6, 4, 2)` in the lamp shade. Walls and ceiling cast no shadows (the sun reaches the room from behind the camera).
 
 Files in `fixtures/scenes/<id>/`:
 - `photo.jpg`: the photo (JFIF only, no metadata, so ingest passes it through byte for byte).
 - `truth.json`: `{version, id, image: {w, h}, camera, depth: {file, w, h}, objects: {sofa, table}, floor_points}`. Each object has `center` (footprint center on the floor), `size_m {w, h, d}`, `rotation_y_deg`, `corners` (8 world points of its bounding box, ordered bottom then top, each ring back-left, back-right, front-right, front-left, front = local +Z; names in `corner_names`), `corner_px` (their §4.1 projection on the photo) and `parts` (the boxes it is built from, with their corners). `floor_points` are open-floor points (`world`, `px`) where `depth.png` is 0.
 - `depth.png`: exact depth along the view axis (mm), floor within 4 cm masked to 0, at most 1024 px on the long side.
 - `calib.json`: calib.schema.json with `source: "truth"` and the true camera.
+- `lighting.json`: lighting.schema.json with `source: "truth"`: the hemisphere light as `ambient.sh` (exactly bands 0 and 1) and the sun as `key`, in the true camera's frame (§4.8); the lamp, a local light, is left out. `truth.json` gains `lights` (the light definitions above, world frame).
 - `ids.png`: 8-bit RGB id masks at the photo's size, each object rendered **alone** (no occlusion), antialiased like the photo: R = sofa, G = table; threshold at 128.
 
-`fixtures/calib/<sha256 of photo.jpg>/{calib.json, depth.png}` are copies that the calib mock (`MIDSTUDY_CALIB_MOCK=fixtures/calib`) serves for those photos.
+`fixtures/calib/<sha256 of photo.jpg>/{calib.json, depth.png, lighting.json}` are copies that the calib mock (`MIDSTUDY_CALIB_MOCK=fixtures/calib`) serves for those photos.
 
-**Self-check:** `evals/py fixtures/check_scenes.py` reimplements §4.1 in numpy and checks every scene against the renders: each object's projected silhouette matches its id mask (IoU ≥ 0.985, bounding box within 1 px), every sofa corner lands on the sofa (≤ 1.5 px), the true camera beats the same camera with roll negated or pitch off by 0.5° or negated (this pins the signs), `depth.png` equals the ray-plane view-axis depth on the sofa's front face and the back wall (median error well under 1 mm; it is *not* the Euclidean distance), open floor is 0, calib.json validates, and the mock copies are identical. It writes marker images to `evals/out/check-scenes/`. Re-running `make_scene.mjs` regenerates everything (its JPEG bytes may differ run to run; it removes the old `fixtures/calib/<sha>/`), and the self-check must pass after it.
+**Self-check:** `evals/py fixtures/check_scenes.py` reimplements §4.1 in numpy and checks every scene against the renders: each object's projected silhouette matches its id mask (IoU ≥ 0.985, bounding box within 1 px), every sofa corner lands on the sofa (≤ 1.5 px), the true camera beats the same camera with roll negated or pitch off by 0.5° or negated (this pins the signs), `depth.png` equals the ray-plane view-axis depth on the sofa's front face and the back wall (median error well under 1 mm; it is *not* the Euclidean distance), open floor is 0, calib.json validates, and the mock copies are identical. It writes marker images to `evals/out/check-scenes/`. Re-running `make_scene.mjs` regenerates everything (its JPEG bytes may differ run to run; it removes the old `fixtures/calib/<sha>/`), and the self-check must pass after it. `--only <id>` renders one scene; `--lights-only` rewrites `truth.json`'s `lights` and `lighting.json` without rendering.
 
 ### 5.2 Carried evals
 

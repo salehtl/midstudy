@@ -234,7 +234,8 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
 // --- probe library -----------------------------------------------------------------------------------------------------------
 // A GLB box in the item frame (footprint center at the origin, min y = 0), magenta and unlit (KHR_materials_unlit),
 // so it stands out from every colour in the golden room and its silhouette is exactly its bounding box.
-export function boxGlb(w, h, d, rgba = [1, 0, 1, 1]) {
+// { unlit: false } makes a lit one (metallic 0, roughness 1, baseColorFactor linear), for the lighting eval.
+export function boxGlb(w, h, d, rgba = [1, 0, 1, 1], { unlit = true } = {}) {
   const x0 = -w / 2, x1 = w / 2, y0 = 0, y1 = h, z0 = -d / 2, z1 = d / 2
   const faces = [ // 4 corners counterclockwise seen from outside, and the normal
     [[[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], [1, 0, 0]],
@@ -253,10 +254,10 @@ export function boxGlb(w, h, d, rgba = [1, 0, 1, 1]) {
   const bin = Buffer.concat([posB, nrmB, idxB, Buffer.alloc((4 - (idxB.length % 4)) % 4)])
   const gltf = {
     asset: { version: '2.0', generator: 'midstudy evals/lib/harness.mjs' },
-    extensionsUsed: ['KHR_materials_unlit'],
+    ...(unlit ? { extensionsUsed: ['KHR_materials_unlit'] } : {}),
     scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0, name: 'probe-box' }],
     meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 }] }],
-    materials: [{ name: 'probe-magenta', pbrMetallicRoughness: { baseColorFactor: rgba, metallicFactor: 0, roughnessFactor: 1 }, extensions: { KHR_materials_unlit: {} } }],
+    materials: [{ name: unlit ? 'probe-magenta' : 'probe-lit', pbrMetallicRoughness: { baseColorFactor: rgba, metallicFactor: 0, roughnessFactor: 1 }, ...(unlit ? { extensions: { KHR_materials_unlit: {} } } : {}) }],
     buffers: [{ byteLength: bin.length }],
     bufferViews: [
       { buffer: 0, byteOffset: 0, byteLength: posB.length, target: 34962 },

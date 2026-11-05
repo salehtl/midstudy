@@ -10,7 +10,11 @@
 //   fixtures/scenes/<id>/ids.png       id masks rendered alone, no occlusion: R = sofa, G = table (8-bit RGB)
 //   fixtures/calib/<sha256 of photo.jpg>/{calib.json,depth.png}   what MIDSTUDY_CALIB_MOCK serves for that photo
 //
-// Usage: node fixtures/make_scene.mjs [--only <id>]      (then: evals/py fixtures/check_scenes.py)
+//   fixtures/scenes/<id>/lighting.json the scene's known lights as lighting.json (contract §4.8, source "truth"), also
+//                                      copied into the mock folder below
+//
+// Usage: node fixtures/make_scene.mjs [--only <id>] [--lights-only]     (then: evals/py fixtures/check_scenes.py)
+//   --lights-only rewrites truth.json's `lights` and lighting.json without rendering (photos unchanged).
 // Browser: MIDSTUDY_BROWSER, default /Applications/Helium.app/Contents/MacOS/Helium (software GL, swiftshader).
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -21,14 +25,86 @@ import { chromium } from 'playwright-core'
 const REPO = path.resolve(import.meta.dirname, '..')
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
 const ONLY = arg('only', null)
+const LIGHTS_ONLY = process.argv.includes('--lights-only')
 const BROWSER = process.env.MIDSTUDY_BROWSER || '/Applications/Helium.app/Contents/MacOS/Helium'
 
-// The three scenes of PLAN.md §6.1. Depth maps are at most 1024 px on the long side, same aspect (contract §4.2).
+// The lights (world frame, three.js 0.180 units; colours are sRGB hex, which three.js turns linear). `sun` is a
+// DirectionalLight from `position` towards `target`; `hemi` a HemisphereLight (sky from +Y); `lamp` a PointLight.
+// DAYLIGHT is what the first three scenes were rendered with (their photos predate per-scene lights and are unchanged).
+export const DAYLIGHT = {
+  hemi: { sky: 0xfff6ea, ground: 0xb9a48c, intensity: 1.9 },
+  sun: { color: 0xfff1df, intensity: 2.2, position: [3.2, 5.0, 1.5], target: [-0.4, 0, -3.0], shadow_radius: 6 },
+  lamp: { color: 0xffd9a0, intensity: 1.6, position: [1.95, 1.5, -3.9], distance: 4, decay: 2 },
+}
+// Contract §5.1: the same room and camera as living-wide under other lights, for the lighting evals (contract §4.8).
+const COOL_LEFT = { // cool daylight from the far left, in front of the camera: shadows fall towards the camera and right
+  hemi: { sky: 0xdfe9ff, ground: 0x8e8a84, intensity: 1.6 },
+  sun: { color: 0xd6e4ff, intensity: 2.4, position: [-4.0, 3.0, -6.0], target: [0.4, 0, -2.5], shadow_radius: 6 },
+  lamp: { color: 0xffd9a0, intensity: 0, position: [1.95, 1.5, -3.9], distance: 4, decay: 2 },
+}
+const WARM_RIGHT = { // a warm evening key from the right, high; a dimmer warm fill; the lamp off (one key light)
+  hemi: { sky: 0xffe2bf, ground: 0x6e5a48, intensity: 1.2 },
+  sun: { color: 0xffc68a, intensity: 2.6, position: [3.5, 4.0, -3.0], target: [-0.5, 0, -2.5], shadow_radius: 6 },
+  lamp: { color: 0xffc070, intensity: 0, position: [1.95, 1.5, -3.9], distance: 4, decay: 2 },
+}
+
+// The scenes of PLAN.md §6.1. Depth maps are at most 1024 px on the long side, same aspect (contract §4.2).
+const LIVING = { fov_y_deg: 55.0, height_m: 1.40, pitch_deg: -10.0, roll_deg: 0.0 }
 export const SCENES = [
-  { id: 'living-wide', w: 1600, h: 1200, camera: { fov_y_deg: 55.0, height_m: 1.40, pitch_deg: -10.0, roll_deg: 0.0 } },
-  { id: 'steep-roll', w: 1600, h: 1200, camera: { fov_y_deg: 65.0, height_m: 1.60, pitch_deg: -25.0, roll_deg: 2.0 } },
-  { id: 'portrait', w: 1200, h: 1600, camera: { fov_y_deg: 70.0, height_m: 1.25, pitch_deg: -8.0, roll_deg: -1.0 } },
+  { id: 'living-wide', w: 1600, h: 1200, camera: LIVING, lights: DAYLIGHT },
+  { id: 'steep-roll', w: 1600, h: 1200, camera: { fov_y_deg: 65.0, height_m: 1.60, pitch_deg: -25.0, roll_deg: 2.0 }, lights: DAYLIGHT },
+  { id: 'portrait', w: 1200, h: 1600, camera: { fov_y_deg: 70.0, height_m: 1.25, pitch_deg: -8.0, roll_deg: -1.0 }, lights: DAYLIGHT },
+  { id: 'living-cool', w: 1600, h: 1200, camera: LIVING, lights: COOL_LEFT },
+  { id: 'living-warm', w: 1600, h: 1200, camera: LIVING, lights: WARM_RIGHT },
 ]
+
+// --- lighting truth (contract §4.8) -------------------------------------------------------------------------------
+// lighting.json for a scene's known lights, in the camera frame of its true camera: the hemisphere light is exactly
+// L2 spherical harmonics (bands 0 and 1), the sun is the key light. The lamp is a local light and is left out.
+const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+export const hexLinear = (hex) => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((v) => srgbToLinear(v / 255))
+const norm3 = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l) }
+// World vector → the camera frame of a contract §4.1 camera: v_c = Rᵀ v, R = Rx(pitch) · Rz(roll).
+export function worldToCamera(cam, v) {
+  const p = cam.pitch_deg * Math.PI / 180, r = cam.roll_deg * Math.PI / 180
+  const cp = Math.cos(p), sp = Math.sin(p), cr = Math.cos(r), sr = Math.sin(r)
+  const R = [[cr, -sr, 0], [cp * sr, cp * cr, -sp], [sp * sr, sp * cr, cp]]
+  return [0, 1, 2].map((j) => R[0][j] * v[0] + R[1][j] * v[1] + R[2][j] * v[2])
+}
+// Correlated colour temperature (K) of a linear sRGB colour: CIE xy, then McCamy's approximation.
+export function cct([r, g, b]) {
+  const X = 0.4124 * r + 0.3576 * g + 0.1805 * b, Y = 0.2126 * r + 0.7152 * g + 0.0722 * b, Z = 0.0193 * r + 0.1192 * g + 0.9505 * b
+  const x = X / (X + Y + Z), y = Y / (X + Y + Z), n = (x - 0.3320) / (0.1858 - y)
+  return Math.min(40000, Math.max(1000, 449 * n ** 3 + 3525 * n ** 2 + 6823.3 * n + 5520.33))
+}
+export function truthLighting(s) {
+  const L = s.lights, cam = s.camera
+  const S = hexLinear(L.hemi.sky), G = hexLinear(L.hemi.ground), I = L.hemi.intensity
+  // three.js: E(n) = I · mix(G, S, 0.5 + 0.5 n·up) = I (S+G)/2 + I (S−G)/2 (n·up); shGetIrradianceAt gives
+  // E = 0.886227 L00 + 1.023328 (L1−1 y + L10 z + L11 x) + …, with coefficients ordered [L00, L1−1(y), L10(z), L11(x), …].
+  const up = worldToCamera(cam, [0, 1, 0])
+  const sh = Array.from({ length: 9 }, () => [0, 0, 0])
+  for (let c = 0; c < 3; c++) {
+    sh[0][c] = I * (S[c] + G[c]) / 2 / 0.886227
+    const k = I * (S[c] - G[c]) / 2 / (2 * 0.511664)
+    sh[1][c] = k * up[1]; sh[2][c] = k * up[2]; sh[3][c] = k * up[0]
+  }
+  const dirW = norm3(L.sun.position.map((v, i) => v - L.sun.target[i]))
+  const col = hexLinear(L.sun.color), m = Math.max(...col)
+  const r6 = (v) => Math.round(v * 1e6) / 1e6
+  // white balance: the mean irradiance over the normals a placed piece shows the camera (up, the sides, the front)
+  const refN = [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [1, 0, 1], [-1, 0, 1]].map(norm3)
+  const tot = [0, 1, 2].map((c) => refN.reduce((acc, n) => acc + I * (G[c] + (S[c] - G[c]) * (0.5 + 0.5 * n[1]))
+    + L.sun.intensity * col[c] * Math.max(0, n[0] * dirW[0] + n[1] * dirW[1] + n[2] * dirW[2]), 0) / refN.length)
+  const Y = 0.2126 * tot[0] + 0.7152 * tot[1] + 0.0722 * tot[2]
+  return {
+    version: 1, source: 'truth', frame: 'camera', image: { w: s.w, h: s.h }, camera: cam,
+    ambient: { sh: sh.map((c) => c.map(r6)) },
+    key: { direction: norm3(worldToCamera(cam, dirW)).map(r6), color: col.map((v) => r6(v / m)), intensity: r6(L.sun.intensity * m), softness: 0.15, confidence: 1 },
+    white_balance: { rgb: tot.map((v) => r6(v / Y)), cct_k: Math.round(cct(tot)) },
+    world: { key_direction: dirW.map(r6), note: 'truth only: the key direction in the world frame, for evals' },
+  }
+}
 
 // The room (meters, Y-up, floor y = 0; the camera stands at x = z = 0 and looks along -Z). Same for every scene.
 const ROOM = { x0: -2.6, x1: 2.6, z0: -5.0, z1: 1.2, h: 2.7 }
@@ -305,13 +381,21 @@ for (const [name, o] of Object.entries(OBJECTS)) {
   }
 }
 
-// Light: soft sky fill from the window side plus a sun patch; the lamp gives a warm accent.
-scene.add(new THREE.HemisphereLight(0xfff6ea, 0xb9a48c, 1.9))
-const sun = new THREE.DirectionalLight(0xfff1df, 2.2); sun.position.set(3.2, 5.0, 1.5); sun.target.position.set(-0.4, 0, -3.0)
-sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.radius = 6; sun.shadow.bias = -0.0004
+// Light: soft sky fill plus a sun patch; the lamp gives a warm accent. Set per scene from cfg.lights (DAYLIGHT for the
+// first three scenes: hemisphere 0xfff6ea/0xb9a48c 1.9, sun 0xfff1df 2.2 from (3.2, 5, 1.5) to (−0.4, 0, −3), lamp 1.6).
+const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1); scene.add(hemi)
+const sun = new THREE.DirectionalLight(0xffffff, 1)
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004
 Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 0.5, far: 15 })
 scene.add(sun, sun.target)
-const lampLight = new THREE.PointLight(0xffd9a0, 1.6, 4, 2); lampLight.position.set(1.95, 1.5, -3.9); scene.add(lampLight)
+const lampLight = new THREE.PointLight(0xffffff, 1, 4, 2); scene.add(lampLight)
+function setLights(L) {
+  hemi.color.setHex(L.hemi.sky); hemi.groundColor.setHex(L.hemi.ground); hemi.intensity = L.hemi.intensity
+  sun.color.setHex(L.sun.color); sun.intensity = L.sun.intensity; sun.position.set(...L.sun.position); sun.target.position.set(...L.sun.target)
+  sun.shadow.radius = L.sun.shadow_radius; sun.target.updateMatrixWorld(); sun.shadow.needsUpdate = true
+  lampLight.color.setHex(L.lamp.color); lampLight.intensity = L.lamp.intensity; lampLight.position.set(...L.lamp.position)
+  lampLight.distance = L.lamp.distance; lampLight.decay = L.lamp.decay
+}
 
 // --- renders -----------------------------------------------------------------------------------------------------
 function camera(cam, W, H) {
@@ -330,6 +414,7 @@ const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s 
 
 window.renderScene = (cfg) => {
   const { W, H, DW, DH, cam } = cfg
+  setLights(cfg.lights)
   renderer.setSize(W, H, false)
   const c = camera(cam, W, H)
   renderer.setRenderTarget(null); renderer.render(scene, c)
@@ -409,7 +494,29 @@ function png16(width, height, bytes) {
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 const json = (o) => JSON.stringify(o, null, 2) + '\n'
 
+// lighting.json (truth) next to the photo and in the calib mock folder (contract §4.8, §5.1).
+function writeLighting(s, photo) {
+  const body = json(truthLighting(s))
+  fs.writeFileSync(path.join(REPO, 'fixtures/scenes', s.id, 'lighting.json'), body)
+  const mock = path.join(REPO, 'fixtures/calib', sha256(photo))
+  fs.mkdirSync(mock, { recursive: true })
+  fs.writeFileSync(path.join(mock, 'lighting.json'), body)
+}
+// --lights-only: add `lights` to truth.json and write lighting.json for scenes already rendered, without rendering
+// (the photos, and so their SHA-256 and the mock folders, stay as they are).
+function lightsOnly() {
+  for (const s of SCENES) {
+    if (ONLY && s.id !== ONLY) continue
+    const dir = path.join(REPO, 'fixtures/scenes', s.id)
+    const truth = JSON.parse(fs.readFileSync(path.join(dir, 'truth.json'), 'utf8'))
+    fs.writeFileSync(path.join(dir, 'truth.json'), json({ ...truth, lights: s.lights }))
+    writeLighting(s, fs.readFileSync(path.join(dir, 'photo.jpg')))
+    console.log(`${s.id}: lights and lighting.json written (no render)`)
+  }
+}
+
 async function main() {
+  if (LIGHTS_ONLY) return lightsOnly()
   const browser = await chromium.launch({ executablePath: BROWSER, headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1600 } })
@@ -431,7 +538,7 @@ async function main() {
       if (ONLY && s.id !== ONLY) continue
       const long = Math.max(s.w, s.h), k = Math.min(1, 1024 / long), DW = Math.round(s.w * k), DH = Math.round(s.h * k)
       const t0 = Date.now()
-      const r = await page.evaluate((cfg) => window.renderScene(cfg), { W: s.w, H: s.h, DW, DH, cam: s.camera })
+      const r = await page.evaluate((cfg) => window.renderScene(cfg), { W: s.w, H: s.h, DW, DH, cam: s.camera, lights: s.lights })
       if (errors.length) throw new Error(`render of ${s.id} failed: ${errors.join(' | ')}`)
       const dir = path.join(REPO, 'fixtures/scenes', s.id)
       fs.mkdirSync(dir, { recursive: true })
@@ -460,8 +567,10 @@ async function main() {
         ids: { file: 'ids.png', r: 'sofa', g: 'table', note: 'each object rendered alone (no occlusion), antialiased: threshold at 128' },
         objects,
         floor_points: FLOOR_POINTS.map((p) => { const q = project(s.camera, s.w, s.h, p); return { world: p, px: [+q.px.toFixed(3), +q.py.toFixed(3)] } }),
+        lights: s.lights,
       }
       fs.writeFileSync(path.join(dir, 'truth.json'), json(truth))
+      writeLighting(s, photo)
       const calib = {
         version: 1, source: 'truth', model: null, image: { w: s.w, h: s.h }, camera: s.camera, principal: [0.5, 0.5],
         floor: { found: true, inlier_ratio: +r.floorRatio.toFixed(4), rmse_m: 0 },
