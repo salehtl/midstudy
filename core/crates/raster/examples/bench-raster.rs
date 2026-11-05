@@ -1,7 +1,7 @@
 //! Native timings of the kernels on the sizes the planner uses (median of 9 runs, after a warm-up): depth.png
 //! 1024 × 768 (the golden file, filter 0, and the same samples Paeth-filtered), the environment map at v1's 512 × 256
 //! from a 2048 × 1536 photo, the keep-room mask at 2048 × 1152, and 10⁶ projections.
-//! `cargo run --release -p midstudy-raster --example bench` (from core/).
+//! `cargo run --release -p midstudy-raster --example bench-raster` (from core/).
 #![allow(
     clippy::unwrap_used,
     clippy::cast_lossless,

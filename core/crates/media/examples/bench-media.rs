@@ -2,7 +2,7 @@
 //! Prints the median and the fastest of `runs` (default 15) runs after one warm-up, in milliseconds. The file is read
 //! once, outside the timing (as the server holds the upload in memory). Only for docs/notes/k-media.md.
 //!
-//! `cargo run --release --example bench -p midstudy-media -- jpeg evals/out/media-diff/corpus/big12mp-gps.jpg`
+//! `cargo run --release --example bench-media -p midstudy-media -- jpeg evals/out/media-diff/corpus/big12mp-gps.jpg`
 
 use std::time::Instant;
 
