@@ -62,7 +62,7 @@ def draw_grid(img: Image.Image, cam: dict, color: tuple, step: float = 0.5, reac
         for i in range(len(pts) - 1):
             if ok[i] and ok[i + 1]:
                 a = int(255 * max(0.15, 1 - dist[i] / reach))
-                dr.line([tuple(px[i]), tuple(px[i + 1])], fill=color + (a,), width=width)
+                dr.line([tuple(px[i]), tuple(px[i + 1])], fill=(*color, a), width=width)
     img.alpha_composite(over)
 
 
@@ -88,7 +88,7 @@ def run_cli(photo: Path, out: Path, model: str, device: str) -> tuple[dict, floa
     cmd = [sys.executable, "-m", "midstudy_calib.cli", "run", str(photo), "--out", str(out), "--model", model, "--device", device]
     env = {k: v for k, v in __import__("os").environ.items() if k not in ("MIDSTUDY_CALIB_MOCK",)}
     t = time.monotonic()
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)
     dt = time.monotonic() - t
     (out.parent / f"{out.name}.stderr.txt").write_text(p.stderr)
     last = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else "{}"
@@ -140,7 +140,7 @@ def golden(sid: str, out: Path, args) -> dict:
 
 def real(photo: Path, out: Path, args) -> dict:
     name = photo.stem
-    res, dt, err = run_cli(photo, out / "real" / name, args.model, args.device)
+    res, dt, _ = run_cli(photo, out / "real" / name, args.model, args.device)
     scene = out / "real" / name
     row = {"photo": str(photo.relative_to(REPO)) if photo.is_relative_to(REPO) else str(photo), "camera": res["camera"],
            "source": res["source"], "floor": res["floor"], "device": res["device"], "runtime_s": round(dt, 1),
@@ -176,8 +176,9 @@ def main() -> int:
                   f"| {r.get('depth', {}).get('median_rel_err_after_scale_pct')}% | {r['floor']['inlier_ratio']} | {r['runtime_s']} s |", flush=True)
     photos = args.photos
     if photos is None:
-        photos = sorted(p for p in (REPO / "fixtures/photos").glob("*") if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".heic", ".webp"))
-        photos += sorted(p for p in (REPO / "fixtures/photos-public").glob("*") if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".heic", ".webp"))
+        kinds = (".jpg", ".jpeg", ".png", ".heic", ".webp")
+        photos = sorted(p for p in (REPO / "fixtures/photos").glob("*") if p.is_file() and p.suffix.lower() in kinds)
+        photos += sorted(p for p in (REPO / "fixtures/photos-public").glob("*") if p.is_file() and p.suffix.lower() in kinds)
     for ph in photos:
         if "private" in ph.parts:
             continue  # never opened

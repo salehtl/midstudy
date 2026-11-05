@@ -25,9 +25,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import IO, TypedDict
+from typing import IO, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
@@ -63,20 +64,29 @@ def env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in ("MIDSTUDY_CALIB_MOCK", "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH")}
 
 
-def _num(d: object, *path: str) -> float | None:
+def _get(d: object, *path: str) -> object:
+    """d[path[0]][path[1]]... through JSON objects, None where the path breaks."""
     for k in path:
         if not isinstance(d, dict):
             return None
-        d = d.get(k)  # type: ignore[union-attr]  # narrowed to dict above
-    return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
+        d = cast(dict[str, object], d).get(k)
+    return d
+
+
+def _num(d: object, *path: str) -> float | None:
+    v = _get(d, *path)
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
+def _load(p: Path) -> object:
+    data: object = json.loads(p.read_text()) if p.is_file() else None
+    return data
 
 
 def row(mode: str, repeat: int, index: int, name: str, wall: float, res: object, scene: Path) -> Row:
-    light: object = None
-    if (scene / "lighting.json").is_file():
-        light = json.loads((scene / "lighting.json").read_text())
-    ok = isinstance(res, dict) and res.get("ok") is True  # type: ignore[union-attr]
-    err = res.get("error") if isinstance(res, dict) else "no JSON result"  # type: ignore[union-attr]
+    light = _load(scene / "lighting.json")
+    ok = _get(res, "ok") is True
+    err = _get(res, "error") if res is not None else "no JSON result"
     return Row(mode=mode, repeat=repeat, index=index, name=name, wall_s=round(wall, 3), ok=ok,
                elapsed_s=_num(res, "elapsed_s"), load_s=_num(res, "moge", "load_s"), infer_s=_num(res, "moge", "infer_s"),
                floor_fit_s=_num(res, "moge", "floor_fit_s"), light_s=_num(light, "fit", "elapsed_s"),
@@ -125,7 +135,7 @@ def worker(cli: list[str], photos: list[tuple[str, Path]], out: Path, repeat: in
                 line = stdout.readline()
                 wall = time.monotonic() - t0
                 res: object = json.loads(line) if line.strip() else None
-                if not isinstance(res, dict) or res.get("id") != name:  # type: ignore[union-attr]
+                if _get(res, "id") != name:
                     raise SystemExit(f"bench: the worker answered {line!r} to request {name}")
                 clean(scene)
                 rows.append(row("worker", repeat, i, name, wall, res, scene))
@@ -160,12 +170,12 @@ def table(rows: list[Row]) -> str:
 
 
 # --- comparing two runs ----------------------------------------------------------------------------------------------
-def _load(p: Path) -> object:
-    return json.loads(p.read_text()) if p.is_file() else None
+def _vec(v: object) -> NDArray[np.float64]:
+    return np.asarray(v, np.float64)
 
 
-def _angle(a: list[float], b: list[float]) -> float:
-    va, vb = np.asarray(a, float), np.asarray(b, float)
+def _angle(a: object, b: object) -> float:
+    va, vb = _vec(a), _vec(b)
     c = float(va @ vb / (np.linalg.norm(va) * np.linalg.norm(vb)))
     return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
@@ -175,9 +185,7 @@ def compare(a: Path, b: Path) -> int:
     worst = 0.0
     for n in names:
         ca, cb = _load(a / n / "calib.json"), _load(b / n / "calib.json")
-        assert isinstance(ca, dict) and isinstance(cb, dict)
-        cam_a, cam_b = ca["camera"], cb["camera"]  # type: ignore[index]
-        dcam = {k: round(float(cam_b[k]) - float(cam_a[k]), 4) for k in cam_a}  # type: ignore[union-attr]
+        dcam = {k: round((_num(cb, "camera", k) or 0) - (_num(ca, "camera", k) or 0), 4) for k in ("fov_y_deg", "height_m", "pitch_deg", "roll_deg")}
         da = np.asarray(Image.open(a / n / "depth.png")).astype(np.int64) if (a / n / "depth.png").is_file() else None
         db = np.asarray(Image.open(b / n / "depth.png")).astype(np.int64) if (b / n / "depth.png").is_file() else None
         if da is not None and db is not None and da.shape == db.shape:
@@ -187,15 +195,14 @@ def compare(a: Path, b: Path) -> int:
         else:
             dep = "depth: missing or different sizes"
         la, lb = _load(a / n / "lighting.json"), _load(b / n / "lighting.json")
-        if isinstance(la, dict) and isinstance(lb, dict):
-            ka, kb = la["key"], lb["key"]  # type: ignore[index]
-            ang = _angle(ka["direction"], kb["direction"])  # type: ignore[index]
-            sha, shb = np.asarray(la["ambient"]["sh"], float), np.asarray(lb["ambient"]["sh"], float)  # type: ignore[index]
-            lit = (f"key {ang:.3f} deg apart, intensity {ka['intensity']} vs {kb['intensity']}, cct {la['white_balance']['cct_k']} vs "  # type: ignore[index]
-                   f"{lb['white_balance']['cct_k']}, sh max |d| {float(np.abs(sha - shb).max()):.2e}")  # type: ignore[index]
+        if la is not None and lb is not None:
+            ang = _angle(_get(la, "key", "direction"), _get(lb, "key", "direction"))
+            sh = float(np.abs(_vec(_get(la, "ambient", "sh")) - _vec(_get(lb, "ambient", "sh"))).max())
+            lit = (f"key {ang:.3f} deg apart, intensity {_num(la, 'key', 'intensity')} vs {_num(lb, 'key', 'intensity')}, "
+                   f"cct {_num(la, 'white_balance', 'cct_k')} vs {_num(lb, 'white_balance', 'cct_k')}, sh max |d| {sh:.2e}")
         else:
             lit = "lighting: missing in one"
-        same = ca.get("floor") == cb.get("floor")  # type: ignore[union-attr]
+        same = _get(ca, "floor") == _get(cb, "floor")
         print(f"{n}: camera d {dcam}; floor {'same' if same else 'differs'}; {dep}; {lit}")
     print(f"compared {len(names)} scenes; worst depth difference {worst:.0f} mm")
     return 0

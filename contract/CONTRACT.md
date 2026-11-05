@@ -420,6 +420,26 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **Lighting** (§4.8): after the floor fit, `fit` infers the room's light from the photo's pixels and MoGe's normals and writes `lighting.json`. It runs on MoGe's output at depth size, needs no other model, costs nothing and adds about a second.
 
+#### Worker (`midstudy-calib serve`)
+
+`midstudy-calib serve [--model vitl|vitb|vits] [--device auto|cuda|mps|cpu]` answers the commands above as one long-lived process that keeps MoGe-2 loaded (one model at a time, on the device it last ran on), so only its first calibration pays for starting Python and torch, loading the network and the device's first inference. Measured on the M3 Max (MPS, vitl, `calib/scripts/bench.py`, `docs/notes/calib.md`): a one-shot calibration takes 7–12 s; the worker's first about 6 s and every later one about 1 s. `--model` and `--device` are the defaults of the requests that name none (so a device the server's `--calib` command fixes applies to every request).
+
+**Protocol** (stdin and stdout, UTF-8, one JSON object per line; `calib/src/midstudy_calib/schemas/calib-cli.schema.json`):
+- Request: `{"id": "<1–200 characters>", "cmd": "run" | "fit" | "light" | "align" | "ingest", "args": [...]}`, where `args` are the one-shot command's arguments after its name, e.g. `{"id": "c-20261105-221500-ab12", "cmd": "fit", "args": ["/abs/scenes/x", "--no-depth"]}`.
+- Response: `{"id": <the request's id>, …}`, the rest being exactly the one-shot command's last stdout line (the same object, checked against the same schema). Requests are answered one at a time, in order, and nothing else is written to stdout. The files are written exactly as by the one-shot command.
+- Progress goes to stderr as the one-shot commands write it; a failed request also writes `midstudy-calib: <sentence>` there.
+- A request that fails (not JSON, not a valid request, arguments the CLI refuses, a command that fails) is answered `{"id", "ok": false, "error": "<one sentence>"}` (`id` null when the request had no usable one), and the worker carries on.
+- End of input exits 0. SIGINT answers the request in flight with `"interrupted"` and exits 1.
+- The environment is read for every request as the one-shot commands read it (`MIDSTUDY_CALIB_MOCK` works exactly as there); relative paths are relative to the worker's working directory.
+
+**The server's side** (§4.4):
+- Start the worker (`<calib> serve`, with the one-shot commands' working directory and environment) on the first calibration job, not at startup, and keep it for the next ones.
+- Send the calibration queue's `run`, `fit` and `light` jobs to it, one at a time (the job id makes a good request id). Read its stderr continuously (the job's progress) and its response line within the job's timeout (600 s); handle the response exactly as the one-shot result.
+- `align` (the render path) stays one-shot, so a render never waits behind a calibration.
+- Crash: when the worker can't be started, exits, or answers anything but a JSON object with the request's id, kill it (SIGTERM, then SIGKILL after 5 s) and run that job with the one-shot command; the next job starts a new worker. After 3 such failures in a row, use the one-shot command for the rest of the server's life. This covers `--calib "python3 fixtures/stub_calib.py"` too: the stub has no `serve` and exits 2 at once. An `ok: false` answer is the job's failure, not the worker's.
+- Timeout: a request still running at the job's timeout fails the job with the one-shot timeout message; kill the worker, and the next job starts another.
+- Idle and shutdown: the server may close the worker's stdin after it has been idle for a while (e.g. 10 minutes) to give its memory back (MoGe-2 ViT-L holds about 1.3 GB on the GPU); the next calibration starts it again. On shutdown, close stdin, wait up to 5 s, then kill it.
+
 ### 4.4 Server additions (`planner/serve.py`, stdlib only)
 
 `--scenes-dir` (default `scenes/`) and `--calib CMD` (default `uv run --project calib midstudy-calib`; the Nix package passes its own binary). Calibration runs as jobs in **their own queue** (separate from the library queue), one at a time, each with a 600 s timeout, with the server's environment (so `MIDSTUDY_CALIB_MOCK` reaches it). Every mutating route follows §2.9.
