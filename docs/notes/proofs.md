@@ -3,8 +3,8 @@
 `proofs/` is a Lean 4 + Mathlib project that proves the mathematics midstudy relies on: the camera model of contract
 §4.1 over ℝ, the horizon and depth, drags and Set scale, item rotations, the clamps and angle wrapping, the product
 page's units over ℚ, the lighting rules of §4.8 (SH rotation, the turn of the whole light, the splat level), and the
-JPEG and PNG metadata strippers (byte-level models of `core/crates/media`, proved, then compared with the Rust on
-60,000 generated files). Floats are tested, not proved: the TS/Rust float code is checked against these statements by
+JPEG and PNG metadata strippers, the JPEG frame size and slugs (byte-level models of `core/crates/media`, proved, then
+compared with the Rust on about 110,000 generated inputs). Floats are tested, not proved: the TS/Rust float code is checked against these statements by
 property tests and the golden scenes.
 
 ## Toolchain
@@ -30,9 +30,9 @@ cd proofs
 ./check.sh                  # check:proofs: lake build, no sorry/admit/native_decide/axiom in the sources, and
                             # CheckAxioms.lean: every declaration under Midstudy uses only propext,
                             # Classical.choice and Quot.sound. Prints one summary line.
-./run.sh lake build mediastrip   # the proved JPEG/PNG stripper models as a program (.lake/build/bin/mediastrip)
-nix develop -c proofs/diff/run.sh [N]   # (from the repo root) the differential test against core/crates/media:
-                            # N synthetic files per format (default 3000) plus the repo's fixtures and mutations
+./run.sh lake build mediastrip   # the proved models as a program: .lake/build/bin/mediastrip jpeg|png|slug|frame
+nix develop -c proofs/diff/run.sh [N]   # (from the repo root) the differential test against core/crates/media, all
+                            # four modes: N synthetic inputs each (default 3000) plus the repo's fixtures and mutations
 ```
 
 `nix build -f nix/lean.nix` (or `nix shell -f nix/lean.nix -c lean --version`) gives the Lean alone. From a flake:
@@ -182,12 +182,12 @@ and engine.js (`photoToFloor`, `horizonAt`, `pitchFromHorizon`, `wrapDeg`, `rota
 
 `Midstudy/Jpeg/Model.lean` and `Midstudy/Png.lean` are executable Lean transcriptions of `core/crates/media/src/
 jpeg.rs` (`step`, `scan_end`, `plain_jfif`, `strip`, `is_clean`) and `png.rs` (`strip`), byte for byte in behaviour,
-errors by kind. The theorems above are about these models. **Aeneas was not used**: f-toolchain's Aeneas + Charon build was a
-no-go (docs/notes/f-toolchain.md: 62 minutes, no binary, so no `.#proofs` shell; prebuilt paths would need the
+errors by kind; `Midstudy/Jpeg/Frame.lean` (`frame_info`) and `Midstudy/Slug.lean` (`is_slug`) likewise. The theorems
+above are about these models. **Aeneas was not used**: f-toolchain's Aeneas + Charon build was a no-go (docs/notes/f-toolchain.md: 62 minutes, no binary, so no `.#proofs` shell; prebuilt paths would need the
 `hacl.cachix.org` substituter, a machine-wide setting only the user can change), Aeneas's Lean library pins Lean
 4.35.0 with its own Mathlib (this project is on 4.29.1), and AENEAS.md's JPEG target needs k-media rewrites first
-(`position` as loops, `array::from_fn`). So the proofs cover the
-Rust **by differential testing**: `lake exe mediastrip jpeg|png` (the models as a program; `@[csimp]` swaps in a
+(`position` as loops, `array::from_fn`). So the proofs cover the Rust **by differential testing**:
+`lake exe mediastrip jpeg|png|slug|frame` (the models as a program; `@[csimp]` swaps in a
 constant-stack scan splitter proved equal to the specification) and a 50-line Rust harness (`proofs/diff/`) run on the
 same generated corpus, and every file's outcome (ok or the error kind), JPEG `is_clean`, and the stripped bytes must
 be identical.
@@ -202,8 +202,8 @@ hit). Slugs (`Midstudy/Slug.lean`, `mediastrip slug`): 20,000 strings (valid slu
 65 long, upper case, `_`, `.`, `/`, `..`, spaces, a trailing newline, non-ASCII letters and digits, emoji, empty):
 identical (10,549 slugs, 9,451 not). Frame size (`Midstudy/Jpeg/Frame.lean`, `mediastrip frame`): the JPEG corpus
 plus 400 frame-header cases (zero width or height, short SOF segments, TEM/RST/stray SOI and fill before the frame),
-30,476 files: identical (1,675 sized; every error kind hit, ZeroSize included). Earlier runs against a30feda (before `find_ff`): 45,076 and 30,076 JPEG, 30,079
-PNG, all identical. Lean model speed: about 4,000 files a second.
+30,476 files: identical (1,675 sized; every error kind hit, ZeroSize included). Earlier runs against a30feda (before
+`find_ff`): 45,076 and 30,076 JPEG, 30,079 PNG, all identical. Lean model speed: about 4,000 files a second.
 
 ## Requests to other tracks
 
@@ -212,8 +212,9 @@ PNG, all identical. Lean model speed: about 4,000 files a second.
   declaration's axioms), or at least run `lake exe cache get` first with `MATHLIB_CACHE_DIR=proofs/.lake/mathlib-cache`
   (Mathlib's cache tool otherwise writes to `~/.cache/mathlib`). `proofs/run.sh` sets both. `nix/lean.nix` now pins
   aarch64-darwin and x86_64-linux (the Linux build is untested).
-- **k-media**: the differential harness reads `midstudy_media::jpeg::{strip, is_clean}` and `png::strip` by these
-  names; keep them, or tell proofs. `proofs/diff/run.sh` needs the crate on the branch it runs on.
+- **k-media**: the differential harness calls `midstudy_media::jpeg::{strip, is_clean, frame_info}`, `png::strip`
+  and `slug::is_slug` by these names; keep them, or tell proofs. `proofs/diff/run.sh` needs the crate on the branch
+  it runs on.
 - **server-core / server-routes**: the azimuth observation above.
 - **k-geom**: LEAN.md property 13 and the proptest `four_quarter_turns` claim that four `rotate_by(·, 90)` return
   `round_to(wrap_deg(r), 6)`; for the 4 angles `k/1e7`, `k ∈ [−1,799,999,999, −1,799,999,996]`, the stored angle is
@@ -231,8 +232,8 @@ corrected). Of k-media's AENEAS.md targets, #2 (`megabytes`), #3 (`frame_info`),
 #7 (the Content-Length fold) and #9 (`jpeg::strip`, `is_clean`) have Lean models with proofs; #3, #4, #6 and #9 are
 also compared with the Rust by `proofs/diff/` (all identical). Left:
 - re-run `nix develop -c proofs/diff/run.sh` in place once `core/crates/media` is on `v2` (merge `v2` first): the
-  measurements above are against `v2-k-media` a30feda, extracted to `evals/out/` because it isn't on `v2` yet
-  (`v2` had only the phase 0 commit and the eval-lock fix when this ran);
+  measurements above are against `v2-k-media` cb444c5, extracted to `evals/out/proofs-scratch/` because it isn't on
+  `v2` yet (`v2` had only the phase 0 commit and the eval-lock fix when this ran);
 - Aeneas + Charon on AENEAS.md's targets: blocked (no binary from f-toolchain, and Aeneas's library pins Lean 4.35.0);
 - LEAN.md 17 (the hull contains its points: needs a convexity development), 23's rank-9 claim (numeric) and 28 (half
   floats: IEEE formats): not proved; they stay with geom's tests.
