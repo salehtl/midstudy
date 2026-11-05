@@ -7,3 +7,5 @@ import Midstudy.Item
 import Midstudy.Clamp
 import Midstudy.Units
 import Midstudy.Lighting
+import Midstudy.Jpeg.Model
+import Midstudy.Jpeg.Proofs

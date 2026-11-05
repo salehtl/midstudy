@@ -11,6 +11,6 @@ if grep -rnwE 'sorry|admit|native_decide' "$here/Midstudy" "$here/Midstudy.lean"
 fi
 out="$("$here/run.sh" lake env lean CheckAxioms.lean 2>&1)" || { echo "$out"; echo "check:proofs: FAIL (axioms)"; exit 1; }
 echo "$out"
-files=$(ls "$here"/Midstudy/*.lean | wc -l | tr -d ' ')
-thms=$(cat "$here"/Midstudy/*.lean | grep -cE '^(theorem|lemma) ')
+files=$(find "$here/Midstudy" -name '*.lean' | wc -l | tr -d ' ')
+thms=$(find "$here/Midstudy" -name '*.lean' -exec cat {} + | grep -cE '^(private )?(theorem|lemma) ')
 echo "check:proofs: ok ($files files, $thms theorems, Lean $("$here/run.sh" lean --short-version 2>/dev/null || echo 4.29.1), Mathlib v4.29.1)"
