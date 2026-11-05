@@ -5,7 +5,7 @@
 //   snapshotPages(golden)         → { routes, dir }                   the golden set's saved pages in fixtures/pages/<id>/
 //   startPagesServer({routes,dir}) → { base, port, hits, stop() }    hits: [{method, path, query, headers}] in order
 //
-// A route: { path, query?: {k: v}, status = 200, type?, file? (relative to dir) | body? | generate?, location?, headers? }.
+// A route: { path | prefix, query?: {k: v}, status = 200, type?, file? (relative to dir) | body? | generate?, location?, headers? }.
 // Generators: jpeg, hops (/hops/{n}), slow, trickle, huge, gzip, gzip-bomb (see manifest.json's notes).
 // Shops' real pages (fixtures/pages/) are git-ignored and never committed; fixtures/product-pages/ is made up.
 import http from 'node:http'
@@ -56,6 +56,7 @@ function typeFor(file) {
 
 function match(routes, url) {
   for (const r of routes) {
+    if (r.prefix) { if (url.pathname.startsWith(r.prefix)) return r; continue }
     if (r.path.includes('{n}')) {
       const re = new RegExp(`^${r.path.replace('{n}', '(\\d+)')}$`)
       const m = url.pathname.match(re)
