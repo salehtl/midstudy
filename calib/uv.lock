@@ -417,6 +417,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },
+    { name = "jsonschema" },
     { name = "moge" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -427,13 +428,13 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "jsonschema" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.25" },
+    { name = "jsonschema", specifier = ">=4.23" },
     { name = "moge", git = "https://github.com/microsoft/MoGe?rev=07444410f1e33f402353b99d6ccd26bd31e469e8" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "opencv-python-headless", specifier = ">=4.10" },
@@ -443,10 +444,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "jsonschema", specifier = ">=4" },
-    { name = "pytest", specifier = ">=8" },
-]
+dev = [{ name = "pytest", specifier = ">=8" }]
 
 [[package]]
 name = "moderngl"

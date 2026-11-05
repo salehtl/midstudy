@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/lighting.schema.json",
+  "title": "midstudy lighting inferred from the photo (scenes/<name>/lighting.json, contract §4.8)",
+  "description": "Written by `midstudy-calib fit` (and `run`) next to calib.json. Units: three.js 0.180 light units, linear sRGB, for ACES Filmic at exposure 1. Frame: the camera's (three.js axes: x right, y up, z towards the viewer); the planner rotates it with the scene's current camera. Keys not listed here are allowed for diagnostics; readers ignore them.",
+  "type": "object",
+  "required": ["version", "source", "frame", "ambient", "key", "white_balance"],
+  "additionalProperties": true,
+  "$defs": {
+    "rgb": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 3, "maxItems": 3 },
+    "unit": { "type": "array", "items": { "type": "number", "minimum": -1, "maximum": 1 }, "minItems": 3, "maxItems": 3 }
+  },
+  "properties": {
+    "version": { "const": 1 },
+    "source": { "description": "photo: inferred from the photo; truth: the golden scenes' own lights (fixtures/scenes only).", "enum": ["photo", "truth"] },
+    "frame": { "const": "camera" },
+    "image": { "description": "photo.jpg's size when the fit ran.", "type": ["object", "null"] },
+    "camera": { "description": "The camera block the fit used (informational: the planner uses the scene's current camera).", "type": ["object", "null"] },
+    "ambient": {
+      "type": "object",
+      "required": ["sh"],
+      "additionalProperties": true,
+      "properties": {
+        "sh": {
+          "description": "L2 spherical harmonics, three.js SphericalHarmonics3 order [L00, L1-1 (y), L10 (z), L11 (x), L2-2, L2-1, L20, L21, L22], radiance coefficients as THREE.LightProbe takes them, camera frame, RGB. The key light is not included.",
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "minItems": 9, "maxItems": 9
+        }
+      }
+    },
+    "key": {
+      "type": "object",
+      "required": ["direction", "color", "intensity", "softness", "confidence"],
+      "additionalProperties": true,
+      "properties": {
+        "direction": { "$ref": "#/$defs/unit", "description": "Unit vector towards the light, camera frame." },
+        "color": { "$ref": "#/$defs/rgb", "description": "Linear RGB, largest component 1." },
+        "intensity": { "type": "number", "minimum": 0, "description": "THREE.DirectionalLight intensity." },
+        "softness": { "type": "number", "minimum": 0, "maximum": 1, "description": "0 a hard sun edge, 1 very diffuse." },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "How clearly the photo shows one directional light." }
+      }
+    },
+    "white_balance": {
+      "type": "object",
+      "required": ["rgb", "cct_k"],
+      "additionalProperties": true,
+      "properties": {
+        "rgb": { "$ref": "#/$defs/rgb", "description": "The room light's overall colour, linear RGB with luminance 1." },
+        "cct_k": { "type": ["number", "null"], "minimum": 1000, "maximum": 40000, "description": "Its correlated colour temperature, kelvin." }
+      }
+    },
+    "floor": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": { "radiance": { "$ref": "#/$defs/rgb", "description": "Median linear radiance of the floor's pixels." } }
+    },
+    "fit": { "description": "Diagnostics (free-form).", "type": "object" }
+  }
+}
