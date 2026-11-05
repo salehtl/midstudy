@@ -151,11 +151,34 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 | TScert build (sandboxed) | 5 min 21 s (first), 8 min 7 s (after the patch) |
 | TScert experiments (126 functions, 20 files) / an unchanged re-run | 12–20 s / under 1 s (store hit) |
 | check:rust on the probe workspace (fmt, clippy, test, Miri setup + test, Kani) | 50 s |
-| Planner load, v1 vs bundle | see "Evals" |
+| Planner load to `midstudy.ready`, v1 vs bundle (golden living-wide, fresh context per run, 5 runs each, interleaved, `--exclusive` lock, load average 14–20) | v1 median **1631 ms** (4366 for the first, cold CDN; then 1623, 1631, 1614, 1640), 52 requests, 12 to jsdelivr. Bundle median **1584 ms** (1598, 1584, 1600, 1563, 1578), 21 requests, none to a CDN. Bytes: 1384 kB vs 1402 kB, because jsdelivr compresses and serve.py does not. |
+
+On page load alone the bundle is about 3 % faster once the CDN is warm, and 2.7× faster than the first, cold-CDN load
+of v1. Most of the remaining time is in the page itself (SwiftShader WebGL setup, the scene and its depth), so the
+§4.1 "≥ 40 % faster cold load" target needs more than bundling. f-perf's E17 measures it properly. How this one was
+measured (a one-off script, not committed): one `startServer` from the harness, then playwright either loaded
+`/planner/` as built or answered `/planner/` with v1's `index.html` (`git show 0d40ff5:planner/index.html`, so the
+legacy `main.js` and jsdelivr loaded), alternating the two.
 
 ## Evals
 
-See the "Evals" section appended below once the runs finish.
+With the bundled planner (`planner/index.html` → `dist/app.js`, built by `node scripts/build.mjs`), each run through
+`node scripts/eval-lock.mjs -- npm run eval:…` in the dev shell, 2026-11-05 23:33–23:50. These evals have no build
+step in their harness yet (f-contract adds it), so the bundle was built first. Every eval passed on its first run:
+
+| Eval | Result | Time |
+|---|---|---|
+| eval:selftest (H0) | 22/22 | 7.8 s |
+| eval:planner (E3) | 55/55 | 40.0 s |
+| eval:occlusion (E4) | 20/20 | 11.9 s |
+| eval:floor (E5) | 34/34 | 26.1 s |
+| eval:render (E6) | 36/36 | 59.1 s |
+| eval:phone (E9) | 48/48 | 36.7 s |
+| eval:ux (E11) | 28/28 | 54.6 s |
+| eval:ux2 (E12) | 26/26 | 46.6 s |
+| eval:splat (E13) | 50/50 | 90.0 s (Spark from the bundle's lazy chunk) |
+| eval:product-ui (E15) | 134/134 | 33.9 s |
+| eval:lighting (E16) | 56/56 | 90.9 s |
 
 ## Requests to other tracks
 
