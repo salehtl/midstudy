@@ -6,3 +6,4 @@ import Midstudy.Depth
 import Midstudy.Item
 import Midstudy.Clamp
 import Midstudy.Units
+import Midstudy.Lighting
