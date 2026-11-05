@@ -41,8 +41,8 @@ nix develop -c proofs/diff/run.sh [N]   # (from the repo root) the differential 
 ## What is proved
 
 No `sorry`, `admit` or new axioms: `CheckAxioms.lean` collects the axioms of every declaration under `Midstudy`
-(891 at the last run, 283 theorems in 13 files) and allows only Lean's three standard ones, which Mathlib uses
-throughout.
+(970 at the last run; 329 theorems in 17 files) and allows only Lean's three standard ones, which Mathlib uses
+throughout. The table lists the main results by group; the next section maps k-geom's LEAN.md to them one by one.
 
 | Theorem | File | What it guarantees for the app | Mirrored by (floats are tested, not proved) |
 |---|---|---|---|
@@ -95,6 +95,15 @@ throughout.
 | `megabytes_eq_roundHalfEven`, `megabytes_lt` | Arith | zip.rs `megabytes` is exactly `total/10⁶` rounded half to even (Python's), for every u64; no overflow (AENEAS.md #2) | k-media test `megabytes_round_half_even` |
 | `foldDigits_eq`, `foldDigits_lt`, `foldDigits_prefix_lt` | Arith | Content-Length's digit fold over ≤ 15 digits stays below 10¹⁵ at every step (no overflow) and is the digits' number (AENEAS.md #7) | k-media http tests |
 | `Png.strip_idem`, `Png.strip_no_metadata`, `Png.strip_chunks`, `Png.strip_eq_self_iff` | Png | idempotent; no eXIf/tEXt/iTXt/zTXt/tIME and nothing after IEND; the other chunks byte for byte in order; unchanged exactly when there is nothing to drop (§2.8) | GLB texture stripping |
+| `projectPhoto_ray`, `photoRay_floorToPhoto_y`, `depth_pos_iff`, `photoRay_one_strictAnti` | Camera, Depth, Horizon | the point at parameter t on a pixel's ray projects to that pixel at depth t; in front ⟺ d > 0; the ray turns down monotonically down the photo | geom props (LEAN.md 2, 3, 5, 6) |
+| `floorToPhoto_raise`, `floorToPhoto_up` | Depth | raising a point by δ moves its pixel by `f·δ·z/(d·d')` rows: up in the world is up in the photo for points ahead of the camera's foot | golden signs (LEAN.md 7) |
+| `pitchFromHorizon_lipschitz`, `horizon_drag_cap` | Horizon | a horizon drag tilts the camera by at most `min(degPerCssPx, 0.12)` degrees per CSS pixel (§4.5) | geom props `horizon_drag_is_capped` |
+| `rotateBy_four_quarters_stored`, `rotateBy_four_quarters_exception` | Clamp | `R` four times returns the stored angle, except a stored −180 (from angles within 5·10⁻⁷ of −180), which comes back as 180: see Requests | geom props `four_quarter_turns` |
+| `corners_bound_x/y/z`, `footprint_centre` | Item | every point of a turned box lies within its 8 corners' bounds; the footprint's centre is the box's floor centre | geom `world_bounds`, `footprint` |
+| `dirOf_azElOf` | Lighting | `dirOf(azEl(d)) = d` for every unit direction not straight up or down | geom `az_el_of` |
+| `landing_spec`, `landing_free`, `ringPoint_dist` | Landing | a new piece lands on the base or on the first free ring point (in front, 0.45 m clear), within 5·10⁻⁷ after rounding | geom `landing_spot` |
+| `fwd_iff`, `bwd_iff`, `rowPass_iff`, `dilate_iff` | Dilate | the keep-room mask's two-pass scan is exactly the box dilation `[x − right, x + left] × [y − down, y + up]` (§4.7) | raster props `dilation_is_a_box` |
+| `unfilter_filter`, `paeth_eq_spec` | PngFilter | decoding a filtered PNG row gives it back, for every filter; raster's Paeth is the spec's | raster props `decoder_round_trips_every_filter` |
 
 ## k-geom's LEAN.md, property by property
 
@@ -197,10 +206,12 @@ about 4,000 files a second.
 
 ## Status and what's left
 
-All eight groups are proved: camera, horizon, depth, item rotation, clamps, units, lighting, and the JPEG stripper
-(plus the PNG stripper, the light's turn, drags and Set scale). Left:
+All eight groups are proved: camera, horizon, depth, item rotation, clamps, units, lighting, and the JPEG stripper;
+also the PNG stripper, the light's turn, drags and Set scale, two integer kernels, and 25 of k-geom's 28 LEAN.md
+properties (13 corrected). Left:
 - re-run `nix develop -c proofs/diff/run.sh` in place once `core/crates/media` is on `v2` (merge `v2` first): the
-  measurements above are against `v2-k-media` a30feda, extracted to `evals/out/` because it isn't on `v2` yet;
-- Aeneas + Charon on AENEAS.md's targets, once f-toolchain's shell has them and k-media has made the rewrites it lists;
-- align names with k-geom's `core/crates/geom/LEAN.md` once it exists (not on `v2-k-geom` yet; the names here follow
-  engine.js and k-geom's Rust: `photoToFloor`/`photo_to_floor`, `horizonAt`/`horizon_at`, `wrapDeg`/`wrap_deg`, …).
+  measurements above are against `v2-k-media` a30feda, extracted to `evals/out/` because it isn't on `v2` yet
+  (`v2` had only the phase 0 commit and the eval-lock fix when this ran);
+- Aeneas + Charon on AENEAS.md's targets: blocked (no binary from f-toolchain, and Aeneas's library pins Lean 4.35.0);
+- LEAN.md 17 (the hull contains its points: needs a convexity development), 23's rank-9 claim (numeric) and 28 (half
+  floats: IEEE formats): not proved; they stay with geom's tests.
