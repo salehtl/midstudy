@@ -35,6 +35,7 @@ import {
 import type { ShaderNodeObject } from 'three/tsl'
 import { BLOCK, GpuRadixSort, padToBlock } from './radix-sort.ts'
 import type { SplatData } from './splat-data.ts'
+import { clearTarget } from './passes.ts'
 import type { FromWorker, ToWorker } from './sort-messages.ts'
 
 export const TEX_W = 2048          // data texture width (texels); rows grow with the capacity
@@ -509,7 +510,7 @@ export class SplatLayer {
     const prevTarget = r.getRenderTarget()
     r.setRenderTarget(this.target)
     r.setClearColor(0x000000, 0)
-    r.clear(true, true, true)
+    clearTarget(r)
     drawDepth()
     if (this.mesh && this.count) {
       camera.updateProjectionMatrix()

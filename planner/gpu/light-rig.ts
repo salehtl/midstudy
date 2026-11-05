@@ -19,7 +19,7 @@ import type { Material, NodeBuilder, Object3D, Scene, Texture, TextureNode, WebG
 import { Discard, Fn, If, abs, clamp, dot, float, max, mix, positionWorld, sqrt, step, texture, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import type { ShaderNodeObject } from 'three/tsl'
-import { aces, linearToSrgb, srgbToLinear } from './passes.ts'
+import { aces, clearTarget, linearToSrgb, srgbToLinear } from './passes.ts'
 import type { Frame } from './passes.ts'
 
 type N = ShaderNodeObject<Node>
@@ -367,7 +367,7 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
     const prev = renderer.getRenderTarget()
     const prevOverride = casters.overrideMaterial
     renderer.setRenderTarget(shadowRT)
-    renderer.clear(false, true, false)
+    clearTarget(renderer, false, true, false)
     casters.overrideMaterial = depthOnly
     renderer.render(casters, shadowCam)
     casters.overrideMaterial = prevOverride

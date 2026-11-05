@@ -336,8 +336,12 @@ if (PERF) {
       }
       const med = (v) => [...v].sort((x, y) => x - y)[Math.floor(v.length / 2)]
       const heap1 = performance.memory?.usedJSHeapSize ?? null
+      // Spark's own splat buffers: its packed splats (4 words each) and the ordering (1 word each)
+      let packed = 0
+      scene.traverse((o) => { const a = o.packedSplats?.packedArray; if (a?.byteLength) packed += a.byteLength })
+      const ordering = e.three.spark?.orderingTexture?.image?.data?.byteLength ?? 0
       return { addMs: tAdded - t0, firstSortMs: tSettled - tAdded, firstFrameMs: tFirst - t0, sorts, draws, sortMedian: med(sorts), drawMedian: med(draws),
-        numSplats: e.three.spark?.display?.numSplats ?? null, heapDelta: heap0 != null && heap1 != null ? heap1 - heap0 : null }
+        numSplats: e.three.spark?.display?.numSplats ?? null, heapDelta: heap0 != null && heap1 != null ? heap1 - heap0 : null, packedBytes: packed, orderingBytes: ordering }
     }, IDOL.id).catch((e) => ({ error: String(e.message || e).split('\n')[0] }))
     results.perf.spark = sp
   }

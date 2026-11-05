@@ -12,7 +12,7 @@ import { decodeSplat } from '../splat-data.ts'
 import type { SplatData } from '../splat-data.ts'
 import { SplatLayer, isWebGPU } from '../splat-layer.ts'
 import type { SortMode } from '../splat-layer.ts'
-import { BAR, createDepthPrepass, createFrame, createFurnitureComposite, createPhotoPass, createSplatComposite, depthTexture, photoTexture, warmthTint } from '../passes.ts'
+import { BAR, clearTarget, createDepthPrepass, createFrame, createFurnitureComposite, createPhotoPass, createSplatComposite, depthTexture, photoTexture, warmthTint } from '../passes.ts'
 import { CASTER_LAYER, createLightRig, flipSides } from '../light-rig.ts'
 import type { LightingJson } from '../light-rig.ts'
 import { decodeDepthPng } from './depth-png.ts'
@@ -39,7 +39,7 @@ document.body.appendChild(renderer.domElement)
 const frame = createFrame()
 const photoPass = createPhotoPass(frame)
 const depthPre = createDepthPrepass(frame)
-const furnRT = new RenderTarget(1, 1, { type: HalfFloatType, samples: 4, depthBuffer: true })
+const furnRT = new RenderTarget(1, 1, { type: HalfFloatType, samples: Number(params.get('msaa') ?? 4), depthBuffer: true })
 const furnComp = createFurnitureComposite(frame, furnRT)
 const furnScene = new Scene()
 const depthScene = new Scene()
@@ -267,13 +267,13 @@ async function draw(target: RenderTarget | null, w = renderer.domElement.width, 
   if (furnRT.width !== w || furnRT.height !== h) furnRT.setSize(w, h)
   renderer.setRenderTarget(furnRT)
   renderer.setClearColor(0x000000, 0)
-  renderer.clear(true, true, true)
+  clearTarget(renderer)
   renderer.render(furnScene, camera)
   const withSplats = !!splats && splats.splats > 0
   if (withSplats && splats) splats.render(camera, w, h, drawDepth)
   renderer.setRenderTarget(target)
   renderer.setClearColor(BAR, 1)
-  renderer.clear(true, true, true)
+  clearTarget(renderer)
   photoQuad.render(renderer)
   furnQuad.render(renderer)
   if (withSplats && splatQuad) splatQuad.render(renderer)
@@ -287,10 +287,13 @@ async function gpuSync(): Promise<void> {
 }
 
 // The full photo frame at its own resolution, splats sorted for the capture camera first (§4.7): PNG.
+// One capture target, kept and resized to the photo.
+const captureRT = new RenderTarget(1, 1, { type: UnsignedByteType, depthBuffer: false })
 async function capture(): Promise<{ dataUrl: string, width: number, height: number, ms: number, flipped: boolean }> {
   const t0 = performance.now()
   const w = photo.w, h = photo.h
-  const out = new RenderTarget(w, h, { type: UnsignedByteType, depthBuffer: false })
+  const out = captureRT
+  if (out.width !== w || out.height !== h) out.setSize(w, h)
   try {
     fullFrame(w, h)
     if (splats && splats.splats > 0) await splats.settle(camera)
@@ -312,7 +315,7 @@ async function capture(): Promise<{ dataUrl: string, width: number, height: numb
     g.putImageData(img, 0, 0)
     return { dataUrl: c.toDataURL('image/png'), width: w, height: h, ms: performance.now() - t0, flipped }
   } finally {
-    out.dispose()
+    renderer.setRenderTarget(null)
     updateView()
   }
 }
@@ -426,14 +429,44 @@ window.gpuDemo = {
     let drawn = 0, maxA = 0
     const samples: number[][] = []
     const half = (h: number): number => { const e = (h >> 10) & 31, m = h & 1023, sg = h >> 15 ? -1 : 1; return e === 0 ? sg * m * 2 ** -24 : e === 31 ? (m ? NaN : sg * Infinity) : sg * (1 + m / 1024) * 2 ** (e - 15) }
+    const pxa = new Uint16Array(px.buffer, px.byteOffset, px.byteLength / 2)
     for (let i = 0; i < n; i++) {
-      const a = Number(px[4 * i + 3] ?? 0)
-      if (a > 0) { drawn++; if (samples.length < 6 && i % 7 === 0) samples.push([0, 1, 2, 3].map((k) => half(Number(px[4 * i + k] ?? 0)))) }
+      const a = Number(pxa[4 * i + 3] ?? 0)
+      if (a > 0) { drawn++; if (samples.length < 6 && i % 7 === 0) samples.push([0, 1, 2, 3].map((k) => half(Number(pxa[4 * i + k] ?? 0)))) }
       if (a > maxA) maxA = a
     }
     return { w: t.width, h: t.height, drawn, maxA, samples, type: px.constructor.name, instances: splats.stats() }
   },
   debugShaders: () => splats?.debugShaders(camera) ?? null,
+  debugScene: () => furnScene.children.map((c) => `${c.type}:${c.name}:${c.visible ? 'v' : 'h'}`),
+  // draw calls of the furniture pass alone, and the objects three put in its render list
+  debugFurnitureCalls: () => {
+    renderer.info.autoReset = false
+    renderer.info.reset()
+    renderer.setRenderTarget(furnRT)
+    renderer.autoClear = true
+    try { renderer.render(furnScene, camera) } finally { renderer.autoClear = false; renderer.info.autoReset = true }
+    const names: string[] = []
+    furnScene.traverseVisible((o) => { if (o instanceof Mesh) names.push(`${o.parent?.name ?? ''}/${o.name}`) })
+    return { drawCalls: renderer.info.render.drawCalls, visibleMeshes: names }
+  },
+  debugClearFurn: () => { renderer.setRenderTarget(furnRT); renderer.setClearColor(0x000000, 0); clearTarget(renderer); renderer.setRenderTarget(null) },
+  debugRenderFurn: (withShadow: boolean) => {
+    furnScene.updateMatrixWorld()
+    if (withShadow) rig.fitShadow(shadowBox(), furnScene)
+    renderer.setRenderTarget(furnRT); renderer.setClearColor(0x000000, 0)
+    renderer.autoClear = true
+    try { renderer.render(furnScene, camera) } finally { renderer.autoClear = false }
+    renderer.setRenderTarget(null)
+  },
+  // the furniture target's alpha at a photo-space rect (msaa=0 only): is the piece in the target itself?
+  debugFurnAlpha: async (x0: number, y0: number, w: number, h: number) => {
+    const px = await renderer.readRenderTargetPixelsAsync(furnRT, x0, y0, w, h)
+    const pxa = new Uint16Array(px.buffer, px.byteOffset, px.byteLength / 2)
+    let n = 0
+    for (let i = 0; i < w * h; i++) if (Number(pxa[4 * i + 3] ?? 0) > 0) n++
+    return { size: [furnRT.width, furnRT.height], covered: n / (w * h) }
+  },
   start: () => { running = true; loop() },
   stop: () => { running = false },
   stats: () => ({ splats: splats?.stats() ?? null, info: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, compute: renderer.info.compute.calls }, heap: heapUsed() }),

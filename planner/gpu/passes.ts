@@ -11,7 +11,7 @@
 //                 sRGB, alpha as drawn; only inside the photo.
 //   splatComposite  the splat target over that: un-premultiply, the colour multiplier (§4.8), sRGB, no ACES.
 import { AlwaysDepth, Color, DataTexture, FloatType, LinearFilter, NearestFilter, NodeMaterial, NormalBlending, RedFormat, Texture, Vector2, Vector3, Vector4 } from 'three/webgpu'
-import type { RenderTarget, UniformNode } from 'three/webgpu'
+import type { RenderTarget, UniformNode, WebGPURenderer } from 'three/webgpu'
 import { Discard, Fn, If, clamp, dot, float, max, min, mix, positionGeometry, pow, screenCoordinate, screenUV, select, texture, uniform, vec3, vec4, cameraNear, cameraFar, viewZToPerspectiveDepth } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import type { ShaderNodeObject } from 'three/tsl'
@@ -164,6 +164,19 @@ export function createSplatComposite(frame: Frame, source: RenderTarget, gain: {
   m.transparent = true
   m.blending = NormalBlending
   return m
+}
+
+/** renderer.clear() that clears on both backends. three.js 0.180's WebGL2 backend forces the depth mask on before a
+ * clear but not the colour mask, so a colour clear right after a colorWrite: false draw (the depth pre-pass, the
+ * catcher's shadow map) did nothing: the previous frame's furniture stayed in the target (measured: a removed piece
+ * showed up in the next capture). WebGPU clears with load ops and is unaffected. */
+export function clearTarget(renderer: WebGPURenderer, color = true, depth = true, stencil = true): void {
+  if (color) {
+    const state: unknown = Reflect.get(renderer.backend, 'state')
+    const set: unknown = state && typeof state === 'object' ? Reflect.get(state, 'setColorMask') : null
+    if (typeof set === 'function') Reflect.apply(set, state, [true])
+  }
+  renderer.clear(color, depth, stencil)
 }
 
 /** warmth tint (engine.js warmthTint): luminance-normalized. */
