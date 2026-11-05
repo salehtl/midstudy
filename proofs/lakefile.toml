@@ -1,0 +1,14 @@
+# midstudy proofs (docs/notes/proofs.md): Lean 4.29.1 (nix/lean.nix) + Mathlib v4.29.1, oleans from Mathlib's cache.
+name = "midstudy-proofs"
+defaultTargets = ["Midstudy"]
+
+[leanOptions]
+autoImplicit = false
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.29.1"
+
+[[lean_lib]]
+name = "Midstudy"
