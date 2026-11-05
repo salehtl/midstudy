@@ -1,13 +1,17 @@
-"""The corpus for proofs/diff/run.sh: JPEG-shaped inputs that exercise every branch of the stripper.
+"""The corpora for proofs/diff/run.sh: JPEG- and PNG-shaped inputs that exercise every branch of the strippers.
 
 Deterministic (seeded). Writes OUTDIR/*.jpg and OUTDIR/list.txt. Inputs: the repo's JPEG fixtures (golden scene
 photos and fal mock inputs; never fixtures/photos/), each with metadata injected in several ways, many small synthetic
 JPEGs (segments, APP0 JFIF/JFXX variants, APP1-APP15, COM, fill bytes, length-less markers, scans whose data holds
 stuffed bytes and restart markers, trailing bytes), and mutations of all of them (truncations, byte flips, inserted
 FF bytes, bad lengths).
-usage: python3 gen_corpus.py REPO_ROOT OUTDIR [N_SYNTH]
+PNG: the repo's PNG fixtures (depth maps, id masks) with metadata chunks injected, synthetic chunk streams (every
+dropped type, IEND early or missing, bytes after IEND, huge lengths) and mutations.
+usage: python3 gen_corpus.py jpeg|png REPO_ROOT OUTDIR [N_SYNTH]
 """
 import random
+import struct
+import zlib
 import sys
 from pathlib import Path
 
@@ -104,11 +108,83 @@ def mutate(rng, data):
     return bytes(b)
 
 
+PNG_SIG = b"\x89PNG\r\n\x1a\n"
+DROPPED = [b"eXIf", b"tEXt", b"iTXt", b"zTXt", b"tIME"]
+KEPT = [b"IHDR", b"PLTE", b"IDAT", b"iCCP", b"gAMA", b"pHYs", b"sRGB", b"cHRM", b"bKGD", b"tRNS", b"sBIT", b"hIST",
+        b"sPLT", b"acTL", b"fcTL", b"fdAT", b"oFFs", b"EXIF", b"text", b"IEnd"]
+
+
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
+def png_synth(rng):
+    parts = [PNG_SIG, chunk(b"IHDR", struct.pack(">IIBBBBB", rng.randrange(1, 4000), rng.randrange(1, 4000), 8, 2, 0, 0, 0))]
+    for _ in range(rng.randrange(0, 10)):
+        kind = rng.choice(DROPPED + KEPT)
+        parts.append(chunk(kind, bytes(rng.randrange(256) for _ in range(rng.randrange(0, 60)))))
+    if rng.random() < 0.9:
+        parts.append(chunk(b"IEND", b""))
+    if rng.random() < 0.3:
+        parts.append(rng.choice([chunk(b"tEXt", b"after\0IEND"), bytes(rng.randrange(256) for _ in range(rng.randrange(1, 30))),
+                                 chunk(b"IEND", b"")]))
+    return b"".join(parts)
+
+
+def png_inject(rng, data):
+    i = 8 + 25  # after IHDR
+    extra = b"".join(chunk(k, bytes(rng.randrange(256) for _ in range(rng.randrange(0, 40))))
+                     for k in rng.sample(DROPPED, rng.randrange(1, len(DROPPED) + 1)))
+    return data[:i] + extra + data[i:] + (b"trailer" if rng.random() < 0.5 else b"")
+
+
+def png_mutate(rng, data):
+    b = bytearray(data)
+    for _ in range(rng.randrange(1, 3)):
+        r = rng.random()
+        if r < 0.4 and len(b) > 9:
+            del b[rng.randrange(8, len(b)):]
+        elif r < 0.7 and len(b) > 12:
+            j = rng.randrange(8, len(b) - 4)
+            b[j:j + 4] = struct.pack(">I", rng.choice([0, 1, 0xFFFFFFFF, rng.randrange(1 << 32)]))
+        elif b:
+            b[rng.randrange(len(b))] = rng.randrange(256)
+    return bytes(b)
+
+
+def main_png(root, out, n, rng):
+    files = []
+    fixtures = sorted(p for p in root.joinpath("fixtures").rglob("*.png") if "photos" not in p.parts)
+    for k, p in enumerate(fixtures):
+        data = p.read_bytes()
+        files.append((f"fx{k:02d}.png", data))
+        for j in range(3):
+            files.append((f"fx{k:02d}-inj{j}.png", png_inject(rng, data)))
+        files.append((f"fx{k:02d}-mut.png", png_mutate(rng, png_inject(rng, data))))
+    for k in range(n):
+        data = png_synth(rng)
+        files.append((f"syn{k:05d}.png", data))
+        if k % 2 == 0:
+            files.append((f"syn{k:05d}-mut.png", png_mutate(rng, data)))
+    files += [("empty.png", b""), ("sig.png", PNG_SIG), ("sig-iend.png", PNG_SIG + chunk(b"IEND", b"")),
+              ("jpeg.png", b"\xff\xd8\xff\xd9")]
+    return files
+
+
 def main():
-    root, out = Path(sys.argv[1]), Path(sys.argv[2])
-    n = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
+    mode, root, out = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+    n = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(20261105)
+    files = main_png(root, out, n, rng) if mode == "png" else main_jpeg(root, n, rng)
+    with open(out / "list.txt", "w") as lst:
+        for name, data in files:
+            (out / name).write_bytes(data)
+            lst.write(str(out / name) + "\n")
+    print(f"{len(files)} {mode} files in {out}")
+
+
+def main_jpeg(root, n, rng):
     files = []
     fixtures = sorted(p for p in root.joinpath("fixtures").rglob("*")
                       if p.suffix.lower() in (".jpg", ".jpeg") and "photos" not in p.parts)
@@ -128,11 +204,7 @@ def main():
     files.append(("soi.jpg", b"\xff\xd8"))
     files.append(("soi-eoi.jpg", b"\xff\xd8\xff\xd9"))
     files.append(("png.jpg", b"\x89PNG\r\n\x1a\n" + bytes(20)))
-    with open(out / "list.txt", "w") as lst:
-        for name, data in files:
-            (out / name).write_bytes(data)
-            lst.write(str(out / name) + "\n")
-    print(f"{len(files)} files in {out}")
+    return files
 
 
 if __name__ == "__main__":
