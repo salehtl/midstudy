@@ -1,4 +1,5 @@
 import Midstudy.Camera
+import Mathlib.Analysis.SpecialFunctions.Trigonometric.Arctan
 
 /-!
 # The horizon (contract §4.1 "Signs")
@@ -139,6 +140,51 @@ theorem horizonAt_strictAnti (hf : 0 < c.focalPx ph) (h0 : c.roll_deg < 0) (h1 :
   intro x y hxy
   rw [horizonAt_eq_line hf.ne' hcos.ne', horizonAt_eq_line hf.ne' hcos.ne']
   nlinarith
+
+/-! ### Dragging the horizon sets the pitch (engine.js `setPitchFromHorizon`) -/
+
+variable (c ph) in
+/-- The pitch (degrees) that puts the horizon's middle (the photo's centre column) at row `py`:
+`−atan(cos(roll) · y_c) / DEG` with `y_c = −(py − H/2)/f` (engine.js `setPitchFromHorizon`, before `setCamera`
+clamps it; geom `pitch_from_horizon`). -/
+def pitchFromHorizon (py : ℝ) : ℝ :=
+  -Real.arctan (cos (rad c.roll_deg) * (-(py - ph.h / 2) / c.focalPx ph)) / (π / 180)
+
+/-- The camera block with another pitch. -/
+def withPitch (c : CameraBlock) (p : ℝ) : CameraBlock := { c with pitch_deg := p }
+
+@[simp] theorem withPitch_focalPx (c : CameraBlock) (p : ℝ) : (c.withPitch p).focalPx ph = c.focalPx ph := rfl
+@[simp] theorem withPitch_pitch (c : CameraBlock) (p : ℝ) : (c.withPitch p).pitch_deg = p := rfl
+@[simp] theorem withPitch_roll (c : CameraBlock) (p : ℝ) : (c.withPitch p).roll_deg = c.roll_deg := rfl
+
+theorem rad_div (x : ℝ) : rad (x / (π / 180)) = x := by
+  unfold rad
+  have := Real.pi_pos
+  field_simp
+
+/-- **The dragged horizon lands where it is dropped**: after setting the pitch from row `py`, the horizon's middle is
+at row `py`. -/
+theorem horizonAt_withPitch_pitchFromHorizon (hf : c.focalPx ph ≠ 0) (hr : cos (rad c.roll_deg) ≠ 0) (py : ℝ) :
+    (c.withPitch (c.pitchFromHorizon ph py)).horizonAt ph (ph.w / 2) = py := by
+  rw [horizonAt, withPitch_focalPx, withPitch_pitch, withPitch_roll, pitchFromHorizon, rad_div, Real.tan_neg,
+    Real.tan_arctan]
+  field_simp
+  ring
+
+/-- And reading the pitch back from the horizon's middle gives the pitch, for any pitch strictly between ±90°. -/
+theorem pitchFromHorizon_horizonAt (hf : c.focalPx ph ≠ 0) (hr : cos (rad c.roll_deg) ≠ 0)
+    (h1 : -90 < c.pitch_deg) (h2 : c.pitch_deg < 90) :
+    c.pitchFromHorizon ph (c.horizonAt ph (ph.w / 2)) = c.pitch_deg := by
+  have hy : cos (rad c.roll_deg) * (-(c.horizonAt ph (ph.w / 2) - ph.h / 2) / c.focalPx ph) =
+      -tan (rad c.pitch_deg) := by
+    simp only [horizonAt]
+    field_simp
+    ring
+  unfold pitchFromHorizon
+  rw [hy, Real.arctan_neg, neg_neg, Real.arctan_tan (neg_pi_div_two_lt_rad h1) (rad_lt_pi_div_two h2)]
+  unfold rad
+  have := Real.pi_pos
+  field_simp
 
 end CameraBlock
 
