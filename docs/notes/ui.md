@@ -125,4 +125,5 @@ eval:perf (E17) was not run here (a gate/A-B measurement).
 ## Not done
 
 - eval:perf (E17) not run (performance gate, A/B at Phase 4); the bundle size change is above.
-- No browser-level differential (DOM snapshot v1 vs v2); the nine evals and the logic differential are the check.
+- No browser-level differential (DOM snapshot v1 vs v2); the nine evals, `ui/test/smoke.mjs` and the logic differential
+  are the check.
