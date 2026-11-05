@@ -114,6 +114,7 @@ export function createScenes({ engine }) {
 //   jobs() → Promise<[job]>   GET /api/library/jobs (and polls every 1.5 s while one is queued or running)
 //   addFromFile(file, meta)   POST /api/library/items (raw body; X-Midstudy-Kind model|image from the file name) → job
 //   addFromUrl(url, meta)     POST /api/library/items/from-url → job
+//   readProduct(url, { llm }) POST /api/library/product → what the product page says (§2.11); adds nothing
 //   edit(id, patch)           PATCH → the item, or a rescale job (dims_cm, yaw)
 //   remove(id) / restore(id)  DELETE → move to the library's trash / POST …/restore → the item
 //   spend() → Promise<spend>  GET /api/spend
@@ -226,6 +227,21 @@ export function createLibrary({ engine = null } = {}) {
     quiet(spend())
     return track(jobOf(body))
   }
+  // §2.11: what a shop's product page says (the 200 body); adds nothing. Rejects with the server's sentence, plus
+  // err.status and err.blocked. A shop that blocks reading or a page without a product is the page's answer, shown in
+  // the form, so only a server that isn't answering (or fails) is reported as an error.
+  async function readProduct(url, { llm } = {}) {
+    const req = { url: String(url ?? '').trim() }
+    if (typeof llm === 'boolean') req.llm = llm
+    try {
+      return await fetchJson('/api/library/product', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) })
+    } catch (e) {
+      const err = e.offline || e.status >= 500 ? report(e.offline ? "Couldn't read the page: the server isn't answering" : "Couldn't read the page", e)
+        : new Error(e.body?.error || e.message)
+      Object.assign(err, { status: e.status, blocked: !!e.body?.blocked, offline: !!e.offline })
+      throw err
+    }
+  }
   async function edit(id, patch = {}) {
     let body
     try {
@@ -251,7 +267,7 @@ export function createLibrary({ engine = null } = {}) {
   }
 
   return {
-    events, start, jobs, spend, addFromFile, addFromUrl, edit, remove, restore, estimate: estimateCost,
+    events, start, jobs, spend, addFromFile, addFromUrl, readProduct, edit, remove, restore, estimate: estimateCost,
     getState: () => ({ ...state, jobs: state.jobs.slice(), trash: state.trash.slice() }),
     refreshTrash,
   }

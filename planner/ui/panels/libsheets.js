@@ -1,10 +1,12 @@
-// Library manager sheets (§2.8): Add furniture (a photo from the phone, an image link, or a 3D file) with the price
-// shown before you confirm and today's remaining fal budget, and Edit (name, category, size, turn, shows as, wall).
+// Library manager sheets (§2.8): Add furniture (a product page (§2.11, panels/productsrc.js), a photo from the phone,
+// an image link, or a 3D file) with the price shown before you confirm and today's remaining fal budget, and Edit
+// (name, category, size, turn, shows as, wall).
 // Both are ui/sheet.js sheets; the jobs they start show in the Library panel. Styles: styles/manage.css.
 import { h, segmented } from '../kit.js'
 import { openSheet, formRow, textInput } from '../sheet.js'
 import { pic } from './common.js'
 import { estimateCost, LIB_PRICE } from '../../data.js'
+import { productSource } from './productsrc.js'
 import { fmtUsd } from '../../engine.js'
 
 const usd = (v) => (v > 0 ? fmtUsd(v) : 'free')
@@ -39,7 +41,7 @@ function budgetLine(spend, cost) {
 // --- Add furniture ---------------------------------------------------------------------------------------------
 export function openAddSheet(ctx, { onAdded } = {}) {
   const { shell, lib } = ctx
-  const st = { source: 'photo', file: null, model: null, engine: 'sam3d', resolution: 1024, mount: false, busy: false, error: '' }
+  const st = { source: 'product', file: null, model: null, engine: 'sam3d', resolution: 1024, mount: false, busy: false, error: '' }
   let preview = null
 
   const photoInput = h('input.ms-file-input', { type: 'file', accept: 'image/*', onchange: (e) => { st.file = e.target.files?.[0] || null; showFile(); sync() } })
@@ -53,9 +55,13 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const photoBox = h('div.ms-src', photoPick, h('span.ms-hint', 'A clear photo of the piece on its own: the phone’s camera or library works. JPEG, PNG, HEIC or WebP, up to 20 MB.'))
   const linkBox = h('div.ms-src', formRow('Image link', urlInput, 'The image’s own link: right-click the picture on the shop page, Copy Image Address.'))
   const modelBox = h('div.ms-src', modelPick, h('span.ms-hint', 'A .glb, or a .zip with one .obj, its .mtl and textures (up to 200 MB). .gltf or .usdz: convert to GLB first.'))
-  const source = segmented([{ value: 'photo', label: 'Photo' }, { value: 'link', label: 'Image link' }, { value: 'model', label: '3D file' }], st.source,
-    (v) => { st.source = v; showSource(); sync() }, { label: 'Add from' })
-  source.classList.add('ms-seg')
+  const source = segmented([{ value: 'product', label: 'Product page' }, { value: 'photo', label: 'Photo' }, { value: 'link', label: 'Image link' }, { value: 'model', label: '3D file' }], st.source,
+    (v) => setSource(v), { label: 'Add from' })
+  source.classList.add('ms-seg', 'ms-src-seg')
+  for (const b of source.children) b.dataset.midstudy = `lib-src-${b.dataset.value}` // lib-src-product, -photo, -link, -model
+  source.firstChild.setAttribute('aria-label', 'Product page')
+  source.firstChild.firstChild.replaceChildren('Product', h('span.ms-seg-long', ' page')) // "Product" on a phone
+  const setSource = (v) => { st.source = v; source.set(v); showSource(); sync() }
 
   const name = textInput({ placeholder: 'Oak reading chair', maxLength: 120, label: 'Name', onInput: () => sync() })
   const dims = dimsFields(null, () => sync())
@@ -67,6 +73,8 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const resSeg = segmented(Object.entries(LIB_PRICE.trellis2).map(([r, p]) => ({ value: r, label: `${r} · ${usd(p)}` })), String(st.resolution),
     (v) => { st.resolution = Number(v); sync() }, { label: 'Detail' })
   resSeg.classList.add('ms-seg')
+  const product = productSource({ lib, form: { name, dims, category, getEngine: () => st.engine, setEngine: (v) => { st.engine = v; engineSeg.set(v); rugDefaults(); sync() } },
+    onChange: () => sync(), onUseLink: (img) => { if (img && !urlInput.value.trim()) urlInput.value = img; setSource('link'); urlInput.focus() } })
   const engineHint = h('span.ms-hint')
   const engineRow = h('div.ms-row', h('span.ms-label', 'Model'), engineSeg, engineHint)
   const resRow = h('div.ms-row', h('span.ms-label', 'Detail'), resSeg)
@@ -77,16 +85,17 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const errEl = h('p.ms-error', { role: 'alert', hidden: true })
 
   const body = h('div.ms-form',
-    source, photoBox, linkBox, modelBox,
+    source, product.el, photoBox, linkBox, modelBox,
     formRow('Name', name),
-    h('div.ms-row', h('span.ms-label', 'Real size · W × D × H'), dims, h('span.ms-hint', 'Measure the piece, or take it from the product page: the model is fitted to exactly this.')),
+    h('div.ms-row', h('span.ms-label', 'Real size · W × D × H'), product.sizesEl, dims, h('span.ms-hint', 'Measure the piece, or take it from the product page: the model is fitted to exactly this.'), product.notesEl),
     formRow('Category', category, 'Optional'),
     engineRow, resRow, cost, errEl)
   const cancel = h('button.btn.btn-secondary.ms-btn', { type: 'button', onclick: () => sheet.close() }, 'Cancel')
   const go = h('button.btn.btn-primary.ms-btn.ms-primary', { type: 'button', onclick: () => submit() })
-  const sheet = openSheet(shell, { title: 'Add furniture', sub: 'Made at its real size from a photo, an image link or a 3D file.', body, actions: [cancel, go], cls: 'ms-add', onClose: () => { if (preview) URL.revokeObjectURL(preview) } })
+  const sheet = openSheet(shell, { title: 'Add furniture', sub: 'Made at its real size from a product page, a photo, an image link or a 3D file.', body, actions: [cancel, go], cls: 'ms-add', onClose: () => { if (preview) URL.revokeObjectURL(preview) } })
 
   function showSource() {
+    product.setActive(st.source === 'product')
     photoBox.hidden = st.source !== 'photo'
     linkBox.hidden = st.source !== 'link'
     modelBox.hidden = st.source !== 'model'
@@ -114,6 +123,7 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   }
   const price = () => estimateCost(meta(), kind())
   function problem() {
+    if (st.source === 'product') { const why = product.problem(); if (why) return why }
     if (st.source === 'photo' && !st.file) return 'Choose a photo'
     if (st.source === 'model' && !st.model) return 'Choose a 3D file'
     if (st.source === 'link' && !/^https?:\/\/\S+$/i.test(urlInput.value.trim())) return 'Paste an image link'
@@ -158,6 +168,7 @@ export function openAddSheet(ctx, { onAdded } = {}) {
     const m = meta()
     try {
       const job = st.source === 'link' ? await lib.addFromUrl(urlInput.value.trim(), m)
+        : st.source === 'product' ? await lib.addFromUrl(product.pictureUrl(), m) // the chosen picture, as an image-link add
         : await lib.addFromFile(st.source === 'model' ? st.model : st.file, m)
       sheet.close()
       onAdded?.(job, m)

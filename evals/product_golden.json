@@ -43,8 +43,8 @@
     },
     {
       "id": "floyd-bedside", "url": "https://floydhome.com/products/bedside-table",
-      "pattern": "Shopify: JSON-LD ProductGroup with colour variants; no size anywhere in the served HTML (the spec renders in the browser); the feeds answered 429 when studied",
-      "expect": { "name": "Bedside Table", "category": "bedside table", "is_rug": false, "no_dims": true, "image0": "24070901-W-BEDSIDE-NP" }
+      "pattern": "Shopify: JSON-LD ProductGroup with colour variants; the size only in a collapsed accordion 387 KB into the page, with curly inch marks and both W and L: Overall 16\u201d W x 13\u201d L x 7\u201d H (it clamps to the bed frame, so 7\" is right); the feeds answered 429 when studied",
+      "expect": { "name": "Bedside Table", "category": "bedside table", "is_rug": false, "unit": "in", "dims": [[40.6, 33.0, 17.8]], "image0": "24070901-W-BEDSIDE-NP" }
     },
     {
       "id": "iw-tomo", "url": "https://www.industrywest.com/products/tomo-side-table",
