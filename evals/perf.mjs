@@ -14,7 +14,7 @@
 //            and two frames (the photo checked on a screenshot), from navigation start; requests, bytes, heap
 //   scene    scene_open: openScene(living-wide) from the Scenes page of a loaded planner; long tasks
 //   edit     one fresh copy of living-wide per run, in a fresh page: add_item_glb (probe box), add_item_glb_textured
-//            (SheenChair), drag_frames_{p50,p95} (rAF intervals during a 2 s mouse drag), render_capture and
+//            (SheenChair), drag_frames_{p50,p95} (rAF intervals during a 2 s mouse drag, one way), render_capture and
 //            render_keep_room (+ _client and _server: the page's and the POST's share), add_item_splat (the Idol fixture
 //            item: Spark and splat.spz), splat_first_frame (then until the view is idle), drag_splat (a 5-move drag with
 //            the splat in view, ms per move: the splat pass every frame), render_capture_splat (renderView with the splat: Spark's sort)
@@ -655,8 +655,9 @@ async function measuredLoad(t, P, m, metric, name) {
 }
 async function settle(P, ms = 250) { await frames(P, 2); await sleep(ms); await frames(P, 2) }
 
-// A 2 s mouse drag of the item (press on it, 15 % of the photo's width left, then back), moves dispatched every 16 ms of
-// wall time; the page records every animation frame and long task meanwhile.
+// A 2 s mouse drag of the item (press on it, then 15 % of the photo's width to the left), moves dispatched every 16 ms of
+// wall time; the page records every animation frame and long task meanwhile. Chrome aligns pointer moves with animation
+// frames, so the piece's position is read only after the drag has been drawn; then the hook puts the piece back.
 async function drag(t, P, sceneName, uid) {
   try {
     const r = await photoRect(t, P, sceneName)
@@ -664,7 +665,7 @@ async function drag(t, P, sceneName, uid) {
     if (!sr) return { error: 'getScreenRect is null' }
     const x0 = r.rect.x + (sr.x + sr.w / 2) * r.scale, y0 = r.rect.y + (sr.y + sr.h * 0.6) * r.scale
     const dx = -0.15 * r.rect.w
-    const pos0 = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid).position, uid)
+    const st0 = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid), uid)
     await P.page.evaluate(() => {
       const f = (window.__perf.frames = [])
       window.__perf.framesOn = true
@@ -674,25 +675,26 @@ async function drag(t, P, sceneName, uid) {
     await P.page.mouse.move(x0, y0)
     await P.page.mouse.down()
     const T = 2000, t0 = now()
-    let moves = 0, mid = null
+    let moves = 0
     for (;;) {
       const e = now() - t0
       if (e >= T) break
-      const u = e / T, k = u < 0.5 ? u * 2 : 2 - u * 2
-      await P.page.mouse.move(x0 + dx * k, y0)
+      await P.page.mouse.move(x0 + (dx * e) / T, y0)
       moves++
-      if (!mid && u >= 0.5) mid = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid).position, uid)
       const next = t0 + moves * 16
       if (next > now()) await sleep(next - now())
     }
-    await P.page.mouse.move(x0, y0)
-    await P.page.mouse.up()
+    await P.page.mouse.move(x0 + dx, y0)
     const ms = now() - t0
     const f = await P.page.evaluate(() => { window.__perf.framesOn = false; const f = window.__perf.frames; const lt = window.__perf.lt.filter(([s, d]) => s + d > f[0] && s < f.at(-1)); return { f, lt: lt.reduce((a, [, d]) => a + d, 0) } })
+    await frames(P, 2)
+    const pos = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid).position, uid)
+    await P.page.mouse.up()
+    await P.page.evaluate(({ uid, p, rot }) => window.midstudy.moveItem(uid, { position: p, rotation_y_deg: rot }), { uid, p: st0.position, rot: st0.rotation_y_deg })
     const iv = f.f.slice(1).map((x, i) => x - f.f[i])
-    const moved = mid ? Math.hypot(mid[0] - pos0[0], mid[2] - pos0[2]) * 100 : 0
+    const moved = Math.hypot(pos[0] - st0.position[0], pos[2] - st0.position[2]) * 100
     return { p50: quantile(iv, 0.5), p95: quantile(iv, 0.95), max: round(Math.max(...iv), 1), frames: iv.length, moves, ms: round(ms, 0), moved_cm: round(moved, 1), longtask_ms: round(f.lt, 1),
-      error: iv.length < 2 ? 'fewer than 2 frames' : moved < 5 ? `the drag didn't move the piece (${round(moved, 1)} cm at mid-drag)` : null }
+      error: iv.length < 2 ? 'fewer than 2 frames' : moved < 5 ? `the drag didn't move the piece (${round(moved, 1)} cm)` : null }
   } catch (e) { return { error: String(e?.message || e) } }
 }
 
