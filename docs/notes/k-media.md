@@ -4,7 +4,8 @@ Branch `v2-k-media`. Owns `core/crates/media/**`, `core/crates/wasm-node/**`, `c
 
 ## What exists
 
-- **`core/crates/media`** (`midstudy-media`): pure Rust, no I/O, no dependencies; `#![deny(clippy::indexing_slicing,
+- **`core/crates/media`** (`midstudy-media`): pure Rust, no I/O, no runtime dependencies (proptest and regex for tests);
+  `#![deny(clippy::indexing_slicing,
   clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]` plus `panic`, `unwrap_used`, `expect_used`,
   `unreachable` at crate level; `unsafe` forbidden (workspace lint). Modules, each citing its contract section:
   `sniff` (§4.3/§4.4), `jpeg` (strip §2.6/§2.8, `frame_info` §2.6, `is_clean`/`passthrough` §4.3), `png` (strip §2.8,
@@ -76,16 +77,17 @@ scratch folder it silently ignores files outside its base path).
 
 ## Results
 
-**Differential test** (`diff_v1.py`, 102,349 cases per run, seeds 1, 2 and 3 at scale 1: all pass, every difference an
-expected one). Areas: sniff (vs calib and vs serve.py), JPEG strip (both v1 copies)/size/clean/pass-through, PNG
-strip/size, GLB (in place byte-identical to v1's binary chunk and JSON-equal; compact checked view by view), zip (vs
-serve.py's messages and objzip.py's decisions), path normalize/route (through v1's own `Handler` methods), host,
-Content-Length, Origin (through v1's `forged`), slug, name order, CPython base64 strict/lenient, meta, data URIs, cp437,
-and a privacy check (`evals/lib/metadata.py inspect` on what v2 writes for every GPS canary: clean). Corpus: all of
-metadata.py's GPS-canary kinds (EXIF, after EOI, between progressive scans, zero padding, JFXX, eXIf/tEXt, GPS GLB, 12
-MP, RST0), the tracked fixtures' JPEGs, PNGs and GLBs (never `fixtures/photos/`), Pillow-made JPEGs (progressive,
-optimized, grey, CMYK, ICC, comment, 4:4:4) and PNGs, hand-made edge structures, ~4,000 seeded JPEG mutations, ~1,500
-PNG, ~400 GLB, ~1,500 zips and ~6,000 strings per string area. Expected differences (named in `EXPECTED`, each counted):
+**Differential test** (`diff_v1.py`, 102,349 cases per run at scale 1; every run passed, every difference an expected
+one: seeds 1–4 during development, 5 after the JPEG scan change, 6 on the final code). Areas: sniff (vs calib and vs
+serve.py), JPEG strip (both v1 copies)/size/clean/pass-through, PNG strip/size, GLB (in place byte-identical to v1's
+binary chunk and JSON-equal; compact checked view by view), zip (vs serve.py's messages and objzip.py's decisions), path
+normalize/route (through v1's own `Handler` methods), host, Content-Length, Origin (through v1's `forged`), slug, name
+order, CPython base64 strict/lenient, meta, data URIs, cp437, and a privacy check (`evals/lib/metadata.py inspect` on
+what v2 writes for every GPS canary: clean). Corpus: all of metadata.py's GPS-canary kinds (EXIF, after EOI, between
+progressive scans, zero padding, JFXX, eXIf/tEXt, GPS GLB, 12 MP, RST0), the tracked fixtures' JPEGs, PNGs and GLBs
+(never `fixtures/photos/`), Pillow-made JPEGs (progressive, optimized, grey, CMYK, ICC, comment, 4:4:4) and PNGs,
+hand-made edge structures, ~4,000 seeded JPEG mutations, ~1,500 PNG, ~400 GLB, ~1,500 zips and ~6,000 strings per string
+area. Expected differences (named in `EXPECTED`, each counted):
 
 - `sniff-avif`, `sniff-brands`: v2 uses calib's HEIF rule at upload too (serve.py took AVIF-only `mif1`, and lacked
   `hevm hevs mif2 miaf`).
@@ -107,14 +109,43 @@ itself when it has no `%`/`?`/`#`; `resolve` idempotent; routes = v1's regexes; 
 `host_name`, `content_length` = their regexes; base64 round trips; nothing panics on arbitrary input.
 
 **Fuzzing** (cargo-fuzz 0.13.1 on the pinned stable rustc 1.95 with `RUSTC_BOOTSTRAP=1`, `-s none` (no nightly, so no
-ASan; the crate is safe Rust), debug assertions on, 180 s each, seeded from the GPS canaries): FUZZ_RESULTS
+ASan; the crate is safe Rust), debug assertions on, 180 s each, seeded from the GPS canaries; every target asserts
+invariants, not only "no panic"): `jpeg_strip` 28.1 M runs, `png_strip` 58.7 M, `glb_strip` 61.4 M, `path_normalize`
+7.7 M, `host_check` 63.5 M, no failure. `host_check`'s first run stopped at once on a bug **in the harness**
+(`str::split_at` inside a multi-byte character, `fuzz_targets/host_check.rs`), not in the crate; fixed, the input kept in
+the local corpus (git-ignored), then the 63.5 M clean runs. After the scan change below, `jpeg_strip` (11.2
+M runs) and `glb_strip` (89.9 M) ran again, clean. Corpora and artifacts stay out of git (`fuzz/.gitignore`).
 
 **wasm**: built now, not only at gate-1: the pinned nixpkgs' rustc ships the wasm32-unknown-unknown std; nixpkgs has no
-rust-lld, so `wasm-ld` from `lld` is the linker; then wasm-bindgen-cli 0.2.121 `--target nodejs` and `wasm-opt -O3`:
-116 KB. `face.test.ts` (11 tests) passes on it, including byte equality with the native build on the GPS-canary corpus
-and 3,000 random inputs into every export without a throw.
+rust-lld, so `wasm-ld` from `lld` is the linker; `RUSTFLAGS="-C target-feature=+simd128"`; then wasm-bindgen-cli
+0.2.121 `--target nodejs` and `wasm-opt -O3 --enable-simd`: 116 KB. `face.test.ts` (11 tests) passes on it, including
+byte equality with the native build on the GPS-canary corpus and 3,000 random inputs into every export without a
+throw. Clippy is clean for `--target wasm32-unknown-unknown` too.
 
-**Benchmarks**: BENCH_RESULTS
+**Benchmarks** (medians of 15 runs after a warm-up, ms, the file already in memory; Apple Silicon shared with other
+agents, load ~13; run directly, see the eval-lock note below; `examples/bench.rs`, `wasm-node/js-test/bench.ts`,
+`tests/bench_v1.py`). v1 is `serve.py`'s `clean_jpeg`, `glb.py`'s `clean_png`, and for a GLB its read + `scrub_images`
++ `write_glb`'s serialisation, bytes in to bytes out.
+
+| Input | v2 native | v2 wasm in Node (via node.ts) | v1 Python |
+|---|---|---|---|
+| 12 MP JPEG, metadata.py's `big12mp` (smooth, 335 KB) | 0.009 | 0.049 | 0.025 |
+| 12 MP progressive JPEG with EXIF/GPS (smooth, 170 KB) | 0.004 | 0.027 | 0.025 |
+| 12 MP photo-like JPEG with EXIF/GPS, q92 (7.1 MB) | **0.38** | **1.26** | 2.32 |
+| the same with 200 KB appended after EOI | 0.35 | 1.27 | 2.23 |
+| 3 MP PNG with eXIf (7.0 MB) | 0.10 | 0.79 | 0.93 |
+| GLB textured with that 12 MP JPEG (7.1 MB), compact / in place | **0.70** / 0.74 | **1.52** | 3.60 |
+| fixtures/models/SheenChair.glb (4.1 MB, 7 PNG textures, nothing to strip) | 0.28 | 0.93 | 0.95 |
+| evals' `gps-glb` (2.7 KB) | 0.007 | 0.022 | 0.049 |
+| wasm cold start: import of node.ts + module | | 23.4 + first call 1.4 | |
+
+The first measurement had v2 *slower* than v1 on JPEGs (0.10 vs 0.025 ms on `big12mp`, equal on the photo): the scan
+for the next `FF` was a byte-at-a-time `position`, against CPython's vectorized memchr. Testing each 64-byte block with
+a max-reduction (no early exit, so it compiles to NEON / SIMD128) made it 3x (smooth) to 6x (photo) faster than v1.
+In wasm, slice `==` is compiler-builtins' byte loop, which cost 2.5 ms on SheenChair; whether an image changed now
+comes from the strip's own counts (`Removed::any`, exact, a property test checks it) and the one whole-file comparison
+is a vectorizable XOR-fold: SheenChair in wasm 3.12 → 0.93 ms. SIMD128 gives the wasm JPEG strip another 3x (3.49 →
+1.26 ms on the photo). Every change re-ran the unit, property and differential tests (seed 5, then 6) and the fuzzers.
 
 ## Decisions
 
@@ -150,13 +181,14 @@ No disagreement found that changes behaviour. Two v1 inconsistencies (serve.py v
 ## Requests to other tracks
 
 - **f-toolchain**: the official wasm build should do what `core/crates/wasm-node/build-node.sh` does: `cargo build
-  --release --target wasm32-unknown-unknown -p midstudy-wasm-node`, `wasm-bindgen --target nodejs --out-dir
-  build/wasm/node`, **write `build/wasm/node/package.json` = `{"type":"commonjs"}`** (the nodejs target emits CommonJS
-  and the repo is `"type": "module"`), `wasm-opt -O3`. With nixpkgs' rustc, `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER
-  =wasm-ld` (lld). `check:types` needs `@types/node`; `check:lint` must run eslint where the files are inside its base
-  path. The fuzz crate (`core/crates/media/fuzz`, its own workspace) runs on stable with `RUSTC_BOOTSTRAP=1 … -s none`;
-  a nightly with ASan would be better. Code is formatted with rustfmt's defaults (100 columns): if `core/rustfmt.toml`
-  changes that, re-run `cargo fmt`.
+  --release --target wasm32-unknown-unknown -p midstudy-wasm-node` **with `-C target-feature=+simd128`** (3x on the JPEG
+  strip), `wasm-bindgen --target nodejs --out-dir build/wasm/node`, **write `build/wasm/node/package.json` =
+  `{"type":"commonjs"}`** (the nodejs target emits CommonJS and the repo is `"type": "module"`), `wasm-opt -O3
+  --enable-simd`. With nixpkgs' rustc: `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER=wasm-ld` (lld). `check:types` needs
+  `@types/node`; `check:lint` must run eslint where the files are inside its base path. The fuzz crate
+  (`core/crates/media/fuzz`, its own workspace) runs on stable with `RUSTC_BOOTSTRAP=1 … -s none`; a nightly with ASan
+  would be better. Code is formatted with rustfmt's defaults (100 columns): if `core/rustfmt.toml` changes that, re-run
+  `cargo fmt`.
 - **server-core / server-routes**: route `/api` after `reduceLeadingSlashes` and before `staticRoute`; serve
   `planner` paths with `trailingSlash` → `index.html`, redirect a folder asked for without it, 404 a file asked for with
   it; `library-json` → an empty library when the file is missing. `checkHost` before anything (403 unless `allowed`),
@@ -169,11 +201,20 @@ No disagreement found that changes behaviour. Two v1 inconsistencies (serve.py v
   expect refusals with a sentence for damaged textures. WebP textures (`EXT_texture_webp`) can carry EXIF/XMP chunks
   that neither v1 nor this crate strips: worth a `webp::strip` (RIFF chunks `EXIF`/`XMP `, VP8X flags) if such models
   matter.
-- **kernels-hardening**: Miri (needs nightly + miri), Kani, longer fuzz campaigns with ASan, a SIMD/`memchr` scan for
-  `FF` in the JPEG walker if the 12 MP numbers need it; `AENEAS.md` lists what to extract for the proofs track.
+- **kernels-hardening**: Miri (needs nightly + miri), Kani, longer fuzz campaigns with ASan; the wasm copies in and
+  out (wasm is 3-8x native on large files) if they ever matter; `AENEAS.md` lists what to extract for the proofs
+  track.
+- **main session (scripts/eval-lock.mjs, Phase 0)**: `--exclusive` takes slots one by one and keeps them while it
+  waits, so two exclusive requesters deadlock: at 22:55 f-perf (`evals/perf.mjs --with-calib`, slots 0 and 2) and
+  this track (slot 1) each waited for the other; I stopped mine, and k-geom's exclusive request then took slot 1 and
+  waited the same way. Exclusive acquisition should be all-or-nothing (release what it holds when it can't take every
+  slot, then back off). My benchmarks then ran outside the lock while nothing was measuring
+  (4 s of one core).
 
 ## Left
 
 - Miri and an ASan fuzz run need a nightly toolchain (not in the pinned nixpkgs).
+- The GLB rewrite doesn't check accessors: one pointing into a texture's bufferView (a malformed model) would keep its
+  old range after the view shrinks.
 - The differential test runs v1's Python, so it needs `evals/py`'s environment; it is not wired into `npm run check`
   (f-toolchain's `check:rust` could run the Rust side, the main session the diff).
