@@ -185,8 +185,6 @@ let
         TSCERT_PREBUILT = "1";
         # Each TScert step's limit in seconds (TScert's default is 60, its census uses 300): the Mac is shared and loaded.
         TSCERT_STEP_LIMIT = stepLimit;
-        # The retry of a timed-out unit (scripts/tscert.mjs units) runs it again instead of replaying the recorded timeout.
-        TSCERT_RETRY_TIMEOUTS = "1";
       }
       ''
         cp -R $src work
