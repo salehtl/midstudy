@@ -1,0 +1,8 @@
+{
+  "//": "check:py (scripts/check.mjs): pyright in strict mode over calib/, used until calib/pyproject.toml has its own [tool.pyright]. Paths are relative to this file.",
+  "include": ["../../calib/src", "../../calib/tests", "../../calib/scripts"],
+  "exclude": ["../../calib/.venv", "**/__pycache__"],
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "All"
+}

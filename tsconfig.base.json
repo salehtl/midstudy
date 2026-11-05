@@ -1,0 +1,27 @@
+{
+  // The strict base every TypeScript area extends (docs/REFACTOR.md §3, check:types). Never relax a flag in an area.
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "useUnknownInCatchVariables": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "noUncheckedSideEffectImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "target": "ES2022",
+    // Library .d.ts files (three, node) are not ours to fix; our own code is checked in full.
+    "skipLibCheck": true,
+    // `tsc -b` per area, nothing emitted: the planner is bundled by esbuild, Node runs .ts files directly.
+    "composite": true,
+    "noEmit": true
+  }
+}

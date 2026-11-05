@@ -1,0 +1,12 @@
+{
+  // core/js, the browser face of the wasm build (web.ts, and web/ or *.worker.ts beside it), bundled with the planner.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": [],
+    "tsBuildInfoFile": "build/tsc/core-web.tsbuildinfo"
+  },
+  "include": ["core/js/web.ts", "core/js/web/**/*.ts", "core/js/**/*.worker.ts"]
+}

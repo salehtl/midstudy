@@ -1,0 +1,6 @@
+{
+  // What TScert reads pipeline/src/logic/ with: the pipeline's options, the logic modules only.
+  "extends": "../tsconfig.pipeline.json",
+  "compilerOptions": { "composite": false },
+  "include": ["../pipeline/src/logic/**/*.ts"]
+}

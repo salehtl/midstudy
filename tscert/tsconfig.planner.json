@@ -1,0 +1,7 @@
+{
+  // What TScert reads planner/logic/ with: the planner's options, the logic modules only (they import types and each
+  // other, nothing else).
+  "extends": "../tsconfig.planner.json",
+  "compilerOptions": { "allowJs": false, "composite": false },
+  "include": ["../planner/logic/**/*.ts"]
+}

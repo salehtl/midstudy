@@ -1,0 +1,4 @@
+{
+ "doc": "Every function here must keep certifying (scripts/tscert-ratchet.mjs; docs/notes/tscert.md). Rewritten by --update.",
+ "functions": []
+}

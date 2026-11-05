@@ -1,0 +1,6 @@
+{
+  // What TScert reads server/src/logic/ with: the server's options, the logic modules only.
+  "extends": "../tsconfig.server.json",
+  "compilerOptions": { "composite": false },
+  "include": ["../server/src/logic/**/*.ts"]
+}

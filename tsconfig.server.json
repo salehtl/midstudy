@@ -1,0 +1,13 @@
+{
+  // The HTTP server on Node 22, run directly (`node server/src/main.ts`, type stripping): `.ts` import specifiers.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "build/tsc/server.tsbuildinfo"
+  },
+  "include": ["server/**/*.ts"]
+}

@@ -1,0 +1,17 @@
+{
+  // The planner (browser): bundled by esbuild (scripts/build.mjs). `.js` import specifiers resolve to the `.ts` file.
+  // allowJs with checkJs off while planner/*.js files still exist: TypeScript files can import them, untyped JS is
+  // not checked. planner/gpu/ (the WebGPU spike) is part of this area.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": false,
+    "types": [],
+    "tsBuildInfoFile": "build/tsc/planner.tsbuildinfo"
+  },
+  "include": ["planner/**/*.ts", "planner/**/*.js"],
+  "exclude": ["planner/dist"]
+}

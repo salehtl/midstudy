@@ -1,0 +1,13 @@
+{
+  // core/js, the Node face of the wasm build (node.ts, and node/ beside it), run directly by Node 22.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "build/tsc/core-node.tsbuildinfo"
+  },
+  "include": ["core/js/node.ts", "core/js/node/**/*.ts"]
+}
