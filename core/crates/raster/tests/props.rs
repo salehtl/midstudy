@@ -7,7 +7,9 @@
     clippy::float_cmp,
     clippy::many_single_char_names,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::manual_midpoint
 )]
 
 use midstudy_geom::look::{dir_of, turn_between};
@@ -39,11 +41,11 @@ fn filter_row(ft: u8, cur: &[u8], prev: &[u8], bpp: usize) -> Vec<u8> {
         .collect()
 }
 
-fn chunk(out: &mut Vec<u8>, ty: &[u8; 4], data: &[u8]) {
+fn chunk(out: &mut Vec<u8>, ty: [u8; 4], data: &[u8]) {
     out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_be_bytes());
-    out.extend_from_slice(ty);
+    out.extend_from_slice(&ty);
     out.extend_from_slice(data);
-    out.extend_from_slice(&crc32(&[ty, data]).to_be_bytes());
+    out.extend_from_slice(&crc32(&[&ty, data]).to_be_bytes());
 }
 
 /// A grayscale PNG of `samples` with the given filter per row, its zlib stream split over IDAT chunks of `split`
@@ -86,12 +88,12 @@ fn png_of(
     ihdr.extend_from_slice(&h.to_be_bytes());
     ihdr.extend_from_slice(&[if sixteen { 16 } else { 8 }, 0, 0, 0, 0]);
     let mut out = SIGNATURE.to_vec();
-    chunk(&mut out, b"IHDR", &ihdr);
-    chunk(&mut out, b"tEXt", b"Comment\0k-geom");
+    chunk(&mut out, *b"IHDR", &ihdr);
+    chunk(&mut out, *b"tEXt", b"Comment\0k-geom");
     for part in compress_to_vec_zlib(&raw, level).chunks(split.max(1)) {
-        chunk(&mut out, b"IDAT", part);
+        chunk(&mut out, *b"IDAT", part);
     }
-    chunk(&mut out, b"IEND", &[]);
+    chunk(&mut out, *b"IEND", &[]);
     out
 }
 

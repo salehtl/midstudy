@@ -13,6 +13,7 @@ use midstudy_raster::depth::decode_depth_m;
 use midstudy_raster::png::decode_gray;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// `evals/py core/crates/raster/tests/support/pil_depth.py`: (scene, width, height, sum of samples, SHA-256 of the
@@ -76,11 +77,10 @@ fn decodes_like_pillow() {
         for v in &g.samples {
             hasher.update(v.to_le_bytes());
         }
-        let digest: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let digest = hasher.finalize().iter().fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
         assert_eq!(digest, sha, "{id}: the samples differ from Pillow's");
     }
 }
