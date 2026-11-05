@@ -29,7 +29,7 @@ handler runs (Host, framing, the forged-request check) and after it (strict mode
 | `server/src/logic/*.ts` | Pure, TScert: `url` (urlsplit, urljoin, unquote, parse_qs), `address` (BLOCKED_NETS, fetch_allowed), `http` (v1's sentences, the target's parts, Python's error page), `mime`, `spend` (the 402), `cli` (argparse), `jobs` |
 | `common/lock.ts`, `common/logic/lock.ts` | The v2 library lock (directory protocol, contract §2.8 One writer v2) |
 | `common/costs.ts` | `appendCost` (v1's header and rows, under `<costs file>.lock.d`) |
-| `common/fal.ts`, `common/logic/env.ts` | The key, mock mode, `falCall`, the mock log, `download` |
+| `common/fal.ts`, `common/logic/env.ts` | The key, mock mode (answers and linked files), `falCall`, the mock log, `download` |
 | `common/files.ts` | `atomicWrite`, `jsonText` (v1's two JSON layouts), `readJsonFile`, `makeTempDir` |
 | `common/logic/{pyfmt,time,slug,csv,shlex,tool}.ts` | Pure, TScert: Python's formatting (`fmt_cost`, `repr`, `round`, `:g`, `num_text`, `mb_text`, `strip`, `splitlines`), UTC stamps, slugs, CSV, shlex, the tools' output |
 | `server/test/*.test.ts`, `server/test/v1_oracle.py`, `server/test/lock-child.ts` | 94 node tests (`npm run test:server`) |
@@ -101,7 +101,8 @@ early refusal reaches curl before it uploads.
   (env, else `<repo>/.env` unless MIDSTUDY_NO_DOTENV; never logged), `NO_KEY` (v1's 503 sentence), `falCall(endpoint,
   args, key, { timeoutMs })` → JSON or `FalError` with v1's sentences (HTTP error + first 400 bytes, nano-banana's
   "returned no image this time", "could not reach fal (…)", "… isn't JSON (…)"), `readMockAnswer(endpoint, name)`
-  (`<mock dir>/<slug>/<name>`, null when missing), `mockSlug`, `logMockCall(endpoint, args)` (MIDSTUDY_FAL_MOCK_LOG, one
+  (`<mock dir>/<slug>/<name>`, null when missing), `mockFilePath(endpoint, url)` (`<mock dir>/<slug>/files/<basename>`,
+  midstudy-add's rule), `mockSlug`, `logMockCall(endpoint, args)` (MIDSTUDY_FAL_MOCK_LOG, one
   `{"endpoint", "args"}` line per call), `download(url)` (data: URI or GET, `User-Agent: midstudy`, 120 s).
 - **Fetch** (`server/src/fetch.ts`): `fetchImage(url, destDir)` → path of `download.<ext>`, or `FetchError` with v1's
   sentences (from-URL adds; then check the bytes with the kernel's `sniff`). For the product reader: `safeFetch(url,

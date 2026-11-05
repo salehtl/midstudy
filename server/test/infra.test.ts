@@ -6,7 +6,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countsAgainstCap, download, falCall, FalError, falKey, falMock, falMockDir, logMockCall, mockCost, mockSlug, readMockAnswer } from '../../common/fal.ts'
+import { countsAgainstCap, download, falCall, FalError, falKey, falMock, falMockDir, logMockCall, mockCost, mockFilePath, mockSlug, readMockAnswer } from '../../common/fal.ts'
 import { atomicWrite, jsonText, makeTempDir, readJsonFile } from '../../common/files.ts'
 import { utcDay } from '../../common/logic/time.ts'
 import { JobStore, newJobId, SerialQueue } from '../src/jobs.ts'
@@ -188,6 +188,10 @@ void describe('fal', () => {
     const answer = readMockAnswer('fal-ai/sam-3/3d-objects', 'response.json', env)
     assert.equal(typeof answer, 'object')
     assert.equal(readMockAnswer('fal-ai/sam-3/3d-objects', 'nope.json', env), null)
+    const files = path.join(REPO, 'fixtures/fal/sam-3-3d-objects/files')
+    const one = fs.readdirSync(files)[0] ?? ''
+    assert.equal(mockFilePath('fal-ai/sam-3/3d-objects', 'https://v3.fal.media/files/x/' + encodeURIComponent(one), env), path.join(files, one))
+    assert.equal(mockFilePath('fal-ai/sam-3/3d-objects', 'https://v3.fal.media/files/x/nothing.glb', env), null)
     logMockCall('openrouter/router', { prompt: 'é', n: 1 }, env)
     logMockCall('openrouter/router', { prompt: 'second' }, env)
     const lines = fs.readFileSync(env.MIDSTUDY_FAL_MOCK_LOG, 'utf8').trim().split('\n').map((l): unknown => JSON.parse(l))

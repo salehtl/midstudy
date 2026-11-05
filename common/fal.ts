@@ -88,6 +88,32 @@ export function readMockAnswer(endpoint: string, name = 'response.json', env: No
   }
 }
 
+/** @public The mock copy of a file a mock answer links (contract §3.3): `<mock dir>/<endpoint slug>/files/<name>`, the
+ *  name being the URL path's last segment as fixtures/capture_fal.py saved it, else its percent-decoded spelling (v1
+ *  midstudy-add's MockFal.fetch); null when neither exists. */
+export function mockFilePath(endpoint: string, url: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const dir = falMockDir(env)
+  if (dir === null) return null
+  let raw: string
+  try {
+    raw = path.posix.basename(new URL(url).pathname)
+  } catch {
+    return null
+  }
+  let decoded = raw
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    // keep the spelling as sent
+  }
+  const files = path.join(dir, mockSlug(endpoint), 'files')
+  for (const name of [raw, decoded === '' ? 'download' : decoded]) {
+    const candidate = path.join(files, name)
+    if (name !== '' && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+  }
+  return null
+}
+
 /** How falCall reaches fal (tests point it at a local server; nothing in the environment can). */
 export interface FalCallOptions {
   readonly timeoutMs?: number
