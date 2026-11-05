@@ -122,8 +122,12 @@ def check_image(path: Path) -> str:
         raise MidstudyError(f"{path} isn't an image midstudy-add can read ({type(e).__name__}); use a JPEG, PNG, HEIC or WebP") from None
 
 
+ENGINE_INPUT_MAX_SIDE = 4096  # px: fal rejects larger images ("image_too_large", seen live on speridlabs/idol)
+
+
 def engine_input(src: Path, dest_dir: Path) -> Path:
-    """The photo the engines get (and so what is uploaded to fal): upright (EXIF orientation applied), a JPEG (a PNG
+    """The photo the engines get (and so what is uploaded to fal): upright (EXIF orientation applied), at most
+    ENGINE_INPUT_MAX_SIDE px on its long side (product pages often serve bigger images), a JPEG (a PNG
     when it has transparency), with no metadata at all: no EXIF, GPS, XMP, IPTC or comments. A phone photo of a chair
     at home carries the home's location; none of it may leave the machine. The ICC colour profile is kept: it only
     says how to read the colours. Written to dest_dir (the item's raw/, never served) as engine-input.<ext>."""
@@ -136,6 +140,8 @@ def engine_input(src: Path, dest_dir: Path) -> Path:
         im = ImageOps.exif_transpose(im)
         alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
         im = im.convert("RGBA" if alpha else "RGB")
+        if max(im.size) > ENGINE_INPUT_MAX_SIDE:
+            im.thumbnail((ENGINE_INPUT_MAX_SIDE, ENGINE_INPUT_MAX_SIDE), Image.Resampling.LANCZOS)
         im.info = {}  # Pillow carries comments, XMP and the like over from info when it saves
         extra = {"icc_profile": icc} if icc else {}
         out = dest_dir / ("engine-input.png" if alpha else "engine-input.jpg")

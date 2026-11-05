@@ -4,12 +4,15 @@
 // strip of the page's pictures to make it from (the first chosen) and notes on how the page was read. Make
 // (libsheets.js) sends the chosen picture through the image-link add, exactly like the Image link source.
 // A re-read replaces what the last read filled in, but keeps every field the user typed in since.
+// A shop that blocks automatic reading: "Paste the page instead". The user's own browser copies the page it shows them
+// (the Copy page for midstudy bookmark, or View Source) and the server reads that copy without fetching anything.
 //
 //   productSource({ lib, form: { name, dims, category, getEngine(), setEngine(v) }, onChange(), onUseLink(imageUrl|null) })
 //     → { el, sizesEl, notesEl, setActive(on), problem() → string | null, pictureUrl() → string | null, read() → Promise }
 //   el: the link field, Read, status, error and the picture strip; sizesEl and notesEl go in the sheet's size row.
-// Handles: product-url, product-read, product-status, product-error, product-use-link, product-pic, product-size and
-// product-notes. Styles: styles/manage.css (Product page section).
+// Handles: product-url, product-read, product-status, product-error, product-use-link, product-pic, product-size,
+// product-notes, product-paste-open (the Paste the page section), product-paste, product-bookmarklet and
+// product-bookmarklet-copy. Styles: styles/manage.css (Product page section).
 import { h } from '../kit.js'
 import { textInput } from '../sheet.js'
 import { ring } from '../icons.js'
@@ -23,6 +26,17 @@ const WHERE = {
   og: 'the page’s structured data', meta: 'the page’s structured data', title: 'the page’s title',
   shopify: 'the Shopify feed', woocommerce: 'the WooCommerce shop data', text: 'the page text', llm: 'a language model',
 }
+// The Copy page for midstudy bookmark: copies the page the browser shows, after a line saying where it came from
+// (<!-- midstudy-page: <address> -->, read by the server). execCommand first: it runs inside the click, which the
+// clipboard needs; navigator.clipboard is the fallback.
+const COPY_PAGE = `(()=>{const t='<!-- midstudy-page: '+location.href+' -->\\n'+document.documentElement.outerHTML;`
+  + `const ok=()=>alert('Copied this page for midstudy. Paste it in Add furniture, Product page, Paste the page.');`
+  + `const bad=()=>alert('midstudy could not copy this page: open View Source, select all and copy instead.');`
+  + `const a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.cssText='position:fixed;top:0;left:0;opacity:0';`
+  + `document.body.appendChild(a);a.select();let done=false;try{done=document.execCommand('copy')}catch(e){}a.remove();`
+  + `if(done)ok();else if(navigator.clipboard)navigator.clipboard.writeText(t).then(ok,bad);else bad()})()`
+export const BOOKMARKLET = `javascript:${encodeURIComponent(COPY_PAGE)}`
+const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
 const cm = (v) => (Number.isFinite(v) ? String(Math.round(v * 10) / 10) : '')
 const cap = (s) => String(s || '').replace(/^\s*\S/, (c) => c.toUpperCase())
 const sentence = (s) => { const t = cap(String(s || '').trim()); return /[.!?…:”"')]$/.test(t) ? t : `${t}.` } // server notes come without a full stop
@@ -73,10 +87,50 @@ export function productSource({ lib, form, onChange, onUseLink }) {
     h('span.ms-hint', 'The clearest one of the piece on its own works best (a rug: seen from straight above).'))
   const sizesEl = h('div.ms-prod-sizes', { role: 'group', 'aria-label': 'Sizes on the page', hidden: true })
   const notesEl = h('ul.ms-prod-notes', { dataset: { midstudy: 'product-notes' }, 'aria-label': 'How the page was read', hidden: true })
+
+  // --- Paste the page instead (a shop that blocks automatic reading)
+  const pasteBox = h('textarea.ms-input.ms-prod-pastebox', { rows: 2, placeholder: 'Paste the copied page here', spellcheck: false, autocomplete: 'off',
+    'aria-label': 'The copied page', dataset: { midstudy: 'product-paste' } })
+  pasteBox.setAttribute('autocapitalize', 'off')
+  pasteBox.setAttribute('autocorrect', 'off')
+  // the page is read straight from the clipboard: megabytes of source never sit in the box
+  pasteBox.addEventListener('paste', (e) => {
+    const t = e.clipboardData?.getData('text/plain')
+    if (!t) return
+    e.preventDefault()
+    takePasted(t)
+  })
+  pasteBox.addEventListener('input', () => { if (pasteBox.value.length > 200) takePasted(pasteBox.value) }) // a paste that skipped the event
+  const bmHint = h('p.ms-hint', { hidden: true }, 'Drag the button to your bookmarks bar; clicking it here does nothing. Then, on the shop’s product page, click the bookmark.')
+  const bookmark = h('a.btn.btn-secondary.ms-prod-bm', { href: BOOKMARKLET, draggable: 'true', title: 'Drag to your bookmarks bar', dataset: { midstudy: 'product-bookmarklet' },
+    onclick: (e) => { e.preventDefault(); bmHint.hidden = false } }, pic('link', { size: 16 }), h('span', 'Copy page for midstudy'))
+  const bmCopy = h('button.btn.btn-secondary.ms-prod-bmcopy', { type: 'button', dataset: { midstudy: 'product-bookmarklet-copy' }, onclick: () => copyBookmarklet() }, h('span', 'Copy its address'))
+  const pasteEl = h('details.ms-prod-paste', { dataset: { midstudy: 'product-paste-open' } },
+    h('summary', 'Shop blocks reading? Paste the page instead'),
+    h('ol.ms-prod-steps',
+      h('li', 'Open the product page in your browser.'),
+      h('li', 'Copy the whole page with the bookmark below, or open View Source, select all and copy.'),
+      h('li', 'Paste it here. midstudy reads your copy; nothing is fetched from the shop.')),
+    h('div.ms-prod-bmrow', bookmark, bmCopy),
+    bmHint,
+    h('p.ms-hint', 'On a phone: bookmark any page, edit the bookmark, and paste the copied address in place of its own.'),
+    pasteBox)
+  async function copyBookmarklet() {
+    let ok = false
+    try { await navigator.clipboard.writeText(BOOKMARKLET); ok = true } catch { /* below */ }
+    bmCopy.replaceChildren(h('span', ok ? 'Copied' : 'Couldn’t copy: drag the button instead'))
+    setTimeout(() => bmCopy.replaceChildren(h('span', 'Copy its address')), 2500)
+  }
+  function takePasted(text) {
+    pasteBox.value = ''
+    pasteBox.placeholder = `Pasted a page (${fmtSize(text.length)}): reading it…`
+    read({ html: text })
+  }
+
   const el = h('div.ms-src.ms-prod',
     h('div.ms-row', h('span.ms-label', 'Product page link'), h('div.ms-prod-field', url, readBtn),
       h('span.ms-hint', 'Free to read. When the size is only in the page’s words, a small language model reads it (under $0.001).')),
-    status, errBox, picWarn, picRow)
+    status, errBox, pasteEl, picWarn, picRow)
 
   const dimInputs = () => [...form.dims.querySelectorAll('input')]
   // a field the user typed in since the last prefill keeps its value
@@ -140,13 +194,14 @@ export function productSource({ lib, form, onChange, onUseLink }) {
   }
   const allPicturesFailed = () => !!st.data?.images.length && st.failed.size >= st.data.images.length
 
-  async function read() {
+  async function read({ html = null } = {}) {
     if (st.busy) return
     // a link shared from a phone app often comes with its title around it: keep just the link
     let link = url.value.trim()
     const found = !LINK.test(link) && link.match(/https?:\/\/[^\s<>"'“”]+/i)
     if (found) { link = found[0]; url.value = link }
-    if (!LINK.test(link)) {
+    if (html != null && !LINK.test(link)) link = '' // a pasted page says where it came from itself
+    else if (!LINK.test(link)) {
       st.error = { text: link ? 'That isn’t a web link: paste the address of the shop’s product page (https://…).' : 'Paste the product page’s link first.', local: true }
       render()
       url.focus()
@@ -158,8 +213,9 @@ export function productSource({ lib, form, onChange, onUseLink }) {
     render()
     changed()
     try {
-      const d = await lib.readProduct(link)
+      const d = await lib.readProduct(link, html != null ? { html } : undefined)
       if (seq !== st.seq) return
+      if (html != null && typeof d?.url === 'string' && LINK.test(d.url)) { url.value = d.url; link = d.url } // the page that was read
       st.data = {
         ...d,
         dims_candidates: Array.isArray(d?.dims_candidates) ? d.dims_candidates.filter((c) => c && c.w > 0 && c.d > 0) : [],
@@ -176,7 +232,9 @@ export function productSource({ lib, form, onChange, onUseLink }) {
       st.readUrl = ''
       st.picture = -1
       st.error = { text: sentence(e?.message || 'Couldn’t read that page.'), blocked: !!e?.blocked }
+      if (st.error.blocked) pasteEl.open = true
     } finally {
+      if (html != null) pasteBox.placeholder = 'Paste the copied page here'
       if (seq === st.seq) {
         const hadFocus = document.activeElement === readBtn || document.activeElement === document.body
         st.busy = false

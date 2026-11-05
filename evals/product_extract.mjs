@@ -6,7 +6,7 @@
 // forged requests are 403; what reached the pages server (no pictures, no cookies, the honest User-Agent, feeds only to
 // the page's origin); the prompt (markers, cap, neutralized "</page>", no secrets); cost rows; the spend cap (0.0015
 // and 0.03 with MIDSTUDY_FAL_MOCK_COST=1); llm:false; GET /api/spend; the server stays responsive during a slow page;
-// reads add nothing to the library.
+// reads add nothing to the library; a pasted page ({html}, Paste the page instead) is read without any fetch.
 // Usage: node evals/product_extract.mjs   (or npm run eval:product)
 import fs from 'node:fs'
 import path from 'node:path'
@@ -306,6 +306,40 @@ const heavyDone = await heavy
 const worst = Math.max(...pings.map((p) => p.s))
 ev.check('a page with a 12,000-digit run and 20,000 escaped quotes reads in under 8 s', heavyDone.r.status === 200 && heavyDone.s < 8, `HTTP ${heavyDone.r.status} in ${heavyDone.s.toFixed(2)} s`)
 ev.check('…and GET /api/spend answers within 1 s meanwhile', pings.every((p) => p.r.status === 200) && worst < 1, `slowest ${worst.toFixed(2)} s`)
+
+// --- 8. pasted pages: a shop that blocks automatic reading (the user's browser copies the page) ----------------------
+ev.section('pasted pages: {html} is read without fetching anything')
+const pageFile = (id) => fs.readFileSync(path.join('fixtures/product-pages/pages', `${id}.html`), 'utf8')
+const hitsBeforePaste = pages.hits.length
+const pDesk = await read(srv.base, 'https://shop.example/p/oak-desk', { html: pageFile('jsonld-cm') })
+ev.check('a pasted page with its link → 200, every key, 120 × 60 × 75 from the structured data, url as given',
+  pDesk.status === 200 && shapeProblems(pDesk.json).length === 0 && near(pDesk.json?.dims_candidates?.[0]?.w, 120) && near(pDesk.json?.dims_candidates?.[0]?.h, 75) && pDesk.json?.url === 'https://shop.example/p/oak-desk',
+  `HTTP ${pDesk.status}, ${dimsText(pDesk.json?.dims_candidates)}, ${pDesk.json?.url} ${fmt(shapeProblems(pDesk.json))}`)
+const pMark = await read(srv.base, undefined, { html: `<!-- midstudy-page: https://me:pw@marked.example/p/x?variant=2#top -->\n${pageFile('jsonld-cm')}` })
+ev.check('Copy page for midstudy\'s first line gives the address (no user:password, no #fragment, query kept)',
+  pMark.status === 200 && pMark.json?.url === 'https://marked.example/p/x?variant=2', `HTTP ${pMark.status}, ${pMark.json?.url ?? pMark.json?.error}`)
+const pMarkWins = await read(srv.base, 'https://typed.example/p/other', { html: `<!-- midstudy-page: https://marked.example/p/y -->\n${pageFile('jsonld-cm')}` })
+ev.check('…and it wins over the link field (the copy says which page it is)', pMarkWins.json?.url === 'https://marked.example/p/y', pMarkWins.json?.url ?? pMarkWins.json?.error)
+const canon = pageFile('jsonld-cm').replace(/<head>/i, '<head><link href="https://canon.example/products/oak-desk" rel="canonical">')
+const pCanon = await read(srv.base, undefined, { html: canon })
+ev.check('no link and no first line: the page\'s <link rel=canonical> gives the address', pCanon.status === 200 && pCanon.json?.url === 'https://canon.example/products/oak-desk', `HTTP ${pCanon.status}, ${pCanon.json?.url ?? pCanon.json?.error}`)
+const pNone = await read(srv.base, undefined, { html: pageFile('jsonld-cm') })
+ev.check('no address anywhere → 400 that asks for the link', pNone.status === 400 && /link/i.test(pNone.json?.error || ''), `HTTP ${pNone.status}: ${pNone.json?.error}`)
+for (const [what, body, want] of [['text that isn\'t a page', { url: 'https://shop.example/p', html: 'Oak desk 120 x 60 x 75 cm' }, 400],
+  ['html not text', { html: 5 }, 400], ['an empty html', { url: 'https://shop.example/p', html: '  ' }, 400],
+  ['an ftp address', { url: 'ftp://shop.example/p', html: pageFile('jsonld-cm') }, 400]]) {
+  const r = await read(srv.base, undefined, body)
+  ev.check(`${want} for ${what}`, r.status === want && typeof r.json?.error === 'string', `HTTP ${r.status}: ${r.json?.error}`)
+}
+const pRobot = await read(srv.base, 'https://shop.example/p', { html: pageFile('captcha') })
+ev.check('a pasted robot check → 422 that says so (not "blocked": pasting is already the way round)', pRobot.status === 422 && /robot check/i.test(pRobot.json?.error || '') && !pRobot.json?.blocked,
+  `HTTP ${pRobot.status}: ${fmt(pRobot.json)}`)
+const pShop = await read(srv.base, `${pages.base}${synth.cases['shopify-variants'].path}`, { html: pageFile('shopify-variants') })
+ev.check('a pasted Shopify page reads from the page alone (no feed)', pShop.status === 200 && !(pShop.json?.source_layers_used || []).includes('shopify') && (pShop.json?.dims_candidates || []).length > 0,
+  `HTTP ${pShop.status}, ${fmt(pShop.json?.source_layers_used)}, ${dimsText(pShop.json?.dims_candidates)}`)
+const pForged = await read(srv.base, 'https://shop.example/p', { html: pageFile('jsonld-cm') }, { forged: true })
+ev.check('a forged pasted read → 403', pForged.status === 403, `HTTP ${pForged.status}`)
+ev.check('pasted reads fetched nothing (not the page, not a feed, not a picture)', pages.hits.length === hitsBeforePaste, `${pages.hits.length - hitsBeforePaste} requests`)
 
 const lib = libState(srv.dirs.library)
 const libJson = JSON.parse(lib.json || '{"items":[]}')

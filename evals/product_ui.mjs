@@ -90,7 +90,7 @@ async function setup(device) {
     if (delay) await sleep(delay)
     const patch = ctl.patch
     if (STUB) {
-      const a = stubAnswer(req.url)
+      const a = stubAnswer(req.url || String(req.html || '').match(/midstudy-page: (\S+)/)?.[1])
       return route.fulfill({ status: a.status, contentType: 'application/json', body: JSON.stringify(a.status === 200 && patch ? patch(a.json) : a.json) })
     }
     if (!patch) return route.continue()
@@ -300,6 +300,8 @@ async function flow(device) {
   ev.check(`${device}: readProductPage(blocked) rejects with the contract's sentence`, hkBad.error?.includes(BLOCKED), hkBad.error || fmt(hkBad.value))
 
   // blocked: the sentence and Use Image link instead
+  const pasteOpen = () => page.evaluate(() => document.querySelector('.ms-add [data-midstudy="product-paste-open"]')?.open ?? null)
+  ev.check(`${device}: Paste the page instead starts closed`, (await pasteOpen()) === false, String(await pasteOpen()))
   await readLink(D, URLS.blocked)
   f = await waitRead(D)
   ev.check(`${device}: a blocked shop shows the contract's sentence (product-error) and Use Image link instead`, f?.error === BLOCKED && f.useLink, fmt({ error: f?.error, useLink: f?.useLink }))
@@ -307,6 +309,7 @@ async function flow(device) {
   // verify round (2026-11-05): the last page's size and category don't stay behind for another product
   ev.check(`${device}: a failed read clears the last page's size and category (the typed name stays)`,
     f?.w === '' && f?.d === '' && f?.h === '' && f?.category === '' && f?.name === typed, fmt({ name: f?.name, w: f?.w, d: f?.d, h: f?.h, category: f?.category }))
+  ev.check(`${device}: a blocked shop opens Paste the page instead`, (await pasteOpen()) === true, String(await pasteOpen()))
   await stage(D, 'blocked', '7-blocked')
   await press(D, handle(D, 'product-use-link'))
   f = await form(D)
@@ -314,6 +317,49 @@ async function flow(device) {
     f?.source === 'link' && f.linkField && !f.productBox && f.name === typed, fmt({ source: f?.source, linkField: f?.linkField, name: f?.name }))
   await stage(D, 'switched to Image link', '8-image-link')
   await press(D, D.page.locator('.ms-add [data-midstudy="lib-src-product"]').first())
+
+  // Paste the page instead: the Copy page for midstudy bookmark, run on the shop's page in the user's browser, then pasted
+  const bm = await page.evaluate(() => {
+    const a = document.querySelector('.ms-add [data-midstudy="product-bookmarklet"]')
+    return a ? { href: a.getAttribute('href'), draggable: a.draggable } : null
+  })
+  ev.check(`${device}: the Copy page for midstudy bookmark is a draggable javascript: link`, !!bm && bm.href.startsWith('javascript:') && bm.draggable, bm ? `${bm.href.slice(0, 60)}…, draggable ${bm.draggable}` : 'missing')
+  const before = page.url()
+  await press(D, handle(D, 'product-bookmarklet'))
+  const bmHint = await page.evaluate(() => [...document.querySelectorAll('.ms-add .ms-prod-paste .ms-hint')].some((p) => !p.hidden && /bookmarks bar/.test(p.textContent)))
+  ev.check(`${device}: clicking the bookmark in midstudy runs nothing and says to drag it`, page.url() === before && bmHint, `url unchanged ${page.url() === before}, hint ${bmHint}`)
+  const shop = await D.context.newPage()
+  await shop.goto(URLS.chair)
+  const copied = await shop.evaluate((code) => {
+    let got = null
+    document.execCommand = (cmd) => { got = cmd === 'copy' ? document.querySelector('textarea[readonly]')?.value ?? null : null; return got != null }
+    window.alert = () => {}
+    ;(0, eval)(decodeURIComponent(code.slice('javascript:'.length)))
+    return got
+  }, bm?.href || 'javascript:')
+  await shop.close()
+  ev.check(`${device}: on the shop's page the bookmark copies "<!-- midstudy-page: <address> -->" and the page`, typeof copied === 'string' && copied.startsWith(`<!-- midstudy-page: ${URLS.chair} -->\n<html`) && copied.includes(CHAIR.name),
+    copied ? `${copied.slice(0, 90).replace(/\n/g, '⏎')}… (${copied.length} chars)` : 'nothing copied')
+  const chairHits = pages.hits.filter((x) => x.path === C['ui-chair'].path).length
+  const calls0 = ctl.calls.length
+  await handle(D, 'product-url').fill('')
+  await page.locator('.ms-add input[aria-label="Name"]').fill('') // a typed name would be kept, as on any read
+  await page.evaluate((text) => {
+    const box = document.querySelector('.ms-add [data-midstudy="product-paste"]')
+    const dt = new DataTransfer()
+    dt.setData('text/plain', text)
+    box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  }, copied || '')
+  f = await waitRead(D)
+  const pasted = ctl.calls[calls0] || {}
+  ev.check(`${device}: pasting it reads the page: ${CHAIR.name}, 76 × 84 × 98, its address in the link field, nothing in the way of Make (the eval's $0 cap aside)`,
+    f?.name === CHAIR.name && near(f.w, 76) && near(f.d, 84) && near(f.h, 98) && f.url?.value === URLS.chair && !f.error && /^Make it/.test(f.go?.text || ''),
+    fmt({ name: f?.name, w: f?.w, d: f?.d, h: f?.h, url: f?.url?.value, error: f?.error, go: f?.go }))
+  ev.check(`${device}: the paste was sent as {html} (no url), the box was emptied, and the server fetched nothing`,
+    typeof pasted.html === 'string' && pasted.html.length > 300 && pasted.html.includes(CHAIR.name) && !('url' in pasted) && pages.hits.filter((x) => x.path === C['ui-chair'].path).length === chairHits
+      && (await page.evaluate(() => document.querySelector('.ms-add [data-midstudy="product-paste"]')?.value)) === '',
+    fmt({ keys: Object.keys(pasted), html: pasted.html?.length, fetched: pages.hits.filter((x) => x.path === C['ui-chair'].path).length - chairHits }))
+  await stage(D, 'pasted page read', '8b-pasted')
 
   // the prose page: a language model read it (mocked); then the model's cost in the notes
   await page.locator('.ms-add input[aria-label="Name"]').fill('')
