@@ -45,7 +45,7 @@ Don't run `lake update` for this: it re-resolves the dependencies.
 ## What is proved
 
 No `sorry`, `admit` or new axioms: `CheckAxioms.lean` collects the axioms of every declaration under `Midstudy`
-(998 at the last run; 345 theorems in 18 files) and allows only Lean's three standard ones, which Mathlib uses
+(1,005 at the last run; 347 theorems in 19 files) and allows only Lean's three standard ones, which Mathlib uses
 throughout. The table lists the main results by group; the next section maps k-geom's LEAN.md to them one by one.
 
 | Theorem | File | What it guarantees for the app | Mirrored by (floats are tested, not proved) |
@@ -96,6 +96,7 @@ throughout. The table lists the main results by group; the next section maps k-g
 | `strip_eq_self_iff` | Jpeg | strip leaves a file unchanged exactly when `isClean` accepts it and it has no fill bytes (§4.3 pass-through ⟺ §2.6 stripping is the identity) | — |
 | `ecsSplit_eq_fast` (`@[csimp]`) | Jpeg.Model | the program's constant-stack scan splitter is proved equal to the specification's | — |
 | `Png.walk_serialize`, `Png.walk_chunksOk`, `Png.walk_spec` | Png | the PNG chunk walk reads back well-formed chunks; it consumes exactly the chunks' bytes then what follows IEND | k-media props |
+| `frameWalk_ok`, `frameInfo_ok` | Jpeg.Frame | the JPEG size qwen is priced by is never guessed: an answer is the fields of a start-of-frame segment in the data, where the walk reached it, with a non-zero width and height (AENEAS.md #3) | proofs/diff frame: 30,476 files identical |
 | `isSlug_iff`, `isSlug_ascii`, `isSlug_safe`, `isSlug_length` | Slug | `is_slug` is exactly `^[a-z0-9][a-z0-9-]{0,63}$` (no trailing newline); a slug is ASCII, has no `/`, `\`, `.`, NUL, newline or space and isn't `.`/`..`: one path component inside the folder it is joined to (AENEAS.md #6) | k-media props (regex oracle); proofs/diff slug: 20,000 strings identical |
 | `megabytes_eq_roundHalfEven`, `megabytes_lt` | Arith | zip.rs `megabytes` is exactly `total/10⁶` rounded half to even (Python's), for every u64; no overflow (AENEAS.md #2) | k-media test `megabytes_round_half_even` |
 | `foldDigits_eq`, `foldDigits_lt`, `foldDigits_prefix_lt` | Arith | Content-Length's digit fold over ≤ 15 digits stays below 10¹⁵ at every step (no overflow) and is the digits' number (AENEAS.md #7) | k-media http tests |
@@ -199,7 +200,9 @@ stripped, 8,033 refused, every error kind hit). PNG 30,079 files (15 PNG fixture
 20,000 synthetic chunk streams, 10,000 mutations): **all identical** (21,495 stripped; NoEnd, NotPng, Truncated
 hit). Slugs (`Midstudy/Slug.lean`, `mediastrip slug`): 20,000 strings (valid slugs of every length, and near misses:
 65 long, upper case, `_`, `.`, `/`, `..`, spaces, a trailing newline, non-ASCII letters and digits, emoji, empty):
-identical (10,549 slugs, 9,451 not). Earlier runs against a30feda (before `find_ff`): 45,076 and 30,076 JPEG, 30,079
+identical (10,549 slugs, 9,451 not). Frame size (`Midstudy/Jpeg/Frame.lean`, `mediastrip frame`): the JPEG corpus
+plus 400 frame-header cases (zero width or height, short SOF segments, TEM/RST/stray SOI and fill before the frame),
+30,476 files: identical (1,675 sized; every error kind hit, ZeroSize included). Earlier runs against a30feda (before `find_ff`): 45,076 and 30,076 JPEG, 30,079
 PNG, all identical. Lean model speed: about 4,000 files a second.
 
 ## Requests to other tracks

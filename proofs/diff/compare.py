@@ -18,12 +18,16 @@ for l, r in zip(lean, rust):
 oks = sum(v for k, v in kinds.items() if k[0] == "ok")
 if mode == "slug":
     print(f"{mode}: {len(lean)} strings; outcomes:")
+elif mode == "frame":
+    print(f"{mode}: {len(lean)} files, {sum(v for k, v in kinds.items() if k[0] == 'res')} sized; outcomes (a few):")
+    kinds = collections.Counter({("res", "(a size)", "-"): sum(v for k, v in kinds.items() if k[0] == "res"),
+                                 **{k: v for k, v in kinds.items() if k[0] == "err"}})
 else:
     print(f"{mode}: {len(lean)} files, {oks} stripped, {len(lean) - oks} refused; outcomes:")
 for k, v in sorted(kinds.items()):
     print(f"  {v:6d}  {k[0]} {k[1]} clean={k[2]}")
 for l, r in bad[:20]:
     print("DIFF lean:", l, "| rust:", r)
-what = "is_slug" if mode == "slug" else "result, is_clean and stripped bytes"
+what = {"slug": "is_slug", "frame": "frame_info"}.get(mode, "result, is_clean and stripped bytes")
 print(f"proofs/diff {mode}: {'OK' if not bad else 'FAIL'} ({len(lean) - len(bad)}/{len(lean)} files identical: {what})")
 sys.exit(1 if bad else 0)

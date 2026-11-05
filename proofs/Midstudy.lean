@@ -17,3 +17,4 @@ import Midstudy.PngFilter
 import Midstudy.Landing
 import Midstudy.Dilate
 import Midstudy.Slug
+import Midstudy.Jpeg.Frame

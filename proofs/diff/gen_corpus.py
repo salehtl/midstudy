@@ -9,7 +9,8 @@ PNG: the repo's PNG fixtures (depth maps, id masks) with metadata chunks injecte
 dropped type, IEND early or missing, bytes after IEND, huge lengths) and mutations.
 Slugs: valid ones of every length 1-64, and near misses (65 long, upper case, leading '-', '_', '.', '/', '..', spaces,
 a trailing newline, non-ASCII letters, empty), as UTF-8 text files.
-usage: python3 gen_corpus.py jpeg|png|slug REPO_ROOT OUTDIR [N_SYNTH]
+frame (jpeg.rs frame_info) uses the JPEG corpus.
+usage: python3 gen_corpus.py jpeg|png|slug|frame REPO_ROOT OUTDIR [N_SYNTH]
 """
 import random
 import struct
@@ -229,6 +230,16 @@ def main_jpeg(root, n, rng):
         files.append((f"syn{k:05d}.jpg", data))
         if k % 2 == 0:
             files.append((f"syn{k:05d}-mut.jpg", mutate(rng, data)))
+    # frame headers: a size of 0, short or long SOF segments, stepped-over markers and fill before them
+    for k in range(400):
+        pre = b"".join(rng.choice([b"\xff\x01", b"\xff\xd8", bytes([0xFF, 0xD0 + rng.randrange(8)]), b"\xff",
+                                   seg(0xDB, bytes(rng.randrange(256) for _ in range(rng.randrange(0, 10)))), b""])
+                       for _ in range(rng.randrange(0, 4)))
+        w = rng.choice([0, 1, 4000, rng.randrange(65536)])
+        h = rng.choice([0, 1, 3000, rng.randrange(65536)])
+        body = bytes([8]) + struct.pack(">HH", h, w) + bytes([rng.choice([1, 3, 4])])
+        sof = seg(rng.choice([0xC0, 0xC1, 0xC2, 0xCF, 0xC4, 0xC8, 0xCC]), body[:rng.choice([0, 3, 6, len(body)])])
+        files.append((f"frame{k:04d}.jpg", b"\xff\xd8" + pre + sof + bytes(rng.randrange(0, 12)) + b"\xff\xd9"))
     files.append(("empty.jpg", b""))
     files.append(("soi.jpg", b"\xff\xd8"))
     files.append(("soi-eoi.jpg", b"\xff\xd8\xff\xd9"))
