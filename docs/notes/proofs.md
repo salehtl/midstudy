@@ -45,7 +45,7 @@ Don't run `lake update` for this: it re-resolves the dependencies.
 ## What is proved
 
 No `sorry`, `admit` or new axioms: `CheckAxioms.lean` collects the axioms of every declaration under `Midstudy`
-(1,005 at the last run; 347 theorems in 19 files) and allows only Lean's three standard ones, which Mathlib uses
+(1,074 at the last run; 350 theorems in 19 files) and allows only Lean's three standard ones, which Mathlib uses
 throughout. The table lists the main results by group; the next section maps k-geom's LEAN.md to them one by one.
 
 | Theorem | File | What it guarantees for the app | Mirrored by (floats are tested, not proved) |
@@ -226,8 +226,10 @@ PNG, all identical. Lean model speed: about 4,000 files a second.
 ## Status and what's left
 
 All eight groups are proved: camera, horizon, depth, item rotation, clamps, units, lighting, and the JPEG stripper;
-also the PNG stripper, the light's turn, drags and Set scale, two integer kernels, and 25 of k-geom's 28 LEAN.md
-properties (13 corrected). Left:
+also the PNG stripper, the light's turn, drags and Set scale, and 25 of k-geom's 28 LEAN.md properties (13
+corrected). Of k-media's AENEAS.md targets, #2 (`megabytes`), #3 (`frame_info`), #4 (`png::strip`), #6 (`is_slug`),
+#7 (the Content-Length fold) and #9 (`jpeg::strip`, `is_clean`) have Lean models with proofs; #3, #4, #6 and #9 are
+also compared with the Rust by `proofs/diff/` (all identical). Left:
 - re-run `nix develop -c proofs/diff/run.sh` in place once `core/crates/media` is on `v2` (merge `v2` first): the
   measurements above are against `v2-k-media` a30feda, extracted to `evals/out/` because it isn't on `v2` yet
   (`v2` had only the phase 0 commit and the eval-lock fix when this ran);
