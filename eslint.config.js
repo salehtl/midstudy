@@ -17,7 +17,7 @@ export default defineConfig(
     'proofs/.lake/',
     '.upstream/',
     '.claude/',
-    // TScert's experiments vary their forms on purpose (docs/notes/tscert.md); TScert, not lint, is their judge.
+    // TScert's experiments vary their forms on purpose (tscert/README.md); TScert, not lint, is their judge.
     'tscert/',
     '**/*.js',
     '**/*.mjs',

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// The TScert ratchet (docs/REFACTOR.md §3 check:tscert; docs/notes/tscert.md): TScert over the pure logic modules named
+// The TScert ratchet (docs/REFACTOR.md §3 check:tscert; tscert/README.md): TScert over the pure logic modules named
 // by tscert/config.json, one result per top-level function and per module initialization, written to
 // tscert/report.json (git-ignored). Every function in tscert/baseline.json must still certify; new ones may join it.
 //
 //   node scripts/tscert-ratchet.mjs            check: exit 1 when a baselined function no longer certifies
 //   node scripts/tscert-ratchet.mjs --update   rewrite tscert/baseline.json with everything that certifies now
-//   options: --config FILE (default tscert/config.json), --report FILE, --baseline FILE, --no-baseline
+//   node scripts/tscert-ratchet.mjs --files planner/logic/a.ts,planner/logic/b.ts [--project TSCONFIG]
+//                                              just those files, one line per function, no baseline (to try a module)
+//   options: --config FILE (default tscert/config.json), --report FILE, --baseline FILE, --no-baseline, --verbose
 //
 // TScert itself runs inside the Nix sandbox (nix/tscert.nix runUnits, built on first use: about 6 minutes), under its
 // pinned Node 26.13.0 with its Lean-built verifier. Prints one summary line: `tscert: <certified>/<total> certified …`.
@@ -21,7 +23,7 @@ const NO_BASELINE = argv.includes('--no-baseline')
 const CONFIG = path.resolve(ROOT, opt('--config', 'tscert/config.json'))
 const config = JSON.parse(fs.readFileSync(CONFIG, 'utf8'))
 const fromConfig = (p) => path.resolve(path.dirname(CONFIG), p)
-const REPORT = path.resolve(ROOT, opt('--report', config.report ? path.relative(ROOT, fromConfig(config.report)) : 'tscert/report.json'))
+const REPORT = path.resolve(ROOT, opt('--report', argv.includes('--files') ? 'build/tscert/report-files.json' : config.report ? path.relative(ROOT, fromConfig(config.report)) : 'tscert/report.json'))
 const BASELINE = path.resolve(ROOT, opt('--baseline', 'tscert/baseline.json'))
 const INIT = '(init)'
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/')
@@ -48,7 +50,18 @@ function walk(dir, out = []) {
 
 // The files: each area's glob (relative to the repo, or to the config file when `base` is "config").
 const jobs = []
-for (const area of config.areas) {
+// --files a.ts,b.ts: just those files (each with its area's tsconfig, or --project), no baseline, one line per function.
+const only = opt('--files')?.split(',').filter(Boolean).map((f) => path.resolve(ROOT, f))
+if (only) {
+  for (const f of only) {
+    const r = rel(f)
+    const area = config.areas.find((a) => globRe(a.glob).test(r))
+    const project = opt('--project') ?? area?.project
+    if (!project) { console.error(`tscert: ${r} is in no area of ${rel(CONFIG)}: pass --project TSCONFIG`); process.exit(2) }
+    jobs.push({ file: f, project: path.resolve(ROOT, project) })
+  }
+}
+for (const area of only ? [] : config.areas) {
   const base = area.base === 'config' ? path.dirname(CONFIG) : ROOT
   const re = globRe(area.glob)
   const segs = area.glob.split('/')
@@ -133,12 +146,15 @@ const rev = /rev = "([0-9a-f]{40})"/.exec(fs.readFileSync(path.join(ROOT, 'nix/t
 fs.mkdirSync(path.dirname(REPORT), { recursive: true })
 fs.writeFileSync(REPORT, `${JSON.stringify({ tscert: rev, certified: certified.length, total: keys.length, functions: Object.fromEntries(keys.map((k) => [k, results[k]])) }, null, 1)}\n`)
 
-if (NO_BASELINE) {
+if (only || argv.includes('--verbose')) {
+  for (const k of keys) console.log(`  ${results[k].status === 'verified' ? 'certified' : results[k].status.padEnd(9)} ${k}${results[k].status === 'verified' ? '' : `: ${String(results[k].detail ?? '').split('\n')[0].slice(0, 300)}`}`)
+}
+if (NO_BASELINE || only) {
   console.log(`tscert: ${certified.length}/${keys.length} certified (${jobs.length} files, ${secs} s; report ${rel(REPORT)})`)
   process.exit(0)
 }
 if (UPDATE) {
-  fs.writeFileSync(BASELINE, `${JSON.stringify({ doc: 'Every function here must keep certifying (scripts/tscert-ratchet.mjs; docs/notes/tscert.md). Rewritten by --update.', functions: certified }, null, 1)}\n`)
+  fs.writeFileSync(BASELINE, `${JSON.stringify({ doc: 'Every function here must keep certifying (scripts/tscert-ratchet.mjs; tscert/README.md). Rewritten by --update.', functions: certified }, null, 1)}\n`)
   console.log(`tscert: ${certified.length}/${keys.length} certified; baseline rewritten (${rel(BASELINE)}, ${secs} s)`)
   process.exit(0)
 }
@@ -148,7 +164,7 @@ const lost = baseline.filter((k) => results[k]?.status !== 'verified')
 const fresh = certified.filter((k) => !baseline.includes(k))
 if (lost.length) {
   for (const k of lost) console.log(`  no longer certifies: ${k}: ${results[k] ? `${results[k].status} (${results[k].phase}) ${String(results[k].detail ?? '').split('\n')[0]}` : 'gone (removed or renamed: update the baseline on purpose)'}`)
-  console.log(`tscert: FAIL, ${lost.length} baselined function(s) no longer certify; ${certified.length}/${keys.length} certified (${secs} s)`)
+  console.log(`tscert: ${lost.length} baselined function(s) no longer certify; ${certified.length}/${keys.length} certified (${secs} s)`)
   process.exit(1)
 }
 console.log(`tscert: ${certified.length}/${keys.length} certified, all ${baseline.length} baselined still certify${fresh.length ? `, ${fresh.length} new (add them: --update)` : ''} (${jobs.length} files, ${secs} s)`)

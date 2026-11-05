@@ -1,7 +1,7 @@
 {
-  // What TScert reads planner/logic/ with: the planner's options, the logic modules only (they import types and each
-  // other, nothing else).
+  // What TScert reads planner/logic/ with: the planner's strict options, the logic modules only, and no DOM or other
+  // ambient types, so a logic module that reaches for the browser fails here (it belongs in a shell module).
   "extends": "../tsconfig.planner.json",
-  "compilerOptions": { "allowJs": false, "composite": false },
+  "compilerOptions": { "lib": ["ES2023"], "types": [], "allowJs": false, "composite": false },
   "include": ["../planner/logic/**/*.ts"]
 }

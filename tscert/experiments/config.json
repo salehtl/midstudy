@@ -1,5 +1,5 @@
 {
-  "doc": "TScert experiments (docs/notes/tscert.md): small functions modelled on midstudy's code. node scripts/tscert-ratchet.mjs --config tscert/experiments/config.json --no-baseline",
+  "doc": "TScert experiments (tscert/README.md): small functions modelled on midstudy's code. node scripts/tscert-ratchet.mjs --config tscert/experiments/config.json --no-baseline",
   "report": "report.json",
   "areas": [{ "glob": "*.ts", "project": "tsconfig.json", "base": "config" }]
 }

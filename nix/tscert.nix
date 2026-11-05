@@ -1,5 +1,5 @@
 # TScert (https://github.com/cristianoc/TScert, NON-AI MIT licence: used here as a checker only), pinned, for
-# `npm run check:tscert` (docs/notes/tscert.md).
+# `npm run check:tscert` (tscert/README.md).
 #
 # TScert pins Node 26.13.0 (.nvmrc, `engines`) and Lean 4.33.1 (lean/lean-toolchain). The pinned nixpkgs has Node
 # 26.12.1 and Lean 4.29.1, so both come from their official release archives as fixed-output fetches: no nvm, no elan,
