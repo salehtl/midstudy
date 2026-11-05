@@ -35,7 +35,50 @@ nix develop -c node scripts/eval-lock.mjs -- npm run eval:calib                 
 
 ### Measurements (M3 Max, MPS, vitl, real MoGe-2; the Mac shared with other agents)
 
-MEASUREMENTS
+Wall time of `run <photo> --out <dir>`, per photo, as `fastest / median` over 3 interleaved rounds (v1 one-shot, v2
+one-shot, v2 worker, alternating), `calib/scripts/bench.py` under `eval-lock --exclusive`, load average 2–9 (the
+quietest window of the day). One-shot = `python -m midstudy_calib.cli` per photo (`uv run` adds about 0.02 s); worker =
+one `serve` process per round, the first request timed from spawn, the others request to response.
+
+| photo | v1 one-shot | v2 one-shot | worker, first | worker, later |
+|---|---|---|---|---|
+| living-wide | 10.1 / 10.2 s | 5.4 / 5.6 s | 5.2 / 5.3 s | — |
+| steep-roll | 9.8 / 10.0 s | 5.6 / 5.6 s | — | 1.0 / 1.0 s |
+| portrait | 9.9 / 10.0 s | 5.6 / 5.7 s | — | 0.9 / 0.9 s |
+| living-cool | 9.9 / 10.0 s | 5.4 / 5.6 s | — | 0.9 / 0.9 s |
+| living-warm | 10.0 / 10.0 s | 5.4 / 5.5 s | — | 0.9 / 0.9 s |
+| lounge (`upper-lounge-camera.jpeg`) | 10.0 / 10.2 s | 5.7 / 5.7 s | — | 1.0 / 1.0 s |
+| all | 9.8 / 10.0 s (n=18) | 5.4 / 5.6 s (n=18) | 5.2 / 5.3 s (n=3) | 0.9 / 0.9 s (n=15) |
+
+So a calibration after the first takes **0.9 s instead of 10.0 s (−91 %)** through the worker, and a one-shot run
+**5.6 s instead of 10.0 s (−44 %)** (REFACTOR.md §4.1 asked for ≥ 30 % from the second photo on). Earlier rounds with
+the Mac at load 10–23 gave the same picture, noisier (v1 11.2 / 13.2 s, v2 6.8 / 11.8 s, worker later 0.9 / 1.6 s).
+
+Where the time goes (medians of the quiet rounds; `moge.load_s`, `moge.infer_s`, `moge.floor_fit_s`, `fit.elapsed_s`):
+
+| | load | infer | floor fit | light fit | rest (start, imports, ingest, PNG, writes) |
+|---|---|---|---|---|---|
+| v1 one-shot | 4.0 s | 2.0 s | 0.08 s | 0.23 s | 3.7 s |
+| v2 one-shot | 0.47 s | 2.8 s | 0.08 s | 0.18 s | 2.1 s |
+| worker, later | 0 | 0.61 s | 0.07 s | 0.17 s | 0.07 s |
+
+- **Load** (v1 4.0 s): importing MoGe (most of it `scipy.signal`), asking the Hub whether `main` moved, building
+  DINOv2 ViT-L with random weights that are all thrown away, and reading the checkpoint (one by one at load ~13: 1.9,
+  0.5, 3.4 and 0.2 s). v2 skips the init, pins the revision and defers `scipy.signal`: 0.47 s.
+- **Infer**: the first inference in a process (Metal compiles its kernels) is 2.0 s, later ones 0.6 s. v2's first is
+  0.7 s slower because MoGe's focal solver now imports `scipy.optimize` on first use (it came with `scipy.signal`
+  before); net, the deferral saves about 0.9 s (measured: import + build + first inference 3.7 vs 4.6 s, fastest of 4).
+- **Fit without MoGe** (cached MoGe outputs of the six scenes, `fit` end to end, v1 and v2 processes alternating, 4
+  rounds of 3, load 15): fastest 379 ms → 277 ms (−27 %), median 466 → 425 ms. Lighting 0.23 → 0.18 s in the quiet
+  rounds above; floor fit unchanged at 0.08 s (left as is: the RANSAC's score sums would need a different summation
+  order to be faster, which isn't bit-identical).
+- **Same results**: with real MoGe on MPS, v1 one-shot, v2 one-shot and the worker wrote the same `calib.json` and
+  `lighting.json` (timings aside) and byte-identical `depth.png` for all six photos in every round. E2's results are
+  unchanged (132/132, the same values as in STATUS.md).
+
+Evals on `v2-calib` (2026-11-05): pytest 103/103 (102 + 1 skipped without `fixtures/photos/`); `check:py` clean; `eval:calib -- --mock` 58/58; `eval:calib` (real
+MoGe-2) 132/132 in 95.7 s (load ~35); `eval:real` 31/31 in 66.6 s (lounge camera FOV 69.63, height 1.432, pitch −7.84,
+roll 0.26, as before).
 
 ### Decisions
 
