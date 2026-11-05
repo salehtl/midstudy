@@ -19,6 +19,8 @@ Every v1 file of `planner/ui/` is now a `.ts` file of the same name (`git mv`-st
 | `ui/icons.ts`, `ui/sheet.ts`, `ui/shell.ts`, `ui/sun-dial.ts`, `ui/workspace.ts`, `ui/scenes.ts`, `ui/panels/{common,inroom,layouts,library,libsheets,productsrc,renders,scene}.ts` | The DOM shells, ported line for line: typed event handlers, narrowing with `instanceof` and type guards, no `any`, no `!`, no casts but `as const`, no ts-ignore. `shell.Shell` is an explicit interface (overloaded `confirm`: `Promise<boolean>` for OK/Cancel, `Promise<V \| null>` for custom actions). |
 | `ui/logic/*.ts` (new, 14 modules) | The pure UI logic, TScert-certified: `text` (minus signs, plurals, money, monogram, clipping, sentences, sizes, the forms' number parsing), `dates` (from a Date's parts), `lists` (`uniqueBy`, `countBy`), `chrome` (mode, sheet detents, where a drag or fling settles, chrome metrics, dock split, toast life, menu and tooltip placement, keyboard inset), `workspace` (render chip, switcher state, height field, horizon drag, grip / label / horizon-handle placement, clip, stage insets, the workspace's keys and sentences), `sundial` (the dial's maths and keys), `scenes`, `layouts` (slug, name check, card, sort), `library` (search, filter, counts, jobs), `look` (the Scene panel's words, Reset, touch-slide value), `libforms` (Add/Edit: size fields, meta, problems, Flat rug prefill, budget, patch), `product` (the product-page reading's words, notes, size picker, picture fallback, Make's needs), `renders`, `glyphs` (stroke width, ring arc). Trigonometry (`Math.tan`, `Math.sin/cos/atan2`, `Math.hypot`) comes in as parameters so results stay bit-identical to v1. |
 | `ui/test/logic-vs-v1.mjs` (new) | Differential test: each logic function against the v1 expression it replaced (copied verbatim from 979677c), on seeded random inputs plus edge cases (±0, NaN, ±Infinity, 1e21, empty strings, accents, emoji, decimal commas, U+2212…). Outputs compared with `Object.is`/JSON (`addMeta` and `editPatch` by their JSON: the bytes the server gets). |
+| `ui/test/bus.mjs` (new) | `Bus` against an `EventTarget` (v1's shell events): order, a listener added twice, cancelable events, a listener removed or added during a dispatch, one that removes itself, one that throws. |
+| `ui/test/smoke.mjs` (new) | A browser smoke test, through the evals' harness ($0), of the flows the nine evals do not drive: Library remove / Undo / Recently removed / Edit (the size fields set as properties, as v1), Layouts save / Save as new / the name check / Load with changes, Del then Ctrl+Z, the Scene panel's camera card, Look slider, Reset and grid toggle, Renders' Compare with fewer than two, Scenes rename, a card's flags and meta; no page or console error. Expected texts are v1's. |
 
 ## Commands (worktree root)
 
@@ -28,26 +30,38 @@ MIDSTUDY_TRACK=ui nix develop -c npm run check -- ownership types lint dead tsce
 nix develop -c node scripts/check-ownership.mjs ui --base 979677c
 nix develop -c node scripts/tscert-ratchet.mjs --files $(ls planner/ui/logic/*.ts | tr '\n' ',')   # one line per unit
 nix develop -c node planner/ui/test/logic-vs-v1.mjs [--seed N] [--n ROUNDS]                       # differential vs v1
+nix develop -c node planner/ui/test/bus.mjs                                                       # Bus vs EventTarget
+nix develop -c node scripts/eval-lock.mjs -- node planner/ui/test/smoke.mjs                       # browser smoke (evals/out/ui-smoke/)
 nix develop -c node scripts/eval-lock.mjs -- npm run eval:{phone,ux,ux2,product-ui,lighting,floor,planner,render,splat}
 ```
 
 ## Measurements (rabbit, 2026-11-06, legacy server, fal mocked, headless Chrome from `$PUPPETEER_EXECUTABLE_PATH`)
 
-| What | Before (v1 UI at 979677c, this worktree) | After (TS UI) |
+Each eval through `scripts/eval-lock.mjs`, one after another. "Before": v1's UI at 979677c in this worktree. "Port": the
+first run after the port (b6aa9d1; lighting, floor, render and splat ran while the working tree became 2d3c594, which
+only unexported names and set the Edit sheet's sizes as numbers). "Final 1/2": two full passes on e90f257 (the bundle's inputs are the same at 0f676e9).
+Wall times include waiting for a lock slot (other tracks' evals, an exclusive perf A/B and fuzz campaigns ran meanwhile).
+
+| Eval | Before | Port | Final 1 | Final 2 |
+|---|---|---|---|---|
+| eval:phone (E9) | 49/49 | 49/49 | 49/49 | 49/49 |
+| eval:ux (E11) | 29/29 | 29/29 | 29/29 | 29/29 |
+| eval:ux2 (E12) | 27/27 | 27/27 | 27/27 | 27/27 |
+| eval:product-ui (E15) | 135/135 | 135/135 | 135/135 | 135/135 |
+| eval:lighting (E16) | 57/57 | 57/57 | 57/57 | 57/57 |
+| eval:floor (E5) | 35/35 | 35/35 | 35/35 | 35/35 |
+| eval:planner (E3) | 56/56 | 56/56 | 56/56 | 56/56 |
+| eval:render (E6) | 37/37 | 37/37 | 37/37 | 37/37 |
+| eval:splat (E13) | 51/51 | 51/51 | 51/51 | 51/51 |
+
+| What | Before | After |
 |---|---|---|
-| eval:phone (E9) | 49/49 | 49/49, 49/49 |
-| eval:ux (E11) | 29/29 | 29/29, 29/29 |
-| eval:ux2 (E12) | 27/27 | 27/27, 27/27 |
-| eval:product-ui (E15) | 135/135 | 135/135, 135/135 |
-| eval:lighting (E16) | 57/57 | 57/57, 57/57 |
-| eval:floor (E5) | 35/35 | 35/35, 35/35 |
-| eval:planner (E3) | 56/56 | 56/56, 56/56 |
-| eval:render (E6) | 37/37 | 37/37, 37/37 |
-| eval:splat (E13) | 51/51 | 51/51, 51/51 |
 | check:types / lint (planner area) | — (no .ts) | ok / ok, 33 .ts files |
 | check:dead (knip) | ok | ok |
 | check:tscert | nothing to check | 195/195 units certified (14 files), all baselined |
 | logic-vs-v1 | — | 208,019 checks (seed 7, 4,000 rounds) and 1,040,019 checks (seed 12345, 20,000 rounds): no difference; a mutated copy fails (negative control) |
+| bus.mjs | — | 5/5 cases dispatch as an EventTarget does |
+| smoke.mjs | — | 39/39 (twice; a first run failed on the test's own selector: the hidden upload card is also `.sc-card`) |
 | `planner/dist/app.js` (minified) | 349 kB (357,004 B; UI 136,960 B) | 362 kB (369,935 B; UI 149,914 B: +12,954 B, +9.5 % of the UI, +3.6 % of app.js) |
 
 Where the bytes went: the logic modules (≈25 kB) less the shells (−12 kB); the rest is `String(n)` in templates (the
@@ -104,8 +118,9 @@ eval:perf (E17) was not run here (a gate/A-B measurement).
   `layoutDisplayName(name): string`, `captureComposite(opts): Shot | Promise<Shot>`, `saveLayoutInternal(name, { title })`).
 - **engine**: `prettyLayout` (engine.js) and the UI's `pretty` (logic/layouts.ts) are the same function; one can go
   when the seam is reconciled.
-- **integration**: `planner/ui/test/logic-vs-v1.mjs` is not run by any gate (no planner test runner yet); consider
-  adding it to `npm run check` or a `test:ui` script (package.json is shared-append; not added here).
+- **integration**: `planner/ui/test/{logic-vs-v1,bus,smoke}.mjs` are run by no gate (no planner test runner yet);
+  consider a `test:ui` script or adding them to `npm run check` (package.json is shared-append; not added here, so no
+  other track's lock or script list changes under it).
 
 ## Not done
 
