@@ -99,7 +99,33 @@ Runs: WG 63/67 (run 3: WebGPU all green; the 4 WebGL2 fails were the colour-mask
 every WebGPU and WebGL2 self-check green; the 7 fails were v1's references flaking under machine load 13–47: an
 all-black v1 `lit` composite and v1's own order race at 94.3 %). FINAL_RUN_PLACEHOLDER
 
-NUMBERS_PLACEHOLDER
+## Numbers (262,144 splats: the Idol chair; SwiftShader, so compare relatively; `--perf` under `--exclusive`)
+
+Measured 2026-11-05, 1280 × 800 view, the chair at (1.25, 0, −3.1) on living-wide with its contact and cast
+shadows, occlusion on (`evals/out/webgpu-spike/summary.json` → kept as `evals/out/wg-perf1-summary.json`):
+
+| | WebGPU, GPU sort | WebGPU, CPU sort | WebGL2 fallback, CPU sort | v1: Spark 2.4 on WebGL |
+|---|---|---|---|---|
+| sort, 262,144 splats | **72–84 ms** GPU time (timestamp queries; keys + 2 radix passes, 7 dispatches) | 1.5 ms (worker) | 3.5 ms (worker) | 3.8 s per re-sort (move 1 mm → settled: Spark renders a depth read-back pass of every splat, then sorts in its worker) |
+| splat pass alone | 4.8–5.2 s | 4.6–4.8 s | (not synced: see below) | 3.8 s |
+| whole frame (photo, furniture, shadows, splats, composites) | 4.9 s with a sort, 4.9 s without | 4.8 s | 4.7 s | — |
+| time to the first splat frame (fetch, decode, upload, sort, draw) | 13.8 s (≈ 6.5 s of it compiling the 7 compute pipelines) | 7.3 s | 6.9 s | 29.0 s (add 0.2 s, first sort 24.9 s, draw 4.1 s) |
+| decode splat.spz | 41 ms (browser), 35 ms (Node) | 41 ms | 40 ms | (Spark's own, in add: 0.2 s) |
+| splat memory on the GPU | 17.1 MB (48 B/splat textures + 16 B/splat sort buffers) | 13.6 MB | 13.6 MB | 5.2 MB (packed 16 B/splat + ordering 4 B/splat) |
+
+What the numbers say:
+- **The draw is SwiftShader's triangle cost, not our shader.** The splat pass takes ~5 s with the full projection,
+  with a debug shader that only projects the center, and with one that draws a fixed grid of quads with no texture
+  reads at all (5.2 / 5.2 / 5.3 s, `splatDebug=center|grid`): 524,288 tiny triangles bound it. Spark draws the same
+  count in 3.8 s on ANGLE's SwiftShader. On a real GPU both are milliseconds; not measurable here.
+- **The sort is no longer the bottleneck.** Spark's re-sort costs a full extra pass of every splat on SwiftShader
+  (its depth read-back) plus a round trip; the GPU radix sort is 72–84 ms of compute and lands in the same frame;
+  the worker sort is 1.5–3.5 ms (and on SwiftShader, where "GPU" is the CPU, faster than the GPU sort).
+- **First frame:** pipeline compilation dominates on SwiftShader; ours is 2–4× quicker to a first splat frame than
+  Spark's. On WebGPU the 7 compute pipelines cost ~6.5 s to compile in software (`sort: 'cpu'` avoids it).
+- JS heap deltas read 0 (Chrome's `performance.memory` is coarse in the headless shell); GPU bytes are computed
+  from the buffers each side allocates. The WebGL2 "splat pass alone" timing isn't synced (a 1-pixel read of the
+  canvas doesn't wait for an off-screen target there), so only its whole-frame number counts.
 
 ## Go/no-go for Phase 4: GO, with conditions
 
@@ -125,9 +151,12 @@ is exact; the photo is byte-exact; WebGPU and WebGL2 draw the same picture. Cond
   (`light-rig.ts`, done). Full-screen passes are `QuadMesh`es. `gl_FragCoord` with v1's `uTarget.y − y` flip →
   `screenCoordinate` (top-left on both backends); `gl_FragDepth` → `material.depthNode =
   viewZToPerspectiveDepth(...)`; the pre-pass needs `vertexNode = vec4(positionGeometry.xy, 0, 1)`.
-- **Clears:** use `clearTarget()` (`passes.ts`) everywhere: three 0.180's WebGL2 backend doesn't force the colour
-  mask on before a clear, so a clear after a `colorWrite: false` draw (the depth pre-pass, a shadow map) silently
-  kept the previous frame (measured: a removed piece reappeared in the next capture). WebGPU unaffected.
+- **Clears:** use `clearTarget()` (`passes.ts`) for every clear. three 0.180's WebGL2 backend has two clear bugs,
+  both found and measured here (WebGPU clears with load ops and has neither): it doesn't force the colour mask on, so
+  a clear after a `colorWrite: false` draw (the depth pre-pass, a shadow map) kept the previous frame (a removed piece
+  reappeared in the next capture); and clearing the canvas doesn't bind the default framebuffer, so the clear hit the
+  furniture target's resolve framebuffer and the composite painted the clear colour over the whole photo (a black
+  view at Fit on WebGL2, while captures were fine). Found with a GL call trace (`node planner/gpu/demo/gltrace.mjs`).
 - **Render targets / splat depth:** `WebGLRenderTarget` → `RenderTarget`. WebGPU can't resolve or share the MSAA
   furniture target's depth with a single-sample target, so the splat pass draws its own depth: the photo pre-pass
   plus the meshes depth-only (`DEPTH_LAYER` + `overrideMaterial`) as `SplatLayer.render`'s `drawDepth`. v1's
@@ -158,8 +187,9 @@ is exact; the photo is byte-exact; WebGPU and WebGL2 draw the same picture. Cond
 
 ## Risks
 
-- **three.js WebGPURenderer maturity.** Found in one spike: the WebGL2-backend clear bug (above), three's WebGPU vs
-  WebGL shadow sides, `NodeLibrary.addMaterial` refusing redefinitions. The spike also reaches into internals:
+- **three.js WebGPURenderer maturity.** Found in one spike: two WebGL2-backend clear bugs (above), three's WebGPU vs
+  WebGL shadow sides, `NodeLibrary.addMaterial` refusing redefinitions. The fallback needs its own eval runs: both
+  clear bugs passed every WebGPU check and showed only on WebGL2. The spike also reaches into internals:
   `backend.isWebGPUBackend`, `backend.state.setColorMask`, `builder.context.iblIrradiance` (the radiance-only
   environment), `library.materialNodes`, `isShadowPassMaterial`. Pin 0.180.0; WG catches regressions.
 - **No real GPU here.** All timings are SwiftShader (software); correctness is what the evals prove. Mobile GPU
@@ -172,6 +202,9 @@ is exact; the photo is byte-exact; WebGPU and WebGL2 draw the same picture. Cond
 - **Memory.** The layer keeps 48 B/splat of float textures + 16 B/splat of sort buffers (+ the item texture), about
   3–4× Spark's packed 16 B/splat. Fine for a few furniture pieces at 262,144 splats each; packing (f16 covariance,
   u8 colour) would bring it to ~28 B/splat.
+- **A v1 quirk kept:** the letterbox bars are meant to be `0x0e0f11` but v1 writes the `Color`'s linear components
+  as bytes, so they come out (1, 1, 1); the spike draws the same (checked). Fixing it is a one-line, visible change
+  for later, not part of the swap.
 - **Parity details.** Spark's sort uses 32-bit float depths, ours 16-bit over the items' depth range (0.07 mm steps
   at 1.5–6 m); measured identical-looking (region diffs above). The blur/compensation and the √8 σ quad are Spark's.
 
