@@ -105,16 +105,22 @@ impl std::error::Error for EnvError {}
 /// turned into the camera frame, mirrored to the front (`z = −max(|z|, 1e-3)`), projected, and clamped to the frame.
 #[must_use]
 pub fn photo_uv(spec: &EnvSpec, i: usize, j: usize) -> [f64; 2] {
+    let ((sp, cp), (st, ct)) = (phi_of(spec, i).sin_cos(), theta_of(spec, j).sin_cos());
+    uv_of_dir(spec, [ct * cp, st, ct * sp])
+}
+
+/// φ of column i: `(u − ½) · 2π` at the pixel's centre.
+fn phi_of(spec: &EnvSpec, i: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)] // map sizes are tiny
-    let (u, v) = (
-        (i as f64 + 0.5) / spec.width as f64,
-        (j as f64 + 0.5) / spec.height as f64,
-    );
-    let (phi, th) = (
-        (u - 0.5) * core::f64::consts::TAU,
-        (v - 0.5) * core::f64::consts::PI,
-    );
-    uv_of_dir(spec, [th.cos() * phi.cos(), th.sin(), th.cos() * phi.sin()])
+    let u = (i as f64 + 0.5) / spec.width as f64;
+    (u - 0.5) * core::f64::consts::TAU
+}
+
+/// θ of row j: `(v − ½) · π` at the pixel's centre.
+fn theta_of(spec: &EnvSpec, j: usize) -> f64 {
+    #[allow(clippy::cast_precision_loss)] // map sizes are tiny
+    let v = (j as f64 + 0.5) / spec.height as f64;
+    (v - 0.5) * core::f64::consts::PI
 }
 
 fn uv_of_dir(spec: &EnvSpec, d: [f64; 3]) -> [f64; 2] {
@@ -310,10 +316,13 @@ fn env_map_with(
     let inverse = AcesInverse::new();
     let finish = |rgb: [f64; 3]| inverse.apply(rgb.map(srgb_to_linear));
     let (w, h) = (spec.width, spec.height);
+    // The sines and cosines once per column and per row (the same values photo_uv computes per pixel).
+    let cols: Vec<(f64, f64)> = (0..w).map(|i| phi_of(spec, i).sin_cos()).collect();
     let mut uv = Vec::with_capacity(n);
     for j in 0..h {
-        for i in 0..w {
-            uv.push(photo_uv(spec, i, j));
+        let (st, ct) = theta_of(spec, j).sin_cos();
+        for &(sp, cp) in &cols {
+            uv.push(uv_of_dir(spec, [ct * cp, st, ct * sp]));
         }
     }
     let levels = match spec.filter {
