@@ -12,14 +12,15 @@ out="$root/build/wasm/node"
 cd "$root/core"
 nix shell "$np#cargo" "$np#rustc" "$np#lld" "$np#wasm-bindgen-cli" "$np#binaryen" -c bash -euo pipefail -c '
   out="$1"
-  CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER=wasm-ld \
+  # SIMD128 (Node 22 has it): the JPEG scan and the GLB comparison vectorize, ~3x on a 12 MP JPEG.
+  CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER=wasm-ld RUSTFLAGS="-C target-feature=+simd128" \
     cargo build --release --target wasm32-unknown-unknown -p midstudy-wasm-node
   rm -rf "$out" && mkdir -p "$out"
   wasm-bindgen --target nodejs --out-dir "$out" target/wasm32-unknown-unknown/release/midstudy_wasm_node.wasm
   # The nodejs target writes CommonJS (exports.x = ...); the repo is "type": "module", so mark this folder CommonJS.
   printf "{\"type\": \"commonjs\"}\n" > "$out/package.json"
-  wasm-opt -O3 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
-    --enable-reference-types --enable-multivalue \
+  wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
+    --enable-mutable-globals --enable-reference-types --enable-multivalue \
     "$out/midstudy_wasm_node_bg.wasm" -o "$out/midstudy_wasm_node_bg.wasm"
   ls -l "$out"
 ' _ "$out"

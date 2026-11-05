@@ -51,6 +51,14 @@ pub struct Removed {
     pub trailing_bytes: usize,
 }
 
+impl Removed {
+    /// Whether the output differs from the input (exact: every dropped byte is counted above).
+    #[must_use]
+    pub fn any(&self) -> bool {
+        *self != Removed::default()
+    }
+}
+
 /// A PNG without its metadata, and what was removed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stripped {

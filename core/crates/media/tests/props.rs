@@ -158,6 +158,8 @@ proptest! {
     fn jpeg_strip_matches_the_model((file, want) in jpeg_model()) {
         let s = jpeg::strip(&file).unwrap();
         prop_assert_eq!(&s.bytes, &want);
+        // The counts are exact: something counted ⟺ the bytes changed.
+        prop_assert_eq!(s.removed.any(), s.bytes != file);
         // Idempotent, and what it writes is clean (no APPn≥1, COM, JFXX, thumbnail or byte after EOI anywhere).
         let again = jpeg::strip(&s.bytes).unwrap();
         prop_assert_eq!(&again.bytes, &s.bytes);
@@ -180,6 +182,7 @@ proptest! {
         let file = [&[0xFF, 0xD8][..], &tail].concat();
         if let Ok(s) = jpeg::strip(&file) {
             prop_assert!(jpeg::is_clean(&s.bytes));
+            prop_assert_eq!(s.removed.any(), s.bytes != file);
             prop_assert_eq!(jpeg::strip(&s.bytes).unwrap().bytes, s.bytes);
         }
         if let Ok(f) = jpeg::frame_info(&file) {
@@ -198,6 +201,7 @@ proptest! {
         m.truncate(cut.index(m.len() + 1).max(i));
         if let Ok(s) = jpeg::strip(&m) {
             prop_assert!(jpeg::is_clean(&s.bytes));
+            prop_assert_eq!(s.removed.any(), s.bytes != m);
         }
         let _ = jpeg::frame_info(&m);
     }
@@ -249,6 +253,7 @@ proptest! {
     fn png_strip_matches_the_model((file, want) in png_model()) {
         let s = png::strip(&file).unwrap();
         prop_assert_eq!(&s.bytes, &want);
+        prop_assert_eq!(s.removed.any(), s.bytes != file);
         prop_assert_eq!(png::strip(&s.bytes).unwrap().bytes, s.bytes.clone());
         prop_assert_eq!(png::size(&s.bytes), Some((7, 5)));
     }
@@ -257,6 +262,7 @@ proptest! {
     fn png_arbitrary(tail in prop::collection::vec(any::<u8>(), 0..300)) {
         let file = [&png::SIGNATURE[..], &tail].concat();
         if let Ok(s) = png::strip(&file) {
+            prop_assert_eq!(s.removed.any(), s.bytes != file);
             prop_assert_eq!(png::strip(&s.bytes).unwrap().bytes, s.bytes);
         }
         let _ = png::size(&file);

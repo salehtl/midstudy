@@ -514,18 +514,36 @@ fn read_views(text: &[u8], ix: &json::Index, buffers: &[Buffer]) -> Result<Vec<V
     Ok(out)
 }
 
-/// Cleans one image's bytes: `(kind, Some(cleaned))` for a JPEG or PNG, `(Other, None)` for anything else. The
-/// format is decided by content, as v1 did (`FF D8` or the PNG signature), whatever `mimeType` says.
+/// Cleans one image's bytes: `(kind, Some(cleaned))` for a JPEG or PNG whose metadata was removed, `(kind, None)`
+/// for one that had none and for anything else. The format is decided by content, as v1 did (`FF D8` or the PNG
+/// signature), whatever `mimeType` says. Whether bytes changed comes from the strip's own count (exact), not from
+/// comparing them (a byte-at-a-time `memcmp` in wasm).
 fn clean_image(bytes: &[u8]) -> Result<(ImageKind, Option<Vec<u8>>), ImageProblem> {
     if bytes.starts_with(&[0xFF, 0xD8]) {
         let s = jpeg::strip(bytes).map_err(ImageProblem::Jpeg)?;
-        return Ok((ImageKind::Jpeg, Some(s.bytes)));
+        return Ok((ImageKind::Jpeg, s.removed.any().then_some(s.bytes)));
     }
     if bytes.starts_with(&png::SIGNATURE) {
         let s = png::strip(bytes).map_err(ImageProblem::Png)?;
-        return Ok((ImageKind::Png, Some(s.bytes)));
+        return Ok((ImageKind::Png, s.removed.any().then_some(s.bytes)));
     }
     Ok((ImageKind::Other, None))
+}
+
+/// `a == b`, as an OR of XORs over 64-byte blocks with no early exit, which vectorizes (in wasm, slice equality is
+/// compiler-builtins' byte-at-a-time `memcmp`).
+fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+    const BLOCK: usize = 64;
+    if a.len() != b.len() {
+        return false;
+    }
+    let (mut xa, mut xb) = (a.chunks_exact(BLOCK), b.chunks_exact(BLOCK));
+    for (p, q) in (&mut xa).zip(&mut xb) {
+        if p.iter().zip(q).fold(0u8, |acc, (x, y)| acc | (x ^ y)) != 0 {
+            return false;
+        }
+    }
+    xa.remainder() == xb.remainder()
 }
 
 /// A bufferView whose image shrinks.
@@ -599,8 +617,8 @@ fn view_image(
     let (kind, clean) =
         clean_image(bytes).map_err(|problem| GlbError::BadImage { image: k, problem })?;
     let bytes_after = clean.as_ref().map_or(bytes.len(), Vec::len);
-    let changed = clean.as_ref().is_some_and(|c| c.as_slice() != bytes);
-    if let Some(clean) = clean.filter(|_| changed) {
+    let changed = clean.is_some();
+    if let Some(clean) = clean {
         out.view_edits.push(ViewEdit {
             view: vi,
             offset: view.offset,
@@ -643,8 +661,8 @@ fn uri_image(text: &[u8], k: usize, u: Value, out: &mut Cleaned) -> Result<Image
     let (kind, clean) =
         clean_image(&data.body).map_err(|problem| GlbError::BadImage { image: k, problem })?;
     let bytes_after = clean.as_ref().map_or(data.body.len(), Vec::len);
-    let changed = clean.as_ref().is_some_and(|c| *c != data.body);
-    if let Some(clean) = clean.filter(|_| changed) {
+    let changed = clean.is_some();
+    if let Some(clean) = clean {
         let text = json::quote(&datauri::encode(&data.mime, &clean));
         out.text_edits.push(TextEdit {
             start: u.start,
@@ -924,7 +942,7 @@ pub fn strip(data: &[u8], layout: Layout) -> Result<Stripped, GlbError> {
         _ => None,
     };
     let bytes = assemble(&splice_json(text, text_edits), bin_out)?;
-    let changed = bytes != data;
+    let changed = !same_bytes(&bytes, data);
     Ok(Stripped {
         bytes,
         report: Report {

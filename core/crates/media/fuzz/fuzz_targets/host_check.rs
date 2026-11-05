@@ -19,6 +19,8 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(Some(n)) = http::content_length(&[text]) {
         assert!(n < 1_000_000_000_000_000);
     }
-    let (a, b) = text.split_at(text.len() / 2);
+    // Split near the middle, at a character boundary.
+    let mid = (0..=text.len() / 2).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+    let (a, b) = text.split_at(mid);
     let _ = http::origin_ok(Some(a), Some(b), Some(text));
 });
