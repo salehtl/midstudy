@@ -201,6 +201,19 @@ const checks = {
 
   proofs() {
     if (!exists('proofs/lakefile.lean') && !exists('proofs/lakefile.toml')) return { ok: true, line: 'nothing to check (no proofs/ Lean project yet)' }
+    // The proofs track's own gate: the pinned Lean (nix/lean.nix) and Mathlib's cache kept in proofs/.lake, never ~/.cache.
+    // A worktree without Mathlib's compiled files fetches them first (about 2 minutes): a plain `lake build` would build
+    // Mathlib from source (hours).
+    if (exists('proofs/check.sh') && exists('proofs/run.sh')) {
+      const dir = path.join(ROOT, 'proofs')
+      if (!exists('proofs/.lake/packages/mathlib/.lake/build')) {
+        const g = sh(path.join(dir, 'run.sh'), ['lake', 'exe', 'cache', 'get'], { cwd: dir })
+        if (g.code !== 0) return { ok: false, line: "Mathlib's cache get failed", out: g.out }
+      }
+      const c = sh(path.join(dir, 'check.sh'), [], { cwd: dir })
+      const last = c.out.trim().split('\n').filter((l) => /check:proofs/.test(l)).at(-1) ?? c.out.trim().split('\n').at(-1) ?? ''
+      return { ok: c.code === 0, line: last.replace(/^.*check:proofs:\s*/, ''), out: c.out }
+    }
     const b = sh('lake', ['build'], { cwd: path.join(ROOT, 'proofs') })
     if (b.code !== 0) return { ok: false, line: 'lake build failed', out: b.out }
     const allowed = exists('proofs/axioms.txt') ? fs.readFileSync(path.join(ROOT, 'proofs/axioms.txt'), 'utf8').split('\n').map((l) => l.replace(/#.*/, '').trim()).filter(Boolean) : []

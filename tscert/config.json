@@ -1,8 +1,25 @@
 {
   "doc": "The pure logic modules TScert checks (docs/REFACTOR.md §1, functional core). Each area: a glob (relative to the repo) and the tsconfig TScert reads it with (relative to the repo). scripts/tscert-ratchet.mjs; tscert/README.md.",
   "areas": [
-    { "glob": "planner/logic/**/*.ts", "project": "tscert/tsconfig.planner.json" },
-    { "glob": "server/src/logic/**/*.ts", "project": "tscert/tsconfig.server.json" },
-    { "glob": "pipeline/src/logic/**/*.ts", "project": "tscert/tsconfig.pipeline.json" }
+    {
+      "glob": "planner/logic/**/*.ts",
+      "project": "tscert/tsconfig.planner.json"
+    },
+    {
+      "glob": "planner/ui/logic/**/*.ts",
+      "project": "tscert/tsconfig.planner.json"
+    },
+    {
+      "glob": "server/src/logic/**/*.ts",
+      "project": "tscert/tsconfig.server.json"
+    },
+    {
+      "glob": "pipeline/src/logic/**/*.ts",
+      "project": "tscert/tsconfig.pipeline.json"
+    },
+    {
+      "glob": "common/logic/**/*.ts",
+      "project": "tscert/tsconfig.server.json"
+    }
   ]
 }

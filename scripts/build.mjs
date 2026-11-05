@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The v2 build (docs/REFACTOR.md §1–§2; docs/notes/f-toolchain.md). `npm run build`, or `node scripts/build.mjs`.
 //
-// 1. wasm (only when core/crates/wasm-web or core/crates/wasm-node exist): cargo build --release --target
+// 1. wasm (every core/crates/wasm-<name> crate, into build/wasm/<name>/): cargo build --release --target
 //    wasm32-unknown-unknown (SIMD128 through core/.cargo/config.toml), wasm-bindgen 0.2.121 (--target web into
 //    build/wasm/web/, --target experimental-nodejs-module, Node ESM, into build/wasm/node/), then wasm-opt -O3 with SIMD.
 //    File names are wasm-bindgen's: <lib name>.js, <lib name>.d.ts, <lib name>_bg.wasm (+ _bg.wasm.d.ts).
@@ -108,10 +108,21 @@ const scriptKey = createHash('sha256').update(fs.readFileSync(import.meta.filena
 
 // --- 1. wasm --------------------------------------------------------------------------------------------------------------
 const CORE = path.join(ROOT, 'core')
-const WASM_CRATES = [
-  { crate: 'wasm-web', target: 'web', out: path.join(ROOT, 'build/wasm/web') },
-  { crate: 'wasm-node', target: 'experimental-nodejs-module', out: path.join(ROOT, 'build/wasm/node') },
-].filter((c) => fs.existsSync(path.join(CORE, 'crates', c.crate, 'Cargo.toml')))
+// Every core/crates/wasm-<name> crate builds into build/wasm/<name>/: wasm-web (or a crate whose Cargo.toml says
+// [package.metadata.midstudy] target = "web") for the browser with --target web, every other one for Node as ESM
+// (wasm-node, wasm-pipeline, wasm-product…).
+const WASM_CRATES = (() => {
+  let dirs = []
+  try {
+    dirs = fs.readdirSync(path.join(CORE, 'crates'), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith('wasm-')).map((e) => e.name).sort()
+  } catch { return [] }
+  return dirs.filter((d) => fs.existsSync(path.join(CORE, 'crates', d, 'Cargo.toml'))).map((d) => {
+    const meta = fs.readFileSync(path.join(CORE, 'crates', d, 'Cargo.toml'), 'utf8').split('[package.metadata.midstudy]')[1] ?? ''
+    const web = d === 'wasm-web' || /^\s*target\s*=\s*"web"/m.test(meta.split(/^\[/m)[0] ?? '')
+    return { crate: d, target: web ? 'web' : 'experimental-nodejs-module', out: path.join(ROOT, 'build/wasm', d.slice('wasm-'.length)) }
+  })
+})()
 // The wasm features Rust 1.95 enables by default for wasm32-unknown-unknown, plus SIMD128 (core/.cargo/config.toml).
 const WASM_OPT_FEATURES = ['--enable-simd', '--enable-bulk-memory', '--enable-sign-ext', '--enable-nontrapping-float-to-int',
   '--enable-mutable-globals', '--enable-reference-types', '--enable-multivalue']
@@ -124,7 +135,7 @@ function run(cmd, argv, opts = {}) {
 }
 
 async function buildWasm() {
-  if (!WASM_CRATES.length) return 'wasm: no core/crates/wasm-web or wasm-node yet, nothing to build'
+  if (!WASM_CRATES.length) return 'wasm: no core/crates/wasm-* crate yet, nothing to build'
   const inputs = walk(CORE, (p, e) => e.isDirectory() && ['target', 'fuzz', '.git'].includes(e.name))
     .filter((f) => /\.(rs|toml|lock)$/.test(f))
   const tools = ['cargo', 'rustc', 'wasm-bindgen', 'wasm-opt'].map((t) => [t, which(t)])

@@ -3,5 +3,5 @@
   // logic module that needs node:fs belongs in a shell module).
   "extends": "../tsconfig.server.json",
   "compilerOptions": { "lib": ["ES2024"], "types": [], "composite": false },
-  "include": ["../server/src/logic/**/*.ts"]
+  "include": ["../server/src/logic/**/*.ts", "../common/logic/**/*.ts"]
 }

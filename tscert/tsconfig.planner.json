@@ -3,5 +3,5 @@
   // ambient types, so a logic module that reaches for the browser fails here (it belongs in a shell module).
   "extends": "../tsconfig.planner.json",
   "compilerOptions": { "lib": ["ES2023"], "types": [], "allowJs": false, "composite": false },
-  "include": ["../planner/logic/**/*.ts"]
+  "include": ["../planner/logic/**/*.ts", "../planner/ui/logic/**/*.ts"]
 }

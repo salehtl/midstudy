@@ -1,27 +1,165 @@
 {
   "doc": "Which paths each v2 track may change (docs/REFACTOR.md §6). Globs: ** any depth, * one segment, {a,b}; a leading ! excludes. shared_append files may gain entries from any track. docs/notes/<track>.md is always allowed.",
-  "shared_append": ["package.json", "package-lock.json", "core/Cargo.lock"],
+  "shared_append": [
+    "package.json",
+    "package-lock.json",
+    "core/Cargo.lock",
+    "tscert/baseline.json",
+    "knip.json"
+  ],
   "tracks": {
-    "f-toolchain": ["flake.nix", "flake.lock", "nix/**", "!nix/lean.nix", "tsconfig*.json", "eslint.config.*", "knip.*", ".npmrc", "scripts/**", "!scripts/ownership.json", "!scripts/check-ownership.mjs", "!scripts/eval-lock.mjs", "!scripts/gen-contract.mjs", "planner/index.html", ".gitignore", "tscert/**", "core/Cargo.toml", "core/.cargo/**", "core/rust-toolchain*", "core/deny.toml", "core/clippy.toml", "core/rustfmt.toml"],
-    "f-contract": ["contract/**", "core/crates/contract/**", "scripts/gen-contract.mjs", "evals/lib/harness.mjs", "evals/library_api.sh", "evals/pipeline_offline.sh", "evals/README.md", "evals/all.mjs"],
-    "f-perf": ["evals/perf.mjs", "evals/perf/**"],
-    "k-media": ["core/crates/media/**", "core/crates/wasm-node/**", "core/js/node.ts"],
-    "k-geom": ["core/crates/geom/**", "core/crates/raster/**", "core/crates/wasm-web/**", "core/js/web.ts"],
-    "proofs": ["proofs/**", "nix/lean.nix"],
-    "calib": ["calib/**", "contract/CONTRACT.md"],
-    "webgpu-spike": ["planner/gpu/**"],
-    "server-core": ["server/**", "!server/src/product/**"],
-    "server-routes": ["server/**", "!server/src/product/**"],
-    "product": ["server/src/product/**", "core/crates/product/**"],
-    "engine": ["planner/main.*", "planner/engine.*", "planner/lighting.*", "planner/input.*", "planner/data.*", "planner/logic/**"],
-    "ui": ["planner/ui/**", "planner/styles/**"],
-    "pipeline": ["pipeline/**", "core/crates/splat/**"],
-    "kernels-hardening": ["core/crates/media/**", "core/crates/geom/**", "core/crates/raster/**", "core/crates/wasm-web/**", "core/crates/wasm-node/**", "core/js/**", "core/fuzz/**"],
-    "packaging": ["nix/**", "flake.nix", "flake.lock", "docs/HANDOFF.md"],
-    "gate-1": ["**"],
-    "integration": ["**"],
-    "webgpu-swap": ["**"],
-    "fixer": ["**"],
-    "finish": ["**"]
+    "f-toolchain": [
+      "flake.nix",
+      "flake.lock",
+      "nix/**",
+      "!nix/lean.nix",
+      "**/tsconfig*.json",
+      "eslint.config.*",
+      "knip.*",
+      ".npmrc",
+      "scripts/**",
+      "!scripts/ownership.json",
+      "!scripts/check-ownership.mjs",
+      "!scripts/eval-lock.mjs",
+      "!scripts/gen-contract.mjs",
+      "planner/index.html",
+      ".gitignore",
+      "tscert/**",
+      "core/Cargo.toml",
+      "core/.cargo/**",
+      "core/rust-toolchain*",
+      "core/deny.toml",
+      "core/clippy.toml",
+      "core/rustfmt.toml",
+      "core/miri.txt"
+    ],
+    "f-contract": [
+      "contract/**",
+      "core/crates/contract/**",
+      "scripts/gen-contract.mjs",
+      "evals/lib/harness.mjs",
+      "evals/library_api.sh",
+      "evals/pipeline_offline.sh",
+      "evals/README.md",
+      "evals/all.mjs"
+    ],
+    "f-perf": [
+      "evals/perf.mjs",
+      "evals/perf/**"
+    ],
+    "k-media": [
+      "core/crates/media/**",
+      "core/crates/wasm-node/**",
+      "core/js/node.ts"
+    ],
+    "k-geom": [
+      "core/crates/geom/**",
+      "core/crates/raster/**",
+      "core/crates/wasm-web/**",
+      "core/js/web.ts"
+    ],
+    "proofs": [
+      "proofs/**",
+      "nix/lean.nix"
+    ],
+    "calib": [
+      "calib/**",
+      "contract/CONTRACT.md"
+    ],
+    "webgpu-spike": [
+      "planner/gpu/**"
+    ],
+    "server-core": [
+      "server/**",
+      "common/**",
+      "contract/CONTRACT.md",
+      "tsconfig.server.json"
+    ],
+    "server-scenes": [
+      "server/src/scenes/**",
+      "server/src/routes/scenes.ts",
+      "server/src/routes/layouts.ts",
+      "server/src/routes/render.ts",
+      "server/test/scenes/**"
+    ],
+    "server-library": [
+      "server/src/library/**",
+      "server/src/routes/library.ts",
+      "server/test/library/**"
+    ],
+    "product": [
+      "server/src/product/**",
+      "server/test/product/**",
+      "core/crates/product/**",
+      "core/crates/wasm-product/**",
+      "core/js/product.ts"
+    ],
+    "engine": [
+      "planner/main.*",
+      "planner/engine.*",
+      "planner/lighting.*",
+      "planner/input.*",
+      "planner/data.*",
+      "planner/logic/**",
+      "tsconfig.planner.json"
+    ],
+    "ui": [
+      "planner/ui/**",
+      "planner/styles/**",
+      "planner/index.html"
+    ],
+    "pipeline": [
+      "pipeline/**",
+      "core/crates/splat/**",
+      "core/crates/imaging/**",
+      "core/crates/wasm-pipeline/**",
+      "core/js/pipeline.ts",
+      "tsconfig.pipeline.json"
+    ],
+    "kernels-hardening": [
+      "core/crates/media/**",
+      "core/crates/geom/**",
+      "core/crates/raster/**",
+      "core/crates/wasm-web/**",
+      "core/crates/wasm-node/**",
+      "core/js/web.ts",
+      "core/js/node.ts",
+      "core/fuzz/**",
+      "core/miri.txt"
+    ],
+    "packaging": [
+      "nix/**",
+      "flake.nix",
+      "flake.lock",
+      "docs/HANDOFF.md"
+    ],
+    "proofs-final": [
+      "proofs/**",
+      "nix/lean.nix"
+    ],
+    "verify-ux": [],
+    "verify-contract": [],
+    "verify-rigor-perf": [],
+    "gate-1": [
+      "**"
+    ],
+    "int-planner": [
+      "**"
+    ],
+    "int-backend": [
+      "**"
+    ],
+    "cutover": [
+      "**"
+    ],
+    "webgpu-swap": [
+      "**"
+    ],
+    "fixer": [
+      "**"
+    ],
+    "finish": [
+      "**"
+    ]
   }
 }
