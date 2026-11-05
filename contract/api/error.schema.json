@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/error.schema.json",
+  "title": "ApiError",
+  "description": "Every /api error answer (contract §2.1): one sentence. Routes with richer errors name their own schema in routes.json (402: spend-refused, product: product-error).",
+  "type": "object",
+  "required": ["error"],
+  "additionalProperties": false,
+  "properties": {
+    "error": { "type": "string", "minLength": 1 }
+  }
+}

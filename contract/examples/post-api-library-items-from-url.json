@@ -1,0 +1,59 @@
+{
+  "route": "POST /api/library/items/from-url",
+  "contract": "§2.8, §2.9",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/library-from-url.schema.json",
+      "type": "LibraryFromUrl",
+      "note": "an image link, SAM 3D",
+      "body": {
+        "image_url": "http://127.0.0.1:64081/media/cane-chair.jpg",
+        "name": "Cane chair",
+        "dims_cm": {
+          "w": 75,
+          "d": 80,
+          "h": 95
+        },
+        "engine": "sam3d",
+        "prompt": "chair"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/library-add-accepted.schema.json",
+      "type": "LibraryAddAccepted",
+      "note": "an image link, SAM 3D",
+      "body": {
+        "job": {
+          "id": "l-20261105-180706-fbfd",
+          "kind": "add",
+          "item_id": "cane-chair",
+          "status": "queued",
+          "engine": "sam3d",
+          "cost_usd_estimate": 0.02,
+          "cost_usd": null,
+          "mock": true,
+          "created": "2026-11-05T18:07:06Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the queue",
+          "item": null
+        },
+        "cost_usd_estimate": 0.02
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "a private address",
+      "body": {
+        "error": "that address is on a private network"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

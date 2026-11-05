@@ -1,0 +1,37 @@
+{
+  "route": "POST /api/scenes/{name}/calibrate",
+  "contract": "§4.4",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/calibrate-accepted.schema.json",
+      "type": "CalibrateAccepted",
+      "note": "recalibrate",
+      "body": {
+        "job": {
+          "id": "c-20261105-180704-1f4f",
+          "kind": "calibrate",
+          "scene": "scene-20261105-180704",
+          "status": "queued",
+          "created": "2026-11-05T18:07:04Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the calibration queue",
+          "calib": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 409,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "while one is queued or running",
+      "body": {
+        "error": "this scene is already calibrating: wait for it to finish"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

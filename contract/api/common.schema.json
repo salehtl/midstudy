@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/common.schema.json",
+  "title": "Common",
+  "description": "Definitions shared by the midstudy HTTP API schemas (contract §2, §4.4). Not a payload itself.",
+  "$defs": {
+    "slug": { "title": "Slug", "description": "Ids, layout and scene names (CLAUDE.md conventions).", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "dateTime": { "title": "DateTime", "description": "ISO-8601 UTC, e.g. 2026-11-05T12:00:00Z.", "type": "string", "format": "date-time" },
+    "usd": { "title": "Usd", "description": "An amount in US dollars.", "type": "number", "minimum": 0 },
+    "jobStatus": { "title": "JobStatus", "enum": ["queued", "running", "done", "failed"] },
+    "jpegDataUri": {
+      "title": "JpegDataUri",
+      "description": "A JPEG as a base64 data URI (contract §2.6). The server stores and sends it without its metadata.",
+      "type": "string",
+      "pattern": "^data:image/jpe?g;base64,[A-Za-z0-9+/=\\s]+$"
+    },
+    "pngDataUri": { "title": "PngDataUri", "description": "A PNG as a base64 data URI.", "type": "string", "pattern": "^data:image/png;base64,[A-Za-z0-9+/=\\s]+$" },
+    "publicCalib": {
+      "title": "PublicCalib",
+      "description": "calib.json as the API serves it (contract §4.4): never the camera's make or model (exif.make, exif.model stay on disk), never the stdout-only ok key.",
+      "allOf": [
+        { "$ref": "../calib.schema.json" },
+        {
+          "type": "object",
+          "not": { "type": "object", "required": ["ok"] },
+          "properties": { "exif": { "not": { "type": "object", "anyOf": [{ "required": ["make"] }, { "required": ["model"] }] } } }
+        }
+      ]
+    }
+  }
+}

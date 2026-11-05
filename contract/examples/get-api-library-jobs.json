@@ -1,0 +1,96 @@
+{
+  "route": "GET /api/library/jobs",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/library-jobs.schema.json",
+      "type": "LibraryJobs",
+      "note": "queued and running jobs",
+      "body": {
+        "jobs": [
+          {
+            "id": "l-20261105-180706-fbfd",
+            "kind": "add",
+            "item_id": "cane-chair",
+            "status": "queued",
+            "engine": "sam3d",
+            "cost_usd_estimate": 0.02,
+            "cost_usd": null,
+            "mock": true,
+            "created": "2026-11-05T18:07:06Z",
+            "started": null,
+            "finished": null,
+            "message": "waiting for the queue",
+            "item": null
+          },
+          {
+            "id": "l-20261105-180706-cadf",
+            "kind": "add",
+            "item_id": "morris-chair",
+            "status": "running",
+            "engine": "idol",
+            "cost_usd_estimate": 0.1,
+            "cost_usd": null,
+            "mock": true,
+            "created": "2026-11-05T18:07:06Z",
+            "started": "2026-11-05T18:07:06Z",
+            "finished": null,
+            "message": "making morris-chair (idol)",
+            "item": null
+          },
+          {
+            "id": "l-20261105-180705-ea10",
+            "kind": "add",
+            "item_id": "arrow-sign",
+            "status": "done",
+            "engine": "glb",
+            "cost_usd_estimate": 0,
+            "cost_usd": 0,
+            "mock": true,
+            "created": "2026-11-05T18:07:05Z",
+            "started": "2026-11-05T18:07:05Z",
+            "finished": "2026-11-05T18:07:05Z",
+            "message": "added arrow-sign",
+            "item": {
+              "id": "arrow-sign",
+              "name": "Arrow sign",
+              "category": "decor",
+              "dims_cm": {
+                "w": 100,
+                "d": 40,
+                "h": 30
+              },
+              "assets": {
+                "glb": "arrow-sign/model.glb",
+                "splat": null,
+                "spz": null,
+                "thumb": null
+              },
+              "default_render": "glb",
+              "source": {
+                "engine": "glb",
+                "input": "arrow.glb",
+                "prompt": null,
+                "cost_usd": 0,
+                "mock": true,
+                "created": "2026-11-05T18:07:05Z"
+              },
+              "fit": {
+                "glb_error_pct": {
+                  "w": 0,
+                  "d": 0,
+                  "h": 0
+                },
+                "splat_error_pct": null
+              },
+              "notes": null
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

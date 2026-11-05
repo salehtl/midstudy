@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-list.schema.json",
+  "title": "SceneList",
+  "description": "GET /api/scenes (contract §4.4): the scenes newest first (by created, ties by the name's collision suffix as a number), and the deleted scenes newest first.",
+  "type": "object",
+  "required": ["scenes", "trash"],
+  "additionalProperties": false,
+  "properties": {
+    "scenes": { "type": "array", "items": { "$ref": "scene-object.schema.json" } },
+    "trash": {
+      "type": "array",
+      "items": {
+        "title": "TrashedScene",
+        "type": "object",
+        "required": ["name", "title", "created", "deleted"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/slug" },
+          "title": { "type": ["string", "null"] },
+          "created": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+          "deleted": { "$ref": "common.schema.json#/$defs/dateTime" }
+        }
+      }
+    }
+  }
+}

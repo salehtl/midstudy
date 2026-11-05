@@ -1,0 +1,117 @@
+{
+  "route": "PATCH /api/library/items/{id}",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/library-patch.schema.json",
+      "type": "LibraryPatch",
+      "note": "edits in place",
+      "body": {
+        "name": "Arrow",
+        "category": null,
+        "mount": "wall"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/library.schema.json#/$defs/item",
+      "type": "LibraryItem",
+      "note": "edits in place",
+      "body": {
+        "id": "arrow-sign",
+        "name": "Arrow",
+        "category": null,
+        "dims_cm": {
+          "w": 100,
+          "d": 40,
+          "h": 30
+        },
+        "assets": {
+          "glb": "arrow-sign/model.glb",
+          "splat": null,
+          "spz": null,
+          "thumb": null
+        },
+        "default_render": "glb",
+        "source": {
+          "engine": "glb",
+          "input": "arrow.glb",
+          "prompt": null,
+          "cost_usd": 0,
+          "mock": true,
+          "created": "2026-11-05T18:07:05Z"
+        },
+        "fit": {
+          "glb_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          },
+          "splat_error_pct": null
+        },
+        "notes": null,
+        "mount": "wall"
+      }
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/library-patch.schema.json",
+      "type": "LibraryPatch",
+      "note": "new dims: a rescale job ($0)",
+      "body": {
+        "dims_cm": {
+          "w": 120,
+          "d": 40,
+          "h": 30
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/library-rescale-accepted.schema.json",
+      "type": "LibraryRescaleAccepted",
+      "note": "new dims: a rescale job ($0)",
+      "body": {
+        "job": {
+          "id": "l-20261105-180708-a64c",
+          "kind": "rescale",
+          "item_id": "arrow-sign",
+          "status": "queued",
+          "engine": "glb",
+          "cost_usd_estimate": 0,
+          "cost_usd": null,
+          "mock": true,
+          "created": "2026-11-05T18:07:08Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the queue",
+          "item": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "an Idol piece has no mesh to show",
+      "body": {
+        "error": "an Idol piece has no mesh to show: its model.glb is a stand-in box"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "unknown item",
+      "body": {
+        "error": "no library item 'no-such-item': GET /api/library lists them"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

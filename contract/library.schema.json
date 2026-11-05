@@ -10,16 +10,30 @@
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }
   },
   "$defs": {
-    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
-    "relpath": { "type": "string", "minLength": 1, "not": { "pattern": "^(/|[a-zA-Z]+:)" } },
-    "pct": { "type": "number", "minimum": 0 },
+    "slug": { "title": "Slug", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "relpath": { "title": "RelPath", "type": "string", "minLength": 1, "not": { "pattern": "^(/|[a-zA-Z]+:)" } },
+    "pct": { "title": "Percent", "type": "number", "minimum": 0 },
     "axisErr": {
+      "title": "AxisError",
       "type": "object",
       "required": ["w", "d", "h"],
       "additionalProperties": false,
       "properties": { "w": { "$ref": "#/$defs/pct" }, "d": { "$ref": "#/$defs/pct" }, "h": { "$ref": "#/$defs/pct" } }
     },
+    "dims": {
+      "title": "Dims",
+      "description": "Width (X), depth (Z) and height (Y) in centimeters.",
+      "type": "object",
+      "required": ["w", "d", "h"],
+      "additionalProperties": false,
+      "properties": {
+        "w": { "type": "number", "exclusiveMinimum": 0 },
+        "d": { "type": "number", "exclusiveMinimum": 0 },
+        "h": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
     "item": {
+      "title": "LibraryItem",
       "type": "object",
       "required": ["id", "name", "dims_cm", "assets", "default_render", "source"],
       "additionalProperties": false,
@@ -28,16 +42,7 @@
         "name": { "type": "string", "minLength": 1 },
         "category": { "type": ["string", "null"] },
         "mount": { "enum": ["floor", "wall"] },
-        "dims_cm": {
-          "type": "object",
-          "required": ["w", "d", "h"],
-          "additionalProperties": false,
-          "properties": {
-            "w": { "type": "number", "exclusiveMinimum": 0 },
-            "d": { "type": "number", "exclusiveMinimum": 0 },
-            "h": { "type": "number", "exclusiveMinimum": 0 }
-          }
-        },
+        "dims_cm": { "$ref": "#/$defs/dims" },
         "assets": {
           "type": "object",
           "required": ["glb"],

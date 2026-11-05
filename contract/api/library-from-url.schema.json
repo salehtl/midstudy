@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-from-url.schema.json",
+  "title": "LibraryFromUrl",
+  "description": "POST /api/library/items/from-url (contract §2.8, §2.9 URL fetches): {image_url, ...meta}. The server downloads the image itself (http/https, public addresses only).",
+  "type": "object",
+  "required": ["image_url", "name", "dims_cm"],
+  "additionalProperties": false,
+  "properties": {
+    "image_url": { "type": "string", "pattern": "\\S" },
+    "name": { "$ref": "library-meta.schema.json#/properties/name" },
+    "dims_cm": { "$ref": "../library.schema.json#/$defs/dims" },
+    "id": { "$ref": "common.schema.json#/$defs/slug" },
+    "category": { "$ref": "library-meta.schema.json#/properties/category" },
+    "mount": { "$ref": "library-meta.schema.json#/properties/mount" },
+    "yaw": { "$ref": "library-meta.schema.json#/properties/yaw" },
+    "engine": { "description": "An image engine: idol (default), sam3d, trellis2 or rug.", "enum": ["idol", "sam3d", "trellis2", "rug"] },
+    "prompt": { "$ref": "library-meta.schema.json#/properties/prompt" },
+    "resolution": { "$ref": "library-meta.schema.json#/properties/resolution" }
+  }
+}

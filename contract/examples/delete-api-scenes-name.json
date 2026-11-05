@@ -1,0 +1,18 @@
+{
+  "route": "DELETE /api/scenes/{name}",
+  "contract": "§4.4",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-deleted.schema.json",
+      "type": "SceneDeleted",
+      "note": "to the trash",
+      "body": {
+        "ok": true,
+        "trash": "scenes/.trash/scene-20261105-180705-20261105-180705"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

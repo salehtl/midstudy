@@ -1,0 +1,40 @@
+{
+  "route": "POST /api/scenes/{name}/restore",
+  "contract": "§4.4",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-object.schema.json",
+      "type": "SceneObject",
+      "note": "back from the trash",
+      "body": {
+        "name": "scene-20261105-180705",
+        "title": null,
+        "created": "2026-11-05T18:07:05Z",
+        "saved": null,
+        "photo_url": "/scenes/scene-20261105-180705/photo.jpg?v=1793902025",
+        "thumb_url": null,
+        "depth_url": "/scenes/scene-20261105-180705/depth.png?v=1793902025",
+        "w": 1200,
+        "h": 1600,
+        "camera_source": "auto",
+        "floor_found": true,
+        "layouts": 0,
+        "calib_status": "done",
+        "calib_error": null
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "none left in the trash",
+      "body": {
+        "error": "'scene-20261105-180705' isn't in the scenes' trash"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

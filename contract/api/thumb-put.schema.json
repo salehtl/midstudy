@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/thumb-put.schema.json",
+  "title": "ThumbPut",
+  "description": "PUT /api/scenes/<name>/thumb and PUT /api/library/items/<id>/thumb (contract §2.6, §2.8, §4.4): a JPEG of at most 2 MB (413 over it, 400 when it isn't a JPEG). It is stored without its metadata.",
+  "type": "object",
+  "required": ["image"],
+  "additionalProperties": false,
+  "properties": {
+    "image": { "$ref": "common.schema.json#/$defs/jpegDataUri" }
+  }
+}

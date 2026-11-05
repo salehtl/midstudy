@@ -1,0 +1,33 @@
+{
+  "route": "GET /api/spend",
+  "contract": "§2.9",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/spend.schema.json",
+      "type": "Spend",
+      "note": null,
+      "body": {
+        "day": "2026-11-05",
+        "spent_usd": 0,
+        "reserved_usd": 0,
+        "cap_usd": 0
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/spend.schema.json",
+      "type": "Spend",
+      "note": "a $0.03 cap",
+      "body": {
+        "day": "2026-11-05",
+        "spent_usd": 0,
+        "reserved_usd": 0,
+        "cap_usd": 0.03
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

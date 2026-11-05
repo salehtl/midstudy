@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/render-list.schema.json",
+  "title": "RenderList",
+  "description": "GET /api/renders[?scene=<name>] (contract §2.6, §4.7): newest first.",
+  "type": "object",
+  "required": ["renders", "mock"],
+  "additionalProperties": false,
+  "properties": {
+    "renders": { "type": "array", "items": { "$ref": "render-meta.schema.json" } },
+    "mock": { "description": "v1: whether the server runs with the fal mock (the contract is silent; the planner shows it).", "type": "boolean" }
+  }
+}

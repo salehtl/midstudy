@@ -13,6 +13,19 @@
     "saved": { "description": "Last PUT that changed more than the title, ISO-8601 UTC; null until then.", "type": ["string", "null"], "format": "date-time" },
     "camera": {
       "description": "The camera in use (contract §4.1; same block as calib.schema.json's). Until calibration finishes it is the default camera with camera_source default.",
+      "$ref": "#/$defs/camera"
+    },
+    "camera_source": {
+      "description": "auto: copied from calib.json; manual: the user changed it in Adjust floor; default: no calibration yet, or it failed.",
+      "enum": ["auto", "manual", "default"]
+    },
+    "look": { "$ref": "#/$defs/look" },
+    "upload": { "$ref": "#/$defs/upload" }
+  },
+  "$defs": {
+    "camera": {
+      "title": "Camera",
+      "description": "The camera block (contract §4.1), the same object as calib.schema.json's $defs/camera. Ranges are clamped by every writer.",
       "type": "object",
       "required": ["fov_y_deg", "height_m", "pitch_deg", "roll_deg"],
       "additionalProperties": false,
@@ -23,11 +36,8 @@
         "roll_deg": { "type": "number", "minimum": -20, "maximum": 20 }
       }
     },
-    "camera_source": {
-      "description": "auto: copied from calib.json; manual: the user changed it in Adjust floor; default: no calibration yet, or it failed.",
-      "enum": ["auto", "manual", "default"]
-    },
     "look": {
+      "title": "Look",
       "description": "Applied to the furniture only, never to the photo (contract §4.5), and the lighting controls (contract §4.8). Every key is optional; a missing key takes its default.",
       "type": "object",
       "additionalProperties": false,
@@ -45,6 +55,7 @@
       }
     },
     "upload": {
+      "title": "Upload",
       "description": "What was uploaded (set by the server; informational): the original file name, its extension (source.<ext>) and size.",
       "type": "object",
       "additionalProperties": false,

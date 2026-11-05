@@ -1,0 +1,66 @@
+{
+  "route": "GET /api/layouts/{layout}",
+  "contract": "§2.7",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/layout.schema.json",
+      "type": "Layout",
+      "note": null,
+      "body": {
+        "version": 1,
+        "name": "front",
+        "title": "Front",
+        "scene_name": "scene-20261105-180704",
+        "library": "/library/library.json",
+        "updated": "2026-11-05T18:07:05Z",
+        "items": [
+          {
+            "uid": "probe-box-1",
+            "id": "probe-box",
+            "render": "glb",
+            "position": [
+              0.4,
+              0,
+              -2.6
+            ],
+            "rotation_y_deg": 15,
+            "dims_cm": {
+              "w": 80,
+              "d": 50,
+              "h": 120
+            }
+          },
+          {
+            "uid": "gone-1",
+            "id": "deleted-chair",
+            "render": "glb",
+            "position": [
+              -0.8,
+              0.45,
+              -3.1
+            ],
+            "rotation_y_deg": -90,
+            "dims_cm": {
+              "w": 60,
+              "d": 60,
+              "h": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "no such layout",
+      "body": {
+        "error": "scene 'scene-20261105-180704' has no layout named 'nope'"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

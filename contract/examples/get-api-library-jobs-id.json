@@ -1,0 +1,246 @@
+{
+  "route": "GET /api/library/jobs/{id}",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/library-job.schema.json",
+      "type": "LibraryJob",
+      "note": "a GLB add, done",
+      "body": {
+        "id": "l-20261105-180705-ea10",
+        "kind": "add",
+        "item_id": "arrow-sign",
+        "status": "done",
+        "engine": "glb",
+        "cost_usd_estimate": 0,
+        "cost_usd": 0,
+        "mock": true,
+        "created": "2026-11-05T18:07:05Z",
+        "started": "2026-11-05T18:07:05Z",
+        "finished": "2026-11-05T18:07:05Z",
+        "message": "added arrow-sign",
+        "item": {
+          "id": "arrow-sign",
+          "name": "Arrow sign",
+          "category": "decor",
+          "dims_cm": {
+            "w": 100,
+            "d": 40,
+            "h": 30
+          },
+          "assets": {
+            "glb": "arrow-sign/model.glb",
+            "splat": null,
+            "spz": null,
+            "thumb": null
+          },
+          "default_render": "glb",
+          "source": {
+            "engine": "glb",
+            "input": "arrow.glb",
+            "prompt": null,
+            "cost_usd": 0,
+            "mock": true,
+            "created": "2026-11-05T18:07:05Z"
+          },
+          "fit": {
+            "glb_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            },
+            "splat_error_pct": null
+          },
+          "notes": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/library-job.schema.json",
+      "type": "LibraryJob",
+      "note": "an Idol add, done: splat, spz, stand-in box",
+      "body": {
+        "id": "l-20261105-180706-cadf",
+        "kind": "add",
+        "item_id": "morris-chair",
+        "status": "done",
+        "engine": "idol",
+        "cost_usd_estimate": 0.1,
+        "cost_usd": 0,
+        "mock": true,
+        "created": "2026-11-05T18:07:06Z",
+        "started": "2026-11-05T18:07:06Z",
+        "finished": "2026-11-05T18:07:07Z",
+        "message": "added morris-chair",
+        "item": {
+          "id": "morris-chair",
+          "name": "Morris chair",
+          "category": "chair",
+          "dims_cm": {
+            "w": 80,
+            "d": 90,
+            "h": 95
+          },
+          "assets": {
+            "glb": "morris-chair/model.glb",
+            "splat": "morris-chair/splat.ply",
+            "spz": "morris-chair/splat.spz",
+            "thumb": "morris-chair/thumb.jpg"
+          },
+          "default_render": "splat",
+          "source": {
+            "engine": "idol",
+            "input": "chair.jpg",
+            "prompt": null,
+            "cost_usd": 0,
+            "mock": true,
+            "created": "2026-11-05T18:07:07Z"
+          },
+          "fit": {
+            "glb_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            },
+            "splat_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            }
+          },
+          "notes": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/library-job.schema.json",
+      "type": "LibraryJob",
+      "note": "a SAM 3D add from a link, done",
+      "body": {
+        "id": "l-20261105-180706-fbfd",
+        "kind": "add",
+        "item_id": "cane-chair",
+        "status": "done",
+        "engine": "sam3d",
+        "cost_usd_estimate": 0.02,
+        "cost_usd": 0,
+        "mock": true,
+        "created": "2026-11-05T18:07:06Z",
+        "started": "2026-11-05T18:07:07Z",
+        "finished": "2026-11-05T18:07:08Z",
+        "message": "added cane-chair",
+        "item": {
+          "id": "cane-chair",
+          "name": "Cane chair",
+          "category": null,
+          "dims_cm": {
+            "w": 75,
+            "d": 80,
+            "h": 95
+          },
+          "assets": {
+            "glb": "cane-chair/model.glb",
+            "splat": "cane-chair/splat.ply",
+            "spz": "cane-chair/splat.spz",
+            "thumb": "cane-chair/thumb.jpg"
+          },
+          "default_render": "splat",
+          "source": {
+            "engine": "sam3d",
+            "input": "http://127.0.0.1:64081/media/cane-chair.jpg",
+            "prompt": "chair",
+            "cost_usd": 0,
+            "mock": true,
+            "created": "2026-11-05T18:07:08Z"
+          },
+          "fit": {
+            "glb_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            },
+            "splat_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            }
+          },
+          "notes": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "unknown job",
+      "body": {
+        "error": "no library job 'l-nope': GET /api/library/jobs lists them"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/library-job.schema.json",
+      "type": "LibraryJob",
+      "note": "a rescale, done",
+      "body": {
+        "id": "l-20261105-180708-a64c",
+        "kind": "rescale",
+        "item_id": "arrow-sign",
+        "status": "done",
+        "engine": "glb",
+        "cost_usd_estimate": 0,
+        "cost_usd": 0,
+        "mock": true,
+        "created": "2026-11-05T18:07:08Z",
+        "started": "2026-11-05T18:07:08Z",
+        "finished": "2026-11-05T18:07:08Z",
+        "message": "refit arrow-sign ($0)",
+        "item": {
+          "id": "arrow-sign",
+          "name": "Arrow",
+          "category": null,
+          "dims_cm": {
+            "w": 120,
+            "d": 40,
+            "h": 30
+          },
+          "assets": {
+            "glb": "arrow-sign/model.glb",
+            "splat": null,
+            "spz": null,
+            "thumb": null
+          },
+          "default_render": "glb",
+          "source": {
+            "engine": "glb",
+            "input": "arrow.glb",
+            "prompt": null,
+            "cost_usd": 0,
+            "mock": true,
+            "created": "2026-11-05T18:07:05Z"
+          },
+          "fit": {
+            "glb_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            },
+            "splat_error_pct": null
+          },
+          "notes": null,
+          "mount": "wall"
+        }
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

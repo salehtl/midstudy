@@ -1,0 +1,393 @@
+{
+  "route": "PUT /api/scenes/{name}",
+  "contract": "§4.4, §4.8",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/scene-put.schema.json",
+      "type": "ScenePut",
+      "note": "rename, camera, look",
+      "body": {
+        "title": "Living room, morning",
+        "camera": {
+          "height_m": 1.45,
+          "pitch_deg": -11
+        },
+        "camera_source": "manual",
+        "look": {
+          "exposure": 1.2,
+          "warmth": 0.1,
+          "light_azimuth_deg": 30,
+          "auto_light": false,
+          "cast_shadows": true
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-detail.schema.json",
+      "type": "SceneDetail",
+      "note": "rename, camera, look",
+      "body": {
+        "version": 1,
+        "title": "Living room, morning",
+        "created": "2026-11-05T18:07:04Z",
+        "saved": "2026-11-05T18:07:04Z",
+        "camera": {
+          "fov_y_deg": 55,
+          "height_m": 1.45,
+          "pitch_deg": -11,
+          "roll_deg": 0
+        },
+        "camera_source": "manual",
+        "upload": {
+          "filename": "living-wide.jpg",
+          "ext": "jpg",
+          "bytes": 346771
+        },
+        "look": {
+          "exposure": 1.2,
+          "warmth": 0.1,
+          "light_azimuth_deg": 30,
+          "auto_light": false,
+          "cast_shadows": true
+        },
+        "name": "scene-20261105-180704",
+        "photo_url": "/scenes/scene-20261105-180704/photo.jpg?v=1793902024",
+        "thumb_url": null,
+        "depth_url": "/scenes/scene-20261105-180704/depth.png?v=1793902024",
+        "w": 1600,
+        "h": 1200,
+        "floor_found": true,
+        "layouts": 0,
+        "calib_status": "done",
+        "calib_error": null,
+        "calib": {
+          "version": 1,
+          "source": "truth",
+          "model": null,
+          "image": {
+            "w": 1600,
+            "h": 1200
+          },
+          "camera": {
+            "fov_y_deg": 55,
+            "height_m": 1.4,
+            "pitch_deg": -10,
+            "roll_deg": 0
+          },
+          "principal": [
+            0.5,
+            0.5
+          ],
+          "floor": {
+            "found": true,
+            "inlier_ratio": 0.2889,
+            "rmse_m": 0
+          },
+          "depth": {
+            "file": "depth.png",
+            "w": 1024,
+            "h": 768,
+            "floor_masked": true
+          },
+          "exif": null,
+          "device": null,
+          "elapsed_s": 0.001
+        },
+        "lighting": {
+          "version": 1,
+          "source": "truth",
+          "frame": "camera",
+          "image": {
+            "w": 1600,
+            "h": 1200
+          },
+          "camera": {
+            "fov_y_deg": 55,
+            "height_m": 1.4,
+            "pitch_deg": -10,
+            "roll_deg": 0
+          },
+          "ambient": {
+            "sh": [
+              [
+                1.592022,
+                1.385851,
+                1.163116
+              ],
+              [
+                0.470697,
+                0.503147,
+                0.512464
+              ],
+              [
+                0.082996,
+                0.088718,
+                0.090361
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "key": {
+            "direction": [
+              0.47185,
+              0.542971,
+              0.694651
+            ],
+            "color": [
+              1,
+              0.879622,
+              0.73791
+            ],
+            "intensity": 2.2,
+            "softness": 0.15,
+            "confidence": 1
+          },
+          "white_balance": {
+            "rgb": [
+              1.115723,
+              0.98259,
+              0.8317
+            ],
+            "cct_k": 5493
+          },
+          "world": {
+            "key_direction": [
+              0.47185,
+              0.655347,
+              0.589812
+            ],
+            "note": "truth only: the key direction in the world frame, for evals"
+          }
+        },
+        "lighting_status": "done",
+        "lighting_error": null
+      }
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/scene-put.schema.json",
+      "type": "ScenePut",
+      "note": "a look number clamped, a key removed",
+      "body": {
+        "look": {
+          "exposure": 9,
+          "light_azimuth_deg": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-detail.schema.json",
+      "type": "SceneDetail",
+      "note": "a look number clamped, a key removed",
+      "body": {
+        "version": 1,
+        "title": "Living room, morning",
+        "created": "2026-11-05T18:07:04Z",
+        "saved": "2026-11-05T18:07:04Z",
+        "camera": {
+          "fov_y_deg": 55,
+          "height_m": 1.45,
+          "pitch_deg": -11,
+          "roll_deg": 0
+        },
+        "camera_source": "manual",
+        "upload": {
+          "filename": "living-wide.jpg",
+          "ext": "jpg",
+          "bytes": 346771
+        },
+        "look": {
+          "exposure": 4,
+          "warmth": 0.1,
+          "auto_light": false,
+          "cast_shadows": true
+        },
+        "name": "scene-20261105-180704",
+        "photo_url": "/scenes/scene-20261105-180704/photo.jpg?v=1793902024",
+        "thumb_url": null,
+        "depth_url": "/scenes/scene-20261105-180704/depth.png?v=1793902024",
+        "w": 1600,
+        "h": 1200,
+        "floor_found": true,
+        "layouts": 0,
+        "calib_status": "done",
+        "calib_error": null,
+        "calib": {
+          "version": 1,
+          "source": "truth",
+          "model": null,
+          "image": {
+            "w": 1600,
+            "h": 1200
+          },
+          "camera": {
+            "fov_y_deg": 55,
+            "height_m": 1.4,
+            "pitch_deg": -10,
+            "roll_deg": 0
+          },
+          "principal": [
+            0.5,
+            0.5
+          ],
+          "floor": {
+            "found": true,
+            "inlier_ratio": 0.2889,
+            "rmse_m": 0
+          },
+          "depth": {
+            "file": "depth.png",
+            "w": 1024,
+            "h": 768,
+            "floor_masked": true
+          },
+          "exif": null,
+          "device": null,
+          "elapsed_s": 0.001
+        },
+        "lighting": {
+          "version": 1,
+          "source": "truth",
+          "frame": "camera",
+          "image": {
+            "w": 1600,
+            "h": 1200
+          },
+          "camera": {
+            "fov_y_deg": 55,
+            "height_m": 1.4,
+            "pitch_deg": -10,
+            "roll_deg": 0
+          },
+          "ambient": {
+            "sh": [
+              [
+                1.592022,
+                1.385851,
+                1.163116
+              ],
+              [
+                0.470697,
+                0.503147,
+                0.512464
+              ],
+              [
+                0.082996,
+                0.088718,
+                0.090361
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          "key": {
+            "direction": [
+              0.47185,
+              0.542971,
+              0.694651
+            ],
+            "color": [
+              1,
+              0.879622,
+              0.73791
+            ],
+            "intensity": 2.2,
+            "softness": 0.15,
+            "confidence": 1
+          },
+          "white_balance": {
+            "rgb": [
+              1.115723,
+              0.98259,
+              0.8317
+            ],
+            "cct_k": 5493
+          },
+          "world": {
+            "key_direction": [
+              0.47185,
+              0.655347,
+              0.589812
+            ],
+            "note": "truth only: the key direction in the world frame, for evals"
+          }
+        },
+        "lighting_status": "done",
+        "lighting_error": null
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "an unknown key",
+      "body": {
+        "error": "zoom can't be set: use title, camera, camera_source or look"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

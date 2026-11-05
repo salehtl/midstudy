@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-put.schema.json",
+  "title": "ScenePut",
+  "description": "PUT /api/scenes/<name> (contract §4.4, §4.8): any of title, camera, camera_source, look. Camera values and look numbers are clamped (so any number is accepted); a look replaces only the keys it carries and a key set to null is removed. Unknown keys or wrong types are 400. saved is stamped unless only title changed.",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": false,
+  "properties": {
+    "title": { "description": "Trimmed; at most 200 characters after that (400 otherwise); blank is null.", "type": ["string", "null"] },
+    "camera": {
+      "title": "CameraPatch",
+      "description": "Any of the camera block's keys, merged into the camera in use, then clamped (§4.1).",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "fov_y_deg": { "type": "number" },
+        "height_m": { "type": "number" },
+        "pitch_deg": { "type": "number" },
+        "roll_deg": { "type": "number" }
+      }
+    },
+    "camera_source": { "enum": ["auto", "manual", "default"] },
+    "look": {
+      "title": "LookPatch",
+      "description": "Numbers are clamped to the ranges of scene.schema.json's look; null removes a key.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exposure": { "type": ["number", "null"] },
+        "warmth": { "type": ["number", "null"] },
+        "contact_shadows": { "type": ["boolean", "null"] },
+        "auto_light": { "type": ["boolean", "null"] },
+        "light_azimuth_deg": { "type": ["number", "null"] },
+        "light_elevation_deg": { "type": ["number", "null"] },
+        "light_softness": { "type": ["number", "null"] },
+        "light_strength": { "type": ["number", "null"] },
+        "ambient": { "type": ["number", "null"] },
+        "cast_shadows": { "type": ["boolean", "null"] }
+      }
+    }
+  }
+}

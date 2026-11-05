@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-job.schema.json",
+  "title": "SceneJob",
+  "description": "A job of the calibration queue (contract §4.4, §4.8 backfill): a calibration (c-…) or a light job (l-…). GET /api/scenes/jobs/<id>, and inside the jobs list and the 202 answers. In memory: a restart forgets them.",
+  "oneOf": [{ "$ref": "#/$defs/calibrate" }, { "$ref": "#/$defs/light" }],
+  "$defs": {
+    "calibrate": {
+      "title": "CalibrationJob",
+      "type": "object",
+      "required": ["id", "kind", "scene", "status", "created", "started", "finished", "message", "calib"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "c-…, e.g. c-20261104-201500-ab12.", "type": "string", "pattern": "^c-[0-9a-z-]+$" },
+        "kind": { "const": "calibrate" },
+        "scene": { "$ref": "common.schema.json#/$defs/slug" },
+        "status": { "$ref": "common.schema.json#/$defs/jobStatus" },
+        "created": { "$ref": "common.schema.json#/$defs/dateTime" },
+        "started": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+        "finished": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+        "message": { "description": "A human-readable status line; a failed job's is the tool's error sentence.", "type": "string" },
+        "calib": { "description": "The result (without exif.make, exif.model) once done, else null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/publicCalib" }, { "type": "null" }] }
+      }
+    },
+    "light": {
+      "title": "LightJob",
+      "type": "object",
+      "required": ["id", "kind", "scene", "status", "created", "started", "finished", "message", "calib", "lighting"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "l-…", "type": "string", "pattern": "^l-[0-9a-z-]+$" },
+        "kind": { "const": "light" },
+        "scene": { "$ref": "common.schema.json#/$defs/slug" },
+        "status": { "$ref": "common.schema.json#/$defs/jobStatus" },
+        "created": { "$ref": "common.schema.json#/$defs/dateTime" },
+        "started": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+        "finished": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+        "message": { "type": "string" },
+        "calib": { "description": "Always null (a light job never calibrates).", "type": "null" },
+        "lighting": { "description": "true: lighting.json written; false: no clear light in the photo; null until it ran.", "type": ["boolean", "null"] }
+      }
+    }
+  }
+}

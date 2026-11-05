@@ -1,0 +1,38 @@
+{
+  "route": "POST /api/scenes/{name}/light",
+  "contract": "§4.4, §4.8",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/light-done.schema.json",
+      "type": "LightDone",
+      "note": "lighting.json is there: no job",
+      "body": {
+        "lighting_status": "done"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/light-accepted.schema.json",
+      "type": "LightAccepted",
+      "note": "a scene calibrated before lighting.json (backfill)",
+      "body": {
+        "job": {
+          "id": "l-20261105-180704-12b1",
+          "kind": "light",
+          "scene": "scene-20261105-180704",
+          "status": "queued",
+          "created": "2026-11-05T18:07:04Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the calibration queue",
+          "calib": null,
+          "lighting": null
+        }
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/product-error.schema.json",
+  "title": "ProductError",
+  "description": "A 4xx of POST /api/library/product (contract §2.11): one sentence; blocked: true when the shop refuses automatic reading (422).",
+  "type": "object",
+  "required": ["error"],
+  "additionalProperties": false,
+  "properties": {
+    "error": { "type": "string", "minLength": 1 },
+    "blocked": { "const": true }
+  }
+}

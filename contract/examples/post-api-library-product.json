@@ -1,0 +1,310 @@
+{
+  "route": "POST /api/library/product",
+  "contract": "§2.11",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/product-request.schema.json",
+      "type": "ProductRequest",
+      "note": "JSON-LD in cm",
+      "body": {
+        "url": "http://127.0.0.1:64081/products/oak-writing-desk"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/product-result.schema.json",
+      "type": "ProductResult",
+      "note": "JSON-LD in cm",
+      "body": {
+        "url": "http://127.0.0.1:64081/products/oak-writing-desk",
+        "name": "Oak Writing Desk",
+        "category": "desk",
+        "is_rug": false,
+        "dims_candidates": [
+          {
+            "w": 120,
+            "d": 60,
+            "h": 75,
+            "unit": "cm",
+            "label": null,
+            "unit_note": null,
+            "notes": [],
+            "quote": "width: 120 cm, depth: 60 cm, height: 75 cm",
+            "source": "jsonld"
+          }
+        ],
+        "variants": [],
+        "images": [
+          {
+            "url": "https://cdn.nordwood.example/img/oak-desk-front.jpg",
+            "w": 2000,
+            "h": 1500,
+            "kind": "product"
+          },
+          {
+            "url": "https://cdn.nordwood.example/img/oak-desk-side.jpg",
+            "w": null,
+            "h": null,
+            "kind": "product"
+          },
+          {
+            "url": "https://cdn.nordwood.example/img/oak-desk-og.jpg",
+            "w": null,
+            "h": null,
+            "kind": "og"
+          }
+        ],
+        "source_layers_used": [
+          "jsonld",
+          "opengraph"
+        ],
+        "cost_usd": 0,
+        "mock": false,
+        "warnings": []
+      }
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/product-request.schema.json",
+      "type": "ProductRequest",
+      "note": "a Shopify rug with size variants",
+      "body": {
+        "url": "http://127.0.0.1:64081/products/moss-wool-rug",
+        "llm": false
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/product-result.schema.json",
+      "type": "ProductResult",
+      "note": "a Shopify rug with size variants",
+      "body": {
+        "url": "http://127.0.0.1:64081/products/moss-wool-rug",
+        "name": "Moss Wool Rug",
+        "category": "rug",
+        "is_rug": true,
+        "dims_candidates": [
+          {
+            "w": 152.4,
+            "d": 243.8,
+            "h": 1.3,
+            "unit": "ft",
+            "label": "5' x 8'",
+            "unit_note": "from feet: 5 × 8 ft",
+            "notes": [
+              "thickness from the page: Pile height: 0.5 (read as inches)"
+            ],
+            "quote": "5' x 8'",
+            "source": "shopify"
+          },
+          {
+            "w": 243.8,
+            "d": 304.8,
+            "h": 1.3,
+            "unit": "ft",
+            "label": "8' x 10'",
+            "unit_note": "from feet: 8 × 10 ft",
+            "notes": [
+              "thickness from the page: Pile height: 0.5 (read as inches)"
+            ],
+            "quote": "8' x 10'",
+            "source": "shopify"
+          }
+        ],
+        "variants": [
+          {
+            "label": "5' x 8'",
+            "dims_index": 0
+          },
+          {
+            "label": "8' x 10'",
+            "dims_index": 1
+          }
+        ],
+        "images": [
+          {
+            "url": "https://cdn.shopify.com/s/files/1/0001/moss-rug-top.jpg?v=171",
+            "w": null,
+            "h": null,
+            "kind": "product"
+          },
+          {
+            "url": "https://cdn.shopify.com/s/files/1/0001/moss-rug-room.jpg?v=171",
+            "w": null,
+            "h": null,
+            "kind": "product"
+          },
+          {
+            "url": "https://cdn.shopify.com/s/files/1/0001/moss-rug-8x10.jpg?v=171",
+            "w": null,
+            "h": null,
+            "kind": "variant"
+          },
+          {
+            "url": "http://field-house.example/cdn/shop/files/moss-rug-top.jpg?v=171",
+            "w": null,
+            "h": null,
+            "kind": "og"
+          }
+        ],
+        "source_layers_used": [
+          "opengraph",
+          "shopify",
+          "text"
+        ],
+        "cost_usd": 0,
+        "mock": false,
+        "warnings": []
+      }
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/product-request.schema.json",
+      "type": "ProductRequest",
+      "note": "only the (mocked) language model finds the size",
+      "body": {
+        "url": "http://127.0.0.1:64081/products/teak-cabinet-prose"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/product-result.schema.json",
+      "type": "ProductResult",
+      "note": "only the (mocked) language model finds the size",
+      "body": {
+        "url": "http://127.0.0.1:64081/products/teak-cabinet-prose",
+        "name": "Teak Cabinet",
+        "category": "cabinet",
+        "is_rug": false,
+        "dims_candidates": [
+          {
+            "w": 90,
+            "d": 40,
+            "h": 120,
+            "unit": "cm",
+            "label": null,
+            "unit_note": null,
+            "notes": [],
+            "quote": "stands 120 tall, 90 across and 40 deep, all in centimetres",
+            "source": "llm"
+          }
+        ],
+        "variants": [],
+        "images": [
+          {
+            "url": "https://oldharbour.example/stock/teak-cabinet.jpg",
+            "w": null,
+            "h": null,
+            "kind": "og"
+          }
+        ],
+        "source_layers_used": [
+          "opengraph",
+          "llm"
+        ],
+        "cost_usd": 0,
+        "mock": true,
+        "warnings": []
+      }
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/product-request.schema.json",
+      "type": "ProductRequest",
+      "note": "a pasted page",
+      "body": {
+        "html": "<!-- midstudy-page: https://shop.example/products/oak-desk -->\n<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Oak Writing Desk | Nordwood</title>\n<meta property=\"og:title\" content=\"Oak Writing Desk\">\n<meta property=\"og:image\" content=\"https://cdn.nordwood.example/img/oak-desk-og.jpg\">\n<script type=\"application/ld+json\">\n{\"@context\":\"https://schema.org\",\"@type\":\"Product\",\"name\":\"Oak Writing Desk\",\"category\":\"Desks\",\n \"image\":[{\"@type\":\"ImageObject\",\"contentUrl\":\"https://cdn.nordwood.example/img/oak-desk-front.jpg\",\"width\":\"2000px\",\"height\":\"1500px\"},\n          \"https://cdn.nordwood.example/img/oak-desk-side.jpg\"],\n \"width\":{\"@type\":\"QuantitativeValue\",\"value\":120,\"unitCode\":\"CMT\"},\n \"depth\":{\"@type\":\"QuantitativeValue\",\"value\":60,\"unitCode\":\"CMT\"},\n \"height\":{\"@type\":\"QuantitativeValue\",\"value\":75,\"unitCode\":\"CMT\"},\n \"offers\":{\"@type\":\"Offer\",\"price\":\"499\",\"priceCurrency\":\"EUR\"}}\n</script></head>\n<body><main><h1>Oak Writing Desk</h1><p>Solid oak, oiled. Two drawers.</p>\n<p>Drawer interior: 40 x 35 x 8 cm.</p></main></body></html>\n"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/product-result.schema.json",
+      "type": "ProductResult",
+      "note": "a pasted page",
+      "body": {
+        "url": "https://shop.example/products/oak-desk",
+        "name": "Oak Writing Desk",
+        "category": "desk",
+        "is_rug": false,
+        "dims_candidates": [
+          {
+            "w": 120,
+            "d": 60,
+            "h": 75,
+            "unit": "cm",
+            "label": null,
+            "unit_note": null,
+            "notes": [],
+            "quote": "width: 120 cm, depth: 60 cm, height: 75 cm",
+            "source": "jsonld"
+          }
+        ],
+        "variants": [],
+        "images": [
+          {
+            "url": "https://cdn.nordwood.example/img/oak-desk-front.jpg",
+            "w": 2000,
+            "h": 1500,
+            "kind": "product"
+          },
+          {
+            "url": "https://cdn.nordwood.example/img/oak-desk-side.jpg",
+            "w": null,
+            "h": null,
+            "kind": "product"
+          },
+          {
+            "url": "https://cdn.nordwood.example/img/oak-desk-og.jpg",
+            "w": null,
+            "h": null,
+            "kind": "og"
+          }
+        ],
+        "source_layers_used": [
+          "jsonld",
+          "opengraph"
+        ],
+        "cost_usd": 0,
+        "mock": false,
+        "warnings": []
+      }
+    },
+    {
+      "kind": "response",
+      "status": 422,
+      "schema": "midstudy/api/product-error.schema.json",
+      "type": "ProductError",
+      "note": "the shop refuses (403)",
+      "body": {
+        "error": "This shop blocks automatic reading: paste the image link and size instead.",
+        "blocked": true
+      }
+    },
+    {
+      "kind": "response",
+      "status": 422,
+      "schema": "midstudy/api/product-error.schema.json",
+      "type": "ProductError",
+      "note": "a picture, not a page",
+      "body": {
+        "error": "that's a picture, not a product page: use Image link for it"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/product-error.schema.json",
+      "type": "ProductError",
+      "note": "neither url nor html",
+      "body": {
+        "error": "the body must be JSON like {\"url\": \"https://...\", \"llm\": true}, or {\"html\": \"<the page>\", \"url\": \"https://...\"}"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

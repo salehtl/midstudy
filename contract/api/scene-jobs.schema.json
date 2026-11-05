@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-jobs.schema.json",
+  "title": "SceneJobs",
+  "description": "GET /api/scenes/jobs (contract §4.4): calibration and light jobs, newest first.",
+  "type": "object",
+  "required": ["jobs"],
+  "additionalProperties": false,
+  "properties": {
+    "jobs": { "type": "array", "items": { "$ref": "scene-job.schema.json" } }
+  }
+}

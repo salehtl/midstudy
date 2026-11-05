@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/spend-refused.schema.json",
+  "title": "SpendRefused",
+  "description": "402 over the daily spend cap (contract §2.9): no call was made. Also the answer for a call that costs more than the whole cap.",
+  "type": "object",
+  "required": ["error", "spent_usd", "cap_usd"],
+  "additionalProperties": false,
+  "properties": {
+    "error": { "type": "string", "minLength": 1 },
+    "spent_usd": { "$ref": "common.schema.json#/$defs/usd" },
+    "cap_usd": { "$ref": "common.schema.json#/$defs/usd" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/light-accepted.schema.json",
+  "title": "LightAccepted",
+  "description": "202 of POST /api/scenes/<name>/light (contract §4.4, §4.8 backfill): the light job, or the same job again while one is queued or running.",
+  "type": "object",
+  "required": ["job"],
+  "additionalProperties": false,
+  "properties": {
+    "job": { "$ref": "scene-job.schema.json#/$defs/light" }
+  }
+}

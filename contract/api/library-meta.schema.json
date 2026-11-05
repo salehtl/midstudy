@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-meta.schema.json",
+  "title": "LibraryMeta",
+  "description": "An add's meta (contract §2.8): the JSON whose base64 is the X-Midstudy-Meta header of POST /api/library/items. Anything wrong is 400 with one actionable sentence.",
+  "type": "object",
+  "required": ["name", "dims_cm"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "description": "Not blank.", "type": "string", "pattern": "\\S" },
+    "dims_cm": { "$ref": "../library.schema.json#/$defs/dims" },
+    "id": { "$ref": "common.schema.json#/$defs/slug", "description": "Default: a slug of name. Re-adding an id replaces it (upsert)." },
+    "category": { "type": ["string", "null"] },
+    "mount": { "description": "v1 also takes null (the default, floor).", "enum": ["floor", "wall", null] },
+    "yaw": { "description": "Degrees, around Y after the engine's default orientation (§3.1).", "enum": [0, 90, 180, 270] },
+    "engine": { "description": "Images: idol (default), sam3d, trellis2 or rug. Models: glb (the only one; anything else is 400).", "enum": ["idol", "sam3d", "trellis2", "rug", "glb"] },
+    "prompt": { "description": "sam3d only.", "type": ["string", "null"] },
+    "resolution": { "description": "trellis2 only (default 512).", "enum": [512, 1024, 1536] }
+  }
+}

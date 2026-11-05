@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-jobs.schema.json",
+  "title": "LibraryJobs",
+  "description": "GET /api/library/jobs (contract §2.8): every job since the server started, newest first.",
+  "type": "object",
+  "required": ["jobs"],
+  "additionalProperties": false,
+  "properties": {
+    "jobs": { "type": "array", "items": { "$ref": "library-job.schema.json" } }
+  }
+}

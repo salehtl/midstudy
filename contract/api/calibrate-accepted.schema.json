@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/calibrate-accepted.schema.json",
+  "title": "CalibrateAccepted",
+  "description": "202 of POST /api/scenes/<name>/calibrate (contract §4.4): fit on photo.jpg, or run on source.<ext> when photo.jpg is missing. 409 while one is queued or running for that scene.",
+  "type": "object",
+  "required": ["job"],
+  "additionalProperties": false,
+  "properties": {
+    "job": { "$ref": "scene-job.schema.json#/$defs/calibrate" }
+  }
+}

@@ -3,8 +3,18 @@
 # Checks contract/CONTRACT.md §3. Output lands in evals/out/pipeline/.
 # v4: OBJ zips, --rescale, --mount, MIDSTUDY_FAL_MOCK_COST (§3.1).
 # Usage: bash evals/pipeline_offline.sh   (or npm run eval:pipeline)
+# v2 switch (contract §0): MIDSTUDY_ADD=legacy|next runs `uv run --project pipeline midstudy-add` (v1) or
+# `node pipeline/src/cli.ts` with the same arguments and environment, plus MIDSTUDY_STRICT=1 (and NODE_USE_ENV_PROXY=1,
+# so Node honours the dead proxies below as Python does).
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+case "${MIDSTUDY_ADD:-legacy}" in
+  legacy) ADD_CMD=(uv run -q --offline --project pipeline midstudy-add); NEXT="" ;;
+  next) ADD_CMD=(node pipeline/src/cli.ts); NEXT=1 ;;
+  *) echo "FAIL MIDSTUDY_ADD must be legacy or next, not ${MIDSTUDY_ADD}"; exit 2 ;;
+esac
+echo "E8 pipeline: no server, furniture CLI ${MIDSTUDY_ADD:-legacy} (${ADD_CMD[*]})${NEXT:+, MIDSTUDY_STRICT=1}"
 
 OUT=evals/out/pipeline
 LIB="$OUT/library"
@@ -16,7 +26,11 @@ check() { if eval "$2"; then ok "$1"; else bad "$1${3:+ — $3}"; fi; }
 json() { node -e "const o=JSON.parse(require('fs').readFileSync(0,'utf8').trim().split('\n').pop()); process.stdout.write(String($1))"; }
 lastline() { tail -n 1 "$1" 2>/dev/null; }
 
-[ -f pipeline/pyproject.toml ] || { echo "FAIL pipeline/pyproject.toml not found (pipeline not built yet)"; exit 1; }
+if [ -n "$NEXT" ]; then
+  [ -f pipeline/src/cli.ts ] || { echo "FAIL pipeline/src/cli.ts not found (the v2 CLI isn't there yet)"; exit 1; }
+else
+  [ -f pipeline/pyproject.toml ] || { echo "FAIL pipeline/pyproject.toml not found (pipeline not built yet)"; exit 1; }
+fi
 for slug in sam-3-3d-objects trellis-2; do
   [ -f "fixtures/fal/$slug/response.json" ] || { echo "FAIL fixtures/fal/$slug/response.json missing (run the Phase 0 capture)"; exit 1; }
 done
@@ -25,11 +39,12 @@ IMG=$(ls fixtures/fal/sam-3-3d-objects/input.* 2>/dev/null | head -n 1)
 
 # Sync once with network, then run every CLI call offline with proxies pointed at a dead port:
 # any network request the CLI makes fails loudly instead of silently costing money (L6).
-uv sync -q --project pipeline || { echo "FAIL uv sync --project pipeline"; exit 1; }
+[ -n "$NEXT" ] || uv sync -q --project pipeline || { echo "FAIL uv sync --project pipeline"; exit 1; }
+# FAL_MOCK_DIR: another mock folder for one call (the next CLI's splat cover check below)
 add() {
-  env -u FAL_KEY MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 MIDSTUDY_FAL_MOCK=fixtures/fal \
+  env -u FAL_KEY MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 MIDSTUDY_FAL_MOCK="${FAL_MOCK_DIR:-fixtures/fal}" ${NEXT:+MIDSTUDY_STRICT=1 NODE_USE_ENV_PROXY=1} \
     HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 NO_PROXY= \
-    uv run -q --offline --project pipeline midstudy-add "$@"
+    "${ADD_CMD[@]}" "$@"
 }
 run() { local name=$1; shift; add "$@" >"$OUT/$name.out" 2>"$OUT/$name.err"; }
 
@@ -126,7 +141,7 @@ bad_case missing-file   "$OUT/nope.jpg" --name "X" --dims 75x80x95 --library "$L
 bad_case usdz           "$OUT/model.usdz" --engine glb --name "X" --dims 75x80x95 --library "$LIB"
 # Outside mock mode with no key: must fail before any network call.
 if env -u FAL_KEY -u MIDSTUDY_FAL_MOCK MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 \
-    uv run -q --offline --project pipeline midstudy-add "$IMG" --name "X" --dims 75x80x95 --library "$LIB" >"$OUT/no-key.out" 2>"$OUT/no-key.err"; then
+    ${NEXT:+MIDSTUDY_STRICT=1 NODE_USE_ENV_PROXY=1} "${ADD_CMD[@]}" "$IMG" --name "X" --dims 75x80x95 --library "$LIB" >"$OUT/no-key.out" 2>"$OUT/no-key.err"; then
   bad "missing FAL_KEY is rejected"
 else
   check "missing FAL_KEY is rejected with a FAL_KEY hint" 'tail -n 1 "$OUT/no-key.err" | grep -q FAL_KEY && ! grep -q Traceback "$OUT/no-key.err"' "$(tail -n 1 "$OUT/no-key.err")"
@@ -299,6 +314,8 @@ fi
 bad_case idol-model fixtures/models/arrow.glb --engine idol --name "Not A Photo" --dims 100x100x100 --library "$LIB"
 # Above 262,144 splats, splat.spz keeps the ones that cover the most (opacity x area), not the most opaque: a live
 # SAM 3D splat (878k) kept by opacity alone shrank to 77-94 % of its extent and looked see-through (verify v1.1).
+if [ -z "$NEXT" ]; then
+  # (the Python code below must stay unindented)
 cover=$(uv run --project pipeline python -c "
 import json, numpy as np, tempfile
 from pathlib import Path
@@ -320,6 +337,49 @@ _, xyz = splat.read_spz(t / 'out.spz')
 print(json.dumps({'count': r['count'], 'radius_p99': float(np.percentile(np.linalg.norm(xyz, axis=1), 99))}))
 " 2>&1 | tail -n 1)
 check "splat.spz above 262,144 splats keeps the ones that cover the most: a 1 m shell of big half-opaque splats survives" 'node -e "const c=$cover; process.exit(c.count===262144 && c.radius_p99>0.95 ? 0 : 1)"' "$cover"
+else
+  # The v2 CLI has no Python module to call: the same splats (300k small opaque ones inside 0.3 m, 100k big
+  # half-opaque ones on a 1 m shell) are what a mocked SAM 3D answers, through a real add. Fitted per axis, the
+  # shell is still the outside: splat.spz must keep it (its p99 radius about the center equals all the splats').
+  COVER_MOCK="$OUT/fal-cover"
+  rm -rf "$COVER_MOCK" && mkdir -p "$COVER_MOCK" && cp -R fixtures/fal/sam-3-3d-objects "$COVER_MOCK/"
+  COVER_PLY=$(ls "$COVER_MOCK"/sam-3-3d-objects/files/*.ply | head -n 1)
+  evals/py -c "
+import numpy as np, sys
+rng = np.random.default_rng(1)
+names = ['x','y','z','f_dc_0','f_dc_1','f_dc_2','opacity','scale_0','scale_1','scale_2','rot_0','rot_1','rot_2','rot_3']
+n_in, n_out = 300000, 100000
+d = np.zeros(n_in + n_out, dtype=[(k, '<f4') for k in names])
+p = rng.normal(size=(n_in + n_out, 3)); p /= np.linalg.norm(p, axis=1, keepdims=True)
+p[:n_in] *= rng.uniform(0, 0.3, (n_in, 1))
+for i, k in enumerate('xyz'): d[k] = p[:, i]
+d['opacity'][:n_in], d['opacity'][n_in:] = 8.0, 0.0
+for k in ('scale_0', 'scale_1', 'scale_2'): d[k][:n_in], d[k][n_in:] = np.log(0.002), np.log(0.03)
+d['rot_0'] = 1.0
+head = 'ply\\nformat binary_little_endian 1.0\\nelement vertex %d\\n' % len(d) + ''.join('property float %s\\n' % k for k in names) + 'end_header\\n'
+open(sys.argv[1], 'wb').write(head.encode() + d.tobytes())
+" "$COVER_PLY"
+  if FAL_MOCK_DIR="$COVER_MOCK" run cover "$IMG" --engine sam3d --name "Cover Shell" --id cover-shell --dims 100x100x100 --library "$LIB"; then
+    cover=$(evals/py -c "
+import gzip, json, struct, sys, numpy as np
+raw = open(sys.argv[1], 'rb').read(); end = raw.index(b'end_header\\n') + 11
+props = [l.split() for l in raw[:end].decode().split('\\n') if l.startswith('property')]
+d = np.frombuffer(raw, dtype=[(l[2], '<f4' if l[1] == 'float' else '<f8') for l in props], offset=end)
+ply = np.stack([d['x'], d['y'], d['z']], 1).astype(float)
+u = gzip.decompress(open(sys.argv[2], 'rb').read())
+_, _, n, _, frac, _, _ = struct.unpack_from('<IIIBBBB', u, 0)
+b = np.frombuffer(u, dtype=np.uint8, count=n * 9, offset=16).reshape(n, 3, 3).astype(np.int32)
+q = b[..., 0] | (b[..., 1] << 8) | (b[..., 2] << 16); q = np.where(q >= 1 << 23, q - (1 << 24), q)
+spz = q / float(1 << frac)
+c = (np.percentile(ply, 1, 0) + np.percentile(ply, 99, 0)) / 2
+r = lambda a: float(np.percentile(np.linalg.norm(a - c, axis=1), 99))
+print(json.dumps({'count': int(n), 'ply_count': len(ply), 'ratio': round(r(spz) / r(ply), 4)}))
+" "$LIB/cover-shell/splat.ply" "$LIB/cover-shell/splat.spz" 2>&1 | tail -n 1)
+    check "splat.spz above 262,144 splats keeps the ones that cover the most: a 1 m shell of big half-opaque splats survives (through the CLI)" 'node -e "const c=$cover; process.exit(c.count===262144 && c.ply_count===400000 && c.ratio>0.95 ? 0 : 1)"' "$cover"
+  else
+    bad "a sam3d add of a 400,000-splat shell (the cover check) — $(tail -n 2 "$OUT/cover.err" | tr '\n' ' ')"
+  fi
+fi
 
 # --- costs + contract validation (L2) ----------------------------------------
 check "costs.csv has a header and one row per successful run" '[ "$(tail -n +2 "$LIB/costs.csv" 2>/dev/null | grep -c .)" -ge 6 ]' "$(cat "$LIB/costs.csv" 2>/dev/null | tr '\n' ' ')"

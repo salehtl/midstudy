@@ -7,8 +7,8 @@
   "required": ["version", "source", "frame", "ambient", "key", "white_balance"],
   "additionalProperties": true,
   "$defs": {
-    "rgb": { "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 3, "maxItems": 3 },
-    "unit": { "type": "array", "items": { "type": "number", "minimum": -1, "maximum": 1 }, "minItems": 3, "maxItems": 3 }
+    "rgb": { "title": "Rgb", "type": "array", "items": { "type": "number", "minimum": 0 }, "minItems": 3, "maxItems": 3 },
+    "unit": { "title": "UnitVector", "type": "array", "items": { "type": "number", "minimum": -1, "maximum": 1 }, "minItems": 3, "maxItems": 3 }
   },
   "properties": {
     "version": { "const": 1 },
