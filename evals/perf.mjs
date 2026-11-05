@@ -26,15 +26,18 @@
 //                       [--repo <worktree>] [--label name] [--out <file>] [--baseline] [--compare <file>] [--profile]
 //   node evals/perf.mjs --target v1:<worktree> --target v2:<worktree>[:MIDSTUDY_SERVER=next,MIDSTUDY_ADD=next] ...
 //        A/B interleaved: every later target is compared with the first (ratio of medians, allowance below)
-//   node evals/perf.mjs --make-baseline run1.json run2.json run3.json   quietest run + run-to-run noise → evals/perf/baseline.json
+//   node evals/perf.mjs [--label v1] --make-baseline run1.json run2.json run3.json   quietest run + run-to-run noise →
+//        evals/perf/baseline.json
 //   node evals/perf.mjs --results <results.json> --compare <base.json>   compare two result files, measure nothing
 // --only/--skip take suite or metric names. Output: evals/out/perf/results.json (every sample, machine, commits, load),
 // evals/out/perf/table.txt, --profile → evals/out/perf/profiles/. Exit 1 when --compare finds a regression or a metric
 // has no valid sample. Always $0: fal mocked (MIDSTUDY_FAL_MOCK=fixtures/fal, MIDSTUDY_NO_DOTENV=1), spend cap 0.
 //
-// Compare allowance: a metric fails when now > base × (1 + 10 % + noise) and now − base > 1 ms. noise is the metric's
-// measured run-to-run noise: the relative range of the per-run medians over the baseline's runs (--make-baseline), or,
-// for a single run, the median's own uncertainty from its samples (2 × 1.25 × 1.4826 × MAD / √n, both medians: ×√2).
+// Compare allowance: a metric fails when now > base × (1 + 10 % + noise) and now − base > 1 ms. Against a baseline file,
+// noise is the metric's measured run-to-run noise: the relative range of the per-run medians over the baseline's runs
+// (--make-baseline). In A/B (and without a multi-run baseline) it's the medians' own uncertainty from the samples
+// (2 × 1.25 × 1.4826 × MAD / √n, both medians: ×√2), the larger of the two: interleaved samples share the machine's
+// load, so the run-to-run spread (mostly load changes) doesn't apply.
 // MIDSTUDY_SERVER and MIDSTUDY_ADD pass through to the target's harness (and choose the commands spawned here, see
 // serverCommand/addCommand); MIDSTUDY_PERF_SERVER_CMD and MIDSTUDY_PERF_ADD_CMD override those commands.
 import { spawn, execFileSync } from 'node:child_process'
@@ -126,9 +129,11 @@ const wanted = (s) => {
 // --- machine, git ----------------------------------------------------------------------------------------------------
 const loadavg = () => os.loadavg().map((v) => round(v, 2))
 const sh = (cmd, args, cwd, timeout = 30000) => { try { return execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout }).trim() } catch { return null } }
+// app_commit: the last commit that changed what E17 measures (the app, not the evals), e.g. main's e1b717f for v1.
 function gitInfo(repo) {
   return { commit: sh('git', ['rev-parse', 'HEAD'], repo), branch: sh('git', ['rev-parse', '--abbrev-ref', 'HEAD'], repo),
-    dirty: !!sh('git', ['status', '--porcelain', '--untracked-files=no'], repo) }
+    dirty: !!sh('git', ['status', '--porcelain', '--untracked-files=no'], repo),
+    app_commit: sh('git', ['log', '-1', '--format=%H', '--', 'planner', 'server', 'pipeline', 'calib', 'core', 'contract'], repo) }
 }
 function machine() {
   return { host: os.hostname(), platform: `${os.platform()} ${os.release()}`, arch: os.arch(), cpu: os.cpus()[0]?.model, ncpu: os.cpus().length,
@@ -924,11 +929,11 @@ function noteOf(name, s) {
 function table(res) {
   const lines = []
   for (const t of res.targets) {
-    lines.push(`\nE17 ${t.label} — ${t.repo} @ ${t.git.commit?.slice(0, 10)}${t.git.dirty ? '+dirty' : ''} (server ${t.server_cmd}, add ${t.add_cmd})`)
+    lines.push(`\nE17 ${t.label} — ${t.repo} @ ${t.git.commit?.slice(0, 10)}${t.git.dirty ? '+dirty' : ''}, app code @ ${t.git.app_commit?.slice(0, 10) ?? '?'} (server ${t.server_cmd}, add ${t.add_cmd})`)
     lines.push(`${'metric'.padEnd(26)} ${'median'.padStart(10)} ${'p95'.padStart(10)} ${'n'.padStart(3)} ${'noise'.padStart(8)}  load 1m before→after  notes`)
     for (const [name, m] of Object.entries(t.metrics)) {
       const s = m.summary
-      lines.push(`${name.padEnd(26)} ${fmtV(s.median, m.unit).padStart(10)} ${fmtV(s.p95, m.unit).padStart(10)} ${String(s.n).padStart(3)} ${pct(s.noise_within).padStart(8)}  ${String(s.load_before?.[0] ?? '—').padStart(5)} → ${String(s.load_after?.[0] ?? '—').padEnd(6)}  ${s.n ? noteOf(name, s) : `FAILED: ${s.errors.join(' | ')}`}`)
+      lines.push(`${name.padEnd(26)} ${fmtV(s.median, m.unit).padStart(10)} ${fmtV(s.p95, m.unit).padStart(10)} ${String(s.n).padStart(3)} ${pct(m.noise ?? s.noise_within).padStart(8)}  ${String(s.load_before?.[0] ?? '—').padStart(5)} → ${String(s.load_after?.[0] ?? '—').padEnd(6)}  ${s.n ? noteOf(name, s) : `FAILED: ${s.errors.join(' | ')}`}`)
     }
   }
   return lines.join('\n')
@@ -948,10 +953,12 @@ function compare(base, cur, { baseLabel, curLabel } = {}) {
     const worse = ratio > 1 + allowed && c - b > 1
     rows.push({ name, base: b, now: c, ratio, noise, allowed, verdict: worse ? (METRICS[name]?.info ? 'worse (info)' : 'WORSE') : ratio < 1 / (1 + allowed) ? 'better' : 'same' })
   }
-  return { rows, failed: rows.filter((r) => r.verdict === 'WORSE').map((r) => r.name), baseLabel: bt.label, curLabel: ct.label }
+  const meanLoad = (t) => { const xs = Object.values(t.metrics).flatMap((m) => m.samples.filter((x) => !x.warmup).flatMap((x) => [x.load?.[0]?.[0], x.load?.[1]?.[0]])).filter(Number.isFinite); return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null }
+  return { rows, failed: rows.filter((r) => r.verdict === 'WORSE').map((r) => r.name), baseLabel: bt.label, curLabel: ct.label, loads: base === cur ? null : [meanLoad(bt), meanLoad(ct)] }
 }
 function compareTable(c) {
-  const lines = [`\ncompare ${c.curLabel} against ${c.baseLabel}: fails when worse by more than 10 % + the metric's noise (and > 1 ms)`,
+  const lines = [`\ncompare ${c.curLabel} against ${c.baseLabel}: fails when worse by more than 10 % + the metric's noise (and > 1 ms)` +
+    (c.loads ? `; mean 1-min load ${c.loads.map((l) => round(l, 1)).join(' (base) vs ')} (now)` : ''),
     `${'metric'.padEnd(26)} ${'base'.padStart(10)} ${'now'.padStart(10)} ${'ratio'.padStart(7)} ${'allowed'.padStart(8)}  verdict`]
   for (const r of c.rows) lines.push(`${r.name.padEnd(26)} ${fmtV(r.base).padStart(10)} ${fmtV(r.now).padStart(10)} ${(r.ratio ? r.ratio.toFixed(2) : '—').padStart(7)} ${(r.allowed != null ? `+${pct(r.allowed)}` : '—').padStart(8)}  ${r.verdict}`)
   lines.push(c.failed.length ? `REGRESSION in ${c.failed.length}: ${c.failed.join(', ')}` : 'no regression beyond the allowance')
@@ -964,11 +971,13 @@ function finalize(res) {
 // --make-baseline: the quietest run (lowest mean 1-min load over its samples) with every metric's run-to-run noise.
 function makeBaseline(files) {
   const runs = files.map((f) => ({ f, r: JSON.parse(fs.readFileSync(f, 'utf8')) }))
-  const quiet = (r) => { const xs = r.targets[0] ? Object.values(r.targets[0].metrics).flatMap((m) => m.samples.flatMap((s) => [s.load?.[0]?.[0], s.load?.[1]?.[0]])).filter(Number.isFinite) : []; return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : Infinity }
+  const quiet = (r) => { const xs = r.targets[0] ? Object.values(r.targets[0].metrics).flatMap((m) => m.samples.filter((s) => !s.warmup).flatMap((s) => [s.load?.[0]?.[0], s.load?.[1]?.[0]])).filter(Number.isFinite) : []; return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : Infinity }
   runs.forEach((x) => { x.load = quiet(x.r) })
   const best = runs.slice().sort((a, b) => a.load - b.load)[0]
   const out = structuredClone(best.r)
   const t = out.targets[0]
+  if (A.label) t.label = A.label
+  t.git.app_commit ??= sh('git', ['log', '-1', '--format=%H', '--', 'planner', 'server', 'pipeline', 'calib', 'core', 'contract'], t.repo)
   for (const [name, m] of Object.entries(t.metrics)) {
     const meds = runs.map((x) => x.r.targets[0]?.metrics[name]?.summary?.median).filter(Number.isFinite)
     const mid = median(meds)
@@ -1069,20 +1078,9 @@ if (!A.profile) {
   const empty = res.targets.flatMap((t) => Object.entries(t.metrics).filter(([, m]) => !m.summary.n).map(([n]) => `${t.label}:${n}`))
   if (empty.length) { console.log(`\nno valid sample: ${empty.join(', ')}`); code = 1 }
   for (const t of res.targets.slice(1)) {
+    // A/B: interleaved samples share the machine's state, so the allowance is the samples' own noise (the larger of the
+    // two targets' within-run estimates), not the baseline's run-to-run noise, which mostly measures load changes
     const c = compare(res, res, { baseLabel: res.targets[0].label, curLabel: t.label })
-    // A/B: the allowance takes each metric's noise from the committed baseline when there is one
-    if (fs.existsSync(BASELINE)) {
-      const b = JSON.parse(fs.readFileSync(BASELINE, 'utf8'))
-      for (const r of c.rows) {
-        const bn = b.targets[0]?.metrics[r.name]?.noise
-        if (bn == null || !r.base) continue
-        r.noise = Math.min(1, Math.max(r.noise, bn))
-        r.allowed = 0.1 + r.noise
-        const worse = r.ratio > 1 + r.allowed && r.now - r.base > 1
-        r.verdict = worse ? (METRICS[r.name]?.info ? 'worse (info)' : 'WORSE') : r.ratio < 1 / (1 + r.allowed) ? 'better' : 'same'
-      }
-      c.failed = c.rows.filter((r) => r.verdict === 'WORSE').map((r) => r.name)
-    }
     const ct = compareTable(c)
     console.log(ct)
     txt += `\n${ct}`

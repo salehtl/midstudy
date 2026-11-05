@@ -1,0 +1,6593 @@
+{
+ "eval": "E17",
+ "version": 1,
+ "started": "2026-11-05T19:26:01.950Z",
+ "args": [
+  "--with-calib",
+  "--out",
+  "evals/out/perf-baseline/run-2.json"
+ ],
+ "machine": {
+  "host": "rabbit",
+  "platform": "darwin 25.6.0",
+  "arch": "arm64",
+  "cpu": "Apple M3 Max",
+  "ncpu": 14,
+  "mem_gb": 36,
+  "node": "v22.23.4",
+  "python": "Python 3.12.14",
+  "uv": "uv 0.11.21 (aarch64-apple-darwin)"
+ },
+ "load": {
+  "before": [
+   2.68,
+   5.64,
+   8.88
+  ],
+  "after": [
+   7.6,
+   10.05,
+   9.92
+  ]
+ },
+ "targets": [
+  {
+   "label": "v1",
+   "repo": "/Users/me/Developer/claude-workspace/midstudy/.claude/worktrees/rf-f-perf",
+   "env": {},
+   "git": {
+    "commit": "9a3a828b3c7681c57124362d8489e7799f9168b7",
+    "branch": "v2-f-perf",
+    "dirty": false,
+    "app_commit": "0d40ff5654b60f87f4519483794f88880a43142b"
+   },
+   "mode": {
+    "server": null,
+    "add": null
+   },
+   "server_cmd": "python3 planner/serve.py",
+   "add_cmd": "uv run --project pipeline midstudy-add",
+   "info": {
+    "scene_photo": "1600×1200",
+    "product_cases": 55,
+    "chrome": "147.0.7727.15"
+   },
+   "metrics": {
+    "server_start": {
+     "suite": "server",
+     "what": "spawn → first 200 on /planner/",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 96.714,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:02.119Z",
+       "extra": {
+        "cmd": "python3 planner/serve.py"
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 132.638,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:02.307Z",
+       "extra": {
+        "cmd": "python3 planner/serve.py"
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 180.799,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:02.541Z",
+       "extra": {
+        "cmd": "python3 planner/serve.py"
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 182.545,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:02.777Z",
+       "extra": {
+        "cmd": "python3 planner/serve.py"
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 182.677,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:03.012Z",
+       "extra": {
+        "cmd": "python3 planner/serve.py"
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 95.041,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:03.161Z",
+       "extra": {
+        "cmd": "python3 planner/serve.py"
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 180.799,
+      "p95": 182.6506,
+      "min": 95.041,
+      "max": 182.677,
+      "mad": 1.877999999999986,
+      "noise_within": 0.024413980347957474,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      163.406,
+      180.799,
+      121.575
+     ],
+     "noise": 0.3624
+    },
+    "api_scenes_p50": {
+     "suite": "api",
+     "what": "GET /api/scenes, p50 of 200 sequential",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 0.687,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.256Z",
+       "extra": {
+        "max": 1.12
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 0.659,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.543Z",
+       "extra": {
+        "max": 0.84
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 0.649,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.837Z",
+       "extra": {
+        "max": 1.22
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 0.643,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.116Z",
+       "extra": {
+        "max": 1.26
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 0.646,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.398Z",
+       "extra": {
+        "max": 1.12
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 0.619,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.683Z",
+       "extra": {
+        "max": 4.14
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 0.646,
+      "p95": 0.657,
+      "min": 0.619,
+      "max": 0.659,
+      "mad": 0.0030000000000000027,
+      "noise_within": 0.010915101121006146,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "extra": {
+       "max": 1.22
+      },
+      "errors": []
+     },
+     "run_medians": [
+      0.977,
+      0.646,
+      0.635
+     ],
+     "noise": 0.5294
+    },
+    "api_scenes_p95": {
+     "suite": "api",
+     "what": "GET /api/scenes, p95 of 200",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 0.888,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.256Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 0.718,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.543Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 0.777,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.837Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 0.728,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.116Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 0.747,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.398Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 0.746,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.683Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 0.746,
+      "p95": 0.771,
+      "min": 0.718,
+      "max": 0.777,
+      "mad": 0.018000000000000016,
+      "noise_within": 0.056711705020133805,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      1.344,
+      0.746,
+      0.736
+     ],
+     "noise": 0.815
+    },
+    "api_library_p50": {
+     "suite": "api",
+     "what": "GET /api/library, p50 of 200 sequential",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 0.33,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.324Z",
+       "extra": {
+        "max": 0.61
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 0.356,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.620Z",
+       "extra": {
+        "max": 2.32
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 0.322,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.903Z",
+       "extra": {
+        "max": 0.74
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 0.318,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.182Z",
+       "extra": {
+        "max": 0.53
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 0.314,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.463Z",
+       "extra": {
+        "max": 0.48
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 0.303,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.744Z",
+       "extra": {
+        "max": 0.44
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 0.318,
+      "p95": 0.34919999999999995,
+      "min": 0.303,
+      "max": 0.356,
+      "mad": 0.0040000000000000036,
+      "noise_within": 0.029564592554171785,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "extra": {
+       "max": 0.53
+      },
+      "errors": []
+     },
+     "run_medians": [
+      0.39,
+      0.318,
+      0.321
+     ],
+     "noise": 0.2243
+    },
+    "api_library_p95": {
+     "suite": "api",
+     "what": "GET /api/library, p95 of 200",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 0.378,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.324Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 0.518,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.620Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 0.4,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.903Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 0.399,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.182Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 0.388,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.463Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 0.334,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.744Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 0.399,
+      "p95": 0.4944,
+      "min": 0.334,
+      "max": 0.518,
+      "mad": 0.01100000000000001,
+      "noise_within": 0.06479758443263965,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      0.591,
+      0.399,
+      0.389
+     ],
+     "noise": 0.5063
+    },
+    "api_layouts_p50": {
+     "suite": "api",
+     "what": "GET /api/layouts?scene=, p50 of 200 sequential",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 0.424,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.410Z",
+       "extra": {
+        "max": 0.84
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 0.413,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.703Z",
+       "extra": {
+        "max": 0.56
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 0.4,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.985Z",
+       "extra": {
+        "max": 0.77
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 0.411,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.266Z",
+       "extra": {
+        "max": 0.65
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 0.422,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.552Z",
+       "extra": {
+        "max": 0.78
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 0.391,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.824Z",
+       "extra": {
+        "max": 0.63
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 0.411,
+      "p95": 0.42019999999999996,
+      "min": 0.391,
+      "max": 0.422,
+      "mad": 0.010999999999999954,
+      "noise_within": 0.0629056841572338,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "extra": {
+       "max": 0.65
+      },
+      "errors": []
+     },
+     "run_medians": [
+      0.5,
+      0.411,
+      0.388
+     ],
+     "noise": 0.2725
+    },
+    "api_layouts_p95": {
+     "suite": "api",
+     "what": "GET /api/layouts?scene=, p95 of 200",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 0.479,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.410Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 0.469,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.703Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 0.461,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:05.985Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 0.487,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.68,
+         5.64,
+         8.88
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.266Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 0.58,
+       "load": [
+        [
+         2.68,
+         5.64,
+         8.88
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.552Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 0.453,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:06.824Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 0.469,
+      "p95": 0.5613999999999999,
+      "min": 0.453,
+      "max": 0.58,
+      "mad": 0.01599999999999996,
+      "noise_within": 0.08018371370768951,
+      "load_before": [
+       2.68,
+       5.64,
+       8.88
+      ],
+      "load_after": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      0.729,
+      0.469,
+      0.444
+     ],
+     "noise": 0.6077
+    },
+    "product_read_p50": {
+     "suite": "product",
+     "what": "POST /api/library/product, llm false: p50 over the pages",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 1.1,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:08.841Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 1,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:10.860Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 1.1,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.58,
+         5.52,
+         8.79
+        ]
+       ],
+       "at": "2026-11-05T19:26:12.871Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 1.1,
+       "load": [
+        [
+         2.58,
+         5.52,
+         8.79
+        ],
+        [
+         2.58,
+         5.52,
+         8.79
+        ]
+       ],
+       "at": "2026-11-05T19:26:14.880Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 1,
+       "load": [
+        [
+         2.58,
+         5.52,
+         8.79
+        ],
+        [
+         2.69,
+         5.49,
+         8.77
+        ]
+       ],
+       "at": "2026-11-05T19:26:16.890Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 1.1,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.69,
+         5.49,
+         8.77
+        ]
+       ],
+       "at": "2026-11-05T19:26:18.879Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 1.1,
+      "p95": 1.1,
+      "min": 1,
+      "max": 1.1,
+      "mad": 0,
+      "noise_within": 0,
+      "load_before": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "load_after": [
+       2.69,
+       5.49,
+       8.77
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      2,
+      1.1,
+      1.1
+     ],
+     "noise": 0.8182
+    },
+    "product_read_p95": {
+     "suite": "product",
+     "what": "… p95 over the pages",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 4.08,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:08.841Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 3.18,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:10.860Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 3.02,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.58,
+         5.52,
+         8.79
+        ]
+       ],
+       "at": "2026-11-05T19:26:12.871Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 2.92,
+       "load": [
+        [
+         2.58,
+         5.52,
+         8.79
+        ],
+        [
+         2.58,
+         5.52,
+         8.79
+        ]
+       ],
+       "at": "2026-11-05T19:26:14.880Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 2.99,
+       "load": [
+        [
+         2.58,
+         5.52,
+         8.79
+        ],
+        [
+         2.69,
+         5.49,
+         8.77
+        ]
+       ],
+       "at": "2026-11-05T19:26:16.890Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 2.88,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.69,
+         5.49,
+         8.77
+        ]
+       ],
+       "at": "2026-11-05T19:26:18.879Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 2.99,
+      "p95": 3.148,
+      "min": 2.88,
+      "max": 3.18,
+      "mad": 0.07000000000000028,
+      "noise_within": 0.05502573831570785,
+      "load_before": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "load_after": [
+       2.69,
+       5.49,
+       8.77
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      5.78,
+      2.99,
+      2.85
+     ],
+     "noise": 0.9799
+    },
+    "product_read_max": {
+     "suite": "product",
+     "what": "… the slowest page",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 1748.1,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:08.841Z",
+       "extra": {
+        "pages": 55,
+        "slowest": "huge"
+       },
+       "per_page": {
+        "jsonld-cm": 4.5,
+        "jsonld-graph-inch": 2,
+        "og-only": 1.5,
+        "shopify-variants": 1.9,
+        "woo-store": 1.8,
+        "woo-sizes-unitless": 1.8,
+        "text-table": 1.3,
+        "text-inches-letters": 1.2,
+        "script-json": 1.3,
+        "microdata": 1.1,
+        "prose-llm": 0.9,
+        "injection": 1.1,
+        "picture-links": 1.1,
+        "no-product": 0.8,
+        "blocked": 0.7,
+        "busy": 0.6,
+        "unavailable": 0.6,
+        "robot-check": 0.8,
+        "missing": 0.6,
+        "picture": 0.6,
+        "pdf": 0.6,
+        "redirect-ok": 1.2,
+        "redirect-private": 1.3,
+        "redirect-metadata": 0.6,
+        "hops-5": 2.6,
+        "hops-6": 2.1,
+        "huge": 1748.1,
+        "gzip": 2.2,
+        "gzip-bomb": 195.6,
+        "cookie": 2.2,
+        "ui-rug": 1.8,
+        "ui-chair": 1.4,
+        "line-0": 1.1,
+        "line-1": 1,
+        "line-2": 1,
+        "line-3": 0.9,
+        "line-4": 1.5,
+        "line-5": 1.8,
+        "line-6": 1.1,
+        "line-7": 1.1,
+        "line-8": 1,
+        "line-9": 1,
+        "line-10": 1,
+        "line-11": 1,
+        "line-12": 1,
+        "line-13": 1,
+        "line-14": 1,
+        "line-15": 0.9,
+        "related-first": 1.3,
+        "kilim-ottoman": 1,
+        "woo-rug-cm": 1.6,
+        "shopify-variant-link": 1.6,
+        "private-pictures": 1,
+        "deep-feed": 1.9,
+        "digits": 3.9
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 1765.6,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.63,
+         5.58,
+         8.83
+        ]
+       ],
+       "at": "2026-11-05T19:26:10.860Z",
+       "extra": {
+        "pages": 55,
+        "slowest": "huge"
+       },
+       "per_page": {
+        "jsonld-cm": 1.2,
+        "jsonld-graph-inch": 0.9,
+        "og-only": 0.8,
+        "shopify-variants": 1.4,
+        "woo-store": 1.2,
+        "woo-sizes-unitless": 1.3,
+        "text-table": 1,
+        "text-inches-letters": 1.1,
+        "script-json": 1.2,
+        "microdata": 1.1,
+        "prose-llm": 0.9,
+        "injection": 1,
+        "picture-links": 1,
+        "no-product": 0.8,
+        "blocked": 0.8,
+        "busy": 0.7,
+        "unavailable": 0.7,
+        "robot-check": 0.9,
+        "missing": 0.6,
+        "picture": 0.6,
+        "pdf": 0.6,
+        "redirect-ok": 1.3,
+        "redirect-private": 0.7,
+        "redirect-metadata": 0.7,
+        "hops-5": 2.7,
+        "hops-6": 2.5,
+        "huge": 1765.6,
+        "gzip": 1.9,
+        "gzip-bomb": 189.4,
+        "cookie": 2.2,
+        "ui-rug": 1.4,
+        "ui-chair": 1.2,
+        "line-0": 1.1,
+        "line-1": 1,
+        "line-2": 1.2,
+        "line-3": 1,
+        "line-4": 1,
+        "line-5": 1,
+        "line-6": 1,
+        "line-7": 1,
+        "line-8": 0.9,
+        "line-9": 1,
+        "line-10": 0.9,
+        "line-11": 0.9,
+        "line-12": 0.9,
+        "line-13": 0.9,
+        "line-14": 1.4,
+        "line-15": 1,
+        "related-first": 1.6,
+        "kilim-ottoman": 1.4,
+        "woo-rug-cm": 1.8,
+        "shopify-variant-link": 1.6,
+        "private-pictures": 1.1,
+        "deep-feed": 2.2,
+        "digits": 4.3
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 1762.2,
+       "load": [
+        [
+         2.63,
+         5.58,
+         8.83
+        ],
+        [
+         2.58,
+         5.52,
+         8.79
+        ]
+       ],
+       "at": "2026-11-05T19:26:12.871Z",
+       "extra": {
+        "pages": 55,
+        "slowest": "huge"
+       },
+       "per_page": {
+        "jsonld-cm": 1.3,
+        "jsonld-graph-inch": 1.1,
+        "og-only": 1,
+        "shopify-variants": 1.7,
+        "woo-store": 1.6,
+        "woo-sizes-unitless": 1.6,
+        "text-table": 1.2,
+        "text-inches-letters": 1.2,
+        "script-json": 1.1,
+        "microdata": 1,
+        "prose-llm": 1,
+        "injection": 1,
+        "picture-links": 1.1,
+        "no-product": 0.8,
+        "blocked": 0.7,
+        "busy": 0.7,
+        "unavailable": 0.6,
+        "robot-check": 0.8,
+        "missing": 0.6,
+        "picture": 0.7,
+        "pdf": 0.6,
+        "redirect-ok": 1.4,
+        "redirect-private": 0.7,
+        "redirect-metadata": 0.8,
+        "hops-5": 2.6,
+        "hops-6": 2.2,
+        "huge": 1762.2,
+        "gzip": 1.8,
+        "gzip-bomb": 184.7,
+        "cookie": 2.1,
+        "ui-rug": 1.3,
+        "ui-chair": 1.6,
+        "line-0": 1.1,
+        "line-1": 1.1,
+        "line-2": 1,
+        "line-3": 1,
+        "line-4": 1.1,
+        "line-5": 1.1,
+        "line-6": 1.2,
+        "line-7": 1.1,
+        "line-8": 1,
+        "line-9": 0.9,
+        "line-10": 1,
+        "line-11": 0.9,
+        "line-12": 0.9,
+        "line-13": 0.9,
+        "line-14": 0.9,
+        "line-15": 0.9,
+        "related-first": 1.1,
+        "kilim-ottoman": 0.9,
+        "woo-rug-cm": 1.6,
+        "shopify-variant-link": 1.5,
+        "private-pictures": 1,
+        "deep-feed": 2,
+        "digits": 4
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 1759.6,
+       "load": [
+        [
+         2.58,
+         5.52,
+         8.79
+        ],
+        [
+         2.58,
+         5.52,
+         8.79
+        ]
+       ],
+       "at": "2026-11-05T19:26:14.880Z",
+       "extra": {
+        "pages": 55,
+        "slowest": "huge"
+       },
+       "per_page": {
+        "jsonld-cm": 1,
+        "jsonld-graph-inch": 1.1,
+        "og-only": 1,
+        "shopify-variants": 1.4,
+        "woo-store": 1.3,
+        "woo-sizes-unitless": 1.5,
+        "text-table": 1.1,
+        "text-inches-letters": 1.1,
+        "script-json": 1.4,
+        "microdata": 1.1,
+        "prose-llm": 0.9,
+        "injection": 0.9,
+        "picture-links": 1,
+        "no-product": 0.7,
+        "blocked": 0.6,
+        "busy": 0.6,
+        "unavailable": 0.6,
+        "robot-check": 0.8,
+        "missing": 0.6,
+        "picture": 0.6,
+        "pdf": 0.6,
+        "redirect-ok": 1.4,
+        "redirect-private": 0.7,
+        "redirect-metadata": 0.7,
+        "hops-5": 2.3,
+        "hops-6": 2.3,
+        "huge": 1759.6,
+        "gzip": 1.9,
+        "gzip-bomb": 185.1,
+        "cookie": 2.5,
+        "ui-rug": 1.5,
+        "ui-chair": 1.5,
+        "line-0": 1.2,
+        "line-1": 1.1,
+        "line-2": 1.2,
+        "line-3": 1.1,
+        "line-4": 1,
+        "line-5": 1.1,
+        "line-6": 1,
+        "line-7": 1,
+        "line-8": 1,
+        "line-9": 1,
+        "line-10": 1,
+        "line-11": 1,
+        "line-12": 1,
+        "line-13": 0.9,
+        "line-14": 0.9,
+        "line-15": 0.9,
+        "related-first": 1.1,
+        "kilim-ottoman": 1,
+        "woo-rug-cm": 1.5,
+        "shopify-variant-link": 1.5,
+        "private-pictures": 1.2,
+        "deep-feed": 2.4,
+        "digits": 3.9
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 1763.2,
+       "load": [
+        [
+         2.58,
+         5.52,
+         8.79
+        ],
+        [
+         2.69,
+         5.49,
+         8.77
+        ]
+       ],
+       "at": "2026-11-05T19:26:16.890Z",
+       "extra": {
+        "pages": 55,
+        "slowest": "huge"
+       },
+       "per_page": {
+        "jsonld-cm": 1,
+        "jsonld-graph-inch": 1.3,
+        "og-only": 1.1,
+        "shopify-variants": 1.5,
+        "woo-store": 1.4,
+        "woo-sizes-unitless": 1.5,
+        "text-table": 1.1,
+        "text-inches-letters": 1.1,
+        "script-json": 1,
+        "microdata": 1.1,
+        "prose-llm": 1,
+        "injection": 0.9,
+        "picture-links": 1,
+        "no-product": 0.7,
+        "blocked": 0.6,
+        "busy": 0.6,
+        "unavailable": 0.6,
+        "robot-check": 0.8,
+        "missing": 0.7,
+        "picture": 0.7,
+        "pdf": 0.7,
+        "redirect-ok": 1.7,
+        "redirect-private": 0.8,
+        "redirect-metadata": 0.7,
+        "hops-5": 2.4,
+        "hops-6": 2.6,
+        "huge": 1763.2,
+        "gzip": 1.9,
+        "gzip-bomb": 183.9,
+        "cookie": 2,
+        "ui-rug": 1.3,
+        "ui-chair": 1.2,
+        "line-0": 1.1,
+        "line-1": 1,
+        "line-2": 1,
+        "line-3": 1,
+        "line-4": 1,
+        "line-5": 1,
+        "line-6": 1,
+        "line-7": 1,
+        "line-8": 0.9,
+        "line-9": 0.9,
+        "line-10": 1,
+        "line-11": 1,
+        "line-12": 0.8,
+        "line-13": 0.9,
+        "line-14": 1,
+        "line-15": 1,
+        "related-first": 1.2,
+        "kilim-ottoman": 1,
+        "woo-rug-cm": 1.5,
+        "shopify-variant-link": 1.6,
+        "private-pictures": 1,
+        "deep-feed": 1.9,
+        "digits": 3.9
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 1765.9,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.69,
+         5.49,
+         8.77
+        ]
+       ],
+       "at": "2026-11-05T19:26:18.879Z",
+       "extra": {
+        "pages": 55,
+        "slowest": "huge"
+       },
+       "per_page": {
+        "jsonld-cm": 1,
+        "jsonld-graph-inch": 1,
+        "og-only": 0.9,
+        "shopify-variants": 1.5,
+        "woo-store": 1.4,
+        "woo-sizes-unitless": 1.5,
+        "text-table": 1.1,
+        "text-inches-letters": 1.1,
+        "script-json": 1,
+        "microdata": 1,
+        "prose-llm": 0.9,
+        "injection": 0.9,
+        "picture-links": 1,
+        "no-product": 0.7,
+        "blocked": 0.6,
+        "busy": 0.6,
+        "unavailable": 0.6,
+        "robot-check": 0.7,
+        "missing": 0.6,
+        "picture": 0.6,
+        "pdf": 0.6,
+        "redirect-ok": 1.6,
+        "redirect-private": 0.7,
+        "redirect-metadata": 0.7,
+        "hops-5": 2.4,
+        "hops-6": 2.4,
+        "huge": 1765.9,
+        "gzip": 2,
+        "gzip-bomb": 159.5,
+        "cookie": 2.2,
+        "ui-rug": 1.5,
+        "ui-chair": 1.3,
+        "line-0": 1.1,
+        "line-1": 1.1,
+        "line-2": 1.1,
+        "line-3": 1,
+        "line-4": 1,
+        "line-5": 1.1,
+        "line-6": 1.2,
+        "line-7": 1.3,
+        "line-8": 1.1,
+        "line-9": 1,
+        "line-10": 1.2,
+        "line-11": 1,
+        "line-12": 0.9,
+        "line-13": 1,
+        "line-14": 1.1,
+        "line-15": 1,
+        "related-first": 1.2,
+        "kilim-ottoman": 1,
+        "woo-rug-cm": 1.5,
+        "shopify-variant-link": 1.5,
+        "private-pictures": 1.1,
+        "deep-feed": 2,
+        "digits": 4
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 1763.2,
+      "p95": 1765.8400000000001,
+      "min": 1759.6,
+      "max": 1765.9,
+      "mad": 2.3999999999998636,
+      "noise_within": 0.003199253776846444,
+      "load_before": [
+       2.63,
+       5.58,
+       8.83
+      ],
+      "load_after": [
+       2.69,
+       5.49,
+       8.77
+      ],
+      "extra": {
+       "pages": 55
+      },
+      "errors": []
+     },
+     "run_medians": [
+      2130.4,
+      1763.2,
+      1740.2
+     ],
+     "noise": 0.2213
+    },
+    "add_cli_idol": {
+     "suite": "cli",
+     "what": "midstudy-add idol (262k splats), fal mock",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 850.748,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:20.628Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 859.039,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:22.282Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 851.583,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:23.918Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 853.553,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:25.579Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 852.035,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:27.217Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 852.399,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:28.859Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 852.399,
+      "p95": 857.9418,
+      "min": 851.583,
+      "max": 859.039,
+      "mad": 0.8160000000000309,
+      "noise_within": 0.002250019354990213,
+      "load_before": [
+       2.63,
+       5.43,
+       8.73
+      ],
+      "load_after": [
+       4.99,
+       5.88,
+       8.86
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      1359.923,
+      852.399,
+      840.237
+     ],
+     "noise": 0.6097
+    },
+    "add_cli_sam3d": {
+     "suite": "cli",
+     "what": "midstudy-add sam3d, fal mock",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 419.075,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:21.048Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 413.383,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:22.697Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 432.695,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:24.353Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 416.083,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:25.996Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 408.905,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:27.627Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 408.797,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:29.269Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 413.383,
+      "p95": 429.3726,
+      "min": 408.797,
+      "max": 432.695,
+      "mad": 4.478000000000009,
+      "noise_within": 0.025460709593470753,
+      "load_before": [
+       2.63,
+       5.43,
+       8.73
+      ],
+      "load_after": [
+       4.99,
+       5.88,
+       8.86
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      596.013,
+      413.383,
+      412.607
+     ],
+     "noise": 0.4437
+    },
+    "add_cli_glb": {
+     "suite": "cli",
+     "what": "midstudy-add glb (SheenChair, 7 textures)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 175.808,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:21.225Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 175.777,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:22.874Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 175.494,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:24.529Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 175.269,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:26.172Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 180.871,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:27.809Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 173.535,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:29.444Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 175.494,
+      "p95": 179.8522,
+      "min": 173.535,
+      "max": 180.871,
+      "mad": 0.28299999999998704,
+      "noise_within": 0.0037902092697186386,
+      "load_before": [
+       2.63,
+       5.43,
+       8.73
+      ],
+      "load_after": [
+       4.99,
+       5.88,
+       8.86
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      297.293,
+      175.494,
+      170.243
+     ],
+     "noise": 0.724
+    },
+    "add_cli_rug": {
+     "suite": "cli",
+     "what": "midstudy-add rug (800 px picture)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 195.607,
+       "load": [
+        [
+         2.69,
+         5.49,
+         8.77
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:21.422Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 191.053,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:23.065Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 193.413,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         2.63,
+         5.43,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:24.724Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 190.795,
+       "load": [
+        [
+         2.63,
+         5.43,
+         8.73
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:26.364Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 195.968,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:28.006Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 191.265,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         4.99,
+         5.88,
+         8.86
+        ]
+       ],
+       "at": "2026-11-05T19:26:29.636Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 191.265,
+      "p95": 195.457,
+      "min": 190.795,
+      "max": 195.968,
+      "mad": 0.46999999999999886,
+      "noise_within": 0.005775656815343241,
+      "load_before": [
+       2.63,
+       5.43,
+       8.73
+      ],
+      "load_after": [
+       4.99,
+       5.88,
+       8.86
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      308.786,
+      191.265,
+      185.994
+     ],
+     "noise": 0.642
+    },
+    "planner_load_desktop": {
+     "suite": "load",
+     "what": "cold load to ready + 2 frames, 1280×800",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 6057.1,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         5.57,
+         5.96,
+         8.82
+        ]
+       ],
+       "at": "2026-11-05T19:26:44.166Z",
+       "extra": {
+        "ready": 6046.8,
+        "hook": 323.1,
+        "requests": 57,
+        "kb": 5420.6,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 5.43,
+        "buffers_mb": 6.71,
+        "longtasks": 3,
+        "longtask_ms": 656,
+        "script_ms": 331.1,
+        "layout_ms": 11,
+        "style_ms": 6.8,
+        "task_ms": 5817,
+        "task_other_ms": 5462.6,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 1798.4,
+       "load": [
+        [
+         5.57,
+         5.96,
+         8.82
+        ],
+        [
+         4.87,
+         5.8,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:52.414Z",
+       "extra": {
+        "ready": 1786,
+        "hook": 193.3,
+        "requests": 53,
+        "kb": 1414.3,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.69,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 773,
+        "script_ms": 99.1,
+        "layout_ms": 9.2,
+        "style_ms": 6,
+        "task_ms": 1623.1,
+        "task_other_ms": 1503.1,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 1780.2,
+       "load": [
+        [
+         4.87,
+         5.8,
+         8.73
+        ],
+        [
+         4.64,
+         5.73,
+         8.69
+        ]
+       ],
+       "at": "2026-11-05T19:26:59.658Z",
+       "extra": {
+        "ready": 1765.9,
+        "hook": 184.8,
+        "requests": 53,
+        "kb": 1414.3,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.69,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 768,
+        "script_ms": 98.3,
+        "layout_ms": 9.6,
+        "style_ms": 6,
+        "task_ms": 1599.4,
+        "task_other_ms": 1479.8,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 1825.2,
+       "load": [
+        [
+         4.64,
+         5.73,
+         8.69
+        ],
+        [
+         4.3,
+         5.63,
+         8.62
+        ]
+       ],
+       "at": "2026-11-05T19:27:06.964Z",
+       "extra": {
+        "ready": 1758,
+        "hook": 194.4,
+        "requests": 53,
+        "kb": 1414.3,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.69,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 819,
+        "script_ms": 103.2,
+        "layout_ms": 9.2,
+        "style_ms": 6.1,
+        "task_ms": 891,
+        "task_other_ms": 766.7,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 1923.1,
+       "load": [
+        [
+         4.3,
+         5.63,
+         8.62
+        ],
+        [
+         4.04,
+         5.55,
+         8.57
+        ]
+       ],
+       "at": "2026-11-05T19:27:14.137Z",
+       "extra": {
+        "ready": 1823.8,
+        "hook": 402.7,
+        "requests": 53,
+        "kb": 1414.3,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.68,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 791,
+        "script_ms": 119.4,
+        "layout_ms": 9.7,
+        "style_ms": 6.2,
+        "task_ms": 866.7,
+        "task_other_ms": 725.4,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 1701.4,
+       "load": [
+        [
+         4.04,
+         5.55,
+         8.57
+        ],
+        [
+         3.8,
+         5.47,
+         8.53
+        ]
+       ],
+       "at": "2026-11-05T19:27:21.201Z",
+       "extra": {
+        "ready": 1604,
+        "hook": 192.3,
+        "requests": 53,
+        "kb": 1414.3,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.68,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 774,
+        "script_ms": 106,
+        "layout_ms": 9.3,
+        "style_ms": 6.1,
+        "task_ms": 848.7,
+        "task_other_ms": 721.6,
+        "photo_diff": 2
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 1798.4,
+      "p95": 1903.52,
+      "min": 1701.4,
+      "max": 1923.1,
+      "mad": 26.799999999999955,
+      "noise_within": 0.03502575672593318,
+      "load_before": [
+       5.57,
+       5.96,
+       8.82
+      ],
+      "load_after": [
+       3.8,
+       5.47,
+       8.53
+      ],
+      "extra": {
+       "ready": 1765.9,
+       "hook": 193.3,
+       "requests": 53,
+       "kb": 1414.3,
+       "ext_requests": 12,
+       "ext_kb": 451.4,
+       "cached": 0,
+       "failed": 0,
+       "heap_mb": 4.69,
+       "buffers_mb": 5.62,
+       "longtasks": 2,
+       "longtask_ms": 774,
+       "script_ms": 103.2,
+       "layout_ms": 9.3,
+       "style_ms": 6.1,
+       "task_ms": 891,
+       "task_other_ms": 766.7,
+       "photo_diff": 2
+      },
+      "errors": []
+     },
+     "run_medians": [
+      3065.2,
+      1798.4,
+      1779.1
+     ],
+     "noise": 0.7151
+    },
+    "planner_load_desktop_warm": {
+     "suite": "load",
+     "what": "the same, reloaded (warm HTTP cache)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 1748.3,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         5.57,
+         5.96,
+         8.82
+        ]
+       ],
+       "at": "2026-11-05T19:26:46.449Z",
+       "extra": {
+        "ready": 1740.1,
+        "hook": 94.4,
+        "requests": 53,
+        "kb": 962.9,
+        "ext_requests": 12,
+        "ext_kb": 0,
+        "cached": 12,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.63,
+        "longtasks": 2,
+        "longtask_ms": 814,
+        "script_ms": 86.2,
+        "layout_ms": 1.9,
+        "style_ms": 5.5,
+        "task_ms": 1621.6,
+        "task_other_ms": 1523.5,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 1801.2,
+       "load": [
+        [
+         5.57,
+         5.96,
+         8.82
+        ],
+        [
+         4.87,
+         5.8,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:54.774Z",
+       "extra": {
+        "ready": 1787.7,
+        "hook": 187.1,
+        "requests": 53,
+        "kb": 962.9,
+        "ext_requests": 12,
+        "ext_kb": 0,
+        "cached": 12,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.62,
+        "longtasks": 3,
+        "longtask_ms": 882,
+        "script_ms": 88.2,
+        "layout_ms": 1.8,
+        "style_ms": 5.5,
+        "task_ms": 1634.6,
+        "task_other_ms": 1534.1,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 1815.4,
+       "load": [
+        [
+         4.87,
+         5.8,
+         8.73
+        ],
+        [
+         4.64,
+         5.73,
+         8.69
+        ]
+       ],
+       "at": "2026-11-05T19:27:02.058Z",
+       "extra": {
+        "ready": 1799.4,
+        "hook": 155,
+        "requests": 53,
+        "kb": 962.9,
+        "ext_requests": 12,
+        "ext_kb": 0,
+        "cached": 12,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.62,
+        "longtasks": 3,
+        "longtask_ms": 840,
+        "script_ms": 88.5,
+        "layout_ms": 1.7,
+        "style_ms": 5.5,
+        "task_ms": 1640.7,
+        "task_other_ms": 1539.9,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 1791.8,
+       "load": [
+        [
+         4.64,
+         5.73,
+         8.69
+        ],
+        [
+         4.3,
+         5.63,
+         8.62
+        ]
+       ],
+       "at": "2026-11-05T19:27:09.316Z",
+       "extra": {
+        "ready": 1776.8,
+        "hook": 186.2,
+        "requests": 53,
+        "kb": 962.9,
+        "ext_requests": 12,
+        "ext_kb": 0,
+        "cached": 12,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.62,
+        "longtasks": 3,
+        "longtask_ms": 872,
+        "script_ms": 84.6,
+        "layout_ms": 1.9,
+        "style_ms": 5.7,
+        "task_ms": 1617.8,
+        "task_other_ms": 1520.8,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 1778.1,
+       "load": [
+        [
+         4.3,
+         5.63,
+         8.62
+        ],
+        [
+         4.04,
+         5.55,
+         8.57
+        ]
+       ],
+       "at": "2026-11-05T19:27:16.474Z",
+       "extra": {
+        "ready": 1764.9,
+        "hook": 154.4,
+        "requests": 53,
+        "kb": 962.9,
+        "ext_requests": 12,
+        "ext_kb": 0,
+        "cached": 12,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.62,
+        "longtasks": 3,
+        "longtask_ms": 848,
+        "script_ms": 83,
+        "layout_ms": 1.8,
+        "style_ms": 5.4,
+        "task_ms": 1611.1,
+        "task_other_ms": 1516.1,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 1753.6,
+       "load": [
+        [
+         4.04,
+         5.55,
+         8.57
+        ],
+        [
+         3.8,
+         5.47,
+         8.53
+        ]
+       ],
+       "at": "2026-11-05T19:27:23.489Z",
+       "extra": {
+        "ready": 1742.5,
+        "hook": 154.4,
+        "requests": 53,
+        "kb": 962.9,
+        "ext_requests": 12,
+        "ext_kb": 0,
+        "cached": 12,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.62,
+        "longtasks": 3,
+        "longtask_ms": 831,
+        "script_ms": 86.6,
+        "layout_ms": 1.6,
+        "style_ms": 5.2,
+        "task_ms": 1572.8,
+        "task_other_ms": 1474.5,
+        "photo_diff": 2
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 1791.8,
+      "p95": 1812.5600000000002,
+      "min": 1753.6,
+      "max": 1815.4,
+      "mad": 13.700000000000045,
+      "noise_within": 0.017970909688791312,
+      "load_before": [
+       5.57,
+       5.96,
+       8.82
+      ],
+      "load_after": [
+       3.8,
+       5.47,
+       8.53
+      ],
+      "extra": {
+       "ready": 1776.8,
+       "hook": 155,
+       "requests": 53,
+       "kb": 962.9,
+       "ext_requests": 12,
+       "ext_kb": 0,
+       "cached": 12,
+       "failed": 0,
+       "heap_mb": 4.79,
+       "buffers_mb": 5.62,
+       "longtasks": 3,
+       "longtask_ms": 848,
+       "script_ms": 86.6,
+       "layout_ms": 1.8,
+       "style_ms": 5.5,
+       "task_ms": 1617.8,
+       "task_other_ms": 1520.8,
+       "photo_diff": 2
+      },
+      "errors": []
+     },
+     "run_medians": [
+      1932,
+      1791.8,
+      1774.2
+     ],
+     "noise": 0.0881
+    },
+    "planner_load_phone": {
+     "suite": "load",
+     "what": "cold load to ready + 2 frames, 390×844 touch",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 2257.4,
+       "load": [
+        [
+         4.99,
+         5.88,
+         8.86
+        ],
+        [
+         5.57,
+         5.96,
+         8.82
+        ]
+       ],
+       "at": "2026-11-05T19:26:50.047Z",
+       "extra": {
+        "ready": 1484.8,
+        "hook": 192.6,
+        "requests": 50,
+        "kb": 1391,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.7,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 1299,
+        "script_ms": 99.8,
+        "layout_ms": 10.1,
+        "style_ms": 5,
+        "task_ms": 1368.1,
+        "task_other_ms": 1247.3,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 1732.6,
+       "load": [
+        [
+         5.57,
+         5.96,
+         8.82
+        ],
+        [
+         4.87,
+         5.8,
+         8.73
+        ]
+       ],
+       "at": "2026-11-05T19:26:57.272Z",
+       "extra": {
+        "ready": 966.4,
+        "hook": 171.5,
+        "requests": 50,
+        "kb": 1391.1,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.79,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 803,
+        "script_ms": 97.2,
+        "layout_ms": 9.9,
+        "style_ms": 5,
+        "task_ms": 871.4,
+        "task_other_ms": 753.6,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 1728.1,
+       "load": [
+        [
+         4.87,
+         5.8,
+         8.73
+        ],
+        [
+         4.64,
+         5.73,
+         8.69
+        ]
+       ],
+       "at": "2026-11-05T19:27:04.518Z",
+       "extra": {
+        "ready": 949.8,
+        "hook": 182.7,
+        "requests": 50,
+        "kb": 1391.1,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.7,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 774,
+        "script_ms": 100.1,
+        "layout_ms": 10.4,
+        "style_ms": 4.9,
+        "task_ms": 844.7,
+        "task_other_ms": 724,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 1756.9,
+       "load": [
+        [
+         4.64,
+         5.73,
+         8.69
+        ],
+        [
+         4.3,
+         5.63,
+         8.62
+        ]
+       ],
+       "at": "2026-11-05T19:27:11.596Z",
+       "extra": {
+        "ready": 1641.6,
+        "hook": 202.3,
+        "requests": 50,
+        "kb": 1391.4,
+        "ext_requests": 12,
+        "ext_kb": 451.7,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.7,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 784,
+        "script_ms": 109.9,
+        "layout_ms": 10.3,
+        "style_ms": 5.1,
+        "task_ms": 860.2,
+        "task_other_ms": 729.5,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 1755.9,
+       "load": [
+        [
+         4.3,
+         5.63,
+         8.62
+        ],
+        [
+         4.04,
+         5.55,
+         8.57
+        ]
+       ],
+       "at": "2026-11-05T19:27:18.883Z",
+       "extra": {
+        "ready": 982.9,
+        "hook": 198.8,
+        "requests": 50,
+        "kb": 1391.1,
+        "ext_requests": 12,
+        "ext_kb": 451.4,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.7,
+        "buffers_mb": 5.62,
+        "longtasks": 2,
+        "longtask_ms": 795,
+        "script_ms": 104.3,
+        "layout_ms": 10.1,
+        "style_ms": 4.8,
+        "task_ms": 865.2,
+        "task_other_ms": 740.5,
+        "photo_diff": 2
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 1900.9,
+       "load": [
+        [
+         4.04,
+         5.55,
+         8.57
+        ],
+        [
+         3.8,
+         5.47,
+         8.53
+        ]
+       ],
+       "at": "2026-11-05T19:27:26.029Z",
+       "extra": {
+        "ready": 992.4,
+        "hook": 230.1,
+        "requests": 50,
+        "kb": 1391.2,
+        "ext_requests": 12,
+        "ext_kb": 451.5,
+        "cached": 0,
+        "failed": 0,
+        "heap_mb": 4.7,
+        "buffers_mb": 5.63,
+        "longtasks": 2,
+        "longtask_ms": 785,
+        "script_ms": 104.6,
+        "layout_ms": 10.4,
+        "style_ms": 5.1,
+        "task_ms": 1740.1,
+        "task_other_ms": 1614.6,
+        "photo_diff": 2
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 1755.9,
+      "p95": 1872.1000000000001,
+      "min": 1728.1,
+      "max": 1900.9,
+      "mad": 23.300000000000182,
+      "noise_within": 0.0311885489023979,
+      "load_before": [
+       5.57,
+       5.96,
+       8.82
+      ],
+      "load_after": [
+       3.8,
+       5.47,
+       8.53
+      ],
+      "extra": {
+       "ready": 982.9,
+       "hook": 198.8,
+       "requests": 50,
+       "kb": 1391.1,
+       "ext_requests": 12,
+       "ext_kb": 451.4,
+       "cached": 0,
+       "failed": 0,
+       "heap_mb": 4.7,
+       "buffers_mb": 5.62,
+       "longtasks": 2,
+       "longtask_ms": 785,
+       "script_ms": 104.3,
+       "layout_ms": 10.3,
+       "style_ms": 5,
+       "task_ms": 865.2,
+       "task_other_ms": 740.5,
+       "photo_diff": 2
+      },
+      "errors": []
+     },
+     "run_medians": [
+      3573.5,
+      1755.9,
+      1719.2
+     ],
+     "noise": 1.056
+    },
+    "scene_open": {
+     "suite": "scene",
+     "what": "openScene(living-wide) from the Scenes page",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 957.2,
+       "load": [
+        [
+         3.8,
+         5.47,
+         8.53
+        ],
+        [
+         3.57,
+         5.4,
+         8.48
+        ]
+       ],
+       "at": "2026-11-05T19:27:27.926Z",
+       "extra": {
+        "longtasks": 1,
+        "longtask_ms": 208,
+        "script_ms": 19,
+        "layout_ms": 0.7,
+        "style_ms": 2.4,
+        "task_ms": 941.6,
+        "task_other_ms": 918.7,
+        "requests": 5,
+        "kb": 372.1
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 155.1,
+       "load": [
+        [
+         3.57,
+         5.4,
+         8.48
+        ],
+        [
+         3.57,
+         5.4,
+         8.48
+        ]
+       ],
+       "at": "2026-11-05T19:27:29.092Z",
+       "extra": {
+        "longtasks": 1,
+        "longtask_ms": 105,
+        "script_ms": 20,
+        "layout_ms": 0.7,
+        "style_ms": 2.5,
+        "task_ms": 139.7,
+        "task_other_ms": 115.5,
+        "requests": 5,
+        "kb": 372.1
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 906.7,
+       "load": [
+        [
+         3.57,
+         5.4,
+         8.48
+        ],
+        [
+         3.53,
+         5.36,
+         8.45
+        ]
+       ],
+       "at": "2026-11-05T19:27:31.728Z",
+       "extra": {
+        "longtasks": 1,
+        "longtask_ms": 119,
+        "script_ms": 22.4,
+        "layout_ms": 0.7,
+        "style_ms": 2.5,
+        "task_ms": 886.1,
+        "task_other_ms": 859.6,
+        "requests": 5,
+        "kb": 372.1
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 842.9,
+       "load": [
+        [
+         3.53,
+         5.36,
+         8.45
+        ],
+        [
+         3.53,
+         5.36,
+         8.45
+        ]
+       ],
+       "at": "2026-11-05T19:27:33.664Z",
+       "extra": {
+        "longtasks": 1,
+        "longtask_ms": 100,
+        "script_ms": 22.5,
+        "layout_ms": 0.7,
+        "style_ms": 2.4,
+        "task_ms": 137.2,
+        "task_other_ms": 110.8,
+        "requests": 5,
+        "kb": 372.1
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 784.8,
+       "load": [
+        [
+         3.53,
+         5.36,
+         8.45
+        ],
+        [
+         3.53,
+         5.36,
+         8.45
+        ]
+       ],
+       "at": "2026-11-05T19:27:35.487Z",
+       "extra": {
+        "longtasks": 1,
+        "longtask_ms": 64,
+        "script_ms": 22.2,
+        "layout_ms": 0.6,
+        "style_ms": 2.2,
+        "task_ms": 99.4,
+        "task_other_ms": 73.6,
+        "requests": 5,
+        "kb": 372.1
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 845.8,
+       "load": [
+        [
+         3.53,
+         5.36,
+         8.45
+        ],
+        [
+         4.36,
+         5.5,
+         8.48
+        ]
+       ],
+       "at": "2026-11-05T19:27:37.383Z",
+       "extra": {
+        "longtasks": 1,
+        "longtask_ms": 114,
+        "script_ms": 19.1,
+        "layout_ms": 0.7,
+        "style_ms": 2.4,
+        "task_ms": 145.5,
+        "task_other_ms": 122.4,
+        "requests": 5,
+        "kb": 372.1
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 842.9,
+      "p95": 894.52,
+      "min": 155.1,
+      "max": 906.7,
+      "mad": 58.10000000000002,
+      "noise_within": 0.1620089865679104,
+      "load_before": [
+       3.57,
+       5.4,
+       8.48
+      ],
+      "load_after": [
+       4.36,
+       5.5,
+       8.48
+      ],
+      "extra": {
+       "longtasks": 1,
+       "longtask_ms": 105,
+       "script_ms": 22.2,
+       "layout_ms": 0.7,
+       "style_ms": 2.4,
+       "task_ms": 139.7,
+       "task_other_ms": 115.5,
+       "requests": 5,
+       "kb": 372.1
+      },
+      "errors": []
+     },
+     "run_medians": [
+      919.2,
+      842.9,
+      831.2
+     ],
+     "noise": 0.1044
+    },
+    "add_item_glb": {
+     "suite": "edit",
+     "what": "addItem(probe box), first in the page",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 4.6,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:40.044Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 4.6,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:29.024Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 4.6,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:18.043Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 4.7,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:07.148Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 4.7,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:30:56.092Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 4.7,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:45.172Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 4.7,
+      "p95": 4.7,
+      "min": 4.6,
+      "max": 4.7,
+      "mad": 0,
+      "noise_within": 0,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 0
+      },
+      "errors": []
+     },
+     "run_medians": [
+      8.2,
+      4.7,
+      4.6
+     ],
+     "noise": 0.766
+    },
+    "add_item_glb_textured": {
+     "suite": "edit",
+     "what": "addItem(SheenChair, 4 MB, textures)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 24.8,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:40.071Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 24.7,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:29.051Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 25.2,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:18.070Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 24.1,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:07.174Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 24.8,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:30:56.119Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 24.8,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:45.198Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 24.8,
+      "p95": 25.12,
+      "min": 24.1,
+      "max": 25.2,
+      "mad": 0.10000000000000142,
+      "noise_within": 0.009477359306680195,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 0
+      },
+      "errors": []
+     },
+     "run_medians": [
+      45.1,
+      24.8,
+      24.1
+     ],
+     "noise": 0.8468
+    },
+    "drag_frames_p50": {
+     "suite": "edit",
+     "what": "rAF interval p50 during a 2 s mouse drag",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 66.45,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:45.076Z",
+       "extra": {
+        "frames": 32,
+        "moves": 30,
+        "drag_ms": 2125,
+        "moved_cm": 49.5,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 66.6,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:33.912Z",
+       "extra": {
+        "frames": 34,
+        "moves": 33,
+        "drag_ms": 2120,
+        "moved_cm": 49.5,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 66.6,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:22.930Z",
+       "extra": {
+        "frames": 33,
+        "moves": 31,
+        "drag_ms": 2091,
+        "moved_cm": 49.5,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 66.6,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:12.007Z",
+       "extra": {
+        "frames": 33,
+        "moves": 31,
+        "drag_ms": 2107,
+        "moved_cm": 49.5,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 66.6,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:00.916Z",
+       "extra": {
+        "frames": 33,
+        "moves": 32,
+        "drag_ms": 2095,
+        "moved_cm": 49.5,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 66.7,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:50.129Z",
+       "extra": {
+        "frames": 34,
+        "moves": 31,
+        "drag_ms": 2120,
+        "moved_cm": 49.5,
+        "longtask_ms": 0
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 66.6,
+      "p95": 66.68,
+      "min": 66.6,
+      "max": 66.7,
+      "mad": 0,
+      "noise_within": 0,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "frames": 33,
+       "moves": 31,
+       "drag_ms": 2107,
+       "moved_cm": 49.5,
+       "longtask_ms": 0
+      },
+      "errors": []
+     },
+     "run_medians": [
+      83.42500000000001,
+      66.6,
+      66.6
+     ],
+     "noise": 0.2526
+    },
+    "drag_frames_p95": {
+     "suite": "edit",
+     "what": "rAF interval p95 during the drag",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 66.745,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:45.076Z",
+       "extra": {
+        "max": 216.7
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 67.22,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:33.912Z",
+       "extra": {
+        "max": 83.3
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 67.02,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:22.930Z",
+       "extra": {
+        "max": 83.3
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 68.34,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:12.007Z",
+       "extra": {
+        "max": 83.9
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 71.02,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:00.916Z",
+       "extra": {
+        "max": 83.4
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 75,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:50.129Z",
+       "extra": {
+        "max": 91.7
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 68.34,
+      "p95": 74.204,
+      "min": 67.02,
+      "max": 75,
+      "mad": 1.3200000000000074,
+      "noise_within": 0.04539813202567751,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "max": 83.4
+      },
+      "errors": []
+     },
+     "run_medians": [
+      132.9175,
+      68.34,
+      67.125
+     ],
+     "noise": 0.9627
+    },
+    "render_capture": {
+     "suite": "edit",
+     "what": "renderView() nano-banana, mock",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 403.6,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:45.927Z",
+       "extra": {
+        "longtask_ms": 394,
+        "keep_room": false,
+        "aligned": null
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 399.1,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:34.764Z",
+       "extra": {
+        "longtask_ms": 389,
+        "keep_room": false,
+        "aligned": null
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 405.9,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:23.791Z",
+       "extra": {
+        "longtask_ms": 397,
+        "keep_room": false,
+        "aligned": null
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 405.4,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:12.868Z",
+       "extra": {
+        "longtask_ms": 396,
+        "keep_room": false,
+        "aligned": null
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 413.7,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:01.789Z",
+       "extra": {
+        "longtask_ms": 404,
+        "keep_room": false,
+        "aligned": null
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 485.4,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:51.077Z",
+       "extra": {
+        "longtask_ms": 476,
+        "keep_room": false,
+        "aligned": null
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 405.9,
+      "p95": 471.05999999999995,
+      "min": 399.1,
+      "max": 485.4,
+      "mad": 6.7999999999999545,
+      "noise_within": 0.039375754458697086,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 397
+      },
+      "errors": []
+     },
+     "run_medians": [
+      619,
+      405.9,
+      399.2
+     ],
+     "noise": 0.5415
+    },
+    "render_capture_client": {
+     "suite": "edit",
+     "what": "… the page (capture, encode)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 395.6,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:45.927Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 391.6,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:34.764Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 398.6,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:23.791Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 397.9,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:12.868Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 406,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:01.789Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 478.2,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:51.077Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 398.6,
+      "p95": 463.76,
+      "min": 391.6,
+      "max": 478.2,
+      "mad": 7,
+      "noise_within": 0.0412762061123848,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      604.1,
+      398.6,
+      390.5
+     ],
+     "noise": 0.5359
+    },
+    "render_capture_server": {
+     "suite": "edit",
+     "what": "… the POST /api/render",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 8,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:45.927Z",
+       "extra": {
+        "ttfb": 7.1
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 7.5,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:34.764Z",
+       "extra": {
+        "ttfb": 6.7
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 7.3,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:23.791Z",
+       "extra": {
+        "ttfb": 6.4
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 7.5,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:12.868Z",
+       "extra": {
+        "ttfb": 6.5
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 7.7,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:01.789Z",
+       "extra": {
+        "ttfb": 6.7
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 7.2,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:51.077Z",
+       "extra": {
+        "ttfb": 6.3
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 7.5,
+      "p95": 7.66,
+      "min": 7.2,
+      "max": 7.7,
+      "mad": 0.20000000000000018,
+      "noise_within": 0.06267693621484419,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "ttfb": 6.5
+      },
+      "errors": []
+     },
+     "run_medians": [
+      9.5,
+      7.5,
+      8.4
+     ],
+     "noise": 0.2381
+    },
+    "render_keep_room": {
+     "suite": "edit",
+     "what": "renderView({keepRoom}), mock",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 813.8,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:47.077Z",
+       "extra": {
+        "longtask_ms": 767,
+        "keep_room": true,
+        "aligned": false
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 723.5,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:35.821Z",
+       "extra": {
+        "longtask_ms": 677,
+        "keep_room": true,
+        "aligned": false
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 679.6,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:24.877Z",
+       "extra": {
+        "longtask_ms": 632,
+        "keep_room": true,
+        "aligned": false
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 745.7,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:13.951Z",
+       "extra": {
+        "longtask_ms": 699,
+        "keep_room": true,
+        "aligned": false
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 817.8,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:02.953Z",
+       "extra": {
+        "longtask_ms": 770,
+        "keep_room": true,
+        "aligned": false
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 755.3,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:52.184Z",
+       "extra": {
+        "longtask_ms": 709,
+        "keep_room": true,
+        "aligned": false
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 745.7,
+      "p95": 805.3,
+      "min": 679.6,
+      "max": 817.8,
+      "mad": 22.200000000000045,
+      "noise_within": 0.0699725752968457,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 699
+      },
+      "errors": []
+     },
+     "run_medians": [
+      831.6,
+      745.7,
+      734.3
+     ],
+     "noise": 0.1305
+    },
+    "render_keep_room_client": {
+     "suite": "edit",
+     "what": "… the page (capture + mask)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 768,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:47.077Z",
+       "extra": {}
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 677.8,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:35.821Z",
+       "extra": {}
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 633.4,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:24.877Z",
+       "extra": {}
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 700.3,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:13.951Z",
+       "extra": {}
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 770.8,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:02.953Z",
+       "extra": {}
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 709.8,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:52.184Z",
+       "extra": {}
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 700.3,
+      "p95": 758.5999999999999,
+      "min": 633.4,
+      "max": 770.8,
+      "mad": 22.5,
+      "noise_within": 0.07551572887516027,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {},
+      "errors": []
+     },
+     "run_medians": [
+      776.3,
+      700.3,
+      688.3
+     ],
+     "noise": 0.1257
+    },
+    "render_keep_room_server": {
+     "suite": "edit",
+     "what": "… the POST (stub align)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 45.8,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:47.077Z",
+       "extra": {
+        "ttfb": 45
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 45.7,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:35.821Z",
+       "extra": {
+        "ttfb": 44.8
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 46.2,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:24.877Z",
+       "extra": {
+        "ttfb": 45.2
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 45.4,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:13.951Z",
+       "extra": {
+        "ttfb": 44.6
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 47,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:02.953Z",
+       "extra": {
+        "ttfb": 46
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 45.5,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:52.184Z",
+       "extra": {
+        "ttfb": 44.7
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 45.7,
+      "p95": 46.84,
+      "min": 45.4,
+      "max": 47,
+      "mad": 0.30000000000000426,
+      "noise_within": 0.015429223904092043,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "ttfb": 44.8
+      },
+      "errors": []
+     },
+     "run_medians": [
+      55.8,
+      45.7,
+      47
+     ],
+     "noise": 0.2149
+    },
+    "add_item_splat": {
+     "suite": "edit",
+     "what": "addItem(Idol chair): Spark + splat.spz, first splat",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 170.9,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:48.234Z",
+       "extra": {
+        "longtask_ms": 0,
+        "splats": 262144,
+        "requests": 4,
+        "kb": 3915.8,
+        "ext_kb": 868.1
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 150.7,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:36.976Z",
+       "extra": {
+        "longtask_ms": 0,
+        "splats": 262144,
+        "requests": 4,
+        "kb": 3915.8,
+        "ext_kb": 868.1
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 144.6,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:26.051Z",
+       "extra": {
+        "longtask_ms": 0,
+        "splats": 262144,
+        "requests": 4,
+        "kb": 3915.8,
+        "ext_kb": 868.1
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 156.7,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:15.147Z",
+       "extra": {
+        "longtask_ms": 0,
+        "splats": 262144,
+        "requests": 4,
+        "kb": 3915.8,
+        "ext_kb": 868.1
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 162.9,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:04.189Z",
+       "extra": {
+        "longtask_ms": 0,
+        "splats": 262144,
+        "requests": 4,
+        "kb": 3915.8,
+        "ext_kb": 868.1
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 161.4,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:53.366Z",
+       "extra": {
+        "longtask_ms": 0,
+        "splats": 262144,
+        "requests": 4,
+        "kb": 3915.8,
+        "ext_kb": 868.1
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 156.7,
+      "p95": 162.6,
+      "min": 144.6,
+      "max": 162.9,
+      "mad": 6,
+      "noise_within": 0.08999560081901677,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 0,
+       "splats": 262144,
+       "requests": 4,
+       "kb": 3915.8,
+       "ext_kb": 868.1
+      },
+      "errors": []
+     },
+     "run_medians": [
+      792.6,
+      156.7,
+      159
+     ],
+     "noise": 3.9994
+    },
+    "splat_first_frame": {
+     "suite": "edit",
+     "what": "… then until the view is idle (first draw)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 297,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:27:48.234Z",
+       "extra": {
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 311.1,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:36.976Z",
+       "extra": {
+        "longtask_ms": 62
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 324.5,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:26.051Z",
+       "extra": {
+        "longtask_ms": 70
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 247.3,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:15.147Z",
+       "extra": {
+        "longtask_ms": 66
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 239.7,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:04.189Z",
+       "extra": {
+        "longtask_ms": 57
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 302.9,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:31:53.366Z",
+       "extra": {
+        "longtask_ms": 56
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 302.9,
+      "p95": 321.82,
+      "min": 239.7,
+      "max": 324.5,
+      "mad": 21.600000000000023,
+      "noise_within": 0.16760752173662527,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 62
+      },
+      "errors": []
+     },
+     "run_medians": [
+      437.4,
+      302.9,
+      298.7
+     ],
+     "noise": 0.4579
+    },
+    "drag_splat": {
+     "suite": "edit",
+     "what": "a 5-move mouse drag with the splat in view, ms per move drawn",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 3010.02,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:28:03.627Z",
+       "extra": {
+        "total_ms": 15050.1,
+        "frames": 7,
+        "frame_p50": 3608.2,
+        "max_frame": 3800,
+        "moved_cm": 33,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 3033.76,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:28:52.487Z",
+       "extra": {
+        "total_ms": 15168.8,
+        "frames": 8,
+        "frame_p50": 1854.3,
+        "max_frame": 3808.4,
+        "moved_cm": 33,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 3038.58,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:29:41.640Z",
+       "extra": {
+        "total_ms": 15192.9,
+        "frames": 8,
+        "frame_p50": 1862.5,
+        "max_frame": 3800,
+        "moved_cm": 33,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 3035.36,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:30.716Z",
+       "extra": {
+        "total_ms": 15176.8,
+        "frames": 8,
+        "frame_p50": 1858.4,
+        "max_frame": 3800.1,
+        "moved_cm": 33,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 3782.54,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:23.496Z",
+       "extra": {
+        "total_ms": 18912.7,
+        "frames": 8,
+        "frame_p50": 3737.5,
+        "max_frame": 3783.3,
+        "moved_cm": 33,
+        "longtask_ms": 0
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 3006.68,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:32:08.741Z",
+       "extra": {
+        "total_ms": 15033.4,
+        "frames": 7,
+        "frame_p50": 3649.9,
+        "max_frame": 3766.7,
+        "moved_cm": 33,
+        "longtask_ms": 0
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 3035.36,
+      "p95": 3633.7479999999996,
+      "min": 3006.68,
+      "max": 3782.54,
+      "mad": 3.2199999999998,
+      "noise_within": 0.0024933582994906556,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "total_ms": 15176.8,
+       "frames": 8,
+       "frame_p50": 1862.5,
+       "max_frame": 3800,
+       "moved_cm": 33,
+       "longtask_ms": 0
+      },
+      "errors": []
+     },
+     "run_medians": [
+      3399.22,
+      3035.36,
+      3029.32
+     ],
+     "noise": 0.1219
+    },
+    "render_capture_splat": {
+     "suite": "edit",
+     "what": "renderView() with the splat (sort + capture)",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 11522,
+       "load": [
+        [
+         4.36,
+         5.5,
+         8.48
+        ],
+        [
+         9.89,
+         6.78,
+         8.78
+        ]
+       ],
+       "at": "2026-11-05T19:28:22.698Z",
+       "extra": {
+        "longtask_ms": 3951
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 11313.6,
+       "load": [
+        [
+         9.89,
+         6.78,
+         8.78
+        ],
+        [
+         12.63,
+         7.84,
+         9.06
+        ]
+       ],
+       "at": "2026-11-05T19:29:11.674Z",
+       "extra": {
+        "longtask_ms": 3962
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 11594,
+       "load": [
+        [
+         12.63,
+         7.84,
+         9.06
+        ],
+        [
+         14.01,
+         8.86,
+         9.36
+        ]
+       ],
+       "at": "2026-11-05T19:30:00.824Z",
+       "extra": {
+        "longtask_ms": 3912
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 11502.5,
+       "load": [
+        [
+         14.01,
+         8.86,
+         9.36
+        ],
+        [
+         14.93,
+         9.91,
+         9.72
+        ]
+       ],
+       "at": "2026-11-05T19:30:49.741Z",
+       "extra": {
+        "longtask_ms": 3878
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 7714.3,
+       "load": [
+        [
+         14.93,
+         9.91,
+         9.72
+        ],
+        [
+         15.06,
+         10.61,
+         9.98
+        ]
+       ],
+       "at": "2026-11-05T19:31:38.862Z",
+       "extra": {
+        "longtask_ms": 3923
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 11468.2,
+       "load": [
+        [
+         15.06,
+         10.61,
+         9.98
+        ],
+        [
+         16.58,
+         11.66,
+         10.4
+        ]
+       ],
+       "at": "2026-11-05T19:32:27.692Z",
+       "extra": {
+        "longtask_ms": 3955
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 11468.2,
+      "p95": 11575.7,
+      "min": 7714.3,
+      "max": 11594,
+      "mad": 125.79999999999927,
+      "noise_within": 0.025782463385145483,
+      "load_before": [
+       9.89,
+       6.78,
+       8.78
+      ],
+      "load_after": [
+       16.58,
+       11.66,
+       10.4
+      ],
+      "extra": {
+       "longtask_ms": 3923
+      },
+      "errors": []
+     },
+     "run_medians": [
+      13929.9,
+      11468.2,
+      11538.7
+     ],
+     "noise": 0.2133
+    },
+    "calib_first": {
+     "suite": "calib",
+     "what": "real MoGe-2: 1st photo on a fresh server, POST → done",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 10660.486,
+       "load": [
+        [
+         16.58,
+         11.66,
+         10.4
+        ],
+        [
+         13.92,
+         11.31,
+         10.3
+        ]
+       ],
+       "at": "2026-11-05T19:32:42.682Z",
+       "extra": {
+        "load_ms": 4740,
+        "infer_ms": 1700,
+        "floor_fit_ms": 90,
+        "tool_ms": 10130
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 8063.663,
+       "load": [
+        [
+         13.92,
+         11.31,
+         10.3
+        ],
+        [
+         13.12,
+         11.31,
+         10.32
+        ]
+       ],
+       "at": "2026-11-05T19:32:59.059Z",
+       "extra": {
+        "load_ms": 4450,
+        "infer_ms": 1310,
+        "floor_fit_ms": 90,
+        "tool_ms": 7670
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 8024.538,
+       "load": [
+        [
+         13.12,
+         11.31,
+         10.32
+        ],
+        [
+         11.78,
+         11.1,
+         10.26
+        ]
+       ],
+       "at": "2026-11-05T19:33:16.350Z",
+       "extra": {
+        "load_ms": 4250,
+        "infer_ms": 1340,
+        "floor_fit_ms": 80,
+        "tool_ms": 7650
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 7993.517,
+       "load": [
+        [
+         11.78,
+         11.1,
+         10.26
+        ],
+        [
+         9.84,
+         10.7,
+         10.13
+        ]
+       ],
+       "at": "2026-11-05T19:33:32.380Z",
+       "extra": {
+        "load_ms": 4410,
+        "infer_ms": 1330,
+        "floor_fit_ms": 80,
+        "tool_ms": 7630
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 8055.712,
+       "load": [
+        [
+         9.84,
+         10.7,
+         10.13
+        ],
+        [
+         8.85,
+         10.43,
+         10.05
+        ]
+       ],
+       "at": "2026-11-05T19:33:48.535Z",
+       "extra": {
+        "load_ms": 4490,
+        "infer_ms": 1300,
+        "floor_fit_ms": 80,
+        "tool_ms": 7660
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 7576.538,
+       "load": [
+        [
+         8.85,
+         10.43,
+         10.05
+        ],
+        [
+         7.6,
+         10.05,
+         9.92
+        ]
+       ],
+       "at": "2026-11-05T19:34:04.221Z",
+       "extra": {
+        "load_ms": 4010,
+        "infer_ms": 1290,
+        "floor_fit_ms": 80,
+        "tool_ms": 7170
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 8024.538,
+      "p95": 8062.0728,
+      "min": 7576.538,
+      "max": 8063.663,
+      "mad": 31.174000000000888,
+      "noise_within": 0.009130856550066837,
+      "load_before": [
+       13.92,
+       11.31,
+       10.3
+      ],
+      "load_after": [
+       7.6,
+       10.05,
+       9.92
+      ],
+      "extra": {
+       "load_ms": 4410,
+       "infer_ms": 1310,
+       "floor_fit_ms": 80,
+       "tool_ms": 7650
+      },
+      "errors": []
+     },
+     "run_medians": [
+      8977.699,
+      8024.538,
+      7746.49
+     ],
+     "noise": 0.1534
+    },
+    "calib_second": {
+     "suite": "calib",
+     "what": "the 2nd photo, right after",
+     "unit": "ms",
+     "samples": [
+      {
+       "run": -1,
+       "warmup": true,
+       "ok": true,
+       "value": 8050.989,
+       "load": [
+        [
+         16.58,
+         11.66,
+         10.4
+        ],
+        [
+         13.92,
+         11.31,
+         10.3
+        ]
+       ],
+       "at": "2026-11-05T19:32:50.734Z",
+       "extra": {
+        "load_ms": 4490,
+        "infer_ms": 1320,
+        "floor_fit_ms": 80,
+        "tool_ms": 7660
+       }
+      },
+      {
+       "run": 0,
+       "warmup": false,
+       "ok": true,
+       "value": 9004.764,
+       "load": [
+        [
+         13.92,
+         11.31,
+         10.3
+        ],
+        [
+         13.12,
+         11.31,
+         10.32
+        ]
+       ],
+       "at": "2026-11-05T19:33:08.065Z",
+       "extra": {
+        "load_ms": 5070,
+        "infer_ms": 1560,
+        "floor_fit_ms": 90,
+        "tool_ms": 8570
+       }
+      },
+      {
+       "run": 1,
+       "warmup": false,
+       "ok": true,
+       "value": 7778.962,
+       "load": [
+        [
+         13.12,
+         11.31,
+         10.32
+        ],
+        [
+         11.78,
+         11.1,
+         10.26
+        ]
+       ],
+       "at": "2026-11-05T19:33:24.130Z",
+       "extra": {
+        "load_ms": 4220,
+        "infer_ms": 1290,
+        "floor_fit_ms": 80,
+        "tool_ms": 7400
+       }
+      },
+      {
+       "run": 2,
+       "warmup": false,
+       "ok": true,
+       "value": 7839.303,
+       "load": [
+        [
+         11.78,
+         11.1,
+         10.26
+        ],
+        [
+         9.84,
+         10.7,
+         10.13
+        ]
+       ],
+       "at": "2026-11-05T19:33:40.220Z",
+       "extra": {
+        "load_ms": 4250,
+        "infer_ms": 1290,
+        "floor_fit_ms": 80,
+        "tool_ms": 7430
+       }
+      },
+      {
+       "run": 3,
+       "warmup": false,
+       "ok": true,
+       "value": 7852.026,
+       "load": [
+        [
+         9.84,
+         10.7,
+         10.13
+        ],
+        [
+         8.85,
+         10.43,
+         10.05
+        ]
+       ],
+       "at": "2026-11-05T19:33:56.388Z",
+       "extra": {
+        "load_ms": 4280,
+        "infer_ms": 1290,
+        "floor_fit_ms": 80,
+        "tool_ms": 7470
+       }
+      },
+      {
+       "run": 4,
+       "warmup": false,
+       "ok": true,
+       "value": 7526.752,
+       "load": [
+        [
+         8.85,
+         10.43,
+         10.05
+        ],
+        [
+         7.6,
+         10.05,
+         9.92
+        ]
+       ],
+       "at": "2026-11-05T19:34:11.749Z",
+       "extra": {
+        "load_ms": 4010,
+        "infer_ms": 1260,
+        "floor_fit_ms": 80,
+        "tool_ms": 7130
+       }
+      }
+     ],
+     "summary": {
+      "n": 5,
+      "failed": 0,
+      "median": 7839.303,
+      "p95": 8774.2164,
+      "min": 7526.752,
+      "max": 9004.764,
+      "mad": 60.34099999999944,
+      "noise_within": 0.01809147928141638,
+      "load_before": [
+       13.92,
+       11.31,
+       10.3
+      ],
+      "load_after": [
+       7.6,
+       10.05,
+       9.92
+      ],
+      "extra": {
+       "load_ms": 4250,
+       "infer_ms": 1290,
+       "floor_fit_ms": 80,
+       "tool_ms": 7430
+      },
+      "errors": []
+     },
+     "run_medians": [
+      8518.349,
+      7839.303,
+      7743.96
+     ],
+     "noise": 0.0988
+    }
+   }
+  }
+ ],
+ "finished": "2026-11-05T19:34:11.852Z",
+ "baseline": {
+  "made": "2026-11-05T20:01:01.121Z",
+  "from": [
+   {
+    "file": "evals/out/perf-baseline/run-1.json",
+    "started": "2026-11-05T18:24:24.746Z",
+    "mean_load_1m": 14.72,
+    "commit": "af16b118bbdfb7f50d64ac30dff22edf82db63c0"
+   },
+   {
+    "file": "evals/out/perf-baseline/run-2.json",
+    "started": "2026-11-05T19:26:01.950Z",
+    "mean_load_1m": 8.13,
+    "commit": "9a3a828b3c7681c57124362d8489e7799f9168b7"
+   },
+   {
+    "file": "evals/out/perf-baseline/run-3.json",
+    "started": "2026-11-05T19:51:01.285Z",
+    "mean_load_1m": 11.31,
+    "commit": "9a3a828b3c7681c57124362d8489e7799f9168b7"
+   }
+  ],
+  "chosen": "evals/out/perf-baseline/run-2.json",
+  "noise": "relative range of the per-run medians across these runs"
+ }
+}
