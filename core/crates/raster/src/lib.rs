@@ -7,7 +7,11 @@
 //! Byte parsers deny indexing, unchecked arithmetic and truncating casts (`png`, `pngenc`); nothing here panics on
 //! any input (buffers are checked, errors are values).
 #![forbid(unsafe_code)]
-#![allow(clippy::many_single_char_names)]
+#![deny(missing_docs)]
+#![allow(
+    clippy::many_single_char_names,
+    reason = "the maths' own names: x, y, z, w, h, f, d"
+)]
 
 pub mod color;
 pub mod depth;

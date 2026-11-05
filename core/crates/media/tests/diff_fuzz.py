@@ -173,8 +173,12 @@ def string_round(t: D.Tally, paths: list[str], hosts: list[str], rust: D.Rust) -
     for p, a, b in zip(paths, rn, rr):
         before = sum(len(x["failures"]) for x in t.areas.values())
         t.check("path-normalize", repr(p), D.serve.clean_path(p), bytes.fromhex(a["path"]).decode() if a["ok"] else None)
-        r1 = D.v1_route(p)
         r2 = bytes.fromhex(b["route"]).decode()
+        try:
+            r1 = D.v1_route(p)
+        except ValueError:
+            t.expected("path-route", "path-v1-crash")
+            continue
         if r1 == "api":
             t.check("path-route", repr(p), "not-found", r2.split(":")[0])
         else:

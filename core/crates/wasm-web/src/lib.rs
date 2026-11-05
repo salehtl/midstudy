@@ -11,7 +11,11 @@
 //!
 //! The geometry is exactly the crates' (see their docs and `crates/geom/LEAN.md`); this file only adapts the shapes.
 
-#![allow(clippy::many_single_char_names)]
+#![deny(missing_docs)]
+#![allow(
+    clippy::many_single_char_names,
+    reason = "the maths' own names: x, y, z, w, h, f, d"
+)]
 
 use midstudy_geom::camera::{self, CameraBlock};
 use midstudy_geom::drag::{self, Plane};

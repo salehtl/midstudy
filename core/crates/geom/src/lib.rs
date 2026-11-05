@@ -7,8 +7,11 @@
 //! branch as v1. The maps are checked against the golden scenes (`fixtures/scenes/*/truth.json`), differentially
 //! against v1's JavaScript, and by property tests; LEAN.md lists the formulas and properties for the Lean proofs.
 #![forbid(unsafe_code)]
-// Maths reads best with the names of the formulas (x, y, z, w, f, d).
-#![allow(clippy::many_single_char_names)]
+#![deny(missing_docs)]
+#![allow(
+    clippy::many_single_char_names,
+    reason = "the maths' own names: x, y, z, w, h, f, d"
+)]
 
 pub mod camera;
 pub mod drag;

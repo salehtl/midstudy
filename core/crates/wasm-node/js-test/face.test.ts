@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import {
   checkHost, compareNames, contentLength, decodeImageDataUri, decodeMeta, hostName, isRenderName, isSceneName, isSlug,
   jpegFrame, jpegIsClean, jpegPassthrough, normalizePath, originOk, photoExt, pngSize, reduceLeadingSlashes, sniff,
-  staticRoute, stripGlb, stripJpeg, stripPng, zipPlan,
+  staticRoute, stripGlb, stripJpeg, stripJpegPieces, stripPng, stripPngPieces, zipPlan,
 } from '../../../js/node.ts'
 
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url))
@@ -42,6 +42,35 @@ void test('sniff', () => {
   assert.equal(sniff(bytes('glTF')), 'glb')
   assert.equal(photoExt('heif'), 'heic')
   assert.equal(photoExt('glb'), null)
+})
+
+void test('strip pieces: views of the input (zero-copy), joined they are the strip', () => {
+  const clean = tinyJpeg(64, 48)
+  const exif = seg(0xe1, bytes('Exif\0\0TestCam GPS'))
+  const dirty = bytes(tinyJpeg(64, 48, exif), 'after EOI')
+  const thumb = bytes([0xff, 0xd8], seg(0xe0, bytes('JFIF\0', [1, 1, 0, 0, 72, 0, 72, 1, 1, 9, 9, 9])), clean.subarray(20))
+  for (const input of [clean, dirty, thumb]) {
+    const p = stripJpegPieces(input)
+    const s = stripJpeg(input)
+    assert.ok(p.ok && s.ok)
+    assert.deepEqual(p.value.removed, s.value.removed)
+    const joined = Uint8Array.from(p.value.pieces.flatMap((x) => [...x]))
+    assert.deepEqual(joined, s.value.bytes)
+    assert.equal(p.value.length, s.value.bytes.length)
+    assert.equal(p.value.unchanged, input === clean)
+    // Every range piece is a view of the input itself, not a copy.
+    assert.ok(p.value.pieces.some((x) => x.buffer === input.buffer))
+  }
+  const cp = stripJpegPieces(clean)
+  assert.ok(cp.ok && cp.value.pieces.length === 1 && cp.value.pieces[0]?.buffer === clean.buffer)
+  const png = bytes([0x89], 'PNG\r\n\x1a\n', [0, 0, 0, 0], 'tEXt', [0, 0, 0, 0], [0, 0, 0, 0], 'IEND', [0, 0, 0, 0], 'after')
+  const pp = stripPngPieces(png)
+  const ps = stripPng(png)
+  assert.ok(pp.ok && ps.ok)
+  assert.deepEqual(Uint8Array.from(pp.value.pieces.flatMap((x) => [...x])), ps.value.bytes)
+  assert.ok(pp.value.pieces.every((x) => x.buffer === png.buffer))
+  const bad = stripJpegPieces(bytes('nope'))
+  assert.ok(!bad.ok && bad.error.code === 'not-jpeg')
 })
 
 void test('JPEG: strip, frame, clean, pass-through', () => {

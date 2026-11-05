@@ -3,16 +3,22 @@
 //! properties stated with it. The bounds are what CBMC proves in seconds (README.md lists them and the timings); the
 //! fuzz targets, property tests and the differential test against v1 cover larger inputs.
 //!
-//! Two kinds of harness: whole functions (`strip`, `is_clean`, `frame_info`, …) on short inputs, and their building
-//! blocks (`jpeg::step`, `jpeg::scan_end`, the GLB container, the layout arithmetic) on longer ones, which together
-//! carry the whole function to longer inputs: the walks are loops of these steps, each proved to stay in bounds and
-//! to move forward.
+//! Two kinds of harness: whole functions (`png::strip`, `frame_info`, `sniff`, …) on short inputs, and their building
+//! blocks (`jpeg::step`, `jpeg::scan_end`, the GLB container, the layout arithmetic, the Content-Length digit fold) on
+//! longer ones, which together carry the whole function to longer inputs: the walks are loops of these steps, each
+//! proved to stay in bounds and to move forward.
+//!
+//! The string-heavy parsers (paths, hosts, `X-Midstudy-Meta`, CPython's base64, data URIs, zip names, the glTF JSON
+//! reader) are not here, nor `jpeg::strip` whole: CBMC's models of `String` and `Vec` growth didn't finish them in 5
+//! minutes even at 3 or 4 bytes. `tests/exhaustive.rs` runs them instead on every input up to a bound (every byte
+//! string up to 2 bytes, every string up to 4 or 5 characters over the characters each one treats specially, every
+//! JPEG and PNG of up to 5 or 4 structural tokens).
 //!
 //! Under Kani, `jpeg::find_ff` is the plain `position` scan (CBMC needs minutes for the 64-byte block scan inside the
 //! walk's loops); [`find_ff_blocks_is_position`] and [`find_ff_blocks_is_position_one_block`] prove the block scan
 //! the production build uses equal to it.
 
-use crate::{base64, datauri, glb, http, jpeg, json, meta, path, png, slug, sniff, zip};
+use crate::{base64, glb, http, jpeg, png, slug, sniff};
 
 /// A string of `N` symbolic bytes, cut to a symbolic length `len ≤ N`: every byte string of 0 to `N` bytes.
 fn any_bytes<const N: usize>() -> ([u8; N], usize) {
@@ -88,31 +94,6 @@ fn scan_end_finds_a_marker() {
     }
 }
 
-/// `strip`, `is_clean` and `passthrough` whole, for every input of 0 to 6 bytes: no panic; a stripped JPEG is clean
-/// and no longer than the input; `is_clean` holds exactly when the strip removes nothing but fill bytes.
-#[kani::proof]
-#[kani::unwind(8)]
-fn jpeg_whole_short() {
-    let (buf, len) = any_bytes::<6>();
-    let data = buf.get(..len).unwrap_or_default();
-    let stripped = jpeg::strip(data);
-    let clean = jpeg::is_clean(data);
-    if let Ok(s) = &stripped {
-        assert!(s.bytes.len() <= data.len());
-        assert!(s.bytes.starts_with(&[0xFF, 0xD8]) && s.bytes.ends_with(&[0xFF, 0xD9]));
-    }
-    let nothing_removed = stripped.is_ok_and(|s| {
-        jpeg::Removed {
-            fill_bytes: 0,
-            ..s.removed
-        } == jpeg::Removed::default()
-    });
-    assert_eq!(clean, nothing_removed);
-    if jpeg::passthrough(data).is_ok() {
-        assert!(clean);
-    }
-}
-
 /// `frame_info`, for every input of 0 to 16 bytes: no panic, and a size it reads is never zero.
 #[kani::proof]
 #[kani::unwind(18)]
@@ -143,6 +124,7 @@ fn png_strip_short() {
 
 /// `png::size`, for every input of 0 to 26 bytes: no panic, and an answer only with the signature and an IHDR.
 #[kani::proof]
+#[kani::unwind(28)]
 fn png_size_short() {
     let (buf, len) = any_bytes::<26>();
     let data = buf.get(..len).unwrap_or_default();
@@ -171,26 +153,6 @@ fn glb_container_short() {
                 || c.bin.is_none()
         );
         assert!(c.trailing_bytes <= data.len());
-    }
-}
-
-/// `glb::strip` whole, for every input of 0 to 28 bytes: no panic (the container and the JSON reader's refusals).
-#[kani::proof]
-#[kani::unwind(10)]
-fn glb_strip_short() {
-    let (buf, len) = any_bytes::<28>();
-    let data = buf.get(..len).unwrap_or_default();
-    let _ = glb::strip(data, glb::Layout::Compact);
-}
-
-/// The JSON reader, for every text of 0 to 6 bytes: no panic, depth bounded.
-#[kani::proof]
-#[kani::unwind(8)]
-fn json_parse_short() {
-    let (buf, len) = any_bytes::<6>();
-    let text = buf.get(..len).unwrap_or_default();
-    if let Ok(ix) = json::parse(text) {
-        assert!(ix.root.is_some_and(|r| r.end <= text.len()));
     }
 }
 
@@ -265,75 +227,47 @@ fn is_slug_is_the_regex() {
     assert_eq!(slug::is_slug(s), spec);
 }
 
-/// `Content-Length`, for every value of 0 to 17 ASCII bytes: never overflows; a length is exactly its digits' number
-/// and below 10¹⁵.
+/// The `Content-Length` digit fold, for every input of 0 to 16 bytes: never overflows; a value exactly when the input
+/// is 1 to 15 ASCII digits, and then it is their number, below 10¹⁵.
 #[kani::proof]
-#[kani::unwind(19)]
-fn content_length_is_exact() {
-    let (buf, len) = any_bytes::<17>();
-    let bytes = buf.get(..len).unwrap_or_default();
-    kani::assume(bytes.is_ascii());
-    let Ok(text) = core::str::from_utf8(bytes) else {
+#[kani::unwind(18)]
+fn digits_value_is_exact() {
+    let (buf, len) = any_bytes::<16>();
+    let digits = buf.get(..len).unwrap_or_default();
+    let ok = (1..=15).contains(&len) && digits.iter().all(u8::is_ascii_digit);
+    match http::digits_value(digits) {
+        Some(n) => {
+            assert!(ok && n < 1_000_000_000_000_000);
+            let want = digits
+                .iter()
+                .fold(0u128, |n, d| n * 10 + u128::from(d - b'0'));
+            assert_eq!(u128::from(n), want);
+        }
+        None => {
+            assert!(!ok);
+        }
+    }
+}
+
+/// `content_length` whole, for every single value of 0 to 4 bytes and for two values: no panic; several values are
+/// refused, one value is its digits' number.
+#[kani::proof]
+#[kani::unwind(6)]
+fn content_length_short() {
+    let (buf, len) = any_bytes::<4>();
+    let Ok(text) = core::str::from_utf8(buf.get(..len).unwrap_or_default()) else {
         return;
     };
     if let Ok(Some(n)) = http::content_length(&[text]) {
-        assert!(n < 1_000_000_000_000_000);
-        let digits = text.trim_matches(datauri::is_python_space);
-        let want = digits
-            .bytes()
-            .fold(0u128, |n, d| n * 10 + u128::from(d - b'0'));
-        assert_eq!(u128::from(n), want);
+        assert!(n < 10_000);
     }
-}
-
-/// `host_name`, for every value of 0 to 8 bytes: no panic; a name is lowercase ASCII without a port.
-#[kani::proof]
-#[kani::unwind(10)]
-fn host_name_short() {
-    let (buf, len) = any_bytes::<8>();
-    let Ok(text) = core::str::from_utf8(buf.get(..len).unwrap_or_default()) else {
-        return;
-    };
-    if let Some(name) = http::host_name(text) {
-        assert!(!name.is_empty() && name.is_ascii());
-        assert!(!name.bytes().any(|b| b.is_ascii_uppercase()));
-        assert!(name.starts_with('[') || !name.contains(':'));
-    }
-}
-
-/// Path normalisation, for every target of 0 to 5 bytes: no panic; the result starts with `/` and has no `.` or `..`
-/// segment, and no NUL or backslash.
-#[kani::proof]
-#[kani::unwind(8)]
-fn normalize_short() {
-    let (buf, len) = any_bytes::<5>();
-    let Ok(text) = core::str::from_utf8(buf.get(..len).unwrap_or_default()) else {
-        return;
-    };
-    if let Ok(clean) = path::normalize(text) {
-        assert!(clean.starts_with('/'));
-        assert!(!clean.split('/').any(|s| s == "." || s == ".."));
-        assert!(!clean.contains(['\0', '\\']));
-    }
-    let _ = path::static_route(text);
+    assert_eq!(
+        http::content_length(&[text, text]),
+        Err(http::ContentLengthError::Multiple)
+    );
 }
 
 // --- base64, meta, data URIs, zip ---------------------------------------------------------------------------------
-
-/// `CPython`'s base64 (both modes), for every input of 0 to 8 bytes: no panic; strict-valid input decodes the same
-/// leniently, to at most three bytes per four characters.
-#[kani::proof]
-#[kani::unwind(10)]
-fn base64_python_short() {
-    let (buf, len) = any_bytes::<8>();
-    let input = buf.get(..len).unwrap_or_default();
-    let strict = base64::decode_python(input, true);
-    let lenient = base64::decode_python(input, false);
-    if let Ok(s) = &strict {
-        assert!(s.len() <= input.len() / 4 * 3 + 2);
-        assert_eq!(lenient.as_ref(), Ok(s));
-    }
-}
 
 /// The WHATWG forgiving base64, for every input of 0 to 8 bytes: no panic, at most three bytes per four characters.
 #[kani::proof]
@@ -343,84 +277,5 @@ fn base64_forgiving_short() {
     let input = buf.get(..len).unwrap_or_default();
     if let Some(out) = base64::decode_forgiving(input) {
         assert!(out.len() <= input.len() / 4 * 3 + 2);
-    }
-}
-
-/// `X-Midstudy-Meta`, for every header of 0 to 8 bytes: no panic; what it returns is the strict decode.
-#[kani::proof]
-#[kani::unwind(10)]
-fn meta_decode_short() {
-    let (buf, len) = any_bytes::<8>();
-    let Ok(text) = core::str::from_utf8(buf.get(..len).unwrap_or_default()) else {
-        return;
-    };
-    if let Ok(json) = meta::decode(text, meta::MAX_HEADER_LEN) {
-        assert_eq!(
-            base64::decode_python(text.as_bytes(), true).ok(),
-            Some(json.into_bytes())
-        );
-    }
-}
-
-/// v1's image data URIs, for every payload of 0 to 4 bytes after `data:image/png;base64,`: no panic.
-#[kani::proof]
-#[kani::unwind(28)]
-fn data_uri_image_short() {
-    let (buf, len) = any_bytes::<4>();
-    let Ok(tail) = core::str::from_utf8(buf.get(..len).unwrap_or_default()) else {
-        return;
-    };
-    let mut value = String::from("data:image/png;base64,");
-    value.push_str(tail);
-    if let Ok(bytes) = datauri::decode_image(&value, datauri::ImageType::Png) {
-        assert!(bytes.len() <= 3);
-    }
-    let _ = datauri::decode_image(&value, datauri::ImageType::Jpeg);
-}
-
-/// The WHATWG `data:` URL reader, for every URL of 0 to 7 bytes: no panic.
-#[kani::proof]
-#[kani::unwind(9)]
-fn data_url_parse_short() {
-    let (buf, len) = any_bytes::<7>();
-    let Ok(text) = core::str::from_utf8(buf.get(..len).unwrap_or_default()) else {
-        return;
-    };
-    let _ = datauri::parse(text);
-}
-
-/// The size in v1's "unpacks to N MB" message, for every `u64`: `total / 10⁶` rounded half to even (Python's
-/// `f"{total / 1e6:.0f}"` on an exact quotient), without overflow.
-#[kani::proof]
-fn megabytes_rounds_half_to_even() {
-    let total: u64 = kani::any();
-    let m = u128::from(zip::megabytes(total));
-    let t = u128::from(total);
-    // |total − m·10⁶| ≤ ½·10⁶, and a tie goes to the even m.
-    let twice = 2 * t;
-    let lo = (2 * m).saturating_sub(1) * 1_000_000;
-    let hi = (2 * m + 1) * 1_000_000;
-    assert!(lo <= twice && twice <= hi);
-    if twice == hi || (m > 0 && twice == lo) {
-        assert!(m % 2 == 0);
-    }
-}
-
-/// One zip entry, for every name of 0 to 5 bytes, both name encodings and every mode: no panic; an extracted entry is
-/// relative, doesn't climb, and isn't a link.
-#[kani::proof]
-#[kani::unwind(8)]
-fn zip_decide_short() {
-    let (buf, len) = any_bytes::<5>();
-    let name = buf.get(..len).unwrap_or_default();
-    let entry = zip::Entry {
-        name,
-        utf8: kani::any(),
-        size: kani::any(),
-        external_attr: kani::any(),
-    };
-    if let Ok(zip::Action::Extract { .. }) = zip::decide(&entry) {
-        assert!(!name.starts_with(b"/") && !name.contains(&b'\\') && !name.contains(&0));
-        assert!(entry.external_attr >> 16 & 0o170_000 != 0o120_000);
     }
 }
