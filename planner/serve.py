@@ -2249,13 +2249,21 @@ class Handler(SimpleHTTPRequestHandler):
             body = self.read_json_body()
         except ValueError as e:
             return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
-        url = body.get("url") if isinstance(body, dict) else None
-        if not isinstance(url, str) or not url.strip() or len(url) > 4096:
-            return self.error_json(HTTPStatus.BAD_REQUEST, 'the body must be JSON like {"url": "https://...", "llm": true}')
+        shape = 'the body must be JSON like {"url": "https://...", "llm": true}, or {"html": "<the page>", "url": "https://..."}'
+        if not isinstance(body, dict):
+            return self.error_json(HTTPStatus.BAD_REQUEST, shape)
+        url, page = body.get("url"), body.get("html")
+        if page is not None and (not isinstance(page, str) or not page.strip()):
+            return self.error_json(HTTPStatus.BAD_REQUEST, "html must be the page's source as text")
+        if url is not None and (not isinstance(url, str) or len(url) > 4096):
+            return self.error_json(HTTPStatus.BAD_REQUEST, shape)
+        url = (url or "").strip() or None
+        if url is None and page is None:
+            return self.error_json(HTTPStatus.BAD_REQUEST, shape)
         if not isinstance(body.get("llm", True), bool):
             return self.error_json(HTTPStatus.BAD_REQUEST, "llm must be true or false")
-        status, data = product_page.read(url.strip(), llm=body.get("llm", True), reserve=self.library.reserve,
-                                         release=self.library.release, costs_file=self.costs_file)
+        status, data = product_page.read(url, llm=body.get("llm", True), reserve=self.library.reserve,
+                                         release=self.library.release, costs_file=self.costs_file, html_text=page)
         return self.send_json(status, data)
 
     def patch_library_item(self, item_id: str):

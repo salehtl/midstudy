@@ -114,7 +114,7 @@ export function createScenes({ engine }) {
 //   jobs() → Promise<[job]>   GET /api/library/jobs (and polls every 1.5 s while one is queued or running)
 //   addFromFile(file, meta)   POST /api/library/items (raw body; X-Midstudy-Kind model|image from the file name) → job
 //   addFromUrl(url, meta)     POST /api/library/items/from-url → job
-//   readProduct(url, { llm }) POST /api/library/product → what the product page says (§2.11); adds nothing
+//   readProduct(url, { llm, html }) POST /api/library/product → what the product page (or a pasted copy of it) says (§2.11); adds nothing
 //   edit(id, patch)           PATCH → the item, or a rescale job (dims_cm, yaw)
 //   remove(id) / restore(id)  DELETE → move to the library's trash / POST …/restore → the item
 //   spend() → Promise<spend>  GET /api/spend
@@ -232,8 +232,10 @@ export function createLibrary({ engine = null } = {}) {
   // §2.11: what a shop's product page says (the 200 body); adds nothing. Rejects with the server's sentence, plus
   // err.status and err.blocked. A shop that blocks reading or a page without a product is the page's answer, shown in
   // the form, so only a server that isn't answering (or fails) is reported as an error.
-  async function readProduct(url, { llm } = {}) {
-    const req = { url: String(url ?? '').trim() }
+  async function readProduct(url, { llm, html } = {}) {
+    const req = {}
+    if (String(url ?? '').trim()) req.url = String(url).trim()
+    if (typeof html === 'string') req.html = html // a page the user's browser copied: the server fetches nothing
     if (typeof llm === 'boolean') req.llm = llm
     try {
       return await fetchJson('/api/library/product', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) })

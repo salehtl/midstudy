@@ -26,6 +26,7 @@ const ev = createEval('E16', BASELINE ? 'lighting-baseline' : 'lighting', { time
 const LIT = { id: 'probe-lit', name: 'Lit probe', dims_cm: { w: 45, d: 45, h: 45 }, albedo: 0.5 }
 const UNLIT = { id: 'probe-unlit', name: 'Unlit probe', dims_cm: { w: 40, d: 40, h: 40 }, rgba: [1, 0, 1, 1] }
 const RUG = { id: 'probe-rug', name: 'Unlit rug', dims_cm: { w: 70, d: 50, h: 1 }, rgba: [0.1, 0.55, 0.25, 1] }
+const METAL = { id: 'probe-metal', name: 'Metal probe', dims_cm: { w: 45, d: 45, h: 45 } } // polished metal: reflects the room
 const SPLAT = { id: 'probe-splat', name: 'Splat probe', dims_cm: { w: 45, d: 45, h: 45 }, grey: 0.6 }
 // points on the faces of a w × h × d box, 1 cm apart, opaque, one grey (as E13's splat probe, evals/splat.mjs)
 function splatBoxPly({ w, h, d }, grey, step = 0.01) {
@@ -69,6 +70,7 @@ function writeLibrary(dir) {
   }
   const g = LIT.albedo
   add(LIT, boxGlb(LIT.dims_cm.w / 100, LIT.dims_cm.h / 100, LIT.dims_cm.d / 100, [g, g, g, 1], { unlit: false }), 'Eval probe: lit grey box, albedo 0.5, roughness 1.')
+  add(METAL, boxGlb(METAL.dims_cm.w / 100, METAL.dims_cm.h / 100, METAL.dims_cm.d / 100, [0.95, 0.95, 0.95, 1], { unlit: false, metallic: 1, roughness: 0.05 }), 'Eval probe: polished metal box (metallic 1, roughness 0.05).')
   add(UNLIT, boxGlb(UNLIT.dims_cm.w / 100, UNLIT.dims_cm.h / 100, UNLIT.dims_cm.d / 100, UNLIT.rgba), 'Eval probe: unlit magenta box.')
   add(RUG, boxGlb(RUG.dims_cm.w / 100, RUG.dims_cm.h / 100, RUG.dims_cm.d / 100, RUG.rgba), 'Eval probe: a flat unlit slab, like the Flat rug.')
   // a splat item (§4.5 Splats): a grey splat box (PLY, like E13's probe) drawn by Spark, with a green stand-in GLB that
@@ -208,6 +210,17 @@ await open(C.name)
 await hook(P.page, 'clearItems')
 await place(LIT.id, LIT_POS)
 await hook(P.page, 'setLighting', [{ contact_shadows: false }])
+// Reflections come from the photo (§4.8): a polished metal box shows the room on its faces, while the same light from
+// the SH alone (a smooth function) would leave each face nearly one colour. Compared with the lit grey box's faces.
+const greyFaces = await measure('cool-grey-texture', C)
+await hook(P.page, 'clearItems')
+await place(METAL.id, LIT_POS)
+const metalFaces = await measure('cool-metal', C, { lighting: false }, boxOf(LIT_POS, METAL.dims_cm))
+const maxStd = (r) => Math.max(0, ...Object.values(r?.faces || {}).map((f) => f.std ?? 0))
+ev.check('a polished metal piece reflects the room from the photo (its faces carry the photo\'s detail: luminance spread ≥ 10 levels and ≥ 3× the lit grey box\'s)',
+  maxStd(metalFaces) >= 10 && maxStd(metalFaces) >= 3 * maxStd(greyFaces), fmt({ metal: Object.fromEntries(Object.entries(metalFaces?.faces || {}).map(([k, f]) => [k, f.std])), grey: Object.fromEntries(Object.entries(greyFaces?.faces || {}).map(([k, f]) => [k, f.std])), error: metalFaces?.error || greyFaces?.error }))
+await hook(P.page, 'clearItems')
+await place(LIT.id, LIT_POS)
 let lg = await L()
 const auto = lg?.inferred ? azEl(lg.inferred.direction) : { az: 0, el: 40 }
 const newAz = wrap(auto.az + 180), newEl = 35
@@ -216,21 +229,17 @@ lg = await L()
 const newDir = dirOf(newAz, newEl)
 ev.check('setLighting({light_azimuth_deg, light_elevation_deg}) turns Auto lighting off and moves the key there', lg?.auto_light === false && angle(lg.key.direction, newDir) <= 1
   && Math.abs(lg.light_azimuth_deg - newAz) <= 0.5 && Math.abs(lg.light_elevation_deg - newEl) <= 0.5, fmt({ auto: lg?.auto_light, key: lg?.key && azEl(lg.key.direction), want: { az: newAz, el: newEl } }))
-// what lighting.json would say with the key turned: rewrite the key direction (camera frame) for the helper
+// §4.8: a new direction turns the whole light (the ambient SH with the key), so the helper gets lighting.json as it is
+// and the new direction with --light
 const turned = path.join(ev.out, 'cool-turned.json')
-const Rt = (v) => { // world -> camera: Rᵀ v
-  const p = rad(C.cam.pitch_deg), r = rad(C.cam.roll_deg), cp = Math.cos(p), sp = Math.sin(p), cr = Math.cos(r), sr = Math.sin(r)
-  const R = [[cr, -sr, 0], [cp * sr, cp * cr, -sp], [sp * sr, sp * cr, cp]]
-  return [0, 1, 2].map((j) => R[0][j] * v[0] + R[1][j] * v[1] + R[2][j] * v[2])
-}
-fs.writeFileSync(turned, JSON.stringify({ ...C.lj, key: { ...C.lj.key, direction: Rt(newDir) } }))
+fs.writeFileSync(turned, JSON.stringify(C.lj))
 let r = await measure('cool-turned', C, { lighting: turned, light: newDir })
 ev.check('…the box is lit from there (faces within 12 % of the prediction) and its shadow moves to the other side', facesOk(r) && r.shadow?.offset_vs_light_deg <= SHADOW_TOL_DEG,
   r.error || fmt({ faces: faceSummary(r), vs_light: r.shadow?.offset_vs_light_deg, offset: r.shadow?.offset }))
 const darkTurned = r.shadow?.n_dark ?? 0
 await hook(P.page, 'setLighting', [{ light_strength: 0 }])
 r = await measure('cool-strength0', C, { lighting: turned, strength: 0, light: newDir })
-ev.check('light_strength 0: ambient light only (faces within 12 % of the ambient-only prediction), no cast shadow', facesOk(r) && (r.shadow?.n_dark ?? 0) <= Math.max(50, 0.05 * darkTurned),
+ev.check('light_strength 0: no directional light (the key and the ambient\'s directional part off: faces within 12 % of that prediction), no cast shadow', facesOk(r) && (r.shadow?.n_dark ?? 0) <= Math.max(50, 0.05 * darkTurned),
   r.error || fmt({ faces: faceSummary(r), n_dark: r.shadow?.n_dark, before: darkTurned }))
 await hook(P.page, 'setLighting', [{ light_strength: 1, ambient: 0.5 }])
 r = await measure('cool-ambient05', C, { lighting: turned, ambient: 0.5, light: newDir })

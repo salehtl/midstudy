@@ -1916,10 +1916,13 @@ def _run_llm(url: str, lines: list[str], ctx: _Ctx, reserve, release, costs_file
 
 
 # --- read() ----------------------------------------------------------------------------------------------------------
-def read(url: str, llm: bool = True, reserve=None, release=None, costs_file=None) -> tuple[int, dict]:
-    """POST /api/library/product (§2.11). (status, body); never raises."""
+def read(url: str | None, llm: bool = True, reserve=None, release=None, costs_file=None, html_text: str | None = None) -> tuple[int, dict]:
+    """POST /api/library/product (§2.11). (status, body); never raises. With html_text (a page the user's own browser
+    copied: "Paste the page"), nothing is fetched: url, if any, only says where the page came from."""
     _tl.deadline = None
     try:
+        if html_text is not None:
+            return 200, _read_pasted(url, html_text, llm, reserve, release, costs_file)
         return 200, _read(url, llm, reserve, release, costs_file)
     except ProductError as e:
         return e.status, e.body
@@ -1955,6 +1958,46 @@ def _read(url: str, llm: bool, reserve, release, costs_file) -> dict:
     if _is_robot_check(doc, raw):
         raise ProductError(422, BLOCKED, blocked=True)
     _feeds(doc, raw, budget, warnings)
+    return _extract(doc, raw, warnings, llm, reserve, release, costs_file)
+
+
+# "Copy page for midstudy" (the planner's bookmarklet) puts this line before the page it copies.
+_PASTE_MARK = re.compile(r"\A\s*<!--\s*midstudy-page:\s*(\S+)\s*-->")
+_LOOKS_HTML = re.compile(r"<(?:!doctype\s+html|html|head|body|meta|title)\b", re.I)
+
+
+def _canonical(raw: str) -> str | None:
+    """The page's own address from its <link rel=canonical> or og:url (tags matched in either attribute order)."""
+    for tag in re.findall(r"<(?:link|meta)\b[^>]{0,2000}>", raw[:2_000_000], re.I):
+        t = tag.lower()
+        if re.search(r"rel\s*=\s*[\"']?canonical\b", t) or re.search(r"property\s*=\s*[\"']?og:url\b", t):
+            m = re.search(r"(?:href|content)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", tag, re.I)
+            u = html.unescape((m.group(1) or m.group(2) or m.group(3) or "").strip()) if m else ""
+            if re.match(r"https?://", u, re.I):
+                return u
+    return None
+
+
+def _read_pasted(url: str | None, raw: str, llm: bool, reserve, release, costs_file) -> dict:
+    """A page the user's browser already showed them (a shop that blocks automatic reading): read as fetched pages
+    are, but nothing is fetched, not even the Shopify / WooCommerce feeds."""
+    warnings: list[str] = []
+    m = _PASTE_MARK.match(raw)
+    if m:
+        url, raw = m.group(1), raw[m.end():]
+    if not _LOOKS_HTML.search(raw[:200_000]):
+        raise ProductError(400, "that isn't a web page's source: copy the page with Copy page for midstudy, or from View Source")
+    url = url or _canonical(raw)
+    if not url:
+        raise ProductError(400, "the pasted page doesn't say its address: paste its link in Product page link too")
+    _target(url)  # an http(s) address; never resolved or fetched
+    if len(raw) > PAGE_MAX:
+        raw = raw[:PAGE_MAX]
+        warnings.append("the page is over 10 MB: only its first 10 MB were read")
+    _tl.deadline = time.monotonic() + EXTRACT_S
+    doc = _parse_page(raw, _public_url(url))
+    if _is_robot_check(doc, raw):
+        raise ProductError(422, "that's the shop's robot check, not the product: copy the page once the product shows in your browser")
     return _extract(doc, raw, warnings, llm, reserve, release, costs_file)
 
 

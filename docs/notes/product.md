@@ -76,3 +76,16 @@ Seen, not fixed (follow-ups):
 
 - `costs.csv` keeps 4 decimals (`fmt_cost`, shared by `serve.py` and the pipeline), so a $0.000079 call is logged as $0.0001. The answer's `cost_usd` and the job carry the exact value; the cap is off by under $0.0001 a read.
 - IKEA's JSON-LD name carries the size ("BILLY Bookcase - black oak effect 80x28x106 cm"), and so does the id made from it. It reads fine and can be edited before Make; stripping a trailing size from names would be a small nicety.
+
+## Blocked shops: Paste the page instead (2026-11-05, main session)
+
+West Elm, Crate & Barrel and Pottery Barn answer 403 to anything but a real browser (Wayfair 429); a browser
+User-Agent changes nothing. Getting past that from the server (a headless browser, a scraping proxy) would be getting
+round the shop's bot check, so it isn't done. Instead the user's own browser, which the shop already served, hands the
+page over: `POST /api/library/product` takes `{html, url?}` and reads it without fetching anything (contract §2.11
+Pasted pages). The form's **Paste the page instead** section (opened by a blocked answer) has the **Copy page for
+midstudy** bookmarklet (copies `<!-- midstudy-page: <address> -->` + the page's DOM) and a paste box; View Source,
+select all, copy works too. The DOM copy is better than the served HTML for shops that render sizes in the browser.
+Evals: E14 §8 (pasted pages, 13 checks) and E15 (the section, the bookmarklet run on a shop page, the paste read).
+Not tried on a real blocked shop yet. The blocked sentence still says "paste the image link and size instead" (pinned
+by the contract); the paste section opens right under it.

@@ -345,7 +345,7 @@ function applyCamera() {
   camera.rotation.set(cam.pitch_deg * DEG, 0, cam.roll_deg * DEG, 'YXZ')
   camera.updateMatrixWorld(true)
   R.setFromMatrix4(camera.matrixWorld)
-  lights.setCamera(R)
+  lights.setCamera(R, cam.fov_y_deg)
   lights.setLook(resolvedLook()) // the inferred key turns with the camera (§4.8: lighting.json is in its frame)
   updateView()
 }
