@@ -52,30 +52,47 @@ function notModified(ctx: RequestContext, mtimeMs: number): boolean {
   return Math.floor(mtimeMs / 1000) * 1000 <= t
 }
 
-function serveFile(ctx: RequestContext, file: string, stat: fs.Stats): void {
+/** Files up to this size are read whole and sent in one write (fewer stream turns: the planner's bundle); larger ones
+ *  (models, splats) are streamed. */
+const WHOLE_FILE = 4 * 1024 * 1024
+
+async function serveFile(ctx: RequestContext, file: string, stat: fs.Stats): Promise<void> {
   if (notModified(ctx, stat.mtimeMs)) {
     const res = ctx.beginFile(304, [])
     res.end()
     return
   }
-  let fd: number
+  const headers: readonly (readonly [string, string])[] = [
+    ['Content-Type', mimeType(file)],
+    ['Content-Length', String(stat.size)],
+    ['Last-Modified', new Date(stat.mtimeMs).toUTCString()],
+  ]
+  if (stat.size <= WHOLE_FILE) {
+    // One read from the page cache (well under a millisecond for the bundle) beats three trips to the thread pool.
+    let data: Buffer
+    try {
+      data = fs.readFileSync(file)
+    } catch {
+      ctx.sendHtmlError(404, NOT_FOUND)
+      return
+    }
+    ctx.beginFile(200, headers).end(ctx.method === 'HEAD' ? undefined : data)
+    return
+  }
+  let handle: fs.promises.FileHandle
   try {
-    fd = fs.openSync(file, 'r')
+    handle = await fs.promises.open(file, 'r')
   } catch {
     ctx.sendHtmlError(404, NOT_FOUND)
     return
   }
-  const res = ctx.beginFile(200, [
-    ['Content-Type', mimeType(file)],
-    ['Content-Length', String(stat.size)],
-    ['Last-Modified', new Date(stat.mtimeMs).toUTCString()],
-  ])
+  const res = ctx.beginFile(200, headers)
   if (ctx.method === 'HEAD') {
-    fs.closeSync(fd)
+    await handle.close()
     res.end()
     return
   }
-  const stream = fs.createReadStream(file, { fd, autoClose: true })
+  const stream = handle.createReadStream({ highWaterMark: 1024 * 1024 })
   stream.on('error', () => {
     res.destroy()
   })
@@ -137,5 +154,5 @@ export async function serveStatic(ctx: RequestContext, dirs: StaticDirs): Promis
     ctx.sendHtmlError(404, NOT_FOUND)
     return
   }
-  serveFile(ctx, target, stat)
+  await serveFile(ctx, target, stat)
 }

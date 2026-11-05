@@ -206,7 +206,7 @@ for (const argv of argvs) {
   })
 }
 
-void test('the pure ports answer as v1 does (planner/serve.py and the Python it called)', { skip: !fs.existsSync(path.join(REPO, 'planner/serve.py')) && 'planner/serve.py is gone' }, () => {
+void test('the pure ports answer as v1 does (planner/serve.py and the Python it called)', { skip: !fs.existsSync(path.join(REPO, 'planner/serve.py')) && 'planner/serve.py is gone' }, (t) => {
   const run = spawnSync('python3', ['-I', path.join(REPO, 'server/test/v1_oracle.py')], {
     input: JSON.stringify(cases.map((c) => ({ fn: c.fn, args: c.args }))), encoding: 'utf8', cwd: REPO, maxBuffer: 64 << 20,
   })
@@ -225,4 +225,5 @@ void test('the pure ports answer as v1 does (planner/serve.py and the Python it 
     }
   })
   assert.deepStrictEqual(problems, [], String(problems.length) + ' of ' + String(cases.length) + ' differ:\n' + problems.join('\n'))
+  t.diagnostic(String(cases.length) + ' cases, each equal to v1')
 })
