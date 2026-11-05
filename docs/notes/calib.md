@@ -113,7 +113,9 @@ roll 0.26, as before).
 - **f-contract**: adopt `calib/src/midstudy_calib/schemas/calib-cli.schema.json` as `contract/calib-cli.schema.json`
   (the server validates calib's output and the worker protocol from it); then calib's copy becomes a generated copy
   (one line in `gen_contract_types.py`'s `SOURCES`). Any change to `contract/calib.schema.json` or
-  `lighting.schema.json` needs `gen_contract_types.py` re-run (a test fails until then).
+  `lighting.schema.json` needs `gen_contract_types.py` re-run (a test fails until then): **after merging v2-f-contract**
+  (it adds `title`s to the `$defs`) the two schema copies in `calib/src/midstudy_calib/schemas/` must be regenerated;
+  `contract_types.py` itself comes out the same (checked against v2-f-contract's schemas).
 - **server-core / server-routes** (Phase 2): the worker client as contract §4.3 Worker says (start on the first
   calibration, restart after a crash, one-shot fallback, align stays one-shot).
 - **f-toolchain**: your `check.mjs py` (`pyright --project calib --pythonpath calib/.venv/bin/python`, `ruff check calib`)

@@ -160,7 +160,8 @@ class Gen:
             if "description" in sub_s:
                 lines += _comment(str(sub_s["description"]), "    ")
             lines.append(f"    {key}: {t if key in required else f'NotRequired[{t}]'}")
-        doc = textwrap.wrap(" ".join(str(s.get("description") or s.get("title") or f"{name} in {file}.").split()), 112)
+        # a schema's title is a name (f-contract titles the $defs), so the docstring is its description or where it is
+        doc = textwrap.wrap(" ".join(str(s.get("description") or f"{name} in {file}.").split()), 112)
         if s.get("additionalProperties", True) is not False:
             doc += ["", "Open: the schema allows keys not listed here."]
         head = [f"class {name}(TypedDict):", '    """' + "\n    ".join(doc).replace("\n    \n", "\n\n") + '"""', ""]
