@@ -55,11 +55,11 @@ the committed photo by 1.1 grey levels on average, JPEG noise).
 - E2 (`eval:calib`): lighting checks for the five golden scenes and the lounge, self-test of the truth files (their key
   turned by the true camera is the sun to 3e-5°, their irradiance matches the lights to 2e-6), mock copies. 132/132,
   self-test 53/53, mock 55/55.
-- E15 (`eval:lighting`, `evals/lighting.mjs`): the planner side. Red against v1 (10/36) for the right reasons. A lit grey
+- E16 (`eval:lighting`, `evals/lighting.mjs`): the planner side. Red against v1 (10/36) for the right reasons. A lit grey
   box's faces against lighting.json's prediction (radiance within 12 %), its floor shadow's direction and footprint,
   the controls (direction, strength, ambient, softness, shadows, save, reload, reset), unlit pieces unchanged, a scene
   without lighting.json identical to v1 (the v1 look recorded with `--baseline`: left 175, top 222, front 215), splats
   (once the library has a splat fixture), desktop and phone UI.
-- `evals/lib/images.py lighting`: the measurement behind E15. Checked on the golden photos themselves: the sofa's top
+- `evals/lib/images.py lighting`: the measurement behind E16. Checked on the golden photos themselves: the sofa's top
   and front, one fabric, give the same albedo under all three lights (top/front 0.97–1.02), which pins the frame, the
   SH units and ACES.

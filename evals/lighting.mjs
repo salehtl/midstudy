@@ -1,4 +1,4 @@
-// E15 eval:lighting — lighting inferred from the photo (contract §4.8). Written from the spec only.
+// E16 eval:lighting — lighting inferred from the photo (contract §4.8). Written from the spec only.
 //
 // The golden scenes living-wide, living-cool and living-warm are the same room and camera under three known lights; the
 // calib mock gives each its truth lighting.json (the lights the photo was rendered with). A lit grey box (albedo 0.5,
@@ -21,7 +21,7 @@ import {
 } from './lib/harness.mjs'
 
 const BASELINE = process.argv.includes('--baseline')
-const ev = createEval('E15', BASELINE ? 'lighting-baseline' : 'lighting', { timeoutS: 1200 })
+const ev = createEval('E16', BASELINE ? 'lighting-baseline' : 'lighting', { timeoutS: 1200 })
 const LIT = { id: 'probe-lit', name: 'Lit probe', dims_cm: { w: 45, d: 45, h: 45 }, albedo: 0.5 }
 const UNLIT = { id: 'probe-unlit', name: 'Unlit probe', dims_cm: { w: 40, d: 40, h: 40 }, rgba: [1, 0, 1, 1] }
 const RUG = { id: 'probe-rug', name: 'Unlit rug', dims_cm: { w: 70, d: 50, h: 1 }, rgba: [0.1, 0.55, 0.25, 1] }
