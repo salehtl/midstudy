@@ -1,6 +1,7 @@
 // splat.ply and splat.spz (contract §1; v1's splat.py), through the Rust splat kernels (core/js/pipeline.ts): the
-// per-axis fit with its covariances, the §1 self-check of the written file, then splat.spz (SPZ v2, gzipped as v1's
-// gzip.compress(…, compresslevel=9, mtime=0)) read back and checked against splat.ply.
+// per-axis fit with its covariances, the §1 self-check of the written file, then splat.spz (SPZ v2, gzipped with
+// mtime 0 as v1's gzip.compress, at level 4 rather than v1's 9: a third of the time for 0.6 % more bytes on the
+// Idol fixture, docs/notes/pipeline.md) checked against splat.ply.
 import fs from 'node:fs'
 import zlib from 'node:zlib'
 
@@ -41,7 +42,11 @@ export function normalize(src: string, rotation: Mat3, dims: Vec3, out: string, 
   return { fit: errorsPct(bounds, dims), notes }
 }
 
-/** v1's `write_spz`: splat.spz from the written splat.ply, decoded back and checked. */
+/** The gzip level of splat.spz (v1: 9; the contract names none). */
+const SPZ_GZIP_LEVEL = 4
+
+/** v1's `write_spz`: splat.spz from the written splat.ply, its positions checked against splat.ply's (the payload
+ *  the file holds, before gzip; v1 read the file back and gunzipped it). */
 export function writeSpz(ply: string, out: string): { readonly count: number; readonly dropped: number; readonly bytes: number } {
   const data = new Uint8Array(fs.readFileSync(ply))
   const enc = spzEncode(data)
@@ -49,10 +54,10 @@ export function writeSpz(ply: string, out: string): { readonly count: number; re
     if (enc.error.code === 'too-large') throw new MidstudyError("the splat is over 2 km across: it can't be written as splat.spz")
     throw plyError(enc.error.code, enc.error.detail, ply)
   }
-  const packed = zlib.gzipSync(enc.value.payload, { level: 9 })
+  const raw = enc.value.payload
+  const packed = zlib.gzipSync(raw, { level: SPZ_GZIP_LEVEL })
   fs.writeFileSync(out, packed)
-  const raw = zlib.gunzipSync(fs.readFileSync(out))
-  const check = spzCheck(new Uint8Array(raw), data)
+  const check = spzCheck(raw, data)
   if (!check.ok) {
     if (check.error.code === 'short') {
       throw new UnexpectedError('error', `unpack_from requires a buffer of at least 16 bytes for unpacking 16 bytes at offset 0 (actual buffer size is ${String(raw.length)})`)
