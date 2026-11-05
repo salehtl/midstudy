@@ -155,10 +155,13 @@ is sequential by nature (the PNG filters' left-to-right chains, the row scan of 
   queue file.
 - **engine**: use `SceneCamera` for §4.1 (dispose it on camera change), `clampCamera`/`clampLook` for the clamps. Depth:
   `KernelWorker.decodeDepth` → `DataTexture(data, w, h, RedFormat, FloatType)` as v1 (scale stays a uniform). Env map:
-  `KernelWorker.envMapFromImage(photoBlob, { rotation: R.elements, fov_y_deg })` → `DataTexture(data, 512, 256,
-  RGBAFormat, HalfFloatType)`, `flipY` false, `LinearFilter`, `EquirectangularReflectionMapping`, linear-sRGB, then
-  `pmrem.fromEquirectangular` as v1. Mask: readback (bottom-up) → `KernelWorker.keepRoomMask(rgba, w, h, { png: true })`
+  keep v1's GPU bake on WebGL (1.6 ms on SwiftShader against 35 ms for the CPU kernel); where that pass doesn't exist
+  yet (WebGPU), `KernelWorker.envMapFromImage(photoBlob, { rotation: R.elements, fov_y_deg })` → `DataTexture(data, 512,
+  256, RGBAFormat, HalfFloatType)`, `flipY` false, `LinearFilter`, `EquirectangularReflectionMapping`, linear-sRGB,
+  then `pmrem.fromEquirectangular` as v1. Mask: readback (bottom-up) → `KernelWorker.keepRoomMask(rgba, w, h, { png: true })`
   → `data:image/png;base64,…`. Hit tests: `hitBox` → `'behind'` means raycast as v1.
+- **webgpu-spike / webgpu-swap**: until the env bake is ported to TSL, `KernelWorker.envMapFromImage` gives the same
+  reflections map without any GLSL (mean 2 % from v1's GPU bake), as a half-float `DataTexture` for PMREM.
 - **proofs**: `core/crates/geom/LEAN.md` on branch `v2-k-geom`.
 - **kernels-hardening**: Miri on raster (not run here), longer fuzz campaigns, Kani if packaged.
 
