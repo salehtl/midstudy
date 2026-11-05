@@ -17,14 +17,14 @@ golden scenes and the lounge photo, real MoGe-2 on MPS, v1's one-shot, v2's one-
 | `worker.py`, `cli.py serve` | the warm worker (contract §4.3 Worker): JSON lines on stdin/stdout, MoGe kept loaded, the one-shot code path per request (`cli.dispatch`), failures answered `ok: false` without stopping, EOF exits 0. `serve --model/--device` are the requests' defaults. The one-shot CLI is unchanged (same arguments, output, exit codes; `serve` is the only addition to `--help`). |
 | `moge_runner.py` | the one untyped boundary (MoGe, torch), wrapped once: typed `MogeOutput` arrays out. One network held per process. Builds MoGe without its random init (`_no_weight_init`, then `load_state_dict(strict=True)`), pins the vitl revision (`cb0e8bb…`, the one `nix/moge-weights.nix` fetches; falls back to the Hub's main), and imports MoGe without `scipy.signal` (`import_moge`). |
 | `scripts/bench.py` | one-shot vs worker wall time on the golden scenes and the lounge, and `--compare` of two output folders. |
-| `scripts/check.sh` (`npm run check:py`) | generator `--check`, ruff and pyright `--strict` over `src`, `tests` and `scripts` (v1's `calib_report.py` typed too). |
+| `scripts/check.sh` | calib's own check: generator `--check`, ruff and pyright `--strict` over `src`, `tests` and `scripts` (v1's `calib_report.py` typed too). f-toolchain's `npm run check:py` (`scripts/check.mjs py`) runs the same pyright and ruff through calib's `[tool.pyright]` and `[tool.ruff]`; checked with its exact invocation: clean. |
 | `tests/` | 103 tests (62 in v1): `test_contract_types.py`, `test_worker.py` (protocol, mock parity with the one-shot CLI, failures, no torch under the mock), `test_moge_runner.py` (init skip, one model, pin, the `scipy.signal` stand-in, and the fast build against MoGe's own `from_pretrained` weight for weight when the weights are cached), shared helpers in `synthetic.py` and `cli_run.py`. |
 
 ### How to run and check
 
 ```sh
 nix develop -c uv sync --project calib
-nix develop -c npm run check:py                                   # types, lint, generated files: one line each
+nix develop -c bash calib/scripts/check.sh                       # generated files, ruff, pyright --strict: one line each
 nix develop -c bash -c 'cd calib && uv run pytest -q'             # 103 tests, ~40 s, vitl weights used when cached
 nix develop -c uv run --project calib python calib/scripts/gen_contract_types.py   # after a schema change
 printf '%s\n' '{"id":"a","cmd":"fit","args":["/abs/scene"]}' | nix develop -c uv run --project calib midstudy-calib serve
@@ -76,7 +76,7 @@ Where the time goes (medians of the quiet rounds; `moge.load_s`, `moge.infer_s`,
   `lighting.json` (timings aside) and byte-identical `depth.png` for all six photos in every round. E2's results are
   unchanged (132/132, the same values as in STATUS.md).
 
-Evals on `v2-calib` (2026-11-05): pytest 103/103 (102 + 1 skipped without `fixtures/photos/`); `check:py` clean; `eval:calib -- --mock` 58/58; `eval:calib` (real
+Evals on `v2-calib` (2026-11-05): pytest 103/103 (102 + 1 skipped without `fixtures/photos/`); `calib/scripts/check.sh` clean; `eval:calib -- --mock` 58/58; `eval:calib` (real
 MoGe-2) 132/132 in 95.7 s (load ~35); `eval:real` 31/31 in 66.6 s (lounge camera FOV 69.63, height 1.432, pitch −7.84,
 roll 0.26, as before).
 
@@ -116,8 +116,9 @@ roll 0.26, as before).
   `lighting.schema.json` needs `gen_contract_types.py` re-run (a test fails until then).
 - **server-core / server-routes** (Phase 2): the worker client as contract §4.3 Worker says (start on the first
   calibration, restart after a crash, one-shot fallback, align stays one-shot).
-- **f-toolchain**: `check:py` in package.json is `bash calib/scripts/check.sh`; pyright 1.1.411 and ruff 0.15.14 in the
-  dev shell would save the script its `nix shell` one-offs.
+- **f-toolchain**: your `check.mjs py` (`pyright --project calib --pythonpath calib/.venv/bin/python`, `ruff check calib`)
+  is clean on this branch; it could also run `uv run --project calib python calib/scripts/gen_contract_types.py --check`
+  (pytest covers that too). calib's `[tool.ruff]` selects more rules than the defaults; keep it.
 - **integration**: `fixtures/stub_calib.py` has no `serve`; the server's one-shot fallback covers it (the stub exits 2
   at once), or the stub can gain a stdlib `serve` later.
 - **whoever makes worktrees**: `fixtures/photos/` is git-ignored, so worktrees don't have it. For E2 real and
