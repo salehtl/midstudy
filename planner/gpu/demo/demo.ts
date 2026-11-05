@@ -65,7 +65,7 @@ let splats: SplatLayer | null = null
 let splatQuad: QuadMesh | null = null
 const items = new Map<string, ItemRec>()
 const gltf = new GLTFLoader()
-const photo = { w: 1600, h: 1200, texture: null as Texture | null }
+const photo: { w: number, h: number, texture: Texture | null } = { w: 1600, h: 1200, texture: null }
 let cam: Camera = { fov_y_deg: 55, height_m: 1.4, pitch_deg: -10, roll_deg: 0 }
 let occlusion = true
 let contactShadows = true
@@ -121,9 +121,25 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await r.arrayBuffer())
 }
 
+const num = (o: unknown, k: string): number => { const v: unknown = o && typeof o === 'object' ? Reflect.get(o, k) : undefined; if (typeof v !== 'number') throw new Error(`${k} is not a number`); return v }
+const field = (o: unknown, k: string): unknown => (o && typeof o === 'object' ? Reflect.get(o, k) : undefined)
+function cameraOf(calib: unknown): Camera {
+  const c = field(calib, 'camera')
+  return { fov_y_deg: num(c, 'fov_y_deg'), height_m: num(c, 'height_m'), pitch_deg: num(c, 'pitch_deg'), roll_deg: num(c, 'roll_deg') }
+}
+const numbers = (v: unknown): number[] => (Array.isArray(v) ? v.map((x: unknown) => (typeof x === 'number' ? x : 0)) : [])
+function lightingOf(j: unknown): LightingJson {
+  const sh = field(field(j, 'ambient'), 'sh'), key = field(j, 'key'), wb = field(field(j, 'white_balance'), 'rgb')
+  if (!Array.isArray(sh) || sh.length !== 9 || !key) throw new Error('lighting.json has no ambient.sh or key')
+  return {
+    ambient: { sh: sh.map(numbers) },
+    key: { direction: numbers(field(key, 'direction')), color: numbers(field(key, 'color')), intensity: num(key, 'intensity'), softness: num(key, 'softness') },
+    ...(Array.isArray(wb) ? { white_balance: { rgb: numbers(wb) } } : {}),
+  }
+}
+
 async function openScene(dir: string): Promise<{ w: number, h: number, hasDepth: boolean, lighting: boolean }> {
-  const calib = await (await fetch(`${dir}/calib.json`)).json() as { camera: Camera, floor?: { found?: boolean } }
-  cam = calib.camera
+  cam = cameraOf(await (await fetch(`${dir}/calib.json`)).json())
   const img = new Image()
   img.src = `${dir}/photo.jpg`
   await img.decode()
@@ -140,7 +156,7 @@ async function openScene(dir: string): Promise<{ w: number, h: number, hasDepth:
     hasDepth = true
   }
   const lres = await fetch(`${dir}/lighting.json`)
-  const lj = lres.ok ? await lres.json() as LightingJson : null
+  const lj = lres.ok ? lightingOf(await lres.json()) : null
   applyCamera()
   rig.setData(lj, new Matrix3().setFromMatrix4(camera.matrixWorld), cam.fov_y_deg)
   rig.setPhoto(photo.texture, photo.w / photo.h)
@@ -281,9 +297,10 @@ async function draw(target: RenderTarget | null, w = renderer.domElement.width, 
 }
 
 async function gpuSync(): Promise<void> {
-  const b = renderer.backend as { device?: GPUDevice, gl?: WebGL2RenderingContext }
-  if (b.device) { await b.device.queue.onSubmittedWorkDone(); return }
-  if (b.gl) { const px = new Uint8Array(4); b.gl.readPixels(0, 0, 1, 1, b.gl.RGBA, b.gl.UNSIGNED_BYTE, px) }
+  const device: unknown = Reflect.get(renderer.backend, 'device')
+  const gl: unknown = Reflect.get(renderer.backend, 'gl')
+  if (typeof GPUDevice !== 'undefined' && device instanceof GPUDevice) { await device.queue.onSubmittedWorkDone(); return }
+  if (gl instanceof WebGL2RenderingContext) { const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px) }
 }
 
 // The full photo frame at its own resolution, splats sorted for the capture camera first (§4.7): PNG.

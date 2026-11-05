@@ -11,9 +11,10 @@
 // Usage: node planner/gpu/demo/check.mjs [--perf] [--only=v1,webgpu,webgl,sort,perf]   Output: evals/out/webgpu-spike/
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import {
   REPO, createEval, startServer, seedScene, launchBrowser, openPlanner, hook, state, ensureScene, itemOf, golden, fmt, pyHelper, projectBox,
-  raw, b64json, api, waitFor, sleep, BROWSER_ARGS,
+  raw, b64json, api, waitFor, sleep, BROWSER, BROWSER_ARGS,
 } from '../../../evals/lib/harness.mjs'
 import { build, serve } from './tools.mjs'
 import { writeProbes, SPROBE, PROBE, LIT } from './assets.mjs'
@@ -233,14 +234,35 @@ async function openDemo(backend, extra = '') {
   return { page, ctx, errors, info }
 }
 
+// The view: the photo contain-fit in the 1280 × 800 window with letterbox bars (§4.5), drawn exactly as is.
+function letterbox(file) {
+  try {
+    const out = execFileSync(path.join(REPO, 'evals/py'), ['-c', `import json, numpy as np; from PIL import Image
+a = np.asarray(Image.open(${JSON.stringify(file)}).convert('RGB')).astype(int)
+p = np.asarray(Image.open(${JSON.stringify(LW.photo)}).convert('RGB').resize((1067, 800), Image.BILINEAR)).astype(int)
+bars = np.concatenate([a[:, :100].reshape(-1, 3), a[:, 1180:].reshape(-1, 3)])
+bar = np.abs(bars - np.array([14, 15, 17])).max(-1)
+inner = np.abs(a[40:760, 147:1133] - p[40:760, 40:1026]).max(-1)
+print(json.dumps({"bar_max": int(bar.max()), "photo_mean": float(inner.mean()), "photo_p99": float(np.percentile(inner, 99))}))`], { encoding: 'utf8' })
+    return JSON.parse(out.trim().split('\n').pop())
+  } catch (e) { return { error: String(e.message || e).slice(0, 200) } }
+}
+const v2shots = {}
+
 for (const backend of ['webgpu', 'webgl']) {
   if (!want(backend)) continue
   const tag = backend === 'webgpu' ? 'WebGPU' : 'WebGL2'
   ev.section(`${tag}: the demo on WebGPURenderer${backend === 'webgl' ? ' (forceWebGL)' : ''}`)
   const Dm = await openDemo(backend)
   ev.check(`${tag}: the demo opens the scene on the ${backend === 'webgpu' ? 'WebGPU' : 'WebGL2'} backend`, Dm.info.backend === (backend === 'webgpu' ? 'webgpu' : 'webgl2') && Dm.info.scene?.hasDepth && Dm.info.scene?.lighting, fmt(Dm.info))
+  await Dm.page.evaluate(() => window.gpuDemo.draw()).catch(() => {})
+  const viewFile = path.join(ev.out, `${backend}-view.png`)
+  await Dm.page.screenshot({ path: viewFile }).catch(() => {})
+  const lb = letterbox(viewFile)
+  ev.check(`${tag}: the view letterboxes the photo (bars exactly the bar colour, the photo as is, scaled: mean ≤ 3)`, lb.bar_max === 0 && lb.photo_mean <= 3, fmt(lb))
   const shots = {}
   for (const [name, c] of Object.entries(CASES)) shots[name] = await v2Case(Dm.page, backend, name, c)
+  v2shots[backend] = shots
   ev.check(`${tag}: every case captured at the photo's resolution`, Object.values(shots).every((s) => s.file && s.size?.[0] === W && s.size?.[1] === H), fmt(Object.fromEntries(Object.entries(shots).map(([k, v]) => [k, v.error || `${v.ms?.toFixed(0)} ms`]))))
   results.cases[backend] = judge(tag, shots)
   if (Object.keys(ref).length) results.cases[`${backend}-vs-v1`] = compare(tag, shots, ref)
@@ -279,6 +301,46 @@ for (const backend of ['webgpu', 'webgl']) {
   await Dm.ctx.close()
 }
 
+// A browser without WebGPU at all (MIDSTUDY_WEBGPU=0's flags): WebGPURenderer must fall back to WebGL2 on its own.
+if (want('webgl')) {
+  ev.section('no WebGPU in the browser: the fallback picks itself')
+  const { chromium } = await import('playwright-core')
+  const plain = await chromium.launch({ executablePath: BROWSER, headless: true, args: BROWSER_ARGS.filter((a) => !/webgpu/i.test(a)) })
+  ev.onCleanup(() => plain.close())
+  const page = await plain.newPage({ viewport: { width: 1280, height: 800 } })
+  const errs = []
+  page.on('pageerror', (e) => errs.push(String(e).slice(0, 300)))
+  await page.goto(`${stat.base}/demo/index.html`)
+  const r = await page.evaluate(async () => {
+    const d = window.gpuDemo
+    const info = await d.ready
+    await d.openScene('/scene')
+    await d.addItem({ uid: 'p', glb: '/lib/splat-probe/model.glb', splat: '/lib/splat-probe/splat.ply', position: [-1.0, 0, -2.4] })
+    d.setOcclusion(false); d.setContactShadows(false); d.setCastShadows(false)
+    const s = await d.capture()
+    return { gpu: 'gpu' in navigator, backend: info.backend, url: s.dataUrl }
+  }).catch((e) => ({ error: String(e.message || e).split('\n')[0] }))
+  let d = { error: r.error || 'no capture' }
+  if (r.url) {
+    const f = path.join(ev.out, 'nowebgpu-size.png')
+    fs.writeFileSync(f, Buffer.from(r.url.split(',')[1], 'base64'))
+    const ref = v2shots.webgl?.size?.file
+    d = ref ? pyHelper(['region-diff', '--a', f, '--b', ref, '--rects', JSON.stringify([[0, 0, W, H]])]) : { error: 'no forced-WebGL2 reference' }
+  }
+  ev.check('without navigator.gpu the demo runs on WebGL2 by itself and draws what forceWebGL draws (mean ≤ 0.5)', r.gpu === false && r.backend === 'webgl2' && d.mean != null && d.mean <= 0.5 && errs.length === 0,
+    fmt({ gpu: r.gpu, backend: r.backend, diff: d, errors: errs.slice(0, 2) }))
+}
+
+if (v2shots.webgpu && v2shots.webgl) {
+  ev.section('WebGPU vs its WebGL2 fallback, the same demo')
+  const rows = Object.keys(CASES).map((name) => {
+    const a = v2shots.webgpu[name]?.file, b = v2shots.webgl[name]?.file
+    return [name, a && b ? pyHelper(['region-diff', '--a', a, '--b', b, '--rects', JSON.stringify([[0, 0, W, H]])]) : { error: 'missing' }]
+  })
+  ev.check('every case: the two backends draw the same picture (whole frame, mean ≤ 0.5, p99 ≤ 8)', rows.every(([, d]) => d.mean != null && d.mean <= 0.5 && d.p99 <= 8),
+    fmt(Object.fromEntries(rows.map(([n, d]) => [n, d.error || `${d.mean.toFixed(3)}/${d.p99}`]))))
+}
+
 // --- numbers (SwiftShader: compare relatively) ------------------------------------------------------------------------------
 if (PERF) {
   ev.section('numbers: 262,144 splats (the Idol chair), SwiftShader')
@@ -286,6 +348,8 @@ if (PERF) {
     const Dm = await openDemo(backend, extra)
     const r = await Dm.page.evaluate(async () => {
       const d = window.gpuDemo
+      await d.draw() // the scene's own pipelines compile first, as v1's page has drawn frames before Spark's chair
+      await d.draw()
       const h0 = d.stats().heap
       const add = await d.addItem({ uid: 'chair', glb: '/lib/idol-chair/model.glb', splat: '/lib/idol-chair/splat.spz', position: [1.25, 0, -3.1] })
       const warm = await d.timeFrames(2, { moveSplats: true })
