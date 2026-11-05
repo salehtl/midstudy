@@ -65,7 +65,8 @@ def main():
 
     cases = []  # (name, bytes)
     cases.append(("fixture-chair.jpg", (REPO / "fixtures/fal/sam-3-3d-objects/input.jpg").read_bytes()))
-    sizes = [(1, 1), (7, 5), (17, 9), (16, 16), (33, 17), (100, 75), (349, 401), (640, 480)]
+    # (360, 480) and (300, 502): portrait thumbnails, which Pillow 13 resamples vertical pass first
+    sizes = [(1, 1), (7, 5), (17, 9), (16, 16), (33, 17), (100, 75), (349, 401), (640, 480), (360, 480), (300, 502)]
     if not a.quick:
         sizes += [(1001, 777), (13, 250)]
     k = 0
@@ -122,6 +123,8 @@ def main():
         cases.append((f"w-{'ll' if lossless else 'lossy'}.webp", buf.getvalue()))
     wide = photo(rng, 4200, 60)
     cases.append(("wide-4200.jpg", jpeg(wide, quality=90)))
+    tall = photo(rng, 500, 4400)  # its engine input shrinks vertical pass first
+    cases.append(("tall-4400.jpg", jpeg(tall, quality=90)))
     # rug pictures (E8's and E17's)
     for name, size, rect, stripes in (("rug-e8", (800, 800), [250, 150, 549, 649], "h"), ("rug-e17", (800, 800), [150, 250, 649, 549], "v")):
         from PIL import ImageDraw

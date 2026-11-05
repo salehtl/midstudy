@@ -8,7 +8,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { Document, GLB_BUFFER, Logger, NodeIO } from '@gltf-transform/core'
+import { Document, Format, GLB_BUFFER, Logger, NodeIO } from '@gltf-transform/core'
 import type { GLTF, Node } from '@gltf-transform/core'
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 
@@ -203,10 +203,25 @@ function oneBuffer(doc: Document): void {
   for (const b of buffers.slice(1)) b.dispose()
 }
 
-/** The GLB's bytes with its textures' metadata stripped (contract §2.8). */
+/** The GLB's bytes: glTF-Transform's JSON with every node's translation, rotation and scale as computed (its writer
+ *  drops values within 1e-5 of the identity, and v1 wrote them all, e.g. a rug's 0.99999998 item-frame scale), the
+ *  textures' metadata stripped (contract §2.8). */
 async function writeClean(doc: Document): Promise<Uint8Array> {
   oneBuffer(doc)
-  const glb = await io().writeBinary(doc)
+  const { json, resources } = await io().writeJSON(doc, { format: Format.GLB })
+  const nodes = doc.getRoot().listNodes()
+  json.nodes?.forEach((def, i) => {
+    const node = nodes[i]
+    if (node === undefined) return
+    const t = node.getTranslation()
+    const r = node.getRotation()
+    const s = node.getScale()
+    if (t.some((v) => v !== 0)) def.translation = t
+    if (r[0] !== 0 || r[1] !== 0 || r[2] !== 0 || r[3] !== 1) def.rotation = r
+    if (s.some((v) => v !== 1)) def.scale = s
+  })
+  const bin = resources[GLB_BUFFER]
+  const glb = bin === undefined ? await io().writeBinary(doc) : glbBytes(JSON.stringify(json), bin)
   const clean = stripGlb(glb)
   if (!clean.ok) throw new MidstudyError(`the model's textures can't be cleaned of camera metadata (${clean.error.message}); re-export the model`)
   return clean.value.bytes

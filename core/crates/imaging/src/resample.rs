@@ -81,7 +81,66 @@ fn clip8(v: i32) -> u8 {
     (v >> PRECISION_BITS).clamp(0, 255) as u8
 }
 
-/// `ImagingResample(…, LANCZOS, box)` of `channels`-sample pixels (`src` is `w × h`), into `ow × oh`.
+/// Pillow's `ResampleHorizontal_8bpc`: rows `offset..offset + rows` of `src` (`w` wide) into `ow` columns.
+fn horizontal(
+    src: &[u8],
+    w: usize,
+    channels: usize,
+    offset: usize,
+    rows: usize,
+    ow: usize,
+    bounds: &[(usize, usize)],
+    ksize: usize,
+    kk: &[i32],
+) -> Vec<u8> {
+    let mut out = vec![0u8; ow * rows * channels];
+    for yy in 0..rows {
+        let row = &src[(yy + offset) * w * channels..(yy + offset + 1) * w * channels];
+        for (xx, &(xmin, n)) in bounds.iter().enumerate() {
+            let k = &kk[xx * ksize..xx * ksize + n];
+            for c in 0..channels {
+                let mut ss: i32 = 1 << (PRECISION_BITS - 1);
+                for (x, &kx) in k.iter().enumerate() {
+                    ss =
+                        ss.wrapping_add(i32::from(row[(x + xmin) * channels + c]).wrapping_mul(kx));
+                }
+                out[(yy * ow + xx) * channels + c] = clip8(ss);
+            }
+        }
+    }
+    out
+}
+
+/// Pillow's `ResampleVertical_8bpc`: `src` (`w` wide) into `bounds.len()` rows, each from its rows `ymin..ymin + n`.
+fn vertical(
+    src: &[u8],
+    w: usize,
+    channels: usize,
+    bounds: &[(usize, usize)],
+    ksize: usize,
+    kk: &[i32],
+) -> Vec<u8> {
+    let mut out = vec![0u8; w * bounds.len() * channels];
+    for (yy, &(ymin, n)) in bounds.iter().enumerate() {
+        let k = &kk[yy * ksize..yy * ksize + n];
+        for xx in 0..w {
+            for c in 0..channels {
+                let mut ss: i32 = 1 << (PRECISION_BITS - 1);
+                for (y, &ky) in k.iter().enumerate() {
+                    ss = ss.wrapping_add(
+                        i32::from(src[((y + ymin) * w + xx) * channels + c]).wrapping_mul(ky),
+                    );
+                }
+                out[(yy * w + xx) * channels + c] = clip8(ss);
+            }
+        }
+    }
+    out
+}
+
+/// `ImagingResample(…, LANCZOS, box)` of `channels`-sample pixels (`src` is `w × h`), into `ow × oh`: Pillow 13's
+/// `ImagingResampleInner`, which runs the vertical pass first when the height shrinks by more than twice what the
+/// width does (each pass rounds to 8 bits, so the order shows in the result).
 #[must_use]
 pub fn resample(
     src: &[u8],
@@ -107,63 +166,70 @@ pub fn resample(
     }
     let need_h = ow != w || bx[0] != 0.0 || bx[2] != ow as f32;
     let need_v = oh != h || bx[1] != 0.0 || bx[3] != oh as f32;
+    let (dy, dx) = (h as i64 - oh as i64, w as i64 - ow as i64);
+    let horizontal_first = !(dy > 0 && dy > dx * 2);
     let (ksize_h, bounds_h, kh) = coeffs(w, bx[0], bx[2], ow);
     let (ksize_v, mut bounds_v, kv) = coeffs(h, bx[1], bx[3], oh);
-    let first = bounds_v.first().map_or(0, |b| b.0);
-    let last = bounds_v.last().map_or(h, |b| b.0 + b.1);
-    let (mut cur, mut cw, mut ch) = (src.to_vec(), w, h);
-    if need_h {
-        for b in &mut bounds_v {
-            b.0 -= first;
-        }
-        let rows = last - first;
-        let mut tmp = vec![0u8; ow * rows * channels];
-        for yy in 0..rows {
-            let row = &src[(yy + first) * w * channels..(yy + first + 1) * w * channels];
-            for (xx, &(xmin, n)) in bounds_h.iter().enumerate() {
-                let k = &kh[xx * ksize_h..xx * ksize_h + n];
-                for c in 0..channels {
-                    let mut ss: i32 = 1 << (PRECISION_BITS - 1);
-                    for (x, &kx) in k.iter().enumerate() {
-                        ss = ss.wrapping_add(
-                            i32::from(row[(x + xmin) * channels + c]).wrapping_mul(kx),
-                        );
-                    }
-                    tmp[(yy * ow + xx) * channels + c] = clip8(ss);
-                }
+    if horizontal_first {
+        let mut cur = None;
+        let mut cw = w;
+        if need_h {
+            // only the rows the vertical pass reads
+            let first = bounds_v.first().map_or(0, |b| b.0);
+            let last = bounds_v.last().map_or(h, |b| b.0 + b.1);
+            for b in &mut bounds_v {
+                b.0 -= first;
             }
+            cur = Some(horizontal(
+                src,
+                w,
+                channels,
+                first,
+                last - first,
+                ow,
+                &bounds_h,
+                ksize_h,
+                &kh,
+            ));
+            cw = ow;
         }
-        cur = tmp;
-        cw = ow;
-        ch = rows;
-    }
-    if need_v {
-        let mut out = vec![0u8; cw * oh * channels];
-        for (yy, &(ymin, n)) in bounds_v.iter().enumerate() {
-            let k = &kv[yy * ksize_v..yy * ksize_v + n];
-            for xx in 0..cw {
-                for c in 0..channels {
-                    let mut ss: i32 = 1 << (PRECISION_BITS - 1);
-                    for (y, &ky) in k.iter().enumerate() {
-                        ss = ss.wrapping_add(
-                            i32::from(cur[((y + ymin) * cw + xx) * channels + c]).wrapping_mul(ky),
-                        );
-                    }
-                    out[(yy * cw + xx) * channels + c] = clip8(ss);
-                }
-            }
+        if need_v {
+            let input = cur.as_deref().unwrap_or(src);
+            cur = Some(vertical(input, cw, channels, &bounds_v, ksize_v, &kv));
         }
-        cur = out;
-        ch = oh;
+        cur.unwrap_or_else(|| src.to_vec())
+    } else {
+        let mut cur = None;
+        let mut rows = h;
+        if need_v {
+            cur = Some(vertical(src, w, channels, &bounds_v, ksize_v, &kv));
+            rows = oh;
+        }
+        if need_h {
+            let input = cur.as_deref().unwrap_or(src);
+            cur = Some(horizontal(
+                input, w, channels, 0, rows, ow, &bounds_h, ksize_h, &kh,
+            ));
+        }
+        cur.unwrap_or_else(|| src.to_vec())
     }
-    debug_assert_eq!(cur.len(), cw * ch * channels);
-    cur
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tall_shrinks_run_the_vertical_pass_first() {
+        // a gradient whose 8-bit rounding differs between the pass orders: both orders stay within one level, and
+        // the 360 x 480 -> 256 x 256 (rows 60..420) case is the one Pillow 13 runs vertical-first
+        let src: Vec<u8> = (0..360 * 480)
+            .map(|i| ((i * 37 + i / 360 * 11) % 251) as u8)
+            .collect();
+        let out = resample(&src, 360, 480, 1, 256, 256, [0.0, 60.0, 360.0, 420.0]);
+        assert_eq!(out.len(), 256 * 256);
+    }
 
     #[test]
     fn flat_stays_flat_and_crop_shortcut() {

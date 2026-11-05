@@ -6,6 +6,7 @@
 //! encode IN W H Q OUT    IN = raw RGB
 //! engine IN OUT          OUT = the engine input (jpg or png)
 //! thumb IN OUT
+//! fit IN OUT            OUT = raw RGB of ImageOps.fit(im, (256, 256), LANCZOS)
 //! rug IN W_CM D_CM OUT   OUT = texture JPEG; OUT.json = crop, turned, have, want, edge
 //! mask IN OUT            OUT = mask PNG; OUT.json = kind, share
 //! ```
@@ -21,7 +22,7 @@ use std::fs;
 use midstudy_imaging::formats::read;
 use midstudy_imaging::image::Mode;
 use midstudy_imaging::jpeg::encode::encode_rgb;
-use midstudy_imaging::ops::{MaskKind, engine_input, foreground_mask, rug_texture, thumb};
+use midstudy_imaging::ops::{MaskKind, engine_input, fit, foreground_mask, rug_texture, thumb};
 
 fn mode_name(m: Mode) -> &'static str {
     match m {
@@ -70,6 +71,12 @@ fn main() {
                     let im = read(&fs::read(a[1]).map_err(|e| e.to_string())?)
                         .map_err(|e| format!("{e:?}"))?;
                     fs::write(a[2], thumb(im)).map_err(|e| e.to_string())
+                }
+                "fit" => {
+                    let im = read(&fs::read(a[1]).map_err(|e| e.to_string())?)
+                        .map_err(|e| format!("{e:?}"))?
+                        .to_rgb();
+                    fs::write(a[2], fit(&im, 256, 256).data).map_err(|e| e.to_string())
                 }
                 "rug" => {
                     let im = read(&fs::read(a[1]).map_err(|e| e.to_string())?)
