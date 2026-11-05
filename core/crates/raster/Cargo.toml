@@ -1,0 +1,17 @@
+[package]
+name = "midstudy-raster"
+version = "0.1.0"
+description = "midstudy's raster kernels: the depth.png decoder, the keep-room mask, the environment map from the photo, SH rotation"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midstudy-geom = { path = "../geom" }
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+
+[dev-dependencies]
+proptest = "1"
