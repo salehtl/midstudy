@@ -1,0 +1,67 @@
+{
+  "about": "The golden set for the product page reader (contract §2.11): real shop pages, studied on 2026-11-05. Their HTML is saved (git-ignored) in fixtures/pages/<id>/ with the feeds that answered then; nothing from them is committed. Expected values were read by hand from each page; dims are [w, d, h] in cm (checked within 1 cm or 1.5 %), in order, as a prefix of dims_candidates. 'variants' lists the shop's size options in order. 'image0' must be in the first picture's URL. Shops change: a live run that differs from a snapshot run is a shop change until shown otherwise.",
+  "pages": [
+    {
+      "id": "zennova-star", "url": "https://zennovacarpet.com/product/star-carpet-blue/",
+      "pattern": "WooCommerce shop (the user's carpet shop); JSON-LD Product without sizes; sizes only as unitless variant terms 3*4 … 4*8; the page's custom-size form measures in metres (Length (m))",
+      "expect": { "name": "Star Carpet", "name_excludes": "Zennova Carpets", "category": "rug", "is_rug": true, "unit": "m",
+        "dims": [[300, 400, 1], [300, 500, 1], [400, 500, 1], [400, 600, 1], [400, 800, 1]],
+        "variants": ["3*4", "3*5", "4*5", "4*6", "4*8"], "image0": "wp-content/uploads/2026/10/363.jpg", "layers": ["jsonld", "woocommerce"] }
+    },
+    {
+      "id": "ikea-ae-billy", "url": "https://www.ikea.com/ae/en/p/billy-bookcase-black-oak-effect-00477337/",
+      "pattern": "IKEA, metric: JSON-LD Product with width/depth/height as \"80 cm\" text; also a 3DModel block",
+      "expect": { "name": "BILLY", "category": "bookcase", "is_rug": false, "unit": "cm", "dims": [[80, 28, 106]], "source": "jsonld",
+        "image0": "billy-bookcase-black-oak-effect__1097107_pe864733" }
+    },
+    {
+      "id": "ikea-us-billy", "url": "https://www.ikea.com/us/en/p/billy-bookcase-black-oak-effect-00477337/",
+      "pattern": "IKEA, US: JSON-LD width/depth/height in inches with fractions (31 1/2 \", 41 3/4 \")",
+      "expect": { "name": "BILLY", "category": "bookcase", "is_rug": false, "unit": "in", "dims": [[80.0, 27.9, 106.0]], "source": "jsonld",
+        "image0": "billy-bookcase-black-oak-effect__1097107_pe864733" }
+    },
+    {
+      "id": "albany-barton", "url": "https://www.albanypark.com/products/barton-sofa",
+      "pattern": "Shopify (8 MB page, microdata, no JSON-LD Product): sizes in text, inches with letters 101\" L X 40\" D X 30.5\" H; box sizes and seat/arm heights as distractors; the .json feed body says 101\"W x 30.5\"H x 40\"D",
+      "expect": { "name": "Barton Sofa", "category": "sofa", "is_rug": false, "unit": "in", "dims": [[256.5, 101.6, 77.5]],
+        "not_dims": [[223.5, 81.3, 43.8]], "image0": "barton-sofa__almond-performance-velvet__natural-oak__front" }
+    },
+    {
+      "id": "annie-kali", "url": "https://www.annieselke.com/products/kali-natural-handwoven-jute-rug",
+      "pattern": "Shopify rug: JSON-LD ProductGroup variesBy size, hasVariant size \"7' 6\\\" x 9' 6\\\"\" (feet and inches); the .js feed has a Size option",
+      "expect": { "name": "Kali", "category": "rug", "is_rug": true, "unit": "ft",
+        "dims": [[61.0, 91.4, 1], [91.4, 152.4, 1], [121.9, 182.9, 1], [152.4, 243.8, 1], [182.9, 274.3, 1], [228.6, 289.6, 1], [259.1, 350.5, 1], [289.6, 411.5, 1]],
+        "variants": ["2' x 3'", "3' x 5'", "4' x 6'", "5' x 8'", "6' x 9'", "7' 6\" x 9' 6\"", "8' 6\" x 11' 6\"", "9' 6\" x 13' 6\""],
+        "image0": "28c24f27e6bf69da3bead9df42f8ebd0e14896b8" }
+    },
+    {
+      "id": "boutique-ecorse", "url": "https://boutiquerugs.com/products/ecorse-area-rug",
+      "pattern": "Shopify rug: JSON-LD Product whose offers are named \"… - 3'11\\\" x 5'7\\\" Rectangle\"; a size guide table with nominal sizes (4x6) next to actual ones and shipping sizes (LxWxH) as distractors; Thickness: 0.45\" and Pile Height: 0.29\"",
+      "expect": { "name": "Ecorse", "category": "rug", "is_rug": true, "unit": "ft",
+        "dims": [[61.0, 91.4, 1.1], [119.4, 170.2, 1.1], [160.0, 221.0, 1.1], [200.7, 274.3, 1.1], [78.7, 221.0, 1.1], [238.8, 312.4, 1.1], [269.2, 373.4, 1.1]],
+        "image0": "CIT-2300_design_rct_3157_studio" }
+    },
+    {
+      "id": "floyd-bedside", "url": "https://floydhome.com/products/bedside-table",
+      "pattern": "Shopify: JSON-LD ProductGroup with colour variants; no size anywhere in the served HTML (the spec renders in the browser); the feeds answered 429 when studied",
+      "expect": { "name": "Bedside Table", "category": "bedside table", "is_rug": false, "no_dims": true, "image0": "24070901-W-BEDSIDE-NP" }
+    },
+    {
+      "id": "iw-tomo", "url": "https://www.industrywest.com/products/tomo-side-table",
+      "pattern": "WooCommerce (Yoast JSON-LD Product without sizes); the Store API has dimensions 0 × 0 × 0 and no size attribute; no size in the served HTML",
+      "expect": { "name": "Tomo Side Table", "category": "side table", "is_rug": false, "no_dims": true, "image0": "products-TomoSideTable-EcoWhite_02" }
+    },
+    {
+      "id": "target-bookcase", "url": "https://www.target.com/p/5-shelf-bookcase-black-room-essentials-8482/-/A-54360632",
+      "pattern": "Large retailer rendered in the browser: og:title and og:image only; the size is in an inline script's JSON: \"Dimensions (Overall): 71.18 Inches (H) x 24.49 Inches (W) x 11.57 Inches (D)\", with recommended products' sizes after it",
+      "expect": { "name": "5 Shelf Bookcase", "category": "bookcase", "is_rug": false, "unit": "in", "dims": [[62.2, 29.4, 180.8]],
+        "image0": "GUEST_a9a18ce5-f995-4ea8-aa45-59b6eda006a2" }
+    },
+    {
+      "id": "westelm-mc22", "url": "https://www.westelm.com/products/mid-century-22-bookshelf-acorn-h5335/",
+      "pattern": "Blocks downloads: 403 Access Denied to any non-browser client",
+      "snapshot_status": 403,
+      "expect": { "blocked": true, "error": "This shop blocks automatic reading: paste the image link and size instead." }
+    }
+  ]
+}

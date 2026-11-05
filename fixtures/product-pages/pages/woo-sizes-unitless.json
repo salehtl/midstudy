@@ -1,0 +1,7 @@
+[{"id":77,"name":"Silk Carpet – Rose","slug":"silk-carpet-rose","type":"variable",
+  "description":"<p>Hand knotted silk on a cotton base.</p>","short_description":"",
+  "images":[{"id":1,"src":"https://tabriz-house.example/wp-content/uploads/2026/10/rose-1.jpg"},{"id":2,"src":"https://tabriz-house.example/wp-content/uploads/2026/10/rose-2.jpg"}],
+  "categories":[{"id":9,"name":"Hand Made Silk","slug":"hand-made-silk"}],
+  "attributes":[{"id":1,"name":"Size","taxonomy":"pa_size","has_variations":true,"terms":[{"id":40,"name":"2*3","slug":"23","default":true},{"id":41,"name":"3*4","slug":"34","default":false}]},{"id":2,"name":"Color","taxonomy":"pa_color","has_variations":false,"terms":[{"id":95,"name":"Rose","slug":"rose"}]}],
+  "variations":[{"id":701,"attributes":[{"name":"Size","value":"23"}]},{"id":702,"attributes":[{"name":"Size","value":"34"}]}],
+  "dimensions":{"length":"","width":"","height":""},"formatted_dimensions":"N/A"}]

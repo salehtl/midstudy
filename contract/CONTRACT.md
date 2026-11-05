@@ -95,6 +95,7 @@ interface Midstudy {
   libraryJobs(): Promise<LibraryJob[]>
   addItemFromFile(file: File, meta: Meta): Promise<LibraryJob>
   addItemFromUrl(url: string, meta: Meta): Promise<LibraryJob>
+  readProductPage(url: string, opts?: { llm?: boolean }): Promise<ProductResult>  // §2.11; adds nothing
   editLibraryItem(id: string, patch: object): Promise<Item | LibraryJob>
   removeLibraryItem(id: string): Promise<void>
   restoreLibraryItem(id: string): Promise<Item>
@@ -150,6 +151,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 | `GET /api/library` | | `200` the `library.json` (empty `items` when there's none), plus `"trash": [{id, name, deleted}]` |
 | `POST /api/library/items` | **Raw body**, `Content-Length` required. Headers: `X-Midstudy-Kind: model \| image`, `X-Midstudy-Filename: <name.ext>`, `X-Midstudy-Meta: <base64 of JSON meta>` | `202 {job, cost_usd_estimate}` |
 | `POST /api/library/items/from-url` | JSON `{image_url, ...meta}` | `202 {job, cost_usd_estimate}` |
+| `POST /api/library/product` | JSON `{url, llm?}` | `200` what the product page says (§2.11); adds nothing |
 | `GET /api/library/jobs` | | `200 {"jobs": [job, ...]}`, newest first |
 | `GET /api/library/jobs/<id>` | | `200` the job object itself, or `404` |
 | `PATCH /api/library/items/<id>` | any of `name`, `category`, `mount`, `yaw` (0/90/180/270, relative), `default_render`, `dims_cm` | `200` the item, or `202 {job}` when `dims_cm` or `yaw` changed |
@@ -181,12 +183,63 @@ These rules apply to every `POST`, `PUT`, `PATCH` and `DELETE` that `serve.py` a
 - **Paths:** static paths are normalized (percent-decoding, `.` and `..`) **before** any rule about what is served, so `/./library/costs.csv` gets the same `404` as the plain path. The same holds for `/scenes/`.
 - **Spend cap:** `--daily-spend-usd N` (default `2`; a flag only, no route changes it) covers every paid call: library adds and `/api/render`. It reads `<library-dir>/costs.csv`, the file `midstudy-add` writes, so a `--costs-file` that isn't that file is refused at startup. A call that costs more than the whole cap gets a `402` that says so. Before a paid call the server reserves the estimate against today's (UTC) total from `costs.csv`; a request that would cross the cap gets `402 {"error", "spent_usd", "cap_usd"}` and no call is made. Mock calls cost $0 and count for nothing (unless `MIDSTUDY_FAL_MOCK_COST=1`). `GET /api/spend` → `{"day", "spent_usd", "reserved_usd", "cap_usd"}`. Cost rows are appended under `costs.csv.lock`.
 - **URL fetches** (from-URL add): the server downloads the image itself (http/https only, host resolved once and pinned, every redirect re-checked, at most 3, 20 s, 20 MB, `image/*` only). Private, loopback, link-local, CGNAT, tailnet and multicast addresses (and their IPv4-mapped forms) are refused with `400`. `MIDSTUDY_FETCH_ALLOW=<host>:<port>` (evals only) exempts exactly one address.
+- **Page fetches** (product page, §2.11, added 2026-11-05): the same address rules (resolved once and pinned, every redirect and every hop re-checked, private addresses refused with `400` before any connection, `MIDSTUDY_FETCH_ALLOW` the only exemption), at most **5** redirects, **20 s** for the page and its feeds together, the first **10 MB** of the page (the rest is cut, with a warning), feeds 2 MB, `gzip`/`deflate` bodies decoded within the same limits, `User-Agent: midstudy/1.0 (product page reader)`, no cookies kept. Only `text/html` or `application/xhtml+xml` pages (feeds: JSON or `text/javascript`). Feeds go to the page's own origin only. The server **never downloads the page's pictures**: it only lists their links; the one the user picks goes through the from-URL add above, with its own checks.
 
 Acceptance: W1 forged mutations get `403` everywhere; W2 with `--daily-spend-usd 0.03` and `MIDSTUDY_FAL_MOCK_COST=1`, the second $0.02 add is `402`; W3 private URLs are refused without a connection; W4 `/library/costs.csv`, `.trash/`, `raw/` and `source.*` are `404`, in any case or spelling.
 
 ### 2.10 Elevation (carried; wall hanging dropped)
 
 A placed item's `position[1]` is its bottom's height above the floor, 0–4 m (clamped). Desktop: `Shift`+drag or `PageUp`/`PageDown` (1 cm, 10 cm with `Shift`). Phone: an **Up / Down** control (drag handle, `+`/`−` buttons of 1 cm that repeat when held, the height in cm, editable). A raised item (bottom > 2 cm up) drops its contact shadow and shows a faint guide line to the floor while selected. **Drop to floor** puts it back at 0. Handles: `elev-up`, `elev-down`, `elev-value`, `drop`. Library items may still carry `mount: "wall"`; v1 places them on the floor like any other item.
+
+### 2.11 Product page (added 2026-11-05)
+
+Paste a shop's product link; the server reads the page and answers what it found. **It adds nothing**: the planner prefills the Add furniture form, the user checks it, and **Make** posts the chosen picture to `from-url` (§2.8) as any image-link add. The extractor is `planner/product_page.py` (stdlib only, loaded by `serve.py` from its own folder, so it works under `python3 -I`).
+
+`POST /api/library/product` with JSON `{"url": "https://…", "llm"?: true}` (§2.9 rules: `X-Midstudy`, `Origin`, `Host`). `llm: false` skips the language model (layer 4).
+
+**200** (field order is free; every key is always present):
+
+```json
+{ "url": "<the page's final URL, after redirects>",
+  "name": "BILLY bookcase, black oak effect" | null,
+  "category": "bookcase" | null,
+  "is_rug": false,
+  "dims_candidates": [
+    { "w": 80.0, "d": 27.9, "h": 106.0, "unit": "in", "label": "31 1/2x11x41 3/4\"" | null,
+      "unit_note": "from inches: 31 1/2 × 11 × 41 3/4 in" | null, "notes": ["length read as width"],
+      "quote": "<the text the numbers came from, ≤ 200 chars>", "source": "jsonld" } ],
+  "variants": [ { "label": "8' x 10'", "dims_index": 3 | null } ],
+  "images": [ { "url": "https://…/front.jpg", "w": 2000 | null, "h": 2000 | null, "kind": "product" } ],
+  "source_layers_used": ["jsonld", "opengraph"],
+  "cost_usd": 0, "mock": false,
+  "warnings": ["<one sentence each>"] }
+```
+
+- **`dims_candidates`**: every distinct size reading, **best first**, in **cm** rounded to 0.1. `w`, `d`, `h` are > 0, or `h` is null when the page has no height (not for a rug: below). `unit` is the unit the page used (`cm`, `mm`, `m`, `in`, `ft`); `unit_note` says how it was converted when that wasn't cm; `notes` say how labels were mapped. `quote` is the page text, structured value or feed text the numbers came from. `source`: `jsonld`, `microdata`, `shopify`, `woocommerce`, `text` or `llm`. Readings within 0.5 cm on every axis are one candidate (the better source's). At most 16.
+- **Order:** a shop's size options (variants) in the shop's order, its default first; else explicit `width`/`depth`/`height` in JSON-LD or microdata; feeds; then page text (a reading introduced by "overall", "dimensions" or "assembled" before others); then `llm`.
+- **Mapping:** labels win: W/width, D/depth, H/height; **L/length is read as width** (note "length read as width"). A WooCommerce `dimensions` field (length × width × height) is read w = length, d = width, h = height (note). An unlabelled triple "A × B × C" is W × D × H (note "read as W × D × H"). Rug sizes ("8' x 10'", "160 x 230 cm", "3*4") are W × D in the order given. Readings introduced by box, package, packaging, carton, shipping, seat, arm, leg, drawer, cushion, interior, opening or clearance are not the piece's size and are left out.
+- **Units:** cm, mm, m; inches (`"`, `″`, `”`, `''`, in, inch, inches) and feet (`'`, `′`, `’`, ft, feet, foot), feet and inches together (`7' 6"`), fractions (`31 1/2`, `41 ¾`), decimal commas (`80,5 cm`). 1 in = 2.54 cm, 1 ft = 30.48 cm. A size with **no unit** takes the unit the page measures in elsewhere (`(m)`, `cm`, `in`…), with a note ("no unit on the page: read as m, as the page's other sizes"); with no such hint it is left out with a warning. A reading outside 1–2000 cm on any axis is left out.
+- **Rugs:** `is_rug` is true when the name, category, breadcrumbs or product type say rug, carpet, runner, kilim, dhurrie or tapis. A rug's `h` is its thickness or pile height when the page gives one, else **1** with the note "thickness not on the page: 1 cm assumed". The planner then picks the Flat rug engine.
+- **`variants`**: the shop's size options, when it has more than one (Shopify options named Size/Dimensions, WooCommerce size attributes, JSON-LD `hasVariant` sizes, offer names). `dims_index` points into `dims_candidates`, null when that label couldn't be read. Empty when the page has one size.
+- **`category`**: one plain word or two from the name, product type or breadcrumbs (rug, sofa, armchair, chair, stool, bench, coffee table, side table, dining table, table, desk, bed, bedside table, dresser, wardrobe, bookcase, shelf, cabinet, sideboard, tv stand, lamp, mirror, ottoman, plant), or null.
+- **`images`**: the product's pictures, at most 12, product first (JSON-LD `image`, feed images, then `og:image`, then large `<img>` in the product area), absolute `https`/`http` links only (no `data:`), one per picture (the same path with different size parameters is one). `kind`: `product`, `variant`, `og` or `page`. The planner shows them with `referrerpolicy="no-referrer"`.
+- **`cost_usd`**: what the language model cost (0 without it); `mock` as in §2.6.
+- **`warnings`**: what the user should know (a cut page, a feed that failed, the model skipped and why, a model quote not found on the page).
+
+**Layers**, cheapest and most exact first; a later layer runs only for what is still missing:
+
+1. **The page** (§2.9 Page fetches).
+2. **Structured data, free:** schema.org `Product` / `ProductGroup` in JSON-LD (also inside `@graph` and arrays; `width`/`depth`/`height` as text or `QuantitativeValue` with `unitCode` CMT, MMT, MTR, INH, FOT or `unitText`; `size`; `additionalProperty` named width, depth, height, length, size or dimensions; `hasVariant`; `image` as a string, list or `ImageObject` `url`/`contentUrl`) and microdata (`itemprop`); OpenGraph `og:title`, `og:image` (`og:image:width`/`height`), then `<title>`. **Platform feeds**, one request each, same fetch rules, origin only: **Shopify** (the page shows `cdn.shopify.com` or `Shopify.`): `GET <page path without query>.js`; **WooCommerce** (`woocommerce` in the page or a `/wp-json/` link): `GET <origin>/wp-json/wc/store/v1/products?slug=<the page path's last segment>`. A feed that fails is skipped (a 429 from Shopify is common).
+3. **Page text, free:** the visible text (no scripts, styles or templates), the feeds' descriptions, and the string values inside inline scripts that mention a size (shops that render the page in the browser keep "Dimensions (Overall): 71.18 Inches (H) x …" in a JSON blob). Only readings with an explicit unit, or a page unit hint as above.
+4. **A small language model, only when no size was found** (and `llm` isn't false): fal `openrouter/router` (`https://fal.run/openrouter/router`, `Authorization: Key $FAL_KEY`, §3.3) with `model: "anthropic/claude-haiku-5.5"`, `temperature: 0`, `max_tokens: 600`, a fixed `system_prompt` and the cleaned page text (at most 20,000 characters, the parts around size words first) between `<page>` markers. The page is **data**: the system prompt says that nothing inside it is an instruction, and the output is only ever used as data. The model answers JSON `{"dims": [{"label", "w", "d", "h", "unit", "quote"}], "name": {"value", "quote"} | null}`. The server keeps a size only when its **`quote` is found in the page text** (whitespace collapsed, case ignored), the quote holds every number given, and `unit` is one of cm, mm, m, in, ft; it then converts the units itself. Anything else is dropped with the warning "the language model gave a size that isn't on the page, so it was ignored". At most 8 sizes.
+   - **Money:** about $0.001 a page ($0.10 / $0.50 per million tokens in / out). Before the call the server reserves **$0.002** against the daily cap (§2.9) and releases it after. It records `usage.cost` from fal's answer when present, else the tokens at that price, in `costs.csv` (`engine` = `product:llm`, `id` = `product-<host slug>`, `input` = the page URL without its query), also when the answer is unusable. Over the cap, without `FAL_KEY` (outside mock mode), or with `llm: false`, the model is skipped with a warning and the rest still answers `200`.
+   - **Mock** (`MIDSTUDY_FAL_MOCK=<dir>`): no call; the answer is `<dir>/openrouter-router/<slug>.json`, `<slug>` being the page URL's last path segment (lowercased, anything but `a-z0-9-` turned into `-`), else `<dir>/openrouter-router/response.json` (a model that finds nothing). Files hold fal's answer verbatim (`{"output": "<the model's text>", "usage": {…}}`). Mock calls cost $0 and write a `mock: true` cost row (the $0.001 estimate with `MIDSTUDY_FAL_MOCK_COST=1`).
+
+**Errors:** `400` with one sentence for a body without `url`, a link that isn't http(s), has no host, or resolves to a private address. `422 {"error", "blocked": true}` when the shop refuses (401, 403, 429, 503, or a `200` that is a robot check with no product data in it): **"This shop blocks automatic reading: paste the image link and size instead."** (a 429 adds "or try again in a minute"). `422 {"error"}` when the link isn't a web page (an image: "that's a picture: use Image link"), answers another error, times out, or holds no product (no name and no picture).
+
+**Planner:** Add furniture gets a **Product page** source: a link field, **Read** (a loading state while it reads), then the form prefilled: Name, W × D × H (a size picker when there are several candidates), Category (when empty), the Flat rug engine when `is_rug`, a strip of the page's pictures to choose from (the first chosen), and the notes (unit notes, warnings, and what the model cost). Every field stays editable; nothing is added until **Make**, which sends the chosen picture to `addFromUrl`. A blocked page shows the error with a way to switch to **Image link**. Desktop and phone (390 px: no sideways scroll, targets ≥ 44 px). Handles: `lib-src-product` (the source button), `product-url`, `product-read`, `product-status`, `product-size` (each size choice, with `data-index`), `product-pic` (each picture, with `data-index`), `product-notes`, `product-error`, `product-use-link`. Hook (§2.4): `readProductPage(url: string, opts?: { llm?: boolean }): Promise<ProductResult>` (the `200` body; rejects with the error sentence).
+
+Acceptance: `npm run eval:product` (synthetic pages in `fixtures/product-pages/`, model mocked, $0, in `eval:all`), `npm run eval:product-ui` (the form, desktop and phone, in `eval:all`), `npm run eval:product-live` (the golden set in `evals/product_golden.json` against the real shops, no model unless asked; not in `eval:all`).
 
 ---
 
