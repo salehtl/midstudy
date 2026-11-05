@@ -1,5 +1,33 @@
 # App track notes (planner/ and planner/serve.py)
 
+> **Shortcuts, multi-select, Export (2026-11-05, E17 `eval:keys`):** every keyboard shortcut now goes through one
+> registry, `planner/keymap.js` (`createKeymap` in main.js, `ctx.keys`). A module registers `{ id, group, label, keys,
+> run, when?, priority?, repeat?, inInputs? }`; combos are `mod+shift+/` style (`mod` = ⌘ on a Mac, Ctrl elsewhere;
+> letters from `e.key`, punctuation and digits from `e.code`; modifiers match exactly). One keydown listener in
+> `input.js` dispatches after the shell's key filter (dialogs, pages, sheets still swallow keys first), skipping
+> inputs unless `inInputs`. Several commands may share a key: the highest `priority` whose `when()` passes runs (Esc:
+> ruler 20, Adjust floor 10, deselect 0). `describe()` lists gestures (Shift+click, drag) without running them.
+> `ui/shortcuts.js` builds the Shortcuts sheet from `keys.list()` (⌘?, ⌘/ or ?), so a registered shortcut is listed
+> with nothing else to update; tooltips and keycaps use `keys.lookup(id)`. The engine's keys are in `input.js`
+> (`registerEngineKeys`), the workspace's (Delete + Undo, ⌘Z, Esc for Adjust floor, O, ⌘E) in `ui/workspace.js`, `/`
+> in the Library. New: ⌘A select all, arrows move 1 cm (Shift 10 cm; ↑ away from the camera), ⌘D duplicate (30 cm
+> right), O occlusion, ⌘E export, `/` also opens the Library.
+>
+> **Selection is a set** in the engine (`getSelection()`, `isSelected()`, `select(uid, { toggle, add })`,
+> `selectMany`, `selectAll`); `getSelected()` is its primary (picked last), which the label, grip and height field
+> follow, so one selected piece behaves as before and the hook is unchanged. Shift+click toggles a piece (a Shift press
+> on a piece waits: a click toggles, a drag lifts); Shift/⌘-click toggles rows in In the scene. A drag on any selected
+> piece moves the whole selection; R, the grip and −15°/+15° turn a group about the middle of its positions;
+> `nudgeSelected`, Drop to floor, Remove (one toast, one Undo: `restoreItems`) and ⌘D act on all of them. The overlay
+> draws a dashed footprint for each non-primary piece; the bar shows "n selected" with the group actions only.
+>
+> **Export** (`ui/export.js`, the Export tool, ⌘E): `engine.exportImage({ longEdge, type, quality })` captures the same
+> passes as a render at the photo's size (or a preset: 2048, 1280, 800 px, smaller than the photo only), as JPEG or PNG,
+> and the sheet saves it as a download (Share… on a phone that shares files). Before and after puts the photo next to
+> the scene (above it for a wide photo) with small tags. Nothing is sent to the server; the choices are kept in
+> `localStorage` (`midstudy.export`). Not in the `window.midstudy` hook (the contract is unchanged); E17 uses
+> `window.midstudyCtx.exporter`.
+
 > **Since verify round 2 (see `verify-fix-2.md`):** the Scenes page no longer shows a stray "null" (scenes.js filtered
 > nothing into `replaceChildren`); a scene opens with its layout on any device (this device's own choice, else the
 > layout saved last anywhere); a wake always gets one frame (Set scale redrew only on the next pointer move in slow

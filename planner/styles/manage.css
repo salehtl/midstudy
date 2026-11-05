@@ -251,3 +251,30 @@
 .ms-prod-notes li > svg { flex-shrink: 0; margin-top: 1px; }
 .ms.is-phone .ms-prod-notes li > svg { margin-top: 2px; }
 .ms-prod-notes li.is-warn { color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text)); }
+
+/* --- the Shortcuts sheet (ui/shortcuts.js): the keymap, by group ------------------------------------------- */
+.ms.ks-sheet.is-desktop { width: min(720px, calc(100vw - 32px)); }
+.ks { columns: 2 300px; column-gap: 32px; }
+.ks-group { break-inside: avoid; margin: 0 0 18px; }
+.ks-head { margin: 0 0 6px; font: 600 var(--text-label)/14px var(--font-text); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--color-muted); }
+.ks-list { margin: 0; display: flex; flex-direction: column; }
+.ks-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 4px 0; border-bottom: 1px solid var(--color-line); }
+.ks-row:last-child { border-bottom: 0; }
+.ks-label { margin: 0; font-size: var(--text-body-desktop); line-height: 18px; color: var(--color-text); }
+.ks-keys { margin: 0; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.ks-keys .kbd { min-width: 22px; height: 22px; padding: 0 6px; font-size: 12px; color: var(--color-text); background: var(--color-raised); }
+.ks-or { color: var(--color-muted); font-size: 11px; }
+/* the phone has no keyboard shortcuts to speak of, but the sheet still reads: keys shown there too */
+.ms.is-phone .ks-keys .kbd { display: inline-flex; }
+
+/* --- the Export sheet (ui/export.js) ------------------------------------------------------------------------ */
+.ms.ex-sheet.is-desktop { width: min(560px, calc(100vw - 32px)); }
+.ex-preview { position: relative; display: flex; gap: 4px; border-radius: var(--radius-control); overflow: hidden; background: var(--color-ground); }
+.ex-preview > img { display: block; min-width: 0; flex: 1 1 0; max-height: 280px; object-fit: contain; }
+.ex-preview[data-layout="scene"] > .ex-before { display: none; }
+.ex-preview[data-layout="pair"][data-shape="wide"] { flex-direction: column; }
+.ex-preview[data-layout="pair"][data-shape="wide"] > img { max-height: 160px; }
+.ms.is-phone .ex-preview > img { max-height: 200px; }
+.ms.is-phone .ex-preview[data-layout="pair"][data-shape="wide"] > img { max-height: 120px; }
+.ex-info { margin: -4px 0 0; color: var(--color-muted); font-size: 12px; line-height: 16px; }
+.ms.is-phone .ex-info { font-size: 13px; line-height: 18px; }

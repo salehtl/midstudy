@@ -215,12 +215,10 @@ export function mount(ctx) {
     if (e.detail.detent === 'peek') showAdded()
     else if (e.detail.detent !== 'peek' && !engine.getSelected()) lastAdded = null
   })
-  // "/" focuses the search on desktop while the Library is open
-  shell.addKeyFilter((e) => {
-    if (e.key !== '/' || shell.isPhone() || !panel.isOpen() || e.target.closest?.('input, textarea')) return false
-    e.preventDefault()
-    input.focus()
-    return true
+  // "/" opens the Library (desktop) and focuses its search
+  ctx.keys.register({
+    id: 'library.search', group: 'Panels', label: 'Search the library', keys: ['/'], repeat: false, when: () => !shell.isPhone(),
+    run: () => { if (!panel.isOpen()) shell.openPanel('library'); requestAnimationFrame(() => input.focus()) },
   })
   ctx.library = { openAdd }
   render()

@@ -33,6 +33,8 @@
 //   getStageRect()      { x, y, w, h } the part of the window the photo fits into (client px)
 //   isSceneDirty() / isLayoutDirty() / getDirty() { scene, layout }
 //   getItems() / getItem(uid) / getItemBounds(uid) / getSelected() / getDrag() / getFootprint(uid) / hitItemAt(uid, x, y, pad)
+//   getSelected()       the primary selected piece (the last one picked), or null
+//   getSelection()      every selected piece, in the order picked (the primary last); isSelected(uid)
 //   itemAt(x, y)        the placed piece under a client point, or null
 //   getLook()           { exposure, warmth, contactShadows }
 //   getLibrary(), assetUrl(rel), getLayouts(), getLayoutDetails(), getLayoutName(), getRenders(), isRenderMock()
@@ -47,21 +49,26 @@
 //   saveScene(), saveThumbnail()
 //   setCamera(partial), resetCamera(), setAdjustFloor(on), setOcclusion(on), setGridVisible(on), setPitchFromHorizon(py)
 //   zoomAt(clientX, clientY, zoom), zoomBy(factor, clientX?, clientY?), panBy(dxClient, dyClient), fitView()
-//   addItemInternal(id, opts), moveItemInternal(uid, opts), removeItemInternal(uid), clearItemsInternal(), select(uid|null),
-//   rotateSelected(deg), setSnap(on), beginItemDrag / beginRotateDrag / dragTo / endItemDrag, removeItemWithUndo(uid),
-//   restoreItem(snapshot), setElevation(uid, m), nudgeElevation(uid, dm), dropToFloor(uid), reloadLibrary()
+//   addItemInternal(id, opts), moveItemInternal(uid, opts), removeItemInternal(uid), clearItemsInternal(),
+//   select(uid|null, { toggle, add }) (toggle: Shift+click, in or out of the selection; add: keep the others),
+//   selectMany(uids), selectAll(), rotateSelected(deg) (several: around their middle, as one group),
+//   nudgeSelected([dx, dy, dz]) (m; every selected piece), duplicateSelected() → new uids,
+//   setSnap(on), beginItemDrag / beginRotateDrag / dragTo / endItemDrag (a selected piece drags the whole selection),
+//   removeItemWithUndo(uid), restoreItem(snapshot), restoreItems(snapshots), setElevation(uid, m),
+//   nudgeElevation(uid, dm), dropToFloor(uid), reloadLibrary()
 //   tap(clientX, clientY), setRulerActive(on), clearRuler(), setRulerTrueLength(m) (scales the camera height)
 //   setLook({exposure, warmth}), setContactShadows(on)
 //   saveLayoutInternal(name, { title }), loadLayoutInternal(name), deleteLayoutInternal(name) → the doc (for Undo),
 //   restoreLayoutInternal(doc), listLayoutsInternal(), refreshLayouts()
 //   captureComposite({ maxPx, quality }), captureMask(), postRender(shot, opts), renderViewInternal(opts),
+//   exportImage({ longEdge, type, quality, encode }) → { blob, canvas, width, height } (the view as drawn, no AI, nothing sent),
 //   listRendersInternal(), compare(a, b), settleSplats() (sort the splats for the camera now; renderViewInternal does)
 //   reportError(msg, err) → Error, toast(text, kind, ms), onFrame(fn), worldToScreen(p) → { x, y, visible } (client px)
 //   projectPhoto(p) → [px, py, d], photoToFloor(px, py), floorToPhoto(p), clientToPhoto(x, y), photoToClient(px, py)
 // Events (engine.events, CustomEvents; read e.detail)
 //   'scene'  { phase: 'loading'|'calibrating'|'opened'|'failed'|'closed'|'saved'|'title'|'deleted', name }
 //   'scenes' { scenes }   'camera' { camera, source }   'adjust' { on }   'occlusion' { on }   'grid' { visible }
-//   'view' getView()      'dirty' { scene, layout }     'items' { change, uid }   'selection' { uid }   'drag' { mode, uid, phase }
+//   'view' getView()      'dirty' { scene, layout }     'items' { change, uid }   'selection' { uid, uids }   'drag' { mode, uid, phase }
 //   'look' getLook()      'library' { items }   'layouts' { names?, details?, name? }   'renders' { renders }
 //   'render' { phase: 'start'|'done'|'failed', model, meta? }   'compare' { a, b }   'ruler' getRuler()
 //   'error' { text }      'toast' { text, kind, ms }
@@ -1041,14 +1048,46 @@ function dropToFloor(uid) {
   const rec = items.get(uid)
   if (rec) moveItemInternal(uid, { position: [rec.group.position.x, 0, rec.group.position.z] })
 }
+// Several selected pieces turn as one group, around the middle of their positions (each turns by the same angle).
 function rotateSelected(deg) {
-  const rec = selected && items.get(selected)
-  if (rec) moveItemInternal(rec.uid, { rotation_y_deg: round(wrapDeg(rec.rotationDeg + deg), 6) })
+  const recs = selRecs()
+  if (!recs.length || !isNum(deg)) return
+  const c = recs.length > 1 ? centreOf(recs) : null
+  for (const rec of recs) {
+    const p = rec.group.position
+    const [x, z] = c ? turnAbout(c, p.x, p.z, deg) : [p.x, p.z]
+    moveItemInternal(rec.uid, { position: [round(x, 6), p.y, round(z, 6)], rotation_y_deg: round(wrapDeg(rec.rotationDeg + deg), 6) })
+  }
+}
+// Move every selected piece by [dx, dy, dz] m (dy: its elevation, clamped 0–4 m).
+function nudgeSelected(d) {
+  if (!Array.isArray(d)) return
+  const [dx, dy, dz] = d.map((v) => (isNum(v) ? v : 0))
+  for (const rec of selRecs()) {
+    const p = rec.group.position
+    moveItemInternal(rec.uid, { position: [round(p.x + dx, 6), Math.round(clampElev(p.y + dy) * 1000) / 1000, round(p.z + dz, 6)] })
+  }
+}
+// A copy of each selected piece, 30 cm to the right (+X), same turn and height; the copies become the selection.
+async function duplicateSelected({ offset = [0.3, 0, 0] } = {}) {
+  const recs = selRecs()
+  if (!recs.length) return []
+  const uids = await Promise.all(recs.map((r) => {
+    const p = r.group.position
+    return addItemInternal(r.id, { position: [p.x + offset[0], p.y + offset[1], p.z + offset[2]], rotation_y_deg: r.rotationDeg, missing: r.missing ? { ...r.lib.dims_cm } : undefined })
+  }))
+  selectMany(uids)
+  return uids
 }
 function removeItemInternal(uid) {
   const rec = items.get(uid)
   if (!rec) return
-  if (selected === uid) select(null)
+  if (selection.has(uid)) {
+    selection.delete(uid)
+    if (selected === uid) selected = [...selection].at(-1) ?? null
+    if (drag.mode && drag.uid === uid) endItemDrag()
+    emit('selection', selectionDetail())
+  }
   scene.remove(rec.group)
   rec.build++ // a rebuild in flight (reloadLibrary) drops its result
   detachBuilt(rec)
@@ -1091,15 +1130,49 @@ function getScreenRect(uid) {
 }
 
 // --- selection: drag the item itself on the floor, a grip on its footprint rotates it (contract §2.3) -----------------
+// The selection: a set of placed pieces; `selected` is its primary (the one picked last), which the label, the grip and
+// the height controls follow. One piece selected is the common case and behaves exactly as before.
 let selected = null
+const selection = new Set()
 let snap = false // Shift on desktop: lift drags, 15° grip
-const drag = { mode: null, uid: null, off: new THREE.Vector3(), a0: 0, rot0: 0, plane: new THREE.Plane() }
-function select(uid) {
-  const next = uid && items.has(uid) ? uid : null
-  if (drag.mode && drag.uid !== next) endItemDrag()
-  selected = next
-  emit('selection', { uid: selected })
+// group: [{ uid, pos: Vector3, rot }] the selection as it was when the drag began; centre: what a group turns around
+const drag = { mode: null, uid: null, off: new THREE.Vector3(), a0: 0, rot0: 0, plane: new THREE.Plane(), group: [], centre: null }
+const selectionDetail = () => ({ uid: selected, uids: [...selection] })
+const selRecs = () => [...selection].map((u) => items.get(u)).filter(Boolean)
+const centreOf = (recs) => recs.reduce((a, r) => ({ x: a.x + r.group.position.x / recs.length, z: a.z + r.group.position.z / recs.length }), { x: 0, z: 0 })
+// (x, z) turned by `deg` about the centre c, counterclockwise seen from above (as rotation_y_deg)
+function turnAbout(c, x, z, deg) {
+  const t = deg * DEG, cs = Math.cos(t), sn = Math.sin(t), dx = x - c.x, dz = z - c.z
+  return [c.x + dx * cs + dz * sn, c.z - dx * sn + dz * cs]
 }
+function select(uid, { toggle = false, add = false } = {}) {
+  const ok = !!uid && items.has(uid)
+  if (toggle || add) {
+    if (!ok) return
+    if (toggle && selection.has(uid)) {
+      selection.delete(uid)
+      if (selected === uid) selected = [...selection].at(-1) ?? null
+    } else {
+      selection.delete(uid) // re-added last: it becomes the primary
+      selection.add(uid)
+      selected = uid
+    }
+  } else {
+    selection.clear()
+    if (ok) selection.add(uid)
+    selected = ok ? uid : null
+  }
+  if (drag.mode && !selection.has(drag.uid)) endItemDrag()
+  emit('selection', selectionDetail())
+}
+function selectMany(uids) {
+  selection.clear()
+  for (const u of uids || []) if (items.has(u)) { selection.delete(u); selection.add(u) }
+  selected = [...selection].at(-1) ?? null
+  if (drag.mode && !selection.has(drag.uid)) endItemDrag()
+  emit('selection', selectionDetail())
+}
+function selectAll() { selectMany([...items.keys()]) }
 function setSnap(on) { snap = !!on }
 // Footprint corners [front-left, front-right, back-right, back-left] on the floor (front faces +Z), centre, box, height.
 function getFootprint(uid) {
@@ -1184,20 +1257,24 @@ function beginItemDrag(uid, clientX, clientY, { lift = snap } = {}) {
   } else plane.set(new THREE.Vector3(0, 1, 0), -dragHeight(rec, clientX, clientY))
   const p = planePointAt(plane, clientX, clientY)
   if (!p) return false
-  if (selected !== uid) select(uid)
-  Object.assign(drag, { mode, uid, off: rec.group.position.clone().sub(p) })
+  if (!selection.has(uid)) select(uid)
+  else if (selected !== uid) select(uid, { add: true }) // grabbing one piece of a group: the group moves, it leads
+  Object.assign(drag, { mode, uid, off: rec.group.position.clone().sub(p), group: groupStart(), centre: null })
   drag.plane.copy(plane)
   emit('drag', { mode, uid, phase: 'start' })
   return true
 }
+const groupStart = () => selRecs().map((r) => ({ uid: r.uid, pos: r.group.position.clone(), rot: r.rotationDeg }))
 function beginRotateDrag(uid, clientX, clientY) {
   const rec = items.get(uid)
   if (!rec) return false
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -rec.group.position.y)
   const p = planePointAt(plane, clientX, clientY)
   if (!p) return false
-  const c = rec.group.position
-  Object.assign(drag, { mode: 'rotate', uid, a0: Math.atan2(p.x - c.x, p.z - c.z), rot0: rec.rotationDeg })
+  if (!selection.has(uid)) select(uid)
+  const group = groupStart()
+  const c = group.length > 1 ? centreOf(selRecs()) : { x: rec.group.position.x, z: rec.group.position.z }
+  Object.assign(drag, { mode: 'rotate', uid, a0: Math.atan2(p.x - c.x, p.z - c.z), rot0: rec.rotationDeg, group, centre: c })
   drag.plane.copy(plane)
   emit('drag', { mode: 'rotate', uid, phase: 'start' })
   return true
@@ -1207,17 +1284,29 @@ function dragTo(clientX, clientY, { snapTo = false } = {}) {
   if (!rec) return
   const p = planePointAt(drag.plane, clientX, clientY)
   if (!p) return
-  const g = rec.group.position
+  const lead = drag.group.find((s) => s.uid === drag.uid)
+  const others = drag.group.filter((s) => s !== lead && items.has(s.uid))
+  if (!lead) return
   if (drag.mode === 'move') {
-    moveItemInternal(drag.uid, { position: [round(p.x + drag.off.x, 6), g.y, round(p.z + drag.off.z, 6)] })
+    const x = round(p.x + drag.off.x, 6), z = round(p.z + drag.off.z, 6)
+    const dx = x - lead.pos.x, dz = z - lead.pos.z
+    moveItemInternal(drag.uid, { position: [x, rec.group.position.y, z] })
+    for (const s of others) moveItemInternal(s.uid, { position: [round(s.pos.x + dx, 6), s.pos.y, round(s.pos.z + dz, 6)] })
   } else if (drag.mode === 'lift') {
     let y = clampElev(p.y + drag.off.y)
     if (snap) y = Math.round(y / 0.01) * 0.01
-    moveItemInternal(drag.uid, { position: [g.x, round(y, 6), g.z] })
+    const dy = y - lead.pos.y
+    moveItemInternal(drag.uid, { position: [lead.pos.x, round(y, 6), lead.pos.z] })
+    for (const s of others) moveItemInternal(s.uid, { position: [s.pos.x, round(clampElev(s.pos.y + dy), 6), s.pos.z] })
   } else {
-    let deg = drag.rot0 + (Math.atan2(p.x - g.x, p.z - g.z) - drag.a0) / DEG
+    const c = drag.centre
+    let deg = drag.rot0 + (Math.atan2(p.x - c.x, p.z - c.z) - drag.a0) / DEG
     if (snapTo || snap) deg = Math.round(deg / 15) * 15
-    moveItemInternal(drag.uid, { rotation_y_deg: round(wrapDeg(deg), 6) })
+    const d = deg - drag.rot0
+    for (const s of [lead, ...others]) {
+      const [x, z] = others.length ? turnAbout(c, s.pos.x, s.pos.z, d) : [s.pos.x, s.pos.z]
+      moveItemInternal(s.uid, { position: [round(x, 6), s.pos.y, round(z, 6)], rotation_y_deg: round(wrapDeg(s.rot + d), 6) })
+    }
   }
 }
 function endItemDrag() {
@@ -1225,6 +1314,8 @@ function endItemDrag() {
   const d = { mode: drag.mode, uid: drag.uid }
   drag.mode = null
   drag.uid = null
+  drag.group = []
+  drag.centre = null
   emit('drag', { ...d, phase: 'end' })
 }
 function removeItemWithUndo(uid) {
@@ -1238,6 +1329,12 @@ async function restoreItem(s) {
   const uid = await addItemInternal(s.id, { uid: s.uid, position: s.position, rotation_y_deg: s.rotation_y_deg, missing: s.missing })
   select(uid)
   return uid
+}
+// Undo of removing several pieces: all of them back, selected together.
+async function restoreItems(snaps) {
+  const uids = await Promise.all((snaps || []).map((s) => addItemInternal(s.id, { uid: s.uid, position: s.position, rotation_y_deg: s.rotation_y_deg, missing: s.missing })))
+  selectMany(uids)
+  return uids
 }
 
 // --- the ruler (Adjust floor): two taps on the floor, the distance between them -------------------------------------
@@ -2121,15 +2218,40 @@ function readTarget(rt, w, h) {
   ctx2.putImageData(img, 0, 0)
   return { canvas: c, pixels: img.data }
 }
-function captureComposite({ maxPx = null, quality = 0.92 } = {}) {
+// The view as a 2D canvas: both passes at the photo's own size times k (no view offset, no grid, no UI).
+function captureCanvas(k = 1) {
   if (!photo.has) throw new Error('no photo is open')
-  const k = maxPx ? Math.min(1, maxPx / Math.max(photo.w, photo.h)) : 1
   const w = Math.max(1, Math.round(photo.w * k)), h = Math.max(1, Math.round(photo.h * k))
+  const max = renderer.capabilities.maxTextureSize || 4096
+  if (Math.max(w, h) > max) throw new Error(`${w} × ${h} is larger than this GPU draws (${max} px)`)
   const out = new THREE.WebGLRenderTarget(w, h, { type: THREE.UnsignedByteType, depthBuffer: false })
   try {
-    const { canvas: c } = withFullFrame(w, h, () => { drawTo(out); return readTarget(out, w, h) })
-    return { dataUrl: c.toDataURL('image/jpeg', quality), width: w, height: h }
+    return withFullFrame(w, h, () => { drawTo(out); return readTarget(out, w, h) }).canvas
   } finally { out.dispose() }
+}
+function captureComposite({ maxPx = null, quality = 0.92 } = {}) {
+  const k = maxPx ? Math.min(1, maxPx / Math.max(photo.w, photo.h)) : 1
+  const c = captureCanvas(k)
+  return { dataUrl: c.toDataURL('image/jpeg', quality), width: c.width, height: c.height }
+}
+// Export (no AI, free, nothing leaves the device): the scene as drawn, at `longEdge` px on its longer side (default the
+// photo's own size; up to 2× it), as a JPEG or PNG blob, and the canvas. encode: false skips the blob (the caller
+// composes the canvas itself, as Before and after does).
+async function exportImage({ longEdge = null, type = 'image/jpeg', quality = 0.92, encode = true } = {}) {
+  if (!sceneName || !photo.has) throw reportError('Open a scene first, then export it')
+  if (!/^image\/(jpeg|png)$/.test(type)) throw reportError(`Can't export as ${type} (JPEG or PNG)`)
+  const long = Math.max(photo.w, photo.h)
+  const k = isNum(longEdge) && longEdge > 0 ? Math.min(2, longEdge / long) : 1
+  try { await settleSplats() } catch (e) { reportError('Could not sort the splats for the export', e) }
+  holdFrames++
+  let canvas
+  try {
+    try { canvas = captureCanvas(k) } catch (e) { throw reportError('Could not capture the view', e) }
+  } finally { holdFrames--; wake() }
+  if (!encode) return { blob: null, canvas, width: canvas.width, height: canvas.height, type }
+  const blob = await new Promise((res) => canvas.toBlob(res, type, type === 'image/jpeg' ? quality : undefined))
+  if (!blob) throw reportError('Could not encode the image')
+  return { blob, canvas, width: canvas.width, height: canvas.height, type }
 }
 // The keep-room mask (§4.7): items white on black at the photo's size (what the photo hides of them stays black),
 // dilated by 3 % of the photo's width, and twice that below each piece for its shadow. → { dataUrl, width, height, coverage }
@@ -2373,6 +2495,8 @@ export const engine = {
   getItem: (uid) => (items.has(uid) ? itemInfo(items.get(uid)) : null),
   getItemBounds: (uid) => { const rec = items.get(uid); if (!rec) return null; const b = worldBounds(rec); return { min: b.min.toArray(), max: b.max.toArray() } },
   getSelected: () => selected,
+  getSelection: () => [...selection],
+  isSelected: (uid) => selection.has(uid),
   getDrag: () => (drag.mode ? { mode: drag.mode, uid: drag.uid } : null),
   getFootprint, hitItemAt, itemAt, getScreenRect, getElevation,
   getLook, getLibrary: () => library.slice(), assetUrl,
@@ -2386,8 +2510,9 @@ export const engine = {
   // view
   zoomAt, zoomBy, panBy, fitView,
   // items + selection
-  addItemInternal, moveItemInternal, removeItemInternal, clearItemsInternal, select, rotateSelected, setSnap,
-  beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem,
+  addItemInternal, moveItemInternal, removeItemInternal, clearItemsInternal, select, selectMany, selectAll, rotateSelected,
+  nudgeSelected, duplicateSelected, setSnap,
+  beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem, restoreItems,
   setElevation, nudgeElevation, dropToFloor, reloadLibrary: () => loadLibrary(),
   tap, setRulerActive, clearRuler, setRulerPointAt, setRulerTrueLength,
   // look and lighting (§4.8)
@@ -2396,7 +2521,7 @@ export const engine = {
   // layouts
   saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal, refreshLayouts, setLayoutName,
   // renders
-  captureComposite, captureMask, postRender, renderViewInternal, listRendersInternal, compare, settleSplats,
+  captureComposite, captureMask, postRender, renderViewInternal, listRendersInternal, compare, settleSplats, exportImage,
   // errors + overlays + projection
   reportError, toast, onFrame, wake, worldToScreen, projectPhoto, photoToFloor, floorToPhoto, clientToPhoto, photoToClient,
 }

@@ -1,8 +1,9 @@
 // midstudy planner entry: the engine (engine.js) and its input (input.js), the scenes and library stores (data.js), the
 // shell (ui/shell.js) and the area modules that fill it, plus the window.midstudy test hook. Spec: contract/CONTRACT.md
-// §2.4 and §4.6. Every UI module exports mount(ctx), ctx = { engine, scenes, lib, shell, icons, kit }.
+// §2.4 and §4.6. Every UI module exports mount(ctx), ctx = { engine, scenes, lib, shell, icons, kit, keys }.
 import { engine } from './engine.js'
 import { installInput } from './input.js'
+import { createKeymap } from './keymap.js'
 import { createScenes, createLibrary } from './data.js'
 import { createShell } from './ui/shell.js'
 import * as icons from './ui/icons.js'
@@ -14,17 +15,23 @@ import * as layouts from './ui/panels/layouts.js'
 import * as scenePanel from './ui/panels/scene.js'
 import * as renders from './ui/panels/renders.js'
 import * as scenesPage from './ui/scenes.js'
+import * as shortcuts from './ui/shortcuts.js'
+import * as exporter from './ui/export.js'
 
-engine.input = installInput(engine)
+// One keymap for every shortcut (keymap.js): input.js registers the engine's, each UI module its own, and the
+// Shortcuts sheet (⌘?) lists them all.
+const keys = createKeymap({ groups: ['Selection', 'Move and turn', 'View', 'Tools', 'Panels', 'Help'] })
+engine.input = installInput(engine, { keys })
 const shell = createShell({ engine })
 engine.mount(shell.mounts.view)
 const scenes = createScenes({ engine })
 const lib = createLibrary({ engine })
-const ctx = { engine, scenes, lib, shell, icons, kit }
+const ctx = { engine, scenes, lib, shell, icons, kit, keys }
 window.midstudyCtx = ctx // for manual checks from the console; evals use window.midstudy only
 
 // Panels register in rail/dock order: Library, In scene, Layouts, Scene, Renders.
-for (const [name, mod] of Object.entries({ workspace, library, inscene, layouts, scene: scenePanel, renders, scenes: scenesPage })) {
+// Shortcuts and Export first: the panels show their keys (keys.lookup) when they mount.
+for (const [name, mod] of Object.entries({ shortcuts, exporter, workspace, library, inscene, layouts, scene: scenePanel, renders, scenes: scenesPage })) {
   try { mod.mount(ctx) } catch (e) { engine.reportError(`Could not set up the ${name} UI`, e) }
 }
 
