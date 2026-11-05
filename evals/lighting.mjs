@@ -130,7 +130,9 @@ if (!BASELINE) {
 const browser = await launchBrowser(ev)
 let P = null
 async function open(name) {
-  if (P) await P.context.close().catch(() => {})
+  // leave the page as a closing tab does (pagehide), so a Look change made just before is saved (it saves itself
+  // 0.7 s after a change, at once on pagehide); closing the browser context alone would drop it
+  if (P) { await P.page.evaluate(() => dispatchEvent(new Event('pagehide'))).catch(() => {}); await sleep(400); await P.context.close().catch(() => {}) }
   P = await openPlanner(browser, srv.base, { scene: name })
   const o = await ensureScene(P.page, name)
   return o.ok ? '' : (P.why || o.why)
@@ -381,8 +383,8 @@ if (splatItem) {
   }
   const mean = (r) => { const f = Object.values(r?.faces || {}); return f.length ? [0, 1, 2].map((c) => f.reduce((s, x) => s + x.rgb[c] * x.n_px, 0) / f.reduce((s, x) => s + x.n_px, 0)) : null }
   const mc = mean(sp['living-cool']), mw = mean(sp['living-warm'])
-  ev.check('the splat item is drawn as a splat (getState render "splat"), grey, never its green stand-in', sp['living-cool'].render === 'splat' && mc && mw
-    && [mc, mw].every((m) => m[1] < 1.15 * Math.max(m[0], m[2])), fmt({ render: sp['living-cool'].render, cool: mc, warm: mw }))
+  ev.check('the splat item is drawn as a splat (getState render "splat"), lit grey (mean ≥ 60 levels), never its green stand-in', sp['living-cool'].render === 'splat' && mc && mw
+    && [mc, mw].every((m) => m[1] < 1.15 * Math.max(m[0], m[2]) && lum(m) >= 60), fmt({ render: sp['living-cool'].render, cool: mc, warm: mw }))
   ev.check('a splat is colour-matched: warmer in living-warm than in living-cool (red/blue ratio ≥ 1.1× higher)', mc && mw && (mw[0] / mw[2]) > 1.1 * (mc[0] / mc[2]), fmt({ cool: mc, warm: mw }))
   ev.check('its hidden box casts a floor shadow away from the light', ['living-cool', 'living-warm'].every((id) => sp[id].shadow?.n_dark > 200 && sp[id].shadow?.offset_vs_light_deg <= SHADOW_TOL_DEG),
     fmt(Object.fromEntries(Object.entries(sp).map(([k, v]) => [k, v.shadow && { n: v.shadow.n_dark, vs: v.shadow.offset_vs_light_deg }]))))
