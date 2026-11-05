@@ -1,0 +1,55 @@
+# cargo-fuzz targets for the media kernels (docs/REFACTOR.md: cargo-fuzz on every byte parser). Its own workspace, so
+# the core workspace never builds libFuzzer. Each target checks invariants, not only "no panic".
+#
+#   cd core/crates/media/fuzz && RUSTC_BOOTSTRAP=1 cargo fuzz run <target> -s none -- -max_total_time=300
+#   (a nightly toolchain runs it with the address sanitizer: drop RUSTC_BOOTSTRAP and `-s none`)
+[package]
+name = "midstudy-media-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+midstudy-media = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "jpeg_strip"
+path = "fuzz_targets/jpeg_strip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "png_strip"
+path = "fuzz_targets/png_strip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "glb_strip"
+path = "fuzz_targets/glb_strip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "path_normalize"
+path = "fuzz_targets/path_normalize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "host_check"
+path = "fuzz_targets/host_check.rs"
+test = false
+doc = false
+bench = false

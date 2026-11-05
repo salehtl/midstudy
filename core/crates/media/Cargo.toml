@@ -1,0 +1,18 @@
+# midstudy's byte-level kernels (docs/REFACTOR.md, track k-media): file sniffing, JPEG/PNG/GLB metadata stripping,
+# frame sizes, the static path allowlist, slugs, HTTP framing, zip entry policy and X-Midstudy-Meta decoding.
+# Pure Rust, no I/O and no dependencies; called from Node through crates/wasm-node.
+[package]
+name = "midstudy-media"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest = { version = "1.7", default-features = false, features = ["std"] }
+regex = "1"
+
+[lints]
+workspace = true
