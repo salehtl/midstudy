@@ -1,0 +1,2 @@
+{"output": "{\"dims\": [{\"label\": null, \"w\": 90, \"d\": 40, \"h\": 120, \"unit\": \"cm\", \"quote\": \"stands 120 tall, 90 across and 40 deep, all in centimetres\"}], \"name\": null}", "reasoning": null, "partial": false, "error": null,
+ "usage": {"prompt_tokens": 1520, "completion_tokens": 58, "total_tokens": 1578, "cost": 0.000181}}

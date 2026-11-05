@@ -195,12 +195,12 @@ class FalError(Exception):
     pass
 
 
-def fal_call(endpoint: str, args: dict, key: str) -> dict:
+def fal_call(endpoint: str, args: dict, key: str, timeout: float = FAL_TIMEOUT) -> dict:
     req = urllib.request.Request(
         f"https://fal.run/{endpoint}", data=json.dumps(args).encode("utf-8"), method="POST",
         headers={"Authorization": f"Key {key}", "Content-Type": "application/json", "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=FAL_TIMEOUT) as res:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
             return json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read()[:400].decode("utf-8", "replace")
@@ -422,7 +422,9 @@ PRIVATE = "that address is on a private network"
 WEB_PAGE = "that's a web page: paste the image's own link (right-click the image, Copy Image Address)"
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in (
     "0.0.0.0/8", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10",
-    "224.0.0.0/4", "240.0.0.0/4", "::1/128", "::/128", "fd7a:115c:a1e0::/48", "fc00::/7", "fe80::/10", "ff00::/8")]
+    "224.0.0.0/4", "240.0.0.0/4", "::1/128", "::/128", "fd7a:115c:a1e0::/48", "fc00::/7", "fe80::/10", "ff00::/8",
+    # NAT64's local-use prefix, IPv4-translated addresses and the old site-local range can all reach private hosts
+    "64:ff9b:1::/48", "::ffff:0:0:0/96", "fec0::/10")]
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
 IMAGE_SUFFIX = {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
                 "image/heic": ".heic", "image/heif": ".heif"}
@@ -571,6 +573,29 @@ def fetch_image(url: str, dest_dir: Path) -> Path:
             watchdog.cancel()
             conn.close()
     raise FetchError(f"the link redirects more than {FETCH_REDIRECTS} times: paste the image's own link")
+
+
+def load_product_page():
+    """planner/product_page.py (§2.11), loaded by path: the Nix wrapper runs python3 -I, which keeps this folder off
+    sys.path. It gets this file's address rules, pinned connections and fal helpers, so each exists once. No
+    __pycache__ is written next to it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("midstudy_product_page", Path(__file__).resolve().parent / "product_page.py")
+    module = importlib.util.module_from_spec(spec)
+    was = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = was
+    module.configure(address_blocked=address_blocked, fetch_allowed=fetch_allowed, private=PRIVATE,
+                     pinned_http=_PinnedHTTP, pinned_https=_PinnedHTTPS, fal_call=fal_call, fal_error=FalError,
+                     fal_key=fal_key, fal_mock=fal_mock, mock_cost=mock_cost, counts_against_cap=counts_against_cap,
+                     append_cost=append_cost, slugify=slugify)
+    return module
+
+
+product_page = load_product_page()
 
 
 class Busy(Exception):
@@ -1519,6 +1544,8 @@ class Handler(SimpleHTTPRequestHandler):
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             raise ValueError(f"body is not valid JSON: {e}") from None
+        except RecursionError:
+            raise ValueError("body is not valid JSON: it is nested too deeply") from None
 
     def api_path(self):
         path = unquote(urlsplit(self.path).path)
@@ -1601,6 +1628,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.post_library_upload()
             if api == "/api/library/items/from-url":
                 return self.post_library_from_url()
+            if api == "/api/library/product":
+                return self.post_library_product()
             m = re.fullmatch(r"/api/library/items/([^/]*)/restore", api or "")
             if m:
                 return self.restore_library_item(m.group(1))
@@ -2109,6 +2138,21 @@ class Handler(SimpleHTTPRequestHandler):
             shutil.rmtree(tmp, ignore_errors=True)
             raise
         return self.queue_add(src, tmp, meta, url, reserved_key=key)
+
+    def post_library_product(self):
+        """POST /api/library/product (§2.11): what a shop's product page says. Adds nothing; a bad page is a 422."""
+        try:
+            body = self.read_json_body()
+        except ValueError as e:
+            return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
+        url = body.get("url") if isinstance(body, dict) else None
+        if not isinstance(url, str) or not url.strip() or len(url) > 4096:
+            return self.error_json(HTTPStatus.BAD_REQUEST, 'the body must be JSON like {"url": "https://...", "llm": true}')
+        if not isinstance(body.get("llm", True), bool):
+            return self.error_json(HTTPStatus.BAD_REQUEST, "llm must be true or false")
+        status, data = product_page.read(url.strip(), llm=body.get("llm", True), reserve=self.library.reserve,
+                                         release=self.library.release, costs_file=self.costs_file)
+        return self.send_json(status, data)
 
     def patch_library_item(self, item_id: str):
         try:

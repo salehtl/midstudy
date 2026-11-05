@@ -58,3 +58,6 @@ library/costs.csv.lock
 /scenes/
 /layouts/
 /renders/
+
+# product pages downloaded for the golden set (shops' pages and pictures are never committed)
+fixtures/pages/

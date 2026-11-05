@@ -187,3 +187,67 @@
 .ws-guide { stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 3 4; opacity: .75; }
 .ws-guide-dot { fill: #D9A44133; stroke: var(--color-accent); stroke-width: 1.25; }
 .ws-label-up { color: var(--color-accent); }
+
+/* --- Add furniture › Product page (ui/panels/productsrc.js, contract §2.11) ----------------------------------------- */
+/* four sources on one row: "Product page" shortens to "Product" on a phone; every segment a full 44 px target there */
+.ms.ms-add.is-phone .ms-seg > button { height: 44px; padding: 0 4px; }
+.ms.is-phone .ms-seg-long { display: none; }
+.ms-prod-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ms-prod-field .ms-input { flex: 1 1 auto; }
+.ms-prod-read { flex-shrink: 0; min-width: 104px; gap: 6px; } /* wide enough for "Reading…": the field doesn't jump */
+.ms.is-phone .ms-prod-read { min-width: 120px; padding: 0 12px; }
+.ms-prod-read:disabled, .ms-prod-read.is-busy { color: var(--color-muted); }
+.ms-prod-status { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 0; color: var(--color-text); font-size: var(--text-body-desktop); line-height: 18px; }
+.ms.is-phone .ms-prod-status { font-size: 14px; line-height: 20px; }
+.ms-prod-status > svg { flex-shrink: 0; margin-top: 1px; }
+.ms.is-phone .ms-prod-status > svg { margin-top: 2px; }
+.ms-prod-status.is-ok > svg { color: var(--color-ok); }
+.ms-prod-status.is-warn > svg { color: var(--color-accent); }
+.ms-prod-status.is-busy { color: var(--color-muted); }
+.ms-prod-error { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius-control); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
+.ms.is-phone .ms-prod-error { border-radius: var(--radius-panel); padding: 12px 14px; }
+.ms-prod-err-text { margin: 0; color: var(--color-danger); font-size: var(--text-body-desktop); line-height: 18px; overflow-wrap: anywhere; }
+.ms.is-phone .ms-prod-err-text { font-size: 14px; line-height: 20px; }
+.ms-prod-uselink { gap: 6px; }
+.ms-prod-picwarn { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+/* the page's pictures: a strip that scrolls sideways inside itself, never the page */
+.ms-prod-picrow { gap: 8px; }
+.ms-prod-pics {
+  display: flex; gap: 8px; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  padding: 3px 3px 6px; margin: -3px -3px -6px; scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+}
+.ms-prod-pic {
+  position: relative; flex: 0 0 auto; width: 76px; height: 76px; padding: 0; overflow: hidden; scroll-snap-align: start;
+  border-radius: var(--radius-control); background: var(--color-raised); border: 1px solid var(--color-line);
+}
+.ms.is-phone .ms-prod-pic { width: 88px; height: 88px; border-radius: var(--radius-panel); }
+/* contain, not cover: a runner or a tall shelf is seen whole before it's chosen */
+.ms-prod-pic img { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; -webkit-user-select: none; user-select: none; }
+.ms-prod-pic[aria-pressed="false"] img { opacity: .72; }
+@media (hover: hover) { .ms-prod-pic[aria-pressed="false"]:hover img { opacity: 1; } }
+.ms-prod-pic[aria-pressed="true"] { border-color: transparent; box-shadow: 0 0 0 2px var(--color-accent); }
+.ms-prod-tick {
+  position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: none; align-items: center; justify-content: center;
+  border-radius: var(--radius-pill); background: var(--color-accent); color: var(--color-accent-ink); box-shadow: 0 1px 3px #0006;
+}
+.ms-prod-pic[aria-pressed="true"] .ms-prod-tick { display: flex; }
+/* the page's sizes, above W × D × H: picking one fills them */
+.ms-prod-sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.ms-prod-size {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; min-width: 0; min-height: 44px; padding: 5px 10px;
+  border-radius: var(--radius-control); background: var(--color-ground); border: 1px solid var(--color-line); text-align: left;
+}
+.ms.is-phone .ms-prod-size { min-height: 52px; padding: 6px 12px; border-radius: var(--radius-panel); }
+/* both lines wrap: a shop's '72" W x 36" D x 32" H' and the cm size it means are read whole */
+.ms-prod-size b { max-width: 100%; font-weight: 600; overflow-wrap: anywhere; }
+.ms-prod-size span { max-width: 100%; color: var(--color-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.ms.is-phone .ms-prod-size span { font-size: 13px; line-height: 18px; }
+@media (hover: hover) { .ms-prod-size[aria-pressed="false"]:hover { background: var(--color-hover); } }
+.ms-prod-size[aria-pressed="true"] { background: color-mix(in srgb, var(--color-accent) 14%, var(--color-raised)); border-color: color-mix(in srgb, var(--color-accent) 70%, transparent); }
+/* how the page was read: unit notes, warnings, where it came from, what the model cost */
+.ms-prod-notes { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; padding: 0; list-style: none; }
+.ms-prod-notes li { display: flex; gap: 8px; color: var(--color-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.ms.is-phone .ms-prod-notes li { font-size: 13px; line-height: 18px; }
+.ms-prod-notes li > svg { flex-shrink: 0; margin-top: 1px; }
+.ms.is-phone .ms-prod-notes li > svg { margin-top: 2px; }
+.ms-prod-notes li.is-warn { color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text)); }

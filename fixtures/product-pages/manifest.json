@@ -1,0 +1,1237 @@
+{
+  "about": "Routes for evals/lib/pages_server.mjs and what POST /api/library/product must answer for each case (contract §2.11). dims are [w, d, h] in cm, checked within 0.6 cm (or 1 %), in order, as a prefix of dims_candidates. 'image0' must be in the first image's URL; 'images' lists substrings expected in order. {base} is the pages server's origin.",
+  "routes": [
+    {
+      "path": "/products/oak-writing-desk",
+      "file": "pages/jsonld-cm.html"
+    },
+    {
+      "path": "/products/linen-armchair",
+      "file": "pages/jsonld-graph-inch.html"
+    },
+    {
+      "path": "/products/pebble-floor-cushion",
+      "file": "pages/og-only.html"
+    },
+    {
+      "path": "/products/moss-wool-rug",
+      "file": "pages/shopify-variants.html"
+    },
+    {
+      "path": "/products/moss-wool-rug.js",
+      "file": "pages/shopify-variants.js",
+      "type": "text/javascript; charset=utf-8"
+    },
+    {
+      "path": "/product/walnut-sideboard/",
+      "file": "pages/woo-store.html"
+    },
+    {
+      "path": "/wp-json/wc/store/v1/products",
+      "query": {
+        "slug": "walnut-sideboard"
+      },
+      "file": "pages/woo-store.json",
+      "type": "application/json; charset=utf-8"
+    },
+    {
+      "path": "/product/silk-carpet-rose/",
+      "file": "pages/woo-sizes-unitless.html"
+    },
+    {
+      "path": "/wp-json/wc/store/v1/products",
+      "query": {
+        "slug": "silk-carpet-rose"
+      },
+      "file": "pages/woo-sizes-unitless.json",
+      "type": "application/json; charset=utf-8"
+    },
+    {
+      "path": "/products/tall-bookshelf-ash",
+      "file": "pages/text-table.html"
+    },
+    {
+      "path": "/products/harbor-sofa",
+      "file": "pages/text-inches-letters.html"
+    },
+    {
+      "path": "/p/5-shelf-bookcase-black/-/A-1234",
+      "file": "pages/script-json.html"
+    },
+    {
+      "path": "/products/round-side-table",
+      "file": "pages/microdata.html"
+    },
+    {
+      "path": "/products/teak-cabinet-prose",
+      "file": "pages/prose-llm.html"
+    },
+    {
+      "path": "/products/brass-lamp-injection",
+      "file": "pages/injection.html"
+    },
+    {
+      "path": "/products/cane-dining-chair",
+      "file": "pages/picture-links.html"
+    },
+    {
+      "path": "/products/dune-flatweave-rug",
+      "file": "pages/ui-rug.html"
+    },
+    {
+      "path": "/products/morris-reading-chair",
+      "file": "pages/ui-chair.html"
+    },
+    {
+      "prefix": "/media/",
+      "file": "../fal/sam-3-3d-objects/input.jpg",
+      "type": "image/jpeg",
+      "note": "any picture under /media/ is the committed SAM 3D fixture photo (a real JPEG), so a Make from these pages runs the real from-URL add offline"
+    },
+    {
+      "path": "/line/{n}",
+      "generate": "line",
+      "lines": [
+        {
+          "text": "Dimensions: 200 x 90 x 85 cm (W x D x H)"
+        },
+        {
+          "text": "W x D x H: 84 x 38 x 34 in"
+        },
+        {
+          "text": "85 x 200 x 90 cm (H x W x D)"
+        },
+        {
+          "text": "Dimensions (HxWxD): 180 x 80 x 40 cm"
+        },
+        {
+          "text": "Product Dimensions: 78.7\"L x 35.4\"W x 33.5\"H",
+          "title": "Linen Sofa"
+        },
+        {
+          "text": "Overall 16” W x 13” L x 7” H"
+        },
+        {
+          "text": "Dimensions: 200W x 90D x 85H cm"
+        },
+        {
+          "text": "Overall Product Dimensions: 34 H x 84 W x 38 D in"
+        },
+        {
+          "text": "Dimensions: 18\" Dia x 22\" H",
+          "title": "Round Side Table"
+        },
+        {
+          "text": "Size: 200 (W) x 90 (D) x 85 (H) cm"
+        },
+        {
+          "text": "Width 200cm Depth 90cm Height 85cm"
+        },
+        {
+          "text": "Maße: B 120 x T 60 x H 75 cm"
+        },
+        {
+          "text": "Breite: 120 cm, Tiefe: 60 cm, Höhe: 75 cm"
+        },
+        {
+          "text": "Dimensions: W 180–220 cm x D 90 cm x H 75 cm",
+          "title": "Extending Table"
+        },
+        {
+          "text": "Bed size: L 210 x W 170 x H 95 cm",
+          "title": "Oak Bed Frame"
+        },
+        {
+          "text": "Item code 123456789012345678 · Dimensions: 120 x 60 x 75 cm"
+        }
+      ],
+      "note": "one size line on a minimal page: the size strings the accuracy verifier found misread (verify round, 2026-11-05)"
+    },
+    {
+      "path": "/products/walnut-coffee-table",
+      "file": "pages/related-first.html"
+    },
+    {
+      "path": "/products/vintage-kilim-ottoman",
+      "file": "pages/kilim-ottoman.html"
+    },
+    {
+      "path": "/product/wool-carpet-sand/",
+      "file": "pages/woo-rug-cm.html"
+    },
+    {
+      "path": "/wp-json/wc/store/v1/products",
+      "query": {
+        "slug": "wool-carpet-sand"
+      },
+      "file": "pages/woo-rug-cm.json",
+      "type": "application/json; charset=utf-8"
+    },
+    {
+      "path": "/products/lan-chair",
+      "file": "pages/private-pictures.html"
+    },
+    {
+      "path": "/products/deep-feed-stool",
+      "file": "pages/deep-feed.html"
+    },
+    {
+      "path": "/products/deep-feed-stool.js",
+      "generate": "deep",
+      "note": "a feed nested 200,000 levels deep"
+    },
+    {
+      "path": "/products/digits-chair",
+      "generate": "digits",
+      "note": "a 12,000-digit run and 20,000 escaped quotes: CPU work, never a frozen server"
+    },
+    {
+      "path": "/no-product",
+      "file": "pages/no-product.html"
+    },
+    {
+      "path": "/blocked",
+      "status": 403,
+      "file": "pages/blocked.html"
+    },
+    {
+      "path": "/busy",
+      "status": 429,
+      "file": "pages/blocked.html",
+      "headers": {
+        "Retry-After": "60"
+      }
+    },
+    {
+      "path": "/unavailable",
+      "status": 503,
+      "body": "<html><body>Service Unavailable</body></html>"
+    },
+    {
+      "path": "/robot-check",
+      "file": "pages/captcha.html"
+    },
+    {
+      "path": "/missing",
+      "status": 404,
+      "body": "<html><body>Not found</body></html>"
+    },
+    {
+      "path": "/picture.jpg",
+      "generate": "jpeg",
+      "type": "image/jpeg"
+    },
+    {
+      "path": "/manual.pdf",
+      "body": "%PDF-1.4 not really",
+      "type": "application/pdf"
+    },
+    {
+      "path": "/redirect-ok",
+      "status": 302,
+      "location": "/products/oak-writing-desk"
+    },
+    {
+      "path": "/redirect-private",
+      "status": 302,
+      "location": "http://10.1.2.3/products/oak-writing-desk"
+    },
+    {
+      "path": "/redirect-metadata",
+      "status": 301,
+      "location": "http://169.254.169.254/latest/meta-data/"
+    },
+    {
+      "path": "/hops/{n}",
+      "generate": "hops",
+      "note": "302 to /hops/{n-1}; /hops/0 is the desk page. /hops/5 is allowed (5 redirects), /hops/6 is not."
+    },
+    {
+      "path": "/slow",
+      "generate": "slow",
+      "note": "headers after 25 s"
+    },
+    {
+      "path": "/trickle",
+      "generate": "trickle",
+      "note": "a valid start, then one byte a second for 60 s"
+    },
+    {
+      "path": "/huge",
+      "generate": "huge",
+      "note": "the desk's JSON-LD, then 12 MB of filler"
+    },
+    {
+      "path": "/gzip",
+      "generate": "gzip",
+      "note": "the desk page, Content-Encoding: gzip"
+    },
+    {
+      "path": "/gzip-bomb",
+      "generate": "gzip-bomb",
+      "note": "the desk's JSON-LD, then 200 MB of spaces, gzipped (about 200 KB on the wire)"
+    },
+    {
+      "path": "/set-cookie",
+      "status": 302,
+      "location": "/cookie-check",
+      "headers": {
+        "Set-Cookie": "session=abc123; Path=/"
+      }
+    },
+    {
+      "path": "/cookie-check",
+      "file": "pages/jsonld-cm.html",
+      "note": "the server logs whether a Cookie header came"
+    }
+  ],
+  "cases": {
+    "jsonld-cm": {
+      "path": "/products/oak-writing-desk",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk",
+        "category": "desk",
+        "is_rug": false,
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "source": "jsonld",
+        "image0": "oak-desk-front.jpg",
+        "image0_size": [
+          2000,
+          1500
+        ],
+        "llm": false
+      }
+    },
+    "jsonld-graph-inch": {
+      "path": "/products/linen-armchair",
+      "expect": {
+        "status": 200,
+        "name": "Linen Armchair",
+        "category": "armchair",
+        "is_rug": false,
+        "dims": [
+          [
+            80.0,
+            83.8,
+            78.1
+          ]
+        ],
+        "unit": "in",
+        "source": "jsonld",
+        "image0": "linen-armchair.jpg",
+        "llm": false
+      }
+    },
+    "og-only": {
+      "path": "/products/pebble-floor-cushion",
+      "expect": {
+        "status": 200,
+        "name": "Pebble Floor Cushion",
+        "is_rug": false,
+        "dims": [],
+        "no_dims": true,
+        "image0": "pebble-cushion.jpg",
+        "image0_size": [
+          1200,
+          900
+        ],
+        "llm": true,
+        "warning": "size"
+      }
+    },
+    "shopify-variants": {
+      "path": "/products/moss-wool-rug",
+      "expect": {
+        "status": 200,
+        "name": "Moss Wool Rug",
+        "category": "rug",
+        "is_rug": true,
+        "dims": [
+          [
+            152.4,
+            243.8,
+            1.3
+          ],
+          [
+            243.8,
+            304.8,
+            1.3
+          ]
+        ],
+        "variants": [
+          "5' x 8'",
+          "8' x 10'"
+        ],
+        "unit": "ft",
+        "layer": "shopify",
+        "image0": "cdn.shopify.com/s/files/1/0001/moss-rug-top.jpg",
+        "image0_https": true,
+        "llm": false
+      }
+    },
+    "woo-store": {
+      "path": "/product/walnut-sideboard/",
+      "expect": {
+        "status": 200,
+        "name": "Walnut Sideboard",
+        "category": "sideboard",
+        "is_rug": false,
+        "dims": [
+          [
+            180,
+            45,
+            80
+          ]
+        ],
+        "source": "woocommerce",
+        "layer": "woocommerce",
+        "note": "length",
+        "image0": "sideboard-1.jpg",
+        "llm": false
+      }
+    },
+    "woo-sizes-unitless": {
+      "path": "/product/silk-carpet-rose/",
+      "expect": {
+        "status": 200,
+        "name": "Silk Carpet – Rose",
+        "name_excludes": "Tabriz House",
+        "category": "rug",
+        "is_rug": true,
+        "dims": [
+          [
+            200,
+            300,
+            1
+          ],
+          [
+            300,
+            400,
+            1
+          ]
+        ],
+        "variants": [
+          "2*3",
+          "3*4"
+        ],
+        "unit": "m",
+        "unit_note": "m",
+        "layer": "woocommerce",
+        "image0": "rose-1.jpg",
+        "llm": false
+      }
+    },
+    "text-table": {
+      "path": "/products/tall-bookshelf-ash",
+      "expect": {
+        "status": 200,
+        "name": "Tall Bookshelf in Ash",
+        "category": "bookcase",
+        "is_rug": false,
+        "dims": [
+          [
+            250,
+            36,
+            208
+          ]
+        ],
+        "source": "text",
+        "not_dims": [
+          [
+            210,
+            40,
+            30
+          ]
+        ],
+        "image0": "tall-bookshelf-ash.jpg",
+        "images": [
+          "tall-bookshelf-ash.jpg",
+          "/images/tall-bookshelf-ash-room.jpg"
+        ],
+        "llm": false
+      }
+    },
+    "text-inches-letters": {
+      "path": "/products/harbor-sofa",
+      "expect": {
+        "status": 200,
+        "name": "Harbor Sofa",
+        "category": "sofa",
+        "is_rug": false,
+        "dims": [
+          [
+            256.5,
+            101.6,
+            77.5
+          ]
+        ],
+        "unit": "in",
+        "source": "text",
+        "note": "length",
+        "not_dims": [
+          [
+            223.5,
+            81.3,
+            43.8
+          ],
+          [
+            223.5,
+            61.0,
+            47.0
+          ]
+        ],
+        "image0": "harbor-sofa-front.jpg",
+        "llm": false
+      }
+    },
+    "script-json": {
+      "path": "/p/5-shelf-bookcase-black/-/A-1234",
+      "expect": {
+        "status": 200,
+        "name": "5 Shelf Bookcase Black",
+        "category": "bookcase",
+        "is_rug": false,
+        "dims": [
+          [
+            62.2,
+            29.4,
+            180.8
+          ]
+        ],
+        "unit": "in",
+        "source": "text",
+        "image0": "GUEST_5shelf_black",
+        "llm": false
+      }
+    },
+    "microdata": {
+      "path": "/products/round-side-table",
+      "expect": {
+        "status": 200,
+        "name": "Round Side Table",
+        "category": "side table",
+        "is_rug": false,
+        "dims": [
+          [
+            45,
+            45,
+            55
+          ]
+        ],
+        "source": "microdata",
+        "image0": "round-side-table.jpg",
+        "llm": false
+      }
+    },
+    "prose-llm": {
+      "path": "/products/teak-cabinet-prose",
+      "expect": {
+        "status": 200,
+        "name": "Teak Cabinet",
+        "category": "cabinet",
+        "is_rug": false,
+        "dims": [
+          [
+            90,
+            40,
+            120
+          ]
+        ],
+        "source": "llm",
+        "llm": true,
+        "mock": true,
+        "cost_usd": 0
+      }
+    },
+    "injection": {
+      "path": "/products/brass-lamp-injection",
+      "expect": {
+        "status": 200,
+        "name": "Brass Floor Lamp",
+        "name_excludes": "FAL",
+        "category": "lamp",
+        "is_rug": false,
+        "dims": [],
+        "no_dims": true,
+        "llm": true,
+        "warning": "language model"
+      }
+    },
+    "picture-links": {
+      "path": "/products/cane-dining-chair",
+      "expect": {
+        "status": 200,
+        "name": "Cane Dining Chair",
+        "category": "chair",
+        "is_rug": false,
+        "dims": [
+          [
+            48,
+            55,
+            82
+          ]
+        ],
+        "source": "jsonld",
+        "images": [
+          "rattan.example/cdn/files/cane-chair.jpg",
+          "{base}/cdn/files/cane-chair-back.jpg",
+          "rattan.example/cdn/files/cane-chair-side.jpg",
+          "rattan.example/cdn/files/cane-chair-detail.jpg"
+        ],
+        "images_count": 4,
+        "images_exclude": [
+          "data:",
+          "javascript:",
+          "logo.svg"
+        ],
+        "llm": false
+      }
+    },
+    "no-product": {
+      "path": "/no-product",
+      "expect": {
+        "status": 422,
+        "error": "product"
+      }
+    },
+    "blocked": {
+      "path": "/blocked",
+      "expect": {
+        "status": 422,
+        "blocked": true,
+        "error": "This shop blocks automatic reading: paste the image link and size instead."
+      }
+    },
+    "busy": {
+      "path": "/busy",
+      "expect": {
+        "status": 422,
+        "blocked": true,
+        "error": "try again in a minute"
+      }
+    },
+    "unavailable": {
+      "path": "/unavailable",
+      "expect": {
+        "status": 422,
+        "blocked": true,
+        "error": "blocks automatic reading"
+      }
+    },
+    "robot-check": {
+      "path": "/robot-check",
+      "expect": {
+        "status": 422,
+        "blocked": true,
+        "error": "blocks automatic reading"
+      }
+    },
+    "missing": {
+      "path": "/missing",
+      "expect": {
+        "status": 422,
+        "error": "doesn't exist"
+      }
+    },
+    "picture": {
+      "path": "/picture.jpg",
+      "expect": {
+        "status": 422,
+        "error": "Image link"
+      }
+    },
+    "pdf": {
+      "path": "/manual.pdf",
+      "expect": {
+        "status": 422,
+        "error": "web page"
+      }
+    },
+    "redirect-ok": {
+      "path": "/redirect-ok",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk",
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "url_ends": "/products/oak-writing-desk"
+      }
+    },
+    "redirect-private": {
+      "path": "/redirect-private",
+      "expect": {
+        "status": 400,
+        "error": "private network",
+        "max_s": 3
+      }
+    },
+    "redirect-metadata": {
+      "path": "/redirect-metadata",
+      "expect": {
+        "status": 400,
+        "error": "private network",
+        "max_s": 3
+      }
+    },
+    "hops-5": {
+      "path": "/hops/5",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk"
+      }
+    },
+    "hops-6": {
+      "path": "/hops/6",
+      "expect": {
+        "status": 422,
+        "error": "redirects"
+      }
+    },
+    "slow": {
+      "path": "/slow",
+      "expect": {
+        "status": 422,
+        "error": "20 s",
+        "max_s": 24
+      }
+    },
+    "trickle": {
+      "path": "/trickle",
+      "expect": {
+        "status": 422,
+        "error": "20 s",
+        "max_s": 24
+      }
+    },
+    "huge": {
+      "path": "/huge",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk",
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "warning": "10 MB"
+      }
+    },
+    "gzip": {
+      "path": "/gzip",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk",
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ]
+      }
+    },
+    "gzip-bomb": {
+      "path": "/gzip-bomb",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk",
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "warning": "10 MB",
+        "max_s": 20
+      }
+    },
+    "cookie": {
+      "path": "/set-cookie",
+      "expect": {
+        "status": 200,
+        "name": "Oak Writing Desk",
+        "no_cookie_sent": true
+      }
+    },
+    "ui-rug": {
+      "path": "/products/dune-flatweave-rug",
+      "expect": {
+        "status": 200,
+        "name": "Dune Flatweave Rug",
+        "category": "rug",
+        "is_rug": true,
+        "dims": [
+          [
+            160,
+            230,
+            0.8
+          ],
+          [
+            200,
+            300,
+            0.8
+          ],
+          [
+            250,
+            350,
+            0.8
+          ]
+        ],
+        "variants": [
+          "160 x 230 cm",
+          "200 x 300 cm",
+          "250 x 350 cm"
+        ],
+        "images": [
+          "{base}/media/dune-rug-top.jpg",
+          "{base}/media/dune-rug-room.jpg",
+          "{base}/media/dune-rug-corner.jpg"
+        ],
+        "images_count": 3,
+        "llm": false
+      }
+    },
+    "ui-chair": {
+      "path": "/products/morris-reading-chair",
+      "expect": {
+        "status": 200,
+        "name": "Morris Reading Chair",
+        "category": "armchair",
+        "is_rug": false,
+        "dims": [
+          [
+            76,
+            84,
+            98
+          ]
+        ],
+        "source": "jsonld",
+        "images": [
+          "{base}/media/morris-chair-front.jpg",
+          "{base}/media/morris-chair-side.jpg"
+        ],
+        "images_count": 2,
+        "llm": false
+      }
+    },
+    "line-0": {
+      "path": "/line/0",
+      "about": "Dimensions: 200 x 90 x 85 cm (W x D x H)",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            200,
+            90,
+            85
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-1": {
+      "path": "/line/1",
+      "about": "W x D x H: 84 x 38 x 34 in",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            213.4,
+            96.5,
+            86.4
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-2": {
+      "path": "/line/2",
+      "about": "85 x 200 x 90 cm (H x W x D)",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            200,
+            90,
+            85
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-3": {
+      "path": "/line/3",
+      "about": "Dimensions (HxWxD): 180 x 80 x 40 cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            80,
+            40,
+            180
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-4": {
+      "path": "/line/4",
+      "about": "Product Dimensions: 78.7\"L x 35.4\"W x 33.5\"H",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            199.9,
+            89.9,
+            85.1
+          ]
+        ],
+        "llm": false,
+        "note": "longer side"
+      }
+    },
+    "line-5": {
+      "path": "/line/5",
+      "about": "Overall 16” W x 13” L x 7” H",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            40.6,
+            33.0,
+            17.8
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-6": {
+      "path": "/line/6",
+      "about": "Dimensions: 200W x 90D x 85H cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            200,
+            90,
+            85
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-7": {
+      "path": "/line/7",
+      "about": "Overall Product Dimensions: 34 H x 84 W x 38 D in",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            213.4,
+            96.5,
+            86.4
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-8": {
+      "path": "/line/8",
+      "about": "Dimensions: 18\" Dia x 22\" H",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            45.7,
+            45.7,
+            55.9
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-9": {
+      "path": "/line/9",
+      "about": "Size: 200 (W) x 90 (D) x 85 (H) cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            200,
+            90,
+            85
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-10": {
+      "path": "/line/10",
+      "about": "Width 200cm Depth 90cm Height 85cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            200,
+            90,
+            85
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-11": {
+      "path": "/line/11",
+      "about": "Maße: B 120 x T 60 x H 75 cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-12": {
+      "path": "/line/12",
+      "about": "Breite: 120 cm, Tiefe: 60 cm, Höhe: 75 cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "line-13": {
+      "path": "/line/13",
+      "about": "Dimensions: W 180–220 cm x D 90 cm x H 75 cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            180,
+            90,
+            75
+          ]
+        ],
+        "llm": false,
+        "note": "extends to 220"
+      }
+    },
+    "line-14": {
+      "path": "/line/14",
+      "about": "Bed size: L 210 x W 170 x H 95 cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            170,
+            210,
+            95
+          ]
+        ],
+        "llm": false,
+        "category": "bed",
+        "note": "head to foot"
+      }
+    },
+    "line-15": {
+      "path": "/line/15",
+      "about": "Item code 123456789012345678 · Dimensions: 120 x 60 x 75 cm",
+      "expect": {
+        "status": 200,
+        "dims": [
+          [
+            120,
+            60,
+            75
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "related-first": {
+      "path": "/products/walnut-coffee-table",
+      "expect": {
+        "status": 200,
+        "name": "Walnut Coffee Table",
+        "category": "coffee table",
+        "dims": [
+          [
+            110,
+            60,
+            40
+          ]
+        ],
+        "not_dims": [
+          [
+            220,
+            95,
+            80
+          ],
+          [
+            60,
+            60,
+            45
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "kilim-ottoman": {
+      "path": "/products/vintage-kilim-ottoman",
+      "expect": {
+        "status": 200,
+        "category": "ottoman",
+        "is_rug": false,
+        "dims": [
+          [
+            60,
+            60,
+            40
+          ]
+        ],
+        "llm": false
+      }
+    },
+    "woo-rug-cm": {
+      "path": "/product/wool-carpet-sand/",
+      "expect": {
+        "status": 200,
+        "name": "Wool Carpet – Sand",
+        "is_rug": true,
+        "dims": [
+          [
+            160,
+            230,
+            1
+          ],
+          [
+            200,
+            300,
+            1
+          ]
+        ],
+        "variants": [
+          "160*230",
+          "200*300"
+        ],
+        "unit_note": "cm",
+        "llm": false
+      }
+    },
+    "shopify-variant-link": {
+      "path": "/products/moss-wool-rug?variant=2",
+      "expect": {
+        "status": 200,
+        "name": "Moss Wool Rug",
+        "dims": [
+          [
+            243.8,
+            304.8,
+            1.3
+          ],
+          [
+            152.4,
+            243.8,
+            1.3
+          ]
+        ],
+        "note": "picked in the link",
+        "llm": false
+      }
+    },
+    "private-pictures": {
+      "path": "/products/lan-chair",
+      "expect": {
+        "status": 200,
+        "name": "Lan Chair",
+        "dims": [
+          [
+            50,
+            50,
+            80
+          ]
+        ],
+        "images": [
+          "cdn.example.com/lan-chair-ok.jpg"
+        ],
+        "images_count": 1,
+        "llm": false
+      }
+    },
+    "deep-feed": {
+      "path": "/products/deep-feed-stool",
+      "expect": {
+        "status": 200,
+        "name": "Deep Feed Stool",
+        "dims": [
+          [
+            35,
+            35,
+            45
+          ]
+        ],
+        "warning": "isn't valid JSON",
+        "llm": false
+      }
+    },
+    "digits": {
+      "path": "/products/digits-chair",
+      "expect": {
+        "status": 200,
+        "name": "Digits Chair",
+        "dims": [
+          [
+            50,
+            50,
+            80
+          ]
+        ],
+        "max_s": 8,
+        "llm": false
+      }
+    }
+  },
+  "refused_urls": [
+    "http://10.0.0.1/products/x",
+    "http://169.254.169.254/latest/meta-data/",
+    "http://localhost:{pages_port}/products/oak-writing-desk",
+    "http://[::1]:{pages_port}/products/oak-writing-desk",
+    "http://127.0.0.1:{serve_port}/planner/",
+    "http://0x7f000001:{pages_port}/products/oak-writing-desk",
+    "http://[::ffff:127.0.0.1]:{pages_port}/products/oak-writing-desk",
+    "http://100.100.100.100/x",
+    "ftp://example.com/x",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "not a link",
+    "http://[64:ff9b:1::7f00:1]/products/x",
+    "http://[::ffff:0:7f00:1]/products/x",
+    "http://[fec0::1]/products/x",
+    "http://[::1"
+  ]
+}
