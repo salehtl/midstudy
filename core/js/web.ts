@@ -153,15 +153,13 @@ export class SceneCamera {
     return this.#cam
   }
 
-  /** The scratch view, re-made when wasm memory has grown (which detaches old views). */
+  /** The scratch view, re-made when wasm memory has grown (growth detaches the old buffer: its views read length 0). */
   #s(): Float64Array {
-    const c = this.#c()
-    let v = this.#view
-    if (!v || v.buffer !== memory().buffer) {
-      v = new Float64Array(memory().buffer, c.outPtr(), 32)
-      this.#view = v
-    }
-    return v
+    const v = this.#view
+    if (v && v.length === 32) return v
+    const fresh = new Float64Array(memory().buffer, this.#c().outPtr(), 32)
+    this.#view = fresh
+    return fresh
   }
 
   focal(): number {
@@ -461,10 +459,11 @@ export function envMap(photo: Readonly<RgbaImage>, cam: { rotation: Mat3Elements
 
 // --- the worker ---------------------------------------------------------------------------------------------------------
 
-/** What a worker scope (or a MessagePort) offers. */
+/** What a worker scope, a Worker or a MessagePort offers (a MessagePort is started when it has `start`). */
 export interface KernelPort {
   postMessage(message: unknown, transfer: Transferable[]): void
   addEventListener(type: 'message', listener: (e: MessageEvent<unknown>) => void): void
+  start?(): void
 }
 
 type Request =
@@ -565,6 +564,7 @@ export function serveKernels(port: KernelPort, source?: InitInput | SyncInitInpu
       .then(({ reply, transfer }) => { port.postMessage(reply, transfer) })
       .catch((err: unknown) => { port.postMessage({ id, ok: false, error: err instanceof Error ? err.message : String(err) }, []) })
   })
+  port.start?.()
 }
 
 function parseReply(x: unknown): Reply | null {
@@ -603,6 +603,7 @@ export class KernelWorker {
       if (!reply) p.reject(new Error('midstudy kernels: malformed reply'))
       else p.resolve(reply)
     })
+    port.start?.()
   }
 
   #call(msg: Record<string, unknown>, transfer: Transferable[]): Promise<Reply> {

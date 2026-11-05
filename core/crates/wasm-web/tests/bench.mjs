@@ -14,6 +14,8 @@ import { envBakeV1 } from './v1/envbake.mjs'
 import * as k from '../../../js/web.ts'
 
 const REPO = path.resolve(import.meta.dirname, '../../../..')
+const ONLY = process.env.ONLY || '' // depth | mask | project | env: one section
+const run = (name) => !ONLY || ONLY === name
 const builds = {}
 for (const [name, dir] of [['simd', 'build/wasm/web'], ['nosimd', 'build/wasm/web-nosimd']]) {
   const glue = path.join(REPO, dir, 'midstudy_wasm_web.js')
@@ -58,7 +60,7 @@ function paethPng(w, h, mm) {
 const mm = Array.from(decoded.data, (v) => Math.round(v * 1000))
 const paeth = paethPng(decoded.width, decoded.height, mm)
 const v1 = V.makeV1({ camera: { fov_y_deg: 65, height_m: 1.6, pitch_deg: -25, roll_deg: 2 }, w: 1600, h: 1200 })
-for (const [label, bytes] of [['depth.png 1024x768 decode, filter 0', golden], ['depth.png 1024x768 decode, Paeth', paeth]]) {
+for (const [label, bytes] of run('depth') ? [['depth.png 1024x768 decode, filter 0', golden], ['depth.png 1024x768 decode, Paeth', paeth]] : []) {
   row(label, 'v1 JS (DecompressionStream)', await median(() => v1.loadDepth(new Uint8Array(bytes))))
   for (const [name, b] of Object.entries(builds)) {
     row(label, `wasm ${name}`, await median(() => { const r = b.m.decodeDepth(bytes, 1); new Float32Array(b.memory.buffer, r.ptr(), r.len()).slice(); r.free() }))
@@ -70,11 +72,11 @@ const [MW, MH] = [2048, 1152]
 const readback = new Uint8Array(MW * MH * 4)
 for (let y = 300; y < 800; y++) for (let x = 600; x < 1300; x++) readback[(y * MW + x) * 4] = 255
 for (let y = 900; y < 1000; y++) for (let x = 100; x < 400; x++) readback[(y * MW + x) * 4] = 200
-row('keep-room mask 2048x1152 (threshold, dilate, coverage)', 'v1 JS', await median(() => V.maskFromPixels(readback, MW, MH)))
-for (const [name, b] of Object.entries(builds)) {
+if (run('mask')) row('keep-room mask 2048x1152 (threshold, dilate, coverage)', 'v1 JS', await median(() => V.maskFromPixels(readback, MW, MH)))
+for (const [name, b] of run('mask') ? Object.entries(builds) : []) {
   row('keep-room mask 2048x1152 (threshold, dilate, coverage)', `wasm ${name}`, await median(() => { const r = b.m.keepRoomMask(readback, MW, MH, true); new Uint8Array(b.memory.buffer, r.ptr(), r.len()).slice(); r.free() }))
 }
-{
+if (run('mask')) {
   const r = builds.simd.m.keepRoomMask(readback, MW, MH, true)
   row('keep-room mask PNG 2048x1152 (zlib level 6)', 'wasm simd', await median(() => r.toPng(MW, MH, 6)))
   row('keep-room mask PNG 2048x1152 (zlib level 1)', 'wasm simd', await median(() => r.toPng(MW, MH, 1)))
@@ -85,8 +87,8 @@ for (const [name, b] of Object.entries(builds)) {
 const N = 1_000_000
 const pts = new Float64Array(3 * N)
 for (let i = 0; i < N; i++) { pts[3 * i] = (i % 1000) * 0.01 - 5; pts[3 * i + 1] = (i % 7) * 0.3; pts[3 * i + 2] = -1 - (i % 997) * 0.02 }
-row('10^6 projections', 'v1 JS projectPhoto', await median(() => { let a = 0; for (let i = 0; i < N; i++) a += v1.projectPhoto([pts[3 * i], pts[3 * i + 1], pts[3 * i + 2]])[0]; return a }))
-for (const [name, b] of Object.entries(builds)) {
+if (run('project')) row('10^6 projections', 'v1 JS projectPhoto', await median(() => { let a = 0; for (let i = 0; i < N; i++) a += v1.projectPhoto([pts[3 * i], pts[3 * i + 1], pts[3 * i + 2]])[0]; return a }))
+for (const [name, b] of run('project') ? Object.entries(builds) : []) {
   const cam = new b.m.Camera(65, 1.6, -25, 2, 1600, 1200)
   const src = new b.m.F64Buf(3 * N), dst = new b.m.F64Buf(3 * N)
   row('10^6 projections', `wasm ${name} projectMany`, await median(() => {
@@ -96,7 +98,7 @@ for (const [name, b] of Object.entries(builds)) {
   }))
   src.free(); dst.free(); cam.free()
 }
-{
+if (run('project')) {
   const sc = new k.SceneCamera({ fov_y_deg: 65, height_m: 1.6, pitch_deg: -25, roll_deg: 2 }, 1600, 1200)
   row('10^6 projections', 'wasm simd, one call each (face)', await median(() => { let a = 0; for (let i = 0; i < N; i++) a += sc.project([pts[3 * i], pts[3 * i + 1], pts[3 * i + 2]])[0]; return a }))
   sc.dispose()
@@ -107,8 +109,8 @@ const [PW, PH] = [2048, 1536]
 const photo = new Uint8Array(PW * PH * 4)
 for (let i = 0; i < PW * PH; i++) { const x = i % PW, y = (i / PW) | 0; photo.set([(x * 255 / PW) | 0, (y * 255 / PH) | 0, (x ^ y) & 255, 255], 4 * i) }
 const R = v1.R.elements
-row('env map 512x256 from 2048x1536', 'JS transcription (bilinear)', await median(() => envBakeV1({ width: PW, height: PH, data: photo }, v1.R, 65), 3))
-for (const [name, b] of Object.entries(builds)) {
+if (run('env')) row('env map 512x256 from 2048x1536', 'JS transcription (bilinear)', await median(() => envBakeV1({ width: PW, height: PH, data: photo }, v1.R, 65), 3))
+for (const [name, b] of run('env') ? Object.entries(builds) : []) {
   row('env map 512x256 from 2048x1536', `wasm ${name} mipmapped, aniso 4`, await median(() => { const r = b.m.envMap(photo, PW, PH, Float64Array.from(R), 65, 512, 256, 4, true); new Uint16Array(b.memory.buffer, r.f16Ptr(), r.f16Len()).slice(); r.free() }))
   row('env map 512x256 from 2048x1536', `wasm ${name} bilinear`, await median(() => { const r = b.m.envMap(photo, PW, PH, Float64Array.from(R), 65, 512, 256, 0, false); new Float32Array(b.memory.buffer, r.f32Ptr(), r.f32Len()).slice(); r.free() }))
 }
@@ -116,5 +118,5 @@ for (const [name, b] of Object.entries(builds)) {
 const out = path.join(REPO, 'evals/out/k-geom')
 fs.mkdirSync(out, { recursive: true })
 const meta = { node: process.version, load: os.loadavg(), cpus: os.cpus().length, wasm_bytes: Object.fromEntries(Object.entries(builds).map(([n, b]) => [n, b.size])), date: new Date().toISOString() }
-fs.writeFileSync(path.join(out, 'bench.json'), JSON.stringify({ meta, results }, null, 1))
+if (!ONLY) fs.writeFileSync(path.join(out, 'bench.json'), JSON.stringify({ meta, results }, null, 1))
 console.log(`load ${meta.load.map((v) => v.toFixed(1)).join(' ')}; wasm ${JSON.stringify(meta.wasm_bytes)}; written to evals/out/k-geom/bench.json`)

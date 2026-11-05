@@ -92,7 +92,18 @@ nix shell $NP#typescript -c tsc --noEmit --strict --noUncheckedIndexedAccess --e
 
 ## Benchmarks
 
-(filled in below once measured)
+M3 Max (14 cores), Node 22.23, median of 7 (9 native) after a warm-up, wasm timings including the copy out of wasm
+memory. The machine was shared and loaded (load average 10–11) and the exclusive eval lock was unavailable (see the
+request about the lock), so these are back-to-back comparisons on a busy machine, not quiet-machine numbers.
+
+BENCH_TABLE
+
+SIMD128: the kernels are written as straight loops that LLVM vectorises when `+simd128` is on (the wasm carries
+v128/i8x16/i32x4/f64x2 code). Measured with and without: filter-0 depth decode 2× faster, the mask 1.4×, projections
+and the environment map unchanged, and Paeth decode *slower* (5.7 against 4.2 ms: the SLP vectoriser paired the two
+byte chains of 16-bit samples), fixed by unfiltering one chain at a time. No hand-written `core::arch::wasm32` code:
+safe Rust has no v128 load from a slice (`v128_load` is `unsafe`, which these crates forbid), and what is left scalar
+is sequential by nature (the PNG filters' left-to-right chains, the row scan of the dilation).
 
 ## Requests to other tracks
 

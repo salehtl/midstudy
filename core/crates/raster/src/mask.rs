@@ -95,26 +95,12 @@ pub fn dilate_into(
         return Err(MaskError::WrongLength);
     }
     let sat = |r: usize| u32::try_from(r).unwrap_or(u32::MAX);
-    let (left, right, up, down) = (
-        sat(reach.left),
-        sat(reach.right),
-        sat(reach.up),
-        sat(reach.down),
-    );
+    let (up, down) = (sat(reach.up), sat(reach.down));
     for (srow, arow) in src
         .chunks_exact(width)
         .zip(row_pass.chunks_exact_mut(width))
     {
-        let mut since = u32::MAX;
-        for (&s, a) in srow.iter().zip(arow.iter_mut()) {
-            since = if s != 0 { 0 } else { since.saturating_add(1) };
-            *a = u8::from(since <= right);
-        }
-        since = u32::MAX;
-        for (&s, a) in srow.iter().zip(arow.iter_mut()).rev() {
-            since = if s != 0 { 0 } else { since.saturating_add(1) };
-            *a |= u8::from(since <= left);
-        }
+        row_step(srow, arow, reach.left, reach.right);
     }
     counters.fill(u32::MAX);
     for (arow, orow) in row_pass
@@ -134,13 +120,41 @@ pub fn dilate_into(
     Ok(())
 }
 
+/// One row of the row pass: every run of set pixels `[s, e)` turns on `[s − left, e − 1 + right]` (clipped), which is
+/// what v1's two scans (rightward with reach `right`, leftward with `left`) give: the union of `[x − left, x + right]`
+/// over a run is that interval. Finding runs and filling them is several times faster than v1's per-pixel scans.
+fn row_step(srow: &[u8], arow: &mut [u8], left: usize, right: usize) {
+    arow.fill(0);
+    let w = srow.len();
+    let mut x = 0;
+    while let Some(off) = srow.get(x..).and_then(|r| r.iter().position(|&v| v != 0)) {
+        let s = x + off;
+        let run = srow
+            .get(s..)
+            .map_or(0, |r| r.iter().position(|&v| v == 0).unwrap_or(r.len()));
+        let e = s + run; // run ≥ 1: srow[s] is set
+        let lo = s.saturating_sub(left);
+        let hi = (e - 1).saturating_add(right).min(w - 1);
+        if let Some(seg) = arow.get_mut(lo..=hi) {
+            seg.fill(1);
+        }
+        x = e;
+    }
+}
+
 /// One row of the column pass: each column's distance since its last set pixel, and the output bit.
 #[inline]
 fn column_step(arow: &[u8], counters: &mut [u32], orow: &mut [u8], reach: u32, or: bool) {
-    for ((&a, c), o) in arow.iter().zip(counters.iter_mut()).zip(orow.iter_mut()) {
-        *c = if a != 0 { 0 } else { c.saturating_add(1) };
-        let bit = u8::from(*c <= reach);
-        *o = if or { *o | bit } else { bit };
+    if or {
+        for ((&a, c), o) in arow.iter().zip(counters.iter_mut()).zip(orow.iter_mut()) {
+            *c = if a != 0 { 0 } else { c.saturating_add(1) };
+            *o |= u8::from(*c <= reach);
+        }
+    } else {
+        for ((&a, c), o) in arow.iter().zip(counters.iter_mut()).zip(orow.iter_mut()) {
+            *c = if a != 0 { 0 } else { c.saturating_add(1) };
+            *o = u8::from(*c <= reach);
+        }
     }
 }
 

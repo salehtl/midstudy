@@ -14,8 +14,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; console.log(`ok   ${
 
 const { port1, port2 } = new MessageChannel()
 k.serveKernels(port2, new Uint8Array(wasmBytes))
-const worker = new k.KernelWorker(port1)
-port1.start(); port2.start()
+const worker = new k.KernelWorker(port1) // both sides start their MessagePorts themselves
 
 // depth.png: the worker's result equals the direct call, and the input buffer was transferred
 const png = fs.readFileSync(path.join(REPO, 'fixtures/scenes/steep-roll/depth.png'))
@@ -52,7 +51,7 @@ const extra = new MessageChannel()
 const reply = await new Promise((resolve) => {
   k.serveKernels(extra.port2)
   extra.port1.addEventListener('message', (ev) => resolve(ev.data))
-  extra.port1.start(); extra.port2.start()
+  extra.port1.start()
   extra.port1.postMessage({ id: 9, op: 'nope' })
 })
 extra.port1.close(); extra.port2.close()

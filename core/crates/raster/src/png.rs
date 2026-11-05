@@ -353,14 +353,17 @@ pub fn paeth(a: u8, b: u8, c: u8) -> u8 {
 /// Reverses one row's filter in place, `prev` being the previous row as decoded (zeros for the first). `false` for
 /// an unknown filter type.
 fn unfilter<const BPP: usize>(filter: u8, cur: &mut [u8], prev: &[u8]) -> bool {
+    // Sub, Average and Paeth depend on the pixel to the left, so each of the BPP byte chains is a sequential scan. They
+    // run one chain at a time (stride BPP): interleaving the chains invites LLVM's SLP vectoriser to pair them in
+    // 2-lane vectors, which measured slower under SIMD128 (Paeth 5.7 ms against 4.2 ms scalar for 1024 x 768 x 16 bit).
     match filter {
         0 => {}
         1 => {
-            let mut left = [0_u8; BPP];
-            for px in cur.chunks_exact_mut(BPP) {
-                for (x, l) in px.iter_mut().zip(left.iter_mut()) {
-                    *x = x.wrapping_add(*l);
-                    *l = *x;
+            for k in 0..BPP {
+                let mut a = 0_u8;
+                for x in cur.iter_mut().skip(k).step_by(BPP) {
+                    *x = x.wrapping_add(a);
+                    a = *x;
                 }
             }
         }
@@ -370,27 +373,31 @@ fn unfilter<const BPP: usize>(filter: u8, cur: &mut [u8], prev: &[u8]) -> bool {
             }
         }
         3 => {
-            let mut left = [0_u8; BPP];
-            for (px, up) in cur.chunks_exact_mut(BPP).zip(prev.chunks_exact(BPP)) {
-                for ((x, l), &b) in px.iter_mut().zip(left.iter_mut()).zip(up) {
-                    *x = x.wrapping_add(l.midpoint(b));
-                    *l = *x;
+            for k in 0..BPP {
+                let mut a = 0_u8;
+                for (x, &b) in cur
+                    .iter_mut()
+                    .skip(k)
+                    .step_by(BPP)
+                    .zip(prev.iter().skip(k).step_by(BPP))
+                {
+                    *x = x.wrapping_add(a.midpoint(b));
+                    a = *x;
                 }
             }
         }
         4 => {
-            let mut left = [0_u8; BPP];
-            let mut up_left = [0_u8; BPP];
-            for (px, up) in cur.chunks_exact_mut(BPP).zip(prev.chunks_exact(BPP)) {
-                for (((x, l), ul), &b) in px
+            for k in 0..BPP {
+                let (mut a, mut c) = (0_u8, 0_u8);
+                for (x, &b) in cur
                     .iter_mut()
-                    .zip(left.iter_mut())
-                    .zip(up_left.iter_mut())
-                    .zip(up)
+                    .skip(k)
+                    .step_by(BPP)
+                    .zip(prev.iter().skip(k).step_by(BPP))
                 {
-                    *x = x.wrapping_add(paeth(*l, b, *ul));
-                    *l = *x;
-                    *ul = b;
+                    *x = x.wrapping_add(paeth(a, b, c));
+                    a = *x;
+                    c = b;
                 }
             }
         }

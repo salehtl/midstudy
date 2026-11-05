@@ -67,51 +67,55 @@ async function main(): Promise<void> {
   // v1's own bake on the GPU (SwiftShader here): engine.js's photo texture (mipmapped, anisotropy 4) through
   // lighting.js's makeEnvBakeMat into a 512 x 256 target (float here, half in v1, to read it back), against the CPU
   // kernel's mipmapped (v1-like) and bilinear lookups.
-  const renderer = new THREE.WebGLRenderer()
-  const tex = new THREE.Texture(img)
-  tex.flipY = false
-  tex.colorSpace = THREE.NoColorSpace
-  tex.minFilter = THREE.LinearMipmapLinearFilter
-  tex.magFilter = THREE.LinearFilter
-  tex.generateMipmaps = true
-  tex.anisotropy = 4
-  tex.needsUpdate = true
-  const envRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.FloatType, depthBuffer: false })
-  const envMat = makeEnvBakeMat()
-  const envScene = new THREE.Scene()
-  envScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), envMat))
-  const envCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
-  envMat.uniforms.tPhoto.value = tex
-  envMat.uniforms.uWorldToCam.value.fromArray(rotation).transpose()
-  envMat.uniforms.uTanY.value = Math.tan((truth.camera.fov_y_deg * Math.PI / 180) / 2)
-  envMat.uniforms.uAspect.value = px.width / px.height
-  const gpu = new Float32Array(512 * 256 * 4)
-  const bake = (): void => {
-    renderer.setRenderTarget(envRT)
-    renderer.render(envScene, envCam)
-    renderer.setRenderTarget(null)
-    renderer.readRenderTargetPixels(envRT, 0, 0, 512, 256, gpu)
-  }
-  bake()
-  t0 = performance.now(); bake(); const tGpu = ms(t0)
-  const cpuMip = k.envMap({ width: px.width, height: px.height, data: px.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg }, { half: false })
-  const cpuBil = k.envMap({ width: px.width, height: px.height, data: px.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg }, { half: false, anisotropy: 0 })
-  const stats = (cpu: ArrayLike<number>): string => {
-    let sumAbs = 0, sumRef = 0
-    const rels: number[] = []
-    for (let i = 0; i < gpu.length; i++) {
-      if (i % 4 === 3) continue
-      const g = gpu[i] ?? 0, c = cpu[i] ?? 0
-      sumAbs += Math.abs(g - c); sumRef += Math.abs(g)
-      rels.push(Math.abs(g - c) / Math.max(Math.abs(g), 0.01))
+  try {
+    const renderer = new THREE.WebGLRenderer()
+    const tex = new THREE.Texture(img)
+    tex.flipY = false
+    tex.colorSpace = THREE.NoColorSpace
+    tex.minFilter = THREE.LinearMipmapLinearFilter
+    tex.magFilter = THREE.LinearFilter
+    tex.generateMipmaps = true
+    tex.anisotropy = 4
+    tex.needsUpdate = true
+    const envRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.FloatType, depthBuffer: false })
+    const envMat = makeEnvBakeMat()
+    const envScene = new THREE.Scene()
+    envScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), envMat))
+    const envCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+    envMat.uniforms.tPhoto.value = tex
+    envMat.uniforms.uWorldToCam.value.fromArray(rotation).transpose()
+    envMat.uniforms.uTanY.value = Math.tan((truth.camera.fov_y_deg * Math.PI / 180) / 2)
+    envMat.uniforms.uAspect.value = px.width / px.height
+    const gpu = new Float32Array(512 * 256 * 4)
+    const bake = (): void => {
+      renderer.setRenderTarget(envRT)
+      renderer.render(envScene, envCam)
+      renderer.setRenderTarget(null)
+      renderer.readRenderTargetPixels(envRT, 0, 0, 512, 256, gpu)
     }
-    rels.sort((x, y) => x - y)
-    return `mean |Δ| ${(sumAbs / sumRef * 100).toFixed(2)} % of the mean, median ${(100 * (rels[rels.length >> 1] ?? 0)).toFixed(2)} %, p95 ${(100 * (rels[Math.floor(rels.length * 0.95)] ?? 0)).toFixed(1)} %`
+    bake()
+    t0 = performance.now(); bake(); const tGpu = ms(t0)
+    const cpuMip = k.envMap({ width: px.width, height: px.height, data: px.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg }, { half: false })
+    const cpuBil = k.envMap({ width: px.width, height: px.height, data: px.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg }, { half: false, anisotropy: 0 })
+    const stats = (cpu: ArrayLike<number>): string => {
+      let sumAbs = 0, sumRef = 0
+      const rels: number[] = []
+      for (let i = 0; i < gpu.length; i++) {
+        if (i % 4 === 3) continue
+        const g = gpu[i] ?? 0, c = cpu[i] ?? 0
+        sumAbs += Math.abs(g - c); sumRef += Math.abs(g)
+        rels.push(Math.abs(g - c) / Math.max(Math.abs(g), 0.01))
+      }
+      rels.sort((x, y) => x - y)
+      return `mean |Δ| ${(sumAbs / sumRef * 100).toFixed(2)} % of the mean, median ${(100 * (rels[rels.length >> 1] ?? 0)).toFixed(2)} %, p95 ${(100 * (rels[Math.floor(rels.length * 0.95)] ?? 0)).toFixed(1)} %`
+    }
+    const sMip = stats(cpuMip.data), sBil = stats(cpuBil.data)
+    check('env map vs v1\'s GPU bake (SwiftShader): mipmapped CPU kernel', true, `${sMip}; GPU bake + readback ${tGpu}`)
+    check('env map vs v1\'s GPU bake (SwiftShader): bilinear CPU kernel (for contrast)', true, sBil)
+    renderer.dispose()
+  } catch (e) {
+    check('env map vs v1\'s GPU bake (SwiftShader)', false, String(e))
   }
-  const sMip = stats(cpuMip.data), sBil = stats(cpuBil.data)
-  check('env map vs v1\'s GPU bake (SwiftShader): mipmapped CPU kernel', true, `${sMip}; GPU bake + readback ${tGpu}`)
-  check('env map vs v1\'s GPU bake (SwiftShader): bilinear CPU kernel (for contrast)', true, sBil)
-  renderer.dispose()
 
   const [MW, MH] = [2048, 1152]
   const rb = new Uint8Array(MW * MH * 4)
