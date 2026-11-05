@@ -1,0 +1,31 @@
+# The media kernels (crates/media) for Node, through wasm-bindgen: plain types across the boundary (Uint8Array in and
+# out, strings, numbers), every fallible result as a small tagged byte envelope, nothing that can panic. Built to
+# build/wasm/node/ (wasm-bindgen --target nodejs); core/js/node.ts is its typed TypeScript face.
+[package]
+name = "midstudy-wasm-node"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+midstudy-media = { path = "../media" }
+wasm-bindgen = "=0.2.121"
+
+# The workspace lints, except that unsafe_code is "deny" instead of "forbid": wasm-bindgen's generated glue is unsafe
+# code, so the one module that holds the #[wasm_bindgen] exports allows it, and nothing else may.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"
+module_name_repetitions = "allow"
