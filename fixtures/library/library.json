@@ -38,6 +38,7 @@
       "assets": {
         "glb": "test-cube/model.glb",
         "splat": "test-cube/splat.ply",
+        "spz": "test-cube/splat.spz",
         "thumb": null
       },
       "default_render": "splat",
@@ -49,7 +50,19 @@
         "mock": false,
         "created": "2026-10-25T00:00:00Z"
       },
-      "notes": "Front (+Z) half is red."
+      "notes": "Front (+Z) half is red.",
+      "fit": {
+        "glb_error_pct": {
+          "w": 0.0,
+          "d": 0.0,
+          "h": 0.0
+        },
+        "splat_error_pct": {
+          "w": 0.0,
+          "d": 0.0,
+          "h": 0.0
+        }
+      }
     }
   ]
 }

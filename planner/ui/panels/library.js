@@ -55,10 +55,13 @@ export function mount(ctx) {
   async function add(item) {
     if (!engine.getSceneName()) { shell.toast('Open a scene first, then add furniture to it.', { id: 'no-scene' }); shell.openPage('scenes'); return }
     let uid
-    try { uid = await engine.addItemInternal(item.id) } catch { return } // reported (toast)
+    const name = item.name || item.id
+    // A splat can take a few seconds to download and set up: say so if it isn't there at once.
+    let loading = null
+    const slow = setTimeout(() => { loading = shell.toast(`Placing ${name}…`, { ms: 60000 }) }, 400)
+    try { uid = await engine.addItemInternal(item.id) } catch { return } finally { clearTimeout(slow); loading?.close(true) } // reported (toast)
     engine.select(uid)
     lastAdded = item.id
-    const name = item.name || item.id
     shell.toast(`${name} added`, { kind: 'ok', id: `added:${uid}`, action: { label: 'Undo', onClick: () => engine.removeItemInternal(uid) } })
     if (shell.isPhone()) shell.setDetent('peek')
     render()

@@ -6,7 +6,7 @@ everything you need should be here or linked from here. Read this whole file bef
 ## 1. What midstudy is
 
 midstudy lets you see furniture in your own room before you buy it: the room is **one phone photo** (MoGe-2 fits the
-camera and the floor), furniture comes from photos at real-world size (SAM 3D on fal) or GLB files, you place it on
+camera and the floor), furniture comes from photos at real-world size (Idol or SAM 3D on fal) or GLB files, you place it on
 the photo's floor in the browser, save layouts, and render a photoreal image (nano-banana on fal, about $0.04).
 It is a fork of nook without the room scan, for the user's personal use.
 
@@ -30,7 +30,7 @@ so the two are the same history.
 
 | Path | What |
 |---|---|
-| `planner/` | the browser app (no build step; three.js from jsDelivr) and `planner/serve.py`, its stdlib-only server |
+| `planner/` | the browser app (no build step; three.js and Spark from jsDelivr) and `planner/serve.py`, its stdlib-only server |
 | `calib/` | `midstudy-calib` (uv project): photo ingest, MoGe-2 floor fit, keep-room alignment (contract §4.3) |
 | `pipeline/` | `midstudy-add` (uv project): a furniture photo or model to a normalized library item (contract §3) |
 | `contract/` | the spec (`CONTRACT.md`) and JSON schemas |
@@ -72,6 +72,13 @@ Design points worth knowing:
   12.3, pillow-heif 1.4, huggingface-hub 1.16, opencv 4.13).
 - **Weights offline.** The `midstudy-calib` wrapper sets `HF_HUB_CACHE=<moge-weights>` and `HF_HUB_OFFLINE=1` as
   defaults (`--set-default`), so the service never talks to Hugging Face. §8 has the alternative.
+- **v1.1 (Idol and splats) adds nothing to package.** `midstudy-add`'s new default engine, Idol (`speridlabs/idol` on
+  fal, $0.10 a piece), uses the same dependencies (numpy, and the stdlib's gzip for `splat.spz`). The planner loads
+  Spark 2.4.0 from jsDelivr, pinned in `planner/index.html`'s importmap, the same way it loads three.js. So the
+  user's browser needs to reach `cdn.jsdelivr.net`; homeserver doesn't. `/library/<id>/splat.spz` is served from
+  `dataDir` like the other library files, as `application/octet-stream` with no `Content-Encoding` (it is gzip
+  inside). The proxy may compress it again or not; either works. Check that the proxy's response size limit allows
+  6 MB.
 - **Device.** `calibDevice = "auto"` passes the plain binary (the CLI defaults to auto). Other values make the module
   pass a small shim as `--calib` that appends `--device <x>` to `run`/`fit` (serve.py appends the subcommand and its
   arguments to `--calib`, and `align`/`ingest` take no `--device`).

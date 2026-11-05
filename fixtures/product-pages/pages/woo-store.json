@@ -1,0 +1,6 @@
+[{"id":51,"name":"Walnut Sideboard","slug":"walnut-sideboard","permalink":"https://atelier-bois.example/product/walnut-sideboard/",
+  "description":"<p>Four doors, solid walnut, adjustable shelves.</p>","short_description":"<p>Four doors.</p>",
+  "images":[{"id":1,"src":"https://atelier-bois.example/wp-content/uploads/2026/09/sideboard-1.jpg","name":"sideboard-1"},{"id":2,"src":"https://atelier-bois.example/wp-content/uploads/2026/09/sideboard-2.jpg","name":"sideboard-2"}],
+  "categories":[{"id":3,"name":"Sideboards","slug":"sideboards"}],
+  "attributes":[],"variations":[],
+  "dimensions":{"length":"180","width":"45","height":"80"},"formatted_dimensions":"180 &times; 45 &times; 80 cm"}]

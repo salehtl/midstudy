@@ -9,7 +9,7 @@ This file is the plan and the spec. It is owned by the main session. Build agent
 ## 1. User story
 
 1. **New scene:** upload a phone photo of a room (JPEG, HEIC, PNG or WebP). Within seconds the scene opens with a 50 cm grid drawn on the photo's floor. If the grid doesn't sit on the floor, **Adjust floor** fixes it with three sliders and a drag.
-2. **Add furniture:** from the Library panel, exactly as in nook (photo, image link, GLB or zipped OBJ; SAM 3D by default).
+2. **Add furniture:** from the Library panel, exactly as in nook (photo, image link, GLB or zipped OBJ; SAM 3D by default in v1, **Idol** since v1.1, §12).
 3. **Place:** tap a library item and it lands on the floor in front of the camera. Drag it to move it across the floor: dragging it away shrinks it with perspective, dragging it closer grows it. A grip turns it. Up / Down raises it (shelves, lamps on a table).
 4. **Occlusion:** a piece placed behind the real sofa in the photo is hidden by it.
 5. **Layouts:** save several layouts per scene and switch between them.
@@ -33,7 +33,7 @@ The camera never moves. The photo is the only viewpoint. Pinch or wheel zoom is 
 | `fixtures/make_capture.mjs` (becomes `fixtures/make_scene.mjs`, the golden-scene renderer) | `docs/plans/`, `docs/SCANNING.md` |
 | `nix/` as a reference for packaging (§9) | `nix/gsplat.nix`, `nook-gsplat.nix`, `poses.nix` |
 
-Splat furniture (`splat.ply` items) may stay in the library format, but the planner draws GLB only in v1.
+Splat furniture (`splat.ply` items) may stay in the library format, but the planner draws GLB only in v1. (v1.1 draws splats again: §12.)
 
 ### Renames
 
@@ -159,7 +159,7 @@ Upload limits: 25 MB (`413`), `411` without a length, and a body that isn't one 
 - **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth.
 - **Layouts:** per scene (`?scene=`), save / load / delete / switch, unsaved-change warnings, as nook.
 - **Render** (§4.7) and **Compare:** in the Renders panel, select two renders and open a full-screen compare: side by side on desktop, a draggable split slider on both, swipe between them on the phone.
-- Removed: orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat items, LoD, True colour.
+- Removed: orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat items (back in v1.1, §12), LoD, True colour.
 
 ### 4.6 Hook (`window.midstudy`)
 
@@ -286,3 +286,15 @@ The build runs as one workflow, [.claude/workflows/midstudy-v1.js](.claude/workf
 - Depth edges are soft, so occlusion can halo around thin legs. The 3 cm tolerance and the toggle are the v1 answer.
 - Ultrawide (0.5×) photos are the common case, and their residual distortion and stretched edges strain the pinhole model. Placement near the photo's edges may drift by a few centimeters; v1 accepts that and the floor check shows it.
 - The render model may restyle the room. The reference image and keep-room exist for this; the live check (§8) decides the default.
+
+## 12. v1.1: Idol and splat furniture (2026-11-05)
+
+The user tried Idol ([speridlabs/idol](https://github.com/speridlabs/idol-sdk), Apache-2.0: one picture of one object to a 3D Gaussian splat) and finds its splats far more realistic than the low-poly meshes. So:
+
+- **`idol` is the default engine**, on fal as `speridlabs/idol` at **$0.10** per piece, in `midstudy-add` and first in the planner's Add furniture form. SAM 3D, TRELLIS 2 and Flat rug stay as choices.
+- **The splat is what you see.** The planner draws splats again, with Spark 2.4.0 (pinned, from a CDN, no build step). A mesh stays underneath, never drawn, for the exact size, selecting, dragging, stacking and the contact shadow. Idol makes no mesh, so `midstudy-add` writes a stand-in box at the item's dims. The photo hides splats like meshes, and Render includes them.
+- **True size:** a splat is fitted per axis (width, depth and height separately, covariances included), so it fills the same box as its mesh.
+- **Phones:** every splat is also written as `splat.spz` (compressed SPZ, at most 262,144 splats, at most 6 MB), which is what the planner loads.
+- **Shows as** (Splat or Mesh) in the Edit sheet, for items that have both (SAM 3D).
+
+The details are in the contract (§1, §3.2, §3.4, §4.5 Splats); the evals are `eval:splat` (E13) and the idol section of `eval:pipeline`. The fixture `fixtures/fal/speridlabs-idol/` is one live call ($0.10) on the Morris chair.

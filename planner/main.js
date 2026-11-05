@@ -80,6 +80,7 @@ window.midstudy = {
   libraryJobs: () => lib.jobs(),
   addItemFromFile: (file, meta) => lib.addFromFile(file, meta),
   addItemFromUrl: (url, meta) => lib.addFromUrl(url, meta),
+  readProductPage: (url, opts) => lib.readProduct(url, opts), // §2.11: the 200 body; adds nothing
   editLibraryItem: (id, patch) => lib.edit(id, patch),
   removeLibraryItem: (id) => lib.remove(id).then(() => {}),
   restoreLibraryItem: (id) => lib.restore(id),

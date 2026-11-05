@@ -9,6 +9,10 @@
     images.py lighting --composite C.jpg --photo P.jpg --camera J --box '[[min],[max]]' [--depth D.png] [--lighting L.json --albedo 0.5
                        --strength 1 --ambient 1] [--light '[x,y,z]'] [--exclude '[[[min],[max]], ...]'] [--debug out.png]
                        a lit box's faces (measured vs what lighting.json predicts) and its shadow on the floor (§4.8)
+    images.py drawn --composite C.jpg --photo P.jpg --window x0,y0,x1,y1 [--thresh 30] [--debug out.png]   (v1.1 splats)
+    images.py splat-proj --spz S.spz --camera '{...}' --position '[x,y,z]' [--rotation-y-deg R] --width W --height H
+    images.py region-diff --a A.jpg --b B.jpg --rects '[[x0,y0,x1,y1], ...]'
+    images.py mask-cover --mask M.png --rect x0,y0,x1,y1
 
 Each prints one JSON object as its last stdout line.
 """
@@ -417,6 +421,97 @@ def cmd_align_selftest(a):
     return {"perfect": perfect, "three": three, "unaligned": unaligned}
 
 
+# --- v1.1 splats (contract §4.5 Splats) -----------------------------------------------------------------------------
+def _rect(text):
+    return [int(round(float(v))) for v in str(text).strip("[]").split(",")]
+
+
+def cmd_drawn(a):
+    """Where the planner drew something: the bounding box of the pixels inside `window` that differ from the photo by
+    more than `thresh` (max over channels). Uses the 0.2th–99.8th percentile of their coordinates, so a few stray
+    pixels can't stretch it. Contact shadows must be off: they darken the floor around the footprint."""
+    photo, (W, H) = load_rgb(Path(a.photo))
+    comp, csize = load_rgb(Path(a.composite), (W, H))
+    x0, y0, x1, y1 = _rect(a.window)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(W, x1), min(H, y1)
+    diff = np.abs(comp - photo).max(axis=-1) > a.thresh
+    win = np.zeros((H, W), bool)
+    win[y0:y1, x0:x1] = True
+    d = diff & win
+    out = {"composite_size": list(csize), "n": int(d.sum()), "window": [x0, y0, x1, y1]}
+    ys, xs = np.nonzero(d)
+    if len(xs) >= 50:
+        bx0, bx1 = np.percentile(xs, [0.2, 99.8])
+        by0, by1 = np.percentile(ys, [0.2, 99.8])
+        out["bbox"] = [float(bx0), float(by0), float(bx1 + 1), float(by1 + 1)]
+    if a.debug:
+        dbg = comp.copy().astype(np.uint8)
+        dbg[d] = (dbg[d] * 0.4 + np.array([0, 255, 120]) * 0.6).astype(np.uint8)
+        Image.fromarray(dbg).save(a.debug)
+        out["debug"] = a.debug
+    return out
+
+
+def cmd_splat_proj(a):
+    """Where a placed splat's own points land in the photo (§4.1): the centers of the opaque splats (alpha ≥ 0.5) of a
+    gzipped SPZ v2 file (§1), turned by rotation_y_deg (counterclockwise seen from above) and moved to `position`.
+    Returns the 0.2th–99.8th percentile bbox of their pixel coordinates (as `drawn` does)."""
+    import gzip
+    import struct
+    raw = gzip.decompress(Path(a.spz).read_bytes())
+    _magic, _ver, n, _sh, frac, _flags, _r = struct.unpack_from("<IIIBBBB", raw, 0)
+    b = np.frombuffer(raw, dtype=np.uint8, count=n * 9, offset=16).reshape(n, 3, 3).astype(np.int32)
+    v = b[..., 0] | (b[..., 1] << 8) | (b[..., 2] << 16)
+    xyz = np.where(v & 0x800000, v - (1 << 24), v).astype(np.float64) / (1 << frac)
+    alpha = np.frombuffer(raw, dtype=np.uint8, count=n, offset=16 + n * 9)
+    p = xyz[alpha >= 128]
+    t = math.radians(a.rotation_y_deg)
+    x = p[:, 0] * math.cos(t) + p[:, 2] * math.sin(t)
+    z = -p[:, 0] * math.sin(t) + p[:, 2] * math.cos(t)
+    pos = json.loads(a.position)
+    cam = json.loads(a.camera)
+    W, H = a.width, a.height
+    rel = np.stack([x + pos[0], p[:, 1] + pos[1] - cam["height_m"], z + pos[2]], axis=-1)
+    pa, ro = math.radians(cam["pitch_deg"]), math.radians(cam["roll_deg"])
+    # world = Rx(pitch) Rz(roll) cam (world_rays), so cam = Rz(-roll) Rx(-pitch) world
+    y1 = math.cos(pa) * rel[:, 1] + math.sin(pa) * rel[:, 2]
+    z1 = -math.sin(pa) * rel[:, 1] + math.cos(pa) * rel[:, 2]
+    x1 = rel[:, 0]
+    xc = math.cos(ro) * x1 + math.sin(ro) * y1
+    yc = -math.sin(ro) * x1 + math.cos(ro) * y1
+    d = -z1
+    f = (H / 2) / math.tan(math.radians(cam["fov_y_deg"]) / 2)
+    keep = d > 1e-3
+    px = W / 2 + f * xc[keep] / d[keep]
+    py = H / 2 - f * yc[keep] / d[keep]
+    bx0, bx1 = np.percentile(px, [0.2, 99.8])
+    by0, by1 = np.percentile(py, [0.2, 99.8])
+    return {"n": int(keep.sum()), "count": int(n), "bbox": [float(bx0), float(by0), float(bx1), float(by1)]}
+
+
+def cmd_region_diff(a):
+    """How much two composites differ inside the given rects: mean and 99th percentile of the per-pixel max channel
+    difference (JPEG noise alone stays around 1 and under 10)."""
+    A, sa = load_rgb(Path(a.a))
+    B, sb = load_rgb(Path(a.b), sa)
+    H, W = A.shape[:2]
+    sel = np.zeros((H, W), bool)
+    for r in json.loads(a.rects):
+        x0, y0, x1, y1 = (int(round(v)) for v in r)
+        sel[max(0, y0):min(H, y1), max(0, x0):min(W, x1)] = True
+    d = np.abs(A - B).max(axis=-1)[sel]
+    return {"n": int(sel.sum()), "mean": float(d.mean()) if d.size else None, "p99": float(np.percentile(d, 99)) if d.size else None}
+
+
+def cmd_mask_cover(a):
+    """The share of white (≥ 128) mask pixels inside a rect (a keep-room mask, §4.7)."""
+    m = np.asarray(Image.open(a.mask).convert("L"))
+    H, W = m.shape
+    x0, y0, x1, y1 = _rect(a.rect)
+    reg = m[max(0, y0):min(H, y1), max(0, x0):min(W, x1)]
+    return {"size": [W, H], "n": int(reg.size), "white": float((reg >= 128).mean()) if reg.size else None}
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -453,9 +548,27 @@ def main(argv):
     p.add_argument("--debug")
     p = sub.add_parser("align-selftest")
     p.add_argument("--out", required=True)
+    p = sub.add_parser("drawn")
+    for k in ("--composite", "--photo", "--window"):
+        p.add_argument(k, required=True)
+    p.add_argument("--thresh", type=float, default=30)
+    p.add_argument("--debug")
+    p = sub.add_parser("splat-proj")
+    for k in ("--spz", "--camera", "--position"):
+        p.add_argument(k, required=True)
+    p.add_argument("--rotation-y-deg", type=float, default=0.0)
+    p.add_argument("--width", type=int, required=True)
+    p.add_argument("--height", type=int, required=True)
+    p = sub.add_parser("region-diff")
+    for k in ("--a", "--b", "--rects"):
+        p.add_argument(k, required=True)
+    p = sub.add_parser("mask-cover")
+    for k in ("--mask", "--rect"):
+        p.add_argument(k, required=True)
     a = ap.parse_args(argv)
     fn = {"occlusion": cmd_occlusion, "synth-composite": cmd_synth_composite, "align-synth": cmd_align_synth,
-          "align-measure": cmd_align_measure, "align-selftest": cmd_align_selftest, "lighting": cmd_lighting}[a.cmd]
+          "align-measure": cmd_align_measure, "align-selftest": cmd_align_selftest, "drawn": cmd_drawn,
+          "splat-proj": cmd_splat_proj, "region-diff": cmd_region_diff, "mask-cover": cmd_mask_cover, "lighting": cmd_lighting}[a.cmd]
     print(json.dumps(fn(a)))
 
 

@@ -63,7 +63,8 @@ def upsert(lib_dir: Path, data: dict, entry: dict) -> bool:
 
 
 def fmt_cost(cost: float) -> str:
-    return f"{cost:.2f}" if round(cost, 2) == round(cost, 6) else f"{cost:.4f}"
+    """The shortest plain decimal, to 4 places: 0.1, 0.02, 0.0398, 0."""
+    return f"{cost:.4f}".rstrip("0").rstrip(".") or "0"
 
 
 @contextlib.contextmanager

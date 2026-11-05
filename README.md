@@ -1,7 +1,7 @@
 # midstudy
 
 See furniture in your own room before you buy it. The room is **one phone photo**. Furniture is made from photos at
-real-world size (Meta's SAM 3D on fal) or comes from a 3D file. You place the pieces on the photo's floor in the
+real-world size (Idol or Meta's SAM 3D, on fal) or comes from a 3D file. You place the pieces on the photo's floor in the
 browser, save layouts, and render a photoreal image of the result.
 
 midstudy is a fork of [nook](https://github.com/salehtl/nook) without the room scan, for personal use. Where things
@@ -61,7 +61,8 @@ In the planner: **Library › Add furniture**, then one of:
 
 | Source | Engine | Cost |
 |---|---|---|
-| A photo of the piece | SAM 3D (default) or TRELLIS 2 | $0.02 (SAM 3D), $0.25–0.35 (TRELLIS 2) |
+| **A product page** (paste the shop's link, then **Read**) | the picture you pick goes to the engine below | free to read; under $0.001 more when only a language model can find the size |
+| A photo of the piece | **Idol** (default), SAM 3D or TRELLIS 2 | $0.10 (Idol), $0.02 (SAM 3D), $0.25–0.35 (TRELLIS 2) |
 | An image link (the image's own URL, not the shop page) | same | same |
 | A 3D file: `.glb` or a zipped OBJ (the CLI also takes `.gltf`) | none | free |
 | A rug pictured from straight above (a shop's rug picture) | **Flat rug**: laid flat at W × D, H is its thickness (~1 cm) | free |
@@ -71,10 +72,41 @@ budget show before you confirm. Adds run as jobs in the Library panel. Furniture
 metadata before they go to fal. When SAM 3D finds nothing in a photo (it can miss the word it's given), it tries again
 by itself, first less strictly, then with a mask of the piece; the refused calls aren't charged.
 
+The engines make different things:
+
+- **Idol** ([speridlabs/idol](https://github.com/speridlabs/idol)) makes a Gaussian splat: a cloud of soft,
+  coloured points that looks like the photo of the piece, at about 3 MB. It has no mesh. A box at the piece's size
+  stands in for it: it's what you tap and drag, and it casts the contact shadow, but it is never drawn.
+- **SAM 3D** makes a mesh and a splat. The splat is shown by default; the piece's **Edit** sheet has **Shows as**
+  (Splat or Mesh), and pieces already placed switch at once.
+- **TRELLIS 2** makes a textured mesh with finer detail.
+
+The planner draws splats with [Spark](https://sparkjs.dev) 2.4.0. Their colours are the photo's own, so the
+**Look** sliders only brighten or warm them; meshes are lit and tone-mapped. The real furniture in the room photo
+hides both. Renders include splats like any other piece.
+
+### From a product page
+
+Paste the shop's product link and press **Read**. The server reads the page and fills in the form: the name, W × D × H
+in cm (a size picker when the shop sells several sizes, as rug shops do), the category, **Flat rug** when it's a rug,
+and a strip of the page's pictures to pick from. Notes under the size say how it was read ("from inches", "length read
+as width", "thickness not on the page: 1 cm assumed"). Check it, change anything, and **Make** sends the picture you
+picked through the image-link add. Nothing is added before that.
+
+It reads, cheapest and most exact first: the page's structured data (schema.org JSON-LD and microdata, OpenGraph), the
+shop's own product data (Shopify's `.js` feed, the WooCommerce Store API), then the page's text, sizes in tables and
+in the shop's embedded JSON. Only when none of that holds a size does a small language model on fal (Claude Haiku 5.5
+through `openrouter/router`, $0.0001–0.0003 a page measured live, within the daily cap and logged in `costs.csv`) look for it in the
+page's words. Every size it gives must quote text that's really on the page, or it's ignored, and the server converts
+the units itself. Shops that refuse automatic reading (on 2026-11-05: West Elm, Wayfair, Crate & Barrel, Pottery Barn, Amazon) get "This shop blocks
+automatic reading: paste the image link and size instead." with a button to switch to **Image link**. The reader
+introduces itself as `midstudy/1.0 (product page reader)` and never downloads the pictures itself.
+
 The same from the command line (the planner picks it up on reload):
 
 ```sh
 nix develop -c uv run --project pipeline midstudy-add chair.jpg --name "Strandmon wing chair" --dims 82x96x101
+nix develop -c uv run --project pipeline midstudy-add chair.jpg --engine sam3d --name "Morris chair" --dims 70x80x95
 nix develop -c uv run --project pipeline midstudy-add chair.glb --engine glb --name "Sheen chair" --dims 60x65x85
 nix develop -c uv run --project pipeline midstudy-add rug.jpg --engine rug --name "Zen rug" --dims 160x230x1
 nix develop -c uv run --project pipeline midstudy-add --help
@@ -116,7 +148,11 @@ All evals are free: fal is mocked, and they set the mock variables, a $0 cap and
 
 ```sh
 nix develop -c npm install                  # once
-nix develop -c npm run eval:all             # E1, E3–E9, E11, E12, E16 (about 8 min)
+nix develop -c npm run eval:all             # E1, E3–E9, E11–E16 (about 12 min)
+nix develop -c npm run eval:product         # E14: the product page reader on made-up shop pages (seconds)
+nix develop -c npm run eval:product-ui      # E15: the Product page form, desktop and phone
+nix develop -c npm run eval:product-live    # the golden set of real shop pages, from saved copies (-- --live: the web)
+nix develop -c npm run eval:lighting        # E16: lighting from the photo, desktop and phone (about 2 min)
 nix develop -c npm run eval:calib           # E2: real MoGe-2 on the golden scenes and fixtures/photos/
 nix develop -c npm run eval:calib -- --mock # E2 ingest only, no model (seconds)
 nix develop -c npm run eval:real            # the real path end to end on a photo from fixtures/photos/

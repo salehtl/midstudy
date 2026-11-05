@@ -2,7 +2,7 @@
 
 The shared spec between the **planner** (`planner/`, with its server `planner/serve.py`), the **calibration** CLI (`calib/`, `midstudy-calib`) and the **furniture pipeline** (`pipeline/`, `midstudy-add`). They share only the files and HTTP routes described here. Conventions (units, axes, item frame, slugs) are in [CLAUDE.md](../CLAUDE.md) and apply everywhere. [PLAN.md](../PLAN.md) is the plan; where this file and PLAN.md disagree, PLAN.md wins and this file gets fixed.
 
-Sections 1–3 are nook's contract with the scan, rooms, iOS, Spark and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals.
+Sections 1–3 are nook's contract with the scan, rooms, iOS and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals. **v1.1 (2026-11-05, PLAN.md §12):** the `idol` engine (the default), the stand-in box for splat-only items, `splat.spz`, per-axis splat fitting, and the planner drawing splats with Spark (§1, §3.2, §3.4, §4.5 Splats).
 
 Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json), [lighting.schema.json](lighting.schema.json).
 
@@ -13,8 +13,9 @@ Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout
 ```
 library/library.json          furniture library (library.schema.json); versioned in git
 library/costs.csv             one row per paid or mock call: date,id,engine,cost_usd,mock,input; versioned in git
-library/<id>/model.glb        normalized mesh, always present
-library/<id>/splat.ply        normalized 3DGS splat, optional (kept in the format; the v1 planner draws GLB only)
+library/<id>/model.glb        normalized mesh, always present (for `idol`: a stand-in box at dims_cm, never drawn)
+library/<id>/splat.ply        normalized 3DGS splat, optional (`idol`, `sam3d`)
+library/<id>/splat.spz        the same splat compressed for drawing (gzipped SPZ), written with every splat.ply
 library/<id>/thumb.jpg        square thumbnail, optional
 library/<id>/source.<ext>     the input image or model, as given (camera metadata included: never served)
 library/<id>/raw/             untouched engine outputs (debugging only, never served)
@@ -30,10 +31,11 @@ renders/<name>.jpg ...        renders (§2.6, §4.7)
 
 ### Normalized assets
 
-Both `model.glb` and `splat.ply` are stored **already in the item frame**: no runtime transform is needed beyond the item's placement.
+`model.glb`, `splat.ply` and `splat.spz` are stored **already in the item frame**: no runtime transform is needed beyond the item's placement.
 
-- **`model.glb`**: axis-aligned bounds have footprint center at x = z = 0 (±1 cm), min y = 0 (±0.5 cm), and size equal to `dims_cm` within **2 % per axis** (X = w, Y = h, Z = d). Materials and textures from the source are preserved.
-- **`splat.ply`**: standard 3DGS PLY, fitted with a **uniform** scale that matches height (1st–99th percentile of positions: height within 5 % of `dims_cm.h`, min y within ±3 cm of 0, footprint center within 5 cm of the origin).
+- **`model.glb`**: axis-aligned bounds have footprint center at x = z = 0 (±1 cm), min y = 0 (±0.5 cm), and size equal to `dims_cm` within **2 % per axis** (X = w, Y = h, Z = d). Materials and textures from the source are preserved. **Stand-in:** an `idol` item has no mesh (Idol makes only a splat), so its `model.glb` is a plain box exactly at `dims_cm` (one untextured material). The planner never draws it; it gives the item its exact size for selecting, dragging, stacking, `worldBounds` and the contact shadow (§4.5 Splats). An item is a stand-in exactly when `source.engine` is `idol`.
+- **`splat.ply`**: standard binary 3DGS PLY (`x y z f_dc_0..2 opacity scale_0..2 rot_0..3`, plus `f_rest_*` only when nothing rotated them; `nx ny nz` dropped), fitted **per axis**: the extent of the splat centers equals `dims_cm` on each axis, and each Gaussian's covariance is stretched by the same scale (Σ' = S Σ S, written back as `scale_*` and `rot_*`). The **extent** is a percentile range of the centers, by engine: the **1st–99th** for `sam3d` (its splat has floaters; this range matches its GLB within 1 %, measured on the fixture) and the **0.1th–99.9th** for `idol` (dense and nearly floater-free: the 1st–99th cuts 3–7 % of the real surface, measured on the fixture), the 1st–99th for anything else. Checks, on that extent: size within **2 % per axis** of `dims_cm`, min y within ±1 cm of 0, footprint center within 1 cm of the origin.
+- **`splat.spz`**: the splats of `splat.ply`, same frame, same positions (Spark reads both as they are), as **SPZ version 2** (Niantic's format), gzip-compressed: a 16-byte little-endian header (`0x5053474e` "NGSP", version 2, the count, SH degree 0, 12 fractional bits, flags 0, reserved 0), then positions (24-bit fixed point), alphas, colours, scales, rotations (3 bytes, the quaternion's x y z with w ≥ 0). At most **262,144** splats: above that, the ones that cover the least are dropped: they are ranked by opacity × the area of their two largest axes (a live SAM 3D splat has 760,000–880,000; ranking by opacity alone kept only its small inner splats). This is what the planner draws: **at most 6 MB**. Every write of `splat.ply` (add and `--rescale`) writes it too.
 
 ---
 
@@ -41,7 +43,7 @@ Both `model.glb` and `splat.ply` are stored **already in the item frame**: no ru
 
 A static web app in `planner/` (three.js `0.180.0` via importmap, no build step) plus `planner/serve.py` (Python stdlib only). Sections 2.1–2.10 keep nook's numbering, which the code's comments cite. What's new for scenes is in §4.
 
-> **State since the integration commit:** `planner/` implements §4 (scenes, the locked photo camera, occlusion, Adjust floor, keep-room renders, Compare); rooms, splats, Spark, the shell, hanging, retrain and `--scan-api` are gone.
+> **State since the integration commit:** `planner/` implements §4 (scenes, the locked photo camera, occlusion, Adjust floor, keep-room renders, Compare); rooms, the shell, hanging, retrain and `--scan-api` are gone. Splat items came back in v1.1 (§4.5 Splats), drawn with Spark; splat rooms did not.
 
 ### 2.1 Server
 
@@ -52,7 +54,7 @@ python3 planner/serve.py [--port 8765] [--host 127.0.0.1] [--library-dir library
                          [--daily-spend-usd 2] [--allowed-host NAME ...]
 ```
 
-- Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types, `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
+- Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types (`.spz` is `application/octet-stream`, sent as stored: no `Content-Encoding`), `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
 - All `/api` responses are JSON (errors are `{"error": "<one sentence>"}`).
 - Removed from nook: `/api/room`, `/api/rooms*`, `--room-file`, `--room-dir`, `--scan-api` and `/api/scan/*`, flat (scene-less) layouts.
 - Evals and agents always start it with `MIDSTUDY_NO_DOTENV=1`, `MIDSTUDY_FAL_MOCK=fixtures/fal` and `--daily-spend-usd 0` (§5.3).
@@ -79,7 +81,7 @@ interface Midstudy {
   ready: Promise<void>                       // first page state settled (a scene opened, or the Scenes page shown)
   errors: string[]
   getLibrary(): LibraryItem[]                // items from library.json, as-is
-  addItem(id: string, opts?: { position?: [x, y, z], rotation_y_deg?: number }): Promise<string>  // resolves with a new uid
+  addItem(id: string, opts?: { position?: [x, y, z], rotation_y_deg?: number }): Promise<string>  // resolves with a new uid once what it draws (GLB or splat) has loaded
   moveItem(uid: string, opts: { position?: [x, y, z], rotation_y_deg?: number }): void
   selectItem(uid: string | null): void       // as a tap on the item; null clears the selection
   removeItem(uid: string): void
@@ -95,6 +97,7 @@ interface Midstudy {
   libraryJobs(): Promise<LibraryJob[]>
   addItemFromFile(file: File, meta: Meta): Promise<LibraryJob>
   addItemFromUrl(url: string, meta: Meta): Promise<LibraryJob>
+  readProductPage(url: string, opts?: { llm?: boolean }): Promise<ProductResult>  // §2.11; adds nothing
   editLibraryItem(id: string, patch: object): Promise<Item | LibraryJob>
   removeLibraryItem(id: string): Promise<void>
   restoreLibraryItem(id: string): Promise<Item>
@@ -150,6 +153,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 | `GET /api/library` | | `200` the `library.json` (empty `items` when there's none), plus `"trash": [{id, name, deleted}]` |
 | `POST /api/library/items` | **Raw body**, `Content-Length` required. Headers: `X-Midstudy-Kind: model \| image`, `X-Midstudy-Filename: <name.ext>`, `X-Midstudy-Meta: <base64 of JSON meta>` | `202 {job, cost_usd_estimate}` |
 | `POST /api/library/items/from-url` | JSON `{image_url, ...meta}` | `202 {job, cost_usd_estimate}` |
+| `POST /api/library/product` | JSON `{url, llm?}` | `200` what the product page says (§2.11); adds nothing |
 | `GET /api/library/jobs` | | `200 {"jobs": [job, ...]}`, newest first |
 | `GET /api/library/jobs/<id>` | | `200` the job object itself, or `404` |
 | `PATCH /api/library/items/<id>` | any of `name`, `category`, `mount`, `yaw` (0/90/180/270, relative), `default_render`, `dims_cm` | `200` the item, or `202 {job}` when `dims_cm` or `yaw` changed |
@@ -157,7 +161,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 | `POST /api/library/items/<id>/restore` | | `200` the item (newest trashed copy), `404` when none, `409` when the id exists again |
 | `PUT /api/library/items/<id>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB (the planner's render of the model) | `200` the item: `<id>/thumb.jpg` written without metadata (§2.6), `assets.thumb` set; `404` unknown id, `400` not a JPEG, `413` over 2 MB, `503` while a job holds the library |
 
-**Meta:** `name` and `dims_cm` `{w,d,h}` required; `id` (default: slug of `name`), `category`, `mount`, `yaw`, `engine` (`sam3d` \| `trellis2` \| `rug` for images; `glb` for models), `prompt`, `resolution`. Anything wrong is `400` with one actionable sentence.
+**Meta:** `name` and `dims_cm` `{w,d,h}` required; `id` (default: slug of `name`), `category`, `mount`, `yaw`, `engine` (`idol` (default) \| `sam3d` \| `trellis2` \| `rug` for images; `glb` for models, where any other engine is a `400`), `prompt`, `resolution`. `cost_usd_estimate` is the engine's price from §3.2 ($0.10 for `idol`). Anything wrong is `400` with one actionable sentence.
 
 **Bodies:** `model` is a `.glb`, or a `.zip` holding one `.obj` with its `.mtl` and textures (`.usdz`: "convert to GLB first"); `image` is a JPEG, PNG, HEIC or WebP. **Limits:** models 200 MB, images 20 MB (`413`), `411` without a length. Zips: only `.obj .mtl .png .jpg .jpeg` extracted; no absolute paths, `..` or links; at most 500 MB unpacked and 1,000 entries. Uploads land in a private temp folder, never under a served path.
 
@@ -165,7 +169,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 
 **One writer:** every library write takes `<library>/.lock` (`flock`); PATCH, DELETE and restore wait up to 60 s for a running job, then answer `503`.
 
-**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `thumb.jpg`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `source.<ext>` (the upload as given: a phone photo's EXIF and GPS), `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
+**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `splat.spz`, `thumb.jpg`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `source.<ext>` (the upload as given: a phone photo's EXIF and GPS), `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
 
 **Privacy:** what an image engine uploads to fal is `raw/engine-input.jpg` (or `.png` with transparency), a copy made by `midstudy-add`: EXIF orientation applied, no EXIF, GPS, XMP, IPTC or comments (the ICC profile stays). `source.<ext>` keeps the original and is never served. A model's embedded textures lose their camera metadata in `model.glb` (JPEG: APP1–APP15, comments, JFIF thumbnails and JFXX, anything after EOI; PNG: `eXIf`, `tEXt`, `iTXt`, `zTXt`, `tIME`), the image data kept as it is: a user's own GLB can embed a geotagged photo, and `model.glb` is served.
 
@@ -181,6 +185,7 @@ These rules apply to every `POST`, `PUT`, `PATCH` and `DELETE` that `serve.py` a
 - **Paths:** static paths are normalized (percent-decoding, `.` and `..`) **before** any rule about what is served, so `/./library/costs.csv` gets the same `404` as the plain path. The same holds for `/scenes/`.
 - **Spend cap:** `--daily-spend-usd N` (default `2`; a flag only, no route changes it) covers every paid call: library adds and `/api/render`. It reads `<library-dir>/costs.csv`, the file `midstudy-add` writes, so a `--costs-file` that isn't that file is refused at startup. A call that costs more than the whole cap gets a `402` that says so. Before a paid call the server reserves the estimate against today's (UTC) total from `costs.csv`; a request that would cross the cap gets `402 {"error", "spent_usd", "cap_usd"}` and no call is made. Mock calls cost $0 and count for nothing (unless `MIDSTUDY_FAL_MOCK_COST=1`). `GET /api/spend` → `{"day", "spent_usd", "reserved_usd", "cap_usd"}`. Cost rows are appended under `costs.csv.lock`.
 - **URL fetches** (from-URL add): the server downloads the image itself (http/https only, host resolved once and pinned, every redirect re-checked, at most 3, 20 s, 20 MB, `image/*` only). Private, loopback, link-local, CGNAT, tailnet and multicast addresses (and their IPv4-mapped forms) are refused with `400`. `MIDSTUDY_FETCH_ALLOW=<host>:<port>` (evals only) exempts exactly one address.
+- **Page fetches** (product page, §2.11, added 2026-11-05): the same address rules (resolved once and pinned, every redirect and every hop re-checked, private addresses refused with `400` before any connection, `MIDSTUDY_FETCH_ALLOW` the only exemption), at most **5** redirects, **20 s** for the page and its feeds together, the first **10 MB** of the page (the rest is cut, with a warning), feeds 2 MB, `gzip`/`deflate` bodies decoded within the same limits, `User-Agent: midstudy/1.0 (product page reader)`, no cookies kept. Only `text/html` or `application/xhtml+xml` pages (feeds: JSON or `text/javascript`). Feeds go to the page's own origin only. The server **never downloads the page's pictures**: it only lists their links; the one the user picks goes through the from-URL add above, with its own checks.
 
 Acceptance: W1 forged mutations get `403` everywhere; W2 with `--daily-spend-usd 0.03` and `MIDSTUDY_FAL_MOCK_COST=1`, the second $0.02 add is `402`; W3 private URLs are refused without a connection; W4 `/library/costs.csv`, `.trash/`, `raw/` and `source.*` are `404`, in any case or spelling.
 
@@ -188,39 +193,92 @@ Acceptance: W1 forged mutations get `403` everywhere; W2 with `--daily-spend-usd
 
 A placed item's `position[1]` is its bottom's height above the floor, 0–4 m (clamped). Desktop: `Shift`+drag or `PageUp`/`PageDown` (1 cm, 10 cm with `Shift`). Phone: an **Up / Down** control (drag handle, `+`/`−` buttons of 1 cm that repeat when held, the height in cm, editable). A raised item (bottom > 2 cm up) drops its contact shadow and shows a faint guide line to the floor while selected. **Drop to floor** puts it back at 0. Handles: `elev-up`, `elev-down`, `elev-value`, `drop`. Library items may still carry `mount: "wall"`; v1 places them on the floor like any other item.
 
+### 2.11 Product page (added 2026-11-05)
+
+Paste a shop's product link; the server reads the page and answers what it found. **It adds nothing**: the planner prefills the Add furniture form, the user checks it, and **Make** posts the chosen picture to `from-url` (§2.8) as any image-link add. The extractor is `planner/product_page.py` (stdlib only, loaded by `serve.py` from its own folder, so it works under `python3 -I`).
+
+`POST /api/library/product` with JSON `{"url": "https://…", "llm"?: true}` (§2.9 rules: `X-Midstudy`, `Origin`, `Host`). `llm: false` skips the language model (layer 4).
+
+**200** (field order is free; every key is always present):
+
+```json
+{ "url": "<the page's final URL, after redirects>",
+  "name": "BILLY bookcase, black oak effect" | null,
+  "category": "bookcase" | null,
+  "is_rug": false,
+  "dims_candidates": [
+    { "w": 80.0, "d": 27.9, "h": 106.0, "unit": "in", "label": "31 1/2x11x41 3/4\"" | null,
+      "unit_note": "from inches: 31 1/2 × 11 × 41 3/4 in" | null, "notes": ["length read as width"],
+      "quote": "<the text the numbers came from, ≤ 200 chars>", "source": "jsonld" } ],
+  "variants": [ { "label": "8' x 10'", "dims_index": 3 | null } ],
+  "images": [ { "url": "https://…/front.jpg", "w": 2000 | null, "h": 2000 | null, "kind": "product" } ],
+  "source_layers_used": ["jsonld", "opengraph"],
+  "cost_usd": 0, "mock": false,
+  "warnings": ["<one sentence each>"] }
+```
+
+- **`dims_candidates`**: every distinct size reading, **best first**, in **cm** rounded to 0.1. `w`, `d`, `h` are > 0, or `h` is null when the page has no height (not for a rug: below). `unit` is the unit the page used (`cm`, `mm`, `m`, `in`, `ft`); `unit_note` says how it was converted when that wasn't cm; `notes` say how labels were mapped. `quote` is the page text, structured value or feed text the numbers came from. `source`: `jsonld`, `microdata`, `shopify`, `woocommerce`, `text` or `llm`. Readings within 0.5 cm on every axis are one candidate (the better source's). At most 16.
+- **Order:** a shop's size options (variants) in the shop's order, its default first; else explicit `width`/`depth`/`height` in JSON-LD or microdata; feeds; then page text (a reading introduced by "overall", "dimensions" or "assembled" before others); then `llm`.
+- **Mapping:** labels win: W/width, D/depth, H/height (also before or after the number: `200W x 90D x 85H cm`, `34 H x 84 W x 38 D in`, `200 (W) x 90 (D) x 85 (H) cm`, `18" Dia x 22" H`; and Breite/Tiefe/Höhe, largeur/profondeur/hauteur, ancho/fondo/alto, larghezza/profondità/altezza, breedte/diepte/hoogte). An **order key** next to unlabelled numbers sets their axes: `200 x 90 x 85 cm (W x D x H)`, `W x D x H: 84 x 38 x 34 in`, `(HxWxD): 180 x 80 x 40 cm`. **L/length is read as width** (note "length read as width"); when the same reading also labels a W, the longer of the two is the width and the other the depth (`78.7"L x 35.4"W` is a sofa 199.9 wide; Floyd's `16” W x 13” L` keeps W 16), except on a bed, whose length runs head to foot and is the depth. A WooCommerce `dimensions` field (length × width × height) is read w = length, d = width, h = height (note). An unlabelled triple "A × B × C" is W × D × H (note "read as W × D × H"). Rug sizes ("8' x 10'", "160 x 230 cm", "3*4") are W × D in the order given. An unlabelled pair in a structured size (JSON-LD `size`, a variant) on a piece that isn't a rug is W × D with `h` null (note "read as W × D"); in page text such pairs are left out as too ambiguous. Readings introduced by box, package, packaging, carton, shipping, seat, arm, leg, drawer, cushion, interior, opening, clearance or shelf depth are not the piece's size and are left out. Page text inside header, footer, nav, aside or a related / recommended / "complete the look" block counts only when the rest of the page has no size. A range (`W 180–220 cm`) is read as its smaller end, with the note "width extends to 220 cm". One size written twice (also in two units, within 1 %) is one candidate, the metric one.
+- **Units:** cm, mm, m; inches (`"`, `″`, `”`, `''`, in, inch, inches) and feet (`'`, `′`, `’`, ft, feet, foot), feet and inches together (`7' 6"`), fractions (`31 1/2`, `41 ¾`), decimal commas (`80,5 cm`). 1 in = 2.54 cm, 1 ft = 30.48 cm. A size with **no unit** in structured data or a size option takes the unit the page measures in elsewhere (`(m)`, `cm`, `in`…), with a note ("no unit on the page: read as m, as the page's other sizes"), or cm when that unit would make it implausible (`160*230` on a page that measures in m); with no hint it is left out with a warning. Size options that can't be read at all are named in a warning. In page text, unitless numbers count only on a line that is little more than the size (an `<option>`) or when labelled. A reading outside 1–2000 cm on any axis is left out.
+- **Rugs:** `is_rug` is true when rug, carpet, runner, kilim, dhurrie or tapis is the head noun of the name, category, a breadcrumb or the product type (the category rule below: "Kilim Ottoman" is an ottoman). A rug's `h` is its thickness (wins), pile height, pile or height (≤ 5 cm) when the page gives one (a unitless `Thickness: 0.25` is inches on a page in inches or feet, else cm, with a note), else **1** with the note "thickness not on the page: 1 cm assumed". The planner then picks the Flat rug engine.
+- **`variants`**: the shop's size options, when it has more than one (Shopify options named Size/Dimensions, WooCommerce size attributes, JSON-LD `hasVariant` sizes, offer names), without samples or swatches. **The size the link names comes first** (Shopify `?variant=<id>`, matched to the feed's variants or JSON-LD urls; WooCommerce `?attribute_pa_<size>=<slug>`), with the note "the size picked in the link"; else the shop's default. `dims_index` points into `dims_candidates`, null when that label couldn't be read. Empty when the page has one size.
+- **`category`**: one plain word or two from the name, product type or breadcrumbs (rug, sofa, armchair, chair, stool, bench, coffee table, side table, dining table, table, desk, bed, bedside table, dresser, wardrobe, bookcase, shelf, cabinet, sideboard, tv stand, lamp, mirror, ottoman, plant), or null: the keyword that ends last, outside brackets ("Desk Lamp" is a lamp, a sofa bed a sofa).
+- **`images`**: the product's pictures, at most 12, product first (JSON-LD `image`, feed images, then `og:image`, then large `<img>` in the product area: at least 500 px on the long side, a file name or alt text sharing a word with the name or the link, and not inside header, footer, nav, aside or a related / recommended / upsell / cart / menu / reviews block), absolute `https`/`http` links only (no `data:`, protocol-relative links get `https:`), never to a private, loopback or `.local` address (the browser would request it), one per picture (the same host and path with other size parameters or scheme is one; its largest copy, https over http, is kept). `kind`: `product`, `variant`, `og` or `page`. The planner shows them with `referrerpolicy="no-referrer"`.
+- **`source`**: sizes from feed descriptions, meta or JSON-LD descriptions and script strings are `text` (layer 3); `shopify` and `woocommerce` are those feeds' own options and dimensions.
+- **`cost_usd`**: what the language model cost (0 without it); `mock` is true only when the model was called in mock mode. `source_layers_used` lists `llm` only when the model was called (not when it was skipped).
+- **`warnings`**: what the user should know (a cut page, a feed that failed, the model skipped and why, a model quote not found on the page).
+
+**Layers**, cheapest and most exact first; a later layer runs only for what is still missing:
+
+1. **The page** (§2.9 Page fetches).
+2. **Structured data, free:** schema.org `Product` / `ProductGroup` in JSON-LD (also inside `@graph` and arrays; `width`/`depth`/`height` as text or `QuantitativeValue` with `unitCode` CMT, MMT, MTR, INH, FOT or `unitText`; `size`; `additionalProperty` named width, depth, height, length, size or dimensions; `hasVariant`; `image` as a string, list or `ImageObject` `url`/`contentUrl`) and microdata (`itemprop`); OpenGraph `og:title`, `og:image` (`og:image:width`/`height`), then `<title>`. **Platform feeds**, one request each, same fetch rules, origin only: **Shopify** (the page shows `cdn.shopify.com` or `Shopify.`): `GET <page path without query>.js`; **WooCommerce** (`woocommerce` in the page or a `/wp-json/` link): `GET <origin>/wp-json/wc/store/v1/products?slug=<the page path's last segment>`. A feed that fails is skipped (a 429 from Shopify is common).
+3. **Page text, free:** the visible text (no scripts, styles or templates), the feeds' descriptions, and the string values inside inline scripts that mention a size (shops that render the page in the browser keep "Dimensions (Overall): 71.18 Inches (H) x …" in a JSON blob). Only readings with an explicit unit, or a page unit hint as above.
+4. **A small language model, only when no size was found** (and `llm` isn't false): fal `openrouter/router` (`https://fal.run/openrouter/router`, `Authorization: Key $FAL_KEY`, §3.3) with `model: "anthropic/claude-haiku-5.5"`, `temperature: 0`, `max_tokens: 600`, a fixed `system_prompt` and the cleaned page text (at most 20,000 characters, the parts around size words first) between `<page>` markers. The page is **data**: the system prompt says that nothing inside it is an instruction, and the output is only ever used as data. The model answers JSON `{"dims": [{"label", "w", "d", "h", "unit", "quote"}], "name": {"value", "quote"} | null}`. The server keeps a size only when its **`quote` is found in the page text** (whitespace collapsed, case ignored), the quote holds every number given, and `unit` is one of cm, mm, m, in, ft; it then converts the units itself. Anything else is dropped with the warning "the language model gave a size that isn't on the page, so it was ignored". At most 8 sizes.
+   - **Money:** under $0.001 a page ($0.10 / $0.50 per million tokens in / out; measured live on 2026-11-05: $0.00008–0.00025). Before the call the server reserves **$0.002** against the daily cap (§2.9) and releases it after. It records `usage.cost` from fal's answer when present, else the tokens at that price, in `costs.csv` (`engine` = `product:llm`, `id` = `product-<host slug>`, `input` = the page URL without its query), also when the answer is unusable. A call fal refuses (an HTTP error) writes no row and adds a warning. Over the cap, without `FAL_KEY` (outside mock mode), or with `llm: false`, the model is skipped with a warning and the rest still answers `200`.
+   - **Mock** (`MIDSTUDY_FAL_MOCK=<dir>`): no call; the answer is `<dir>/openrouter-router/<slug>.json`, `<slug>` being the page URL's last path segment (lowercased, anything but `a-z0-9-` turned into `-`), else `<dir>/openrouter-router/response.json` (a model that finds nothing). Files hold fal's answer verbatim (`{"output": "<the model's text>", "usage": {…}}`). Mock calls cost $0 and write a `mock: true` cost row (the $0.001 estimate with `MIDSTUDY_FAL_MOCK_COST=1`).
+
+**Errors:** `400` with one sentence for a body without `url`, a link that isn't http(s), is malformed, has no host, doesn't resolve, or resolves to a private address. A link's `user:password@` and `#fragment` are never kept (not in `url`, not in `costs.csv`). The work after the download is bounded too (10 s, then `422` "the page took too long to read"); no page can hold the server: size patterns run in linear time. `422 {"error", "blocked": true}` when the shop refuses (401, 403, 429, 503, or a `200` that is a robot check with no product data in it): **"This shop blocks automatic reading: paste the image link and size instead."** (a 429 adds "or try again in a minute"). `422 {"error"}` when the link isn't a web page (an image: "that's a picture: use Image link"), answers another error, times out, or holds no product (no name and no picture).
+
+**Planner:** Add furniture gets a **Product page** source: a link field, **Read** (a loading state while it reads), then the form prefilled: Name, W × D × H (a size picker when there are several candidates), Category (when empty), the Flat rug engine when `is_rug`, a strip of the page's pictures to choose from (the first chosen), and the notes (unit notes, warnings, and what the model cost). Every field stays editable; nothing is added until **Make**, which sends the chosen picture to `addFromUrl`. A blocked page shows the error with a way to switch to **Image link**. The route's `4xx` answers are the page's answer, shown in the form and not pushed to `window.midstudy.errors`; a server that doesn't answer, or a `5xx`, is an app error (§2.3). Product page is the first source and the default; on the phone its button reads "Product". Desktop and phone (390 px: no sideways scroll, targets ≥ 44 px). Handles: `lib-src-product` (the source button), `product-url`, `product-read`, `product-status`, `product-size` (each size choice, with `data-index`), `product-pic` (each picture, with `data-index`), `product-notes`, `product-error`, `product-use-link`. Hook (§2.4): `readProductPage(url: string, opts?: { llm?: boolean }): Promise<ProductResult>` (the `200` body; rejects with the error sentence).
+
+Acceptance: `npm run eval:product` (synthetic pages in `fixtures/product-pages/`, model mocked, $0, in `eval:all`), `npm run eval:product-ui` (the form, desktop and phone, in `eval:all`), `npm run eval:product-live` (the golden set in `evals/product_golden.json` against the real shops, no model unless asked; not in `eval:all`).
+
 ---
 
 ## 3. Pipeline (carried)
 
-A uv project in `pipeline/` (Python 3.12), console script `midstudy-add`, package `midstudy_pipeline`. No feature work in v1.
+A uv project in `pipeline/` (Python 3.12), console script `midstudy-add`, package `midstudy_pipeline`. v1.1 added the `idol` engine, the stand-in box, `splat.spz` and per-axis splat fitting (PLAN.md §12).
 
 ### 3.1 CLI
 
 ```
 uv run --project pipeline midstudy-add INPUT --name NAME --dims WxDxH
-    [--id SLUG] [--category TEXT] [--engine sam3d|trellis2|glb|rug] [--prompt TEXT]
+    [--id SLUG] [--category TEXT] [--engine idol|sam3d|trellis2|glb|rug] [--prompt TEXT]
     [--yaw 0|90|180|270] [--resolution 512|1024|1536] [--library DIR] [--notes TEXT] [--mount floor|wall]
 uv run --project pipeline midstudy-add --rescale ID [--dims WxDxH] [--yaw 0|90|180|270] [--library DIR]
 ```
 
-- `INPUT`: a local image or image URL (`sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
+- `INPUT`: a local image or image URL (`idol`, `sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
 - `--dims`: centimeters `W x D x H` (`x` or `×`, spaces and decimals allowed). Required for adds.
-- `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `sam3d`.
+- `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `idol`.
 - Image engines get a metadata-free, upright copy of the photo (`raw/engine-input.<ext>`, §2.8 Privacy); `source.<ext>` keeps the input as given.
 - `--yaw`: extra rotation around Y after the engine's default orientation; positive is counterclockwise seen from above, so `--yaw 90` turns +X into −Z. The planner's `rotation_y_deg` uses the same sign.
 - `--rescale ID` refits an existing item from its normalized assets: no model call, `cost_usd: 0`, no cost row.
-- Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}`. Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
+- Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}` (`paths.spz` beside `paths.splat`). Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
 
 ### 3.2 Engines
 
 | `--engine` | fal endpoint | arguments | cost recorded |
 |---|---|---|---|
-| `sam3d` (default) | `fal-ai/sam-3/3d-objects` | `image_url`, `prompt`, `export_textured_glb: true` | $0.02 |
+| `idol` (default) | `speridlabs/idol` | `image_url`, `image_type: "real"`, `num_gaussians: 262144` | $0.10 |
+| `sam3d` | `fal-ai/sam-3/3d-objects` | `image_url`, `prompt`, `export_textured_glb: true` | $0.02 |
 | `trellis2` | `fal-ai/trellis-2` | `image_url`, `resolution` | $0.25 / $0.30 / $0.35 for 512 / 1024 / 1536 |
 | `glb` | none | | $0.00 |
 | `rug` | none | | $0.00 |
 
 - **`sam3d` when it finds nothing** (fal 422 "Auto-segmentation produced no masks", refused before running, so not charged): it asks again with `detection_threshold: 0.2`, then with `mask_urls` holding a mask of the piece (`raw/mask.png`: the picture without its plain margin, or the whole picture), then fails with one plain line. `MIDSTUDY_FAL_MOCK_NO_MASKS=N` (evals) makes the first N mocked calls answer that way.
+- **`idol`** (added 2026-11-05; [speridlabs/idol](https://github.com/speridlabs/idol-sdk), Apache-2.0): one picture of one object to a 3D Gaussian splat. It removes the background and frames the object itself. The response has `model_mesh` (the splat, a PLY despite the name: the only file fetched), `model_glb` (a point-cloud preview of the splat centers, not fetched), `preprocessed_image` (not fetched), `camera` (`yaw`, `pitch` in radians, `radius`, `fov` in degrees: the predicted view of the input) and `num_gaussians`. Measured live: 15 s, 262,144 splats, DC colour only, 17.8 MB. No mesh: `midstudy-add` writes the stand-in box `model.glb` (§1) and `default_render: "splat"`; `prompt` is null. A failed call that fal charged keeps its outputs in `<library>/_failed/`, as for the other engines.
 - **`rug`** (added 2026-11-05): a rug pictured from straight above (a shop's picture) laid flat, with no model call. The picture's plain margin is cropped, it is turned a quarter when that matches W × D better, and it becomes the unlit top face of a W × D × H slab (H is the thickness, about 1 cm; sides in the rug's edge colour). The picture's top edge is the back (−Z). GLB only, no splat; `prompt` is null.
 
 The engines' frames are in `fixtures/fal/NOTES.md`.
@@ -228,11 +286,11 @@ The engines' frames are in `fixtures/fal/NOTES.md`.
 ### 3.3 Credentials and mock mode
 
 - `FAL_KEY` from the environment, else from `.env` at the repo root, unless `MIDSTUDY_NO_DOTENV=1`.
-- **`MIDSTUDY_FAL_MOCK=<dir>`**: no network calls to fal. Each call returns `<dir>/<slug>/response.json` (`sam-3-3d-objects`, `trellis-2`), file URLs resolve to `<dir>/<slug>/files/<basename>`. Mock runs record `mock: true`, `cost_usd: 0`; `FAL_KEY` isn't needed. `MIDSTUDY_FAL_MOCK_COST=1` (evals only) records the real price instead.
+- **`MIDSTUDY_FAL_MOCK=<dir>`**: no network calls to fal. Each call returns `<dir>/<slug>/response.json` (`sam-3-3d-objects`, `trellis-2`, `speridlabs-idol`: the endpoint without `fal-ai/`, `/` → `-`), file URLs resolve to `<dir>/<slug>/files/<basename>`. Mock runs record `mock: true`, `cost_usd: 0`; `FAL_KEY` isn't needed. `MIDSTUDY_FAL_MOCK_COST=1` (evals only) records the real price instead.
 
 ### 3.4 Normalization, library entry, acceptance
 
-Orientation from NOTES.md, then `--yaw`; translate to the footprint center and min y = 0; scale (GLB per axis, splat uniformly); write; self-check (§1) and refuse to upsert a bad item. The entry has `id, name, category, dims_cm, assets, default_render, source {engine, input, prompt, cost_usd, mock, created}, fit`; then a cost row; writes are atomic; every write takes `<library>/.lock`. `npm run eval:pipeline` (L1–L7 and the v4 additions) must pass.
+Orientation from NOTES.md, then `--yaw`; translate to the footprint center and min y = 0; scale per axis (GLB, and splat with its covariances, §1); write (`splat.spz` from the written `splat.ply`); self-check (§1) and refuse to upsert a bad item. The entry has `id, name, category, dims_cm, assets {glb, splat, spz, thumb}, default_render, source {engine, input, prompt, cost_usd, mock, created}, fit` (`source.input`: a URL as given, a local file by its name only, never a path; the server passes the upload's name); `default_render` is `"splat"` when the item has a splat (`idol`, `sam3d`), else `"glb"`; then a cost row; writes are atomic; every write takes `<library>/.lock`. `npm run eval:pipeline` (L1–L7 and the v4 additions) must pass.
 
 ---
 
@@ -408,7 +466,15 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 - **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth. `depth.png` is metric in the calibration's frame, so when the camera's `height_m` differs from `calib.json`'s (Adjust floor), the depth is scaled by `height_m / calib height_m` first; without a measured floor (`floor.found` false, or a fallback source) it is used as it is.
 - **Layouts:** per scene (§2.7), with unsaved-change warnings ("unsaved" means the pieces differ from the layout as saved or loaded, so Remove then Undo isn't). A scene opens with a layout: each device remembers the layout it last had open in each scene and when it chose it (saved, loaded, or none after deleting it); the scene reopens with that one, unless a layout was saved later on any device (`updated`), or the device has never had the scene open: then it opens with the most recently saved layout. So a reload keeps this device's choice, and the phone opens a scene with the layout the desktop just saved. Deleting a layout, a scene or a library item can be undone; deleted scenes are listed under Recently deleted on the Scenes page, with Restore.
 - **Render and Compare** (§4.7): in the Renders panel, pick two renders for a full-screen compare: side by side on desktop, a draggable split slider on both, swipe on the phone, and Swap A and B on both (`compare-swap`).
-- **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat drawing, LoD, True colour, Spark.
+- **Splats** (v1.1): [Spark](https://sparkjs.dev) `2.4.0` (`@sparkjsdev/spark`, `https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.4.0/dist/spark.module.js` in the importmap, beside three.js; no build step) draws splat items.
+  - An item **draws as a splat** when its library entry's `default_render` is `"splat"` and it has `assets.spz` (preferred: what phones can load) or else `assets.splat`; otherwise as its GLB. A missing or broken splat falls back to the GLB with a non-blocking error (§2.3 Errors).
+  - A splat item still loads its GLB, **never drawn** (no colour and no depth: writing depth would cut the splat), for picking, dragging, `worldBounds`, stacking and the contact shadow. So its size and bounds are exactly `dims_cm` (§2.5), as for a mesh. The splat is a child of the item's group: position, rotation and elevation move it, nothing else.
+  - **Occlusion** hides splats like meshes: they draw after the photo's depth pass and test against it (same 3 cm tolerance); between items, Spark sorts splats and meshes hide what's behind them.
+  - **Colour:** splat colours are photo colours (Idol and SAM 3D bake the light in), so they are not lit or tone-mapped (no ACES); Look's exposure and warmth apply to them as a plain multiplier, so a Look change still moves splats and meshes together, times the room's light (§4.8: `white_balance` and the share of the light the strength and ambient controls keep).
+  - **Render** (§4.7): the capture includes splat items, sorted for the capture camera; the keep-room mask covers them (their box is enough, as the mask is dilated anyway).
+  - **Shows as** (the library Edit sheet, `PATCH default_render`, §2.8): Splat or Mesh, offered only for items with a splat **and** a real mesh (`sam3d`); not for `idol` (its GLB is a stand-in box), nor for items without a splat. Placed copies switch at once.
+  - The contact shadow of a splat item never darkens the splat above its bottom 30 % (nook's depth-only proxy does this).
+- **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat rooms, LoD, True colour.
 
 ### 4.6 Hook additions (`window.midstudy`)
 
@@ -436,13 +502,15 @@ setLighting(partial: Partial<LookSettings>): void  // §4.8; live, clamped; the 
 resetLighting(): void                              // §4.8: back to the inferred light
 getState(): {
   scene: { name, title, camera: Camera, camera_source, floor_found, hasDepth, occlusion, adjustFloor } | null,
-  items: Array<{ uid, id, render: 'glb', position: [x, y, z], rotation_y_deg, worldBounds: { min, max }, missing?: boolean }>,
+  items: Array<{ uid, id, render: 'glb' | 'splat', splats?: number, position: [x, y, z], rotation_y_deg, worldBounds: { min, max }, missing?: boolean }>,
+                               // render: what is drawn (§4.5 Splats); splats: the number of splats drawn (splat items only);
+                               // worldBounds come from the GLB (the stand-in box for idol), whatever is drawn
   layout: string | null,       // the layout last loaded or saved
   dirty: boolean,              // unsaved layout changes
 }
 ```
 
-Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. `scene-card` elements also carry `data-scene="<name>"`.
+Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. v1.1: `lib-engine` (the Add form's Model choice: buttons with `data-value` = the engine and `aria-pressed`, in the order `idol`, `sam3d`, `trellis2`, `rug`, labels names only: Idol, SAM 3D, TRELLIS 2, Flat rug), `lib-cost` (its price box, e.g. "$0.10"), `lib-shows-as` (the Edit sheet's Shows as: buttons `data-value` `splat` / `glb`, labels Splat / Mesh, `aria-pressed`). `scene-card` elements also carry `data-scene="<name>"`.
 
 ### 4.7 Render
 
@@ -500,7 +568,7 @@ Moving the light direction or softness turns `auto_light` off and saves the valu
 
 **Planner:**
 - **Meshes:** with `lighting.json`, the light probe (rotated to the world frame) replaces `RoomEnvironment` and the hemisphere light (an environment map made from the same SH stays for reflections only: lit materials take their diffuse ambient from the probe alone), and one `DirectionalLight` comes from the key's world direction with its colour and intensity (times `light_strength`). Its shadow falls on an invisible floor at y = 0 (a shadow catcher: three.js `ShadowMaterial` or the same idea) composited over the photo with the furniture, so the photo's own pixels are only ever darkened where a piece's shadow falls and are otherwise exactly as they are (§4.5). Real things in the photo nearer than the floor hide the shadow as they hide the furniture (Occlusion). Contact shadows stay, as an option. Materials keep their own maps; only lit materials are affected. **Unlit materials** (KHR_materials_unlit, the Flat rug's top, the eval probe) keep exactly their colours, whatever the lighting settings (they may still cast a shadow).
-- **Splats** (Gaussian splats carry their source photo's light): colour-matched to the room instead of lit: exposure and white balance (`white_balance`, the ambient level), at most a weak directional term, using what the pinned Spark version supports. Their hidden mesh or stand-in box casts the floor shadow and receives no light.
+- **Splats** (Gaussian splats carry their source photo's light): colour-matched to the room instead of lit, in the splat pass's plain multiplier (§4.5): exposure × warmth × `white_balance.rgb` (the room light's colour, luminance 1) × level, where level = (A·ambient + K·light_strength) / (A + K) with A the probe's irradiance on an up-facing surface and K half the key's (1 at the defaults; without `lighting.json` the same with the v1 lights). No directional term. Their hidden GLB or stand-in box casts the floor shadow through a copy of it that draws nothing (no colour, no depth) but casts.
 - **Without `lighting.json`** (an older scene, a fallback calibration): the v1 lights exactly, no cast shadow unless `cast_shadows` is turned on; the controls still work on those lights (`auto_light` then means the v1 key direction).
 - **Backfill** (scenes calibrated before `lighting.json` existed): opening a scene whose `lighting_status` is `missing` starts `POST /api/scenes/<name>/light` (the `light` step alone: MoGe-2 on the photo and the fit, a few seconds, $0; no recalibration, the camera and depth stay). The planner keeps the v1 lights meanwhile, polls the scene, and lights the furniture as soon as `lighting.json` is there; Auto lighting then follows it. A scene that is `none` (no clear light) or `failed` keeps the v1 lights; Scene › Look offers **Infer lighting** to try again.
 - **Scene › Look** has: Auto lighting (`light-auto`) with Reset (`light-reset`), the light direction as a draggable sun handle or compass (`light-dir`: drag sets azimuth and elevation; it also works by touch), sliders for strength (`light-strength`), softness (`light-softness`), ambient (`light-ambient`), exposure (`look-exposure`) and warmth (`look-warmth`), and toggles for the floor shadow (`light-shadows`) and contact shadows (`contact-shadows`). Changes apply live and save themselves (`PUT /api/scenes/<name>` with `{look}` 0.7 s after the last change, and at once when another scene opens or the page hides), so the scene is never left unsaved by the Look; Save scene is for the camera. On the phone (390 × 844) every control is reachable by touch with targets ≥ 44 px and no sideways scroll.
@@ -559,6 +627,8 @@ Files in `fixtures/scenes/<id>/`:
 - `npm run eval:pipeline` (`evals/pipeline_offline.sh`): `midstudy-add` against `fixtures/fal`, offline, $0 (§3).
 - `npm run eval:library` (`evals/library_api.sh`): the library API, URL fetch rules and spend cap (§2.8–2.9), mocked, $0. Picks free ports unless `MIDSTUDY_EVAL_LIBRARY_PORT` is set.
 - `evals/validate_library.py <library.json>` checks any library against §1 and the schema; `evals/py` runs these helpers with pinned deps.
+
+v1.1 adds `npm run eval:splat` (E13, `evals/splat.mjs`, in `eval:all`): an `idol` add through the library API against the mock validates; on golden living-wide a splat probe (a magenta splat box with its stand-in box) and the Idol chair draw as splats at their true size and position, the photo hides the probe behind the sofa, Render's composite and keep-room mask include them, Shows as switches a `sam3d` item, GLB items and a Flat rug look the same with splats in the scene, the add form defaults to Idol at $0.10, and the phone (390 × 844) loads the Idol item's `splat.spz` (≤ 6 MB) within 30 s. `eval:pipeline` adds the `idol` engine and `splat.spz` checks.
 
 The evals track added PLAN.md §6.2 (`eval:scenes-api`, `eval:calib`, `eval:planner`, `eval:occlusion`, `eval:floor`, `eval:render`, `eval:phone`, `eval:all`; see `evals/README.md`). `npm run eval:real` (`evals/real_path.mjs`, not in `eval:all`) is the real path on this Mac: the default `--calib` (real MoGe-2) on the photos in `fixtures/photos/`, the real `midstudy-add` (GLB), fal mocked.
 

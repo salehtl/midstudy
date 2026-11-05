@@ -1,8 +1,8 @@
 # midstudy status
 
 As of 2026-11-05, branch `main` (`v1` fast-forwarded into it and pushed to GitHub). Every eval below was run on
-2026-11-05 on this Mac (M3 Max, MPS), with fal mocked. The only paid calls are the main session's live check (below,
-$0.10).
+2026-11-05 on this Mac (M3 Max, MPS), with fal mocked. The only paid calls are the live checks (below: v1 $0.10, the
+Idol check $0.1398, plus $0.10 to record Idol's mock) and the product page reader's (in its notes).
 
 **In short:** v1 is built and works end to end on the Mac: photo in, floor found, furniture placed, layouts saved,
 renders and Compare, now also checked against live fal. What's left is hosting on homeserver, which is packaged but has
@@ -15,14 +15,28 @@ never been built on Linux.
 - **Calibration.** The floor is found on your lounge photo despite the ultrawide lens, the reflective marble and the
   glass balustrade. A photo with an EXIF focal length uses it, which fixes most of MoGe's size bias. Adjust floor
   (sliders, horizon drag, ruler, **Set scale** from a known length) fixes the rest by hand.
-- **Furniture.** Add from a photo or an image link (SAM 3D or TRELLIS 2 on fal), or from a GLB or zipped OBJ (free).
+- **Furniture.** Add from a photo or an image link (**Idol**, the default since v1.1, SAM 3D or TRELLIS 2 on fal), or
+  from a GLB or zipped OBJ (free).
   **Flat rug** (free, added 2026-11-05) lays a shop's top-down rug picture flat at W × D. When SAM 3D finds nothing in
   a photo it tries again by itself (less strict, then with a mask of the piece).
   Pieces are placed, dragged, turned, lifted, removed and restored with undo. Real furniture in the photo hides them
   (occlusion from MoGe's depth).
+- **Splat furniture** (v1.1, 2026-11-05): Idol ($0.10) turns one photo of a piece into a Gaussian splat that looks
+  like the photo. The planner draws splats with Spark 2.4.0 at true size, hidden by the photo's furniture, in renders
+  and on the phone, with the Look's exposure and warmth (no tone mapping, so they keep the photo's colours). An Idol
+  piece has no mesh: an invisible box at its size does the picking, dragging and contact shadow. SAM 3D pieces show
+  their splat too, with **Shows as** (Splat / Mesh) in the Edit sheet. Each splat is served as `splat.spz` (about
+  3 MB). PLAN.md §12, contract §1 and §4.5, notes in `docs/notes/idol.md`.
 - **Layouts** per scene. A scene reopens with its layout on any device.
 - **Render** (nano-banana with your photo as a reference), **Keep room exact** (on by default since the live check),
   the Renders panel and **Compare** (side by side or split, Swap). Tested in mock mode, plus the live check below.
+- **Product page** (added 2026-11-05): paste a shop's product link in Add
+  furniture and **Read** fills in the name, W × D × H (a size picker for rugs sold in several sizes), the category,
+  Flat rug for a rug, and a strip of the page's pictures. Nothing is added before **Make**, which goes through the
+  image-link add. Structured data, the Shopify and WooCommerce feeds and the page text come first, all free; only
+  when none holds a size does Claude Haiku 5.5 on fal (`openrouter/router`, $0.0001–0.0003 a page measured live)
+  read the page's words, and its sizes count only when they quote the page. Shops that refuse automatic reading get a clear message and a button
+  to Image link. Contract §2.11, notes in `docs/notes/product*.md`.
 - **Phone** layout at 390 × 844, touch only. Every target is at least 44 px and there's no sideways scroll.
 - **Privacy and money.** Photos and furniture images lose their EXIF/GPS before they're served or sent to fal. The
   server serves an allowlist only, and there's a daily spend cap ($2 by default).
@@ -41,18 +55,39 @@ never been built on Linux.
 | E4 occlusion (`eval:occlusion`) | **pass** 20/20 | hidden pixels 100 % photo; off: 100 % box; manual height ×1.25 still 100 % |
 | E5 floor (`eval:floor`) | **pass** 34/34 | horizon drag pitch −5.75° (expected −5.74°); manual/auto save and reset |
 | E6 render (`eval:render`) | **pass** 36/36 | align 0.01 px on the synthetic pair; an unrelated image refused; the dialog opens with Keep room exact on |
-| E7 library (`eval:library`) | **pass** 69/69 | carried nook library API |
-| E8 pipeline (`eval:pipeline`) | **pass** 54/54 | `midstudy-add` against the fal mock; Flat rug (crop, turn, 160 × 230 × 1 cm slab) and SAM 3D's no-mask retries (added 2026-11-05) |
+| E7 library (`eval:library`) | **pass** 78/78 | carried nook library API; v1.1: Idol the default at $0.10, `splat.spz` served as stored, Shows as rules, a model with an image engine refused |
+| E8 pipeline (`eval:pipeline`) | **pass** 72/72 | `midstudy-add` against the fal mock; Flat rug (crop, turn, 160 × 230 × 1 cm slab) and SAM 3D's no-mask retries (added 2026-11-05); v1.1: Idol against the mock (stand-in box, per-axis splat fit, upright, `splat.spz`), splat thinning by coverage, inputs recorded by name |
 | E9 phone (`eval:phone`) | **pass** 48/48 | all targets ≥ 44 px, scroll width 390 at every stage |
 | E11 UX round 1 (`eval:ux`) | **pass** 28/28 | drag keeps the grabbed point under the pointer, Set scale, undo (E11.18 now waits for the Undo to finish in the UI) |
 | E12 UX round 2 (`eval:ux2`) | **pass** 26/26 | layouts across devices, ruler, thumbnails, Swap (E12.12 now waits for the photo to settle after Ruler on) |
+| E13 splats (`eval:splat`) | **pass** 50/50 | Idol default add, entries validate, `splat.spz` served; GLB composites unchanged next to splats; a splat probe within 3 % of its projected box; the Idol chair within 3 px of where its own points project; a render right after placing keeps the near splat in front; occlusion behind the sofa; keep-room mask; Shows as; the Add form (order, $0.10, 44 px on the phone); the phone loads `splat.spz` |
+| E14 product page reader (`eval:product`) | **pass** 395/395 | 57 made-up shop pages (JSON-LD, microdata, OpenGraph, Shopify and WooCommerce feeds, tables, script JSON, prose for the model, a planted injection, order keys, foreign labels), blocked and broken pages, private links and redirects, 20 s and 10 MB limits, gzip bombs, a CPU-heavy page that once froze the server, the prompt, cost rows and the cap |
+| E15 product page form (`eval:product-ui`) | **pass** 117/117 | desktop and phone: Read, sizes, pictures, notes, Make through to a done job, a blocked shop, re-reads |
+| Golden shop pages (`eval:product-live`) | **pass** 82/82 saved copies; live with the model 73/73 | ten real pages (IKEA AE and US, the Zennova carpet, Albany Park, Annie Selke, Boutique Rugs, Floyd, Industry West, Target, West Elm). Live with Haiku on 2026-11-05 (after landing): every shop answered, the model ran only on Industry West (no size on the page; it found none, $0.000253) |
 | Real path (`eval:real`) | **pass** 31/31 | your lounge photo, real MoGe, GLB chair, two renders, Compare, phone |
 | Harness self-test (`eval:selftest`) | **pass** 22/22 | |
 | `calib/` unit tests (pytest) | **pass** 42/42 | |
 | `nix flake check --no-build --all-systems` | **pass** | evaluation only, nothing built |
 
-`eval:all` (E1, E3–E9, E11, E12) takes about 5 min. Logs are in `evals/out/main/` (git-ignored). The main session
+`eval:all` (E1, E3–E9, E11–E15) takes about 10 min. With Idol (v1.1) it passed 11 of 11 twice before the product page reader was merged in and 13 of 13 after, all on 2026-11-05. One earlier run failed four timing checks (E3.32, E11.14, E12.13, E13.36) while three verifiers ran beside it, and none of those came back on a quieter machine. The product page reader alone passed 12 of 12 at 14:30 (an earlier run that day failed E3, E4, E5 and E11 on page-load timeouts while other sessions held the Mac's load average above 180). Logs are in `evals/out/main/` (git-ignored). The main session
 found E11.18 and E12.12 flaky (fixed timing in the evals, not the app; each then passed 3 runs out of 3).
+
+## Live check of Idol (v1.1, 2026-11-05, $0.1398)
+
+On your lounge photo, from a fresh checkout of the Idol work with its own data folders (`evals/out/live-idol/`,
+git-ignored; `side-by-side.jpg` shows the view's composite above the final render):
+
+- **Idol add** of the Morris chair photo through the library API, with no engine named (Idol is the default): live,
+  19 s, **$0.10**. The library entry has the stand-in box, `splat.ply` and a 3.0 MB `splat.spz` (262,144 splats),
+  fitted to 75 × 85 × 95 cm with 0 % error, and it passes `validate_library.py`.
+- **Two copies placed** where the v1 check put its SAM 3D chairs: both draw as splats within 0.5 s, on the rug next to
+  the sofa and the round table, at a believable size, with contact shadows.
+- **Render, Keep room exact on:** live nano-banana, 53 s, **$0.0398**, aligned with 597 inliers at 0.67 px. The result
+  is your photo at 2048 × 1152 with the two chairs pasted in and no visible seam.
+- Total **$0.1398** (`costs.csv` and `/api/spend` agree), under the check's $0.20 cap. No console or page errors.
+- What it shows: the chairs keep the light of their own product photo, so they look a little brighter and flatter
+  than the room's warm evening light. The lighting work is for that. Phase 0 made one more live Idol call ($0.10,
+  the same chair) to record the mock; it isn't in a `costs.csv`.
 
 ## Live check (PLAN.md §8, main session, 2026-11-05, $0.10)
 
@@ -72,6 +107,12 @@ On your lounge photo (`evals/out/live/`, git-ignored; `live-check.jpg` puts the 
 
 ## Verified by looking at screenshots
 
+- **v1.1 splats** (`docs/notes/idol.md`): the Idol chair on golden living-wide is photoreal at its size, with the
+  coffee table hiding its lower front, on the desktop and the phone. A splat probe behind the sofa is cut cleanly with
+  no halo. The live SAM 3D chair from the v1 check, refit by v1.1, looks solid as a splat next to its own mesh. Three
+  black-box verifiers (UX, contract and privacy, visuals) found 2 medium and 6 low issues, all fixed; GLB-only
+  composites match v1's within JPEG noise.
+
 - **Today (finish agent), from `eval:real` on your lounge photo** (`evals/out/integrate/`): the grid lies on the
   floor, with lines parallel to the rug's edges. A chair placed in front of the coffee table stands at a believable
   size. A second chair behind the table has its legs hidden by the table top. Compare split and the phone layout
@@ -89,6 +130,13 @@ On your lounge photo (`evals/out/live/`, git-ignored; `live-check.jpg` puts the 
 - **Not automated:** pinch zoom and two-finger pan, swiping between renders on the phone, the grid fading with
   distance, contact shadows, Look on furniture only.
 - **True sizes in your room.** Nothing has been checked against a tape measure.
+- **Splats on a real GPU or phone.** Only SwiftShader (software rendering), where a 262,144-splat frame takes 1–4 s
+  and the view shows the previous sort for a few seconds after a change. A real GPU should take milliseconds; not
+  measured. Idol on pieces other than the Morris chair has not been tried.
+- **Shopify shops under load.** Shopify rate-limits bursts from one IP (429, Cloudflare `local_rate_limited`): after a
+  day of probing on 2026-11-05 Albany Park, Annie Selke, Boutique Rugs and Floyd answered 429 for a few hours, then
+  read fine again. The reader says what it is (`midstudy/1.0 (product page reader)`) and doesn't try to get around a
+  shop's refusal.
 - **SAM 3D's no-mask retries against live fal.** Only mocked: whether the lower threshold or the mask gets the
   bookshelf and the carpet through on the real service (and that refused calls stay free) is untested.
 

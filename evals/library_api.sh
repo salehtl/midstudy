@@ -136,6 +136,7 @@ check "L8 the library passes validate_library.py" 'evals/py evals/validate_libra
 # --- bad adds -----------------------------------------------------------------------------------------------------------------------
 check "missing dims is 400" '[ "$(add nodims model fixtures/models/SheenChair.glb "{\"name\": \"X\"}")" = 400 ] && py "len(r(\"nodims\")[\"error\"]) > 10"'
 check "a non-slug id is 400" '[ "$(add badid model fixtures/models/SheenChair.glb "{\"name\": \"X\", \"id\": \"Bad Id\", \"dims_cm\": {\"w\": 1, \"d\": 1, \"h\": 1}}")" = 400 ]'
+check "a 3D model with an image engine (idol) is 400, not quietly glb" '[ "$(add modeleng model fixtures/models/arrow.glb "{\"name\": \"X\", \"engine\": \"idol\", \"dims_cm\": {\"w\": 1, \"d\": 1, \"h\": 1}}")" = 400 ] && grep -qi "glb" "$OUT/r/modeleng.json"'
 check "an unknown engine is 400" '[ "$(add badeng image "$IMG" "{\"name\": \"X\", \"engine\": \"foo\", \"dims_cm\": {\"w\": 1, \"d\": 1, \"h\": 1}}")" = 400 ]'
 : >"$OUT/thing.usdz"
 check "a .usdz model is 400 with convert to GLB" '[ "$(add usdz model "$OUT/thing.usdz" "{\"name\": \"X\", \"dims_cm\": {\"w\": 1, \"d\": 1, \"h\": 1}}")" = 400 ] && grep -qi "glb" "$OUT/r/usdz.json"'
@@ -225,6 +226,24 @@ st=$(wait_job gpsglbj "$(jid gpsglb)")
 curl -s "$BASE/library/glb-tex/model.glb" -o "$OUT/glb-tex-served.glb"
 evals/py evals/lib/metadata.py inspect "$OUT/glb-tex-served.glb" >"$OUT/glb-tex-served.json" 2>&1
 check "a GLB with a GPS-tagged JPEG texture: /library/<id>/model.glb is served without the EXIF/GPS" '[ "$code" = 202 ] && [ "$st" = done ] && grep -q "\"clean\": true" "$OUT/glb-tex-served.json" && grep -q "\"glb_images\": \[{" "$OUT/glb-tex-served.json"' "$code $st $(tail -n 1 "$OUT/glb-tex-served.json" | head -c 300)"
+
+# --- v1.1 (§2.8, §3.2, §4.5 Shows as): Idol is the default image engine; splat.spz is served as stored ------------------
+code=$(add idolphoto image "$IMG" '{"name": "Idol Chair", "dims_cm": {"w": 80, "d": 90, "h": 95}, "prompt": "chair"}')
+st=$(wait_job idolj "$(jid idolphoto)")
+check "a photo upload with no engine is Idol: \$0.10 estimate, ends done with splat.ply, splat.spz and a stand-in GLB" '[ "$code" = 202 ] && [ "$st" = done ] && py "r(\"idolphoto\")[\"cost_usd_estimate\"] == 0.1 and r(\"idolj\")[\"engine\"] == \"idol\" and r(\"idolj\")[\"item\"][\"assets\"][\"spz\"] == \"idol-chair/splat.spz\" and r(\"idolj\")[\"item\"][\"default_render\"] == \"splat\" and r(\"idolj\")[\"item\"][\"source\"][\"prompt\"] is None"' "$code $st $(head -c 400 "$OUT/r/idolj.json")"
+check "…and the server never passed --prompt to an Idol add" '! grep -q "prompt" "$LIB/idol-chair/raw/request.json"'
+curl -s -D "$OUT/spz.h" -o "$OUT/spz.bin" "$BASE/library/idol-chair/splat.spz"
+check "/library/<id>/splat.spz is served as application/octet-stream, byte for byte as stored (no Content-Encoding)" 'grep -qi "^content-type: application/octet-stream" "$OUT/spz.h" && ! grep -qi "^content-encoding" "$OUT/spz.h" && grep -qi "^x-content-type-options: nosniff" "$OUT/spz.h" && cmp -s "$OUT/spz.bin" "$LIB/idol-chair/splat.spz"' "$(tr -d '\r' <"$OUT/spz.h" | tr '\n' ' ' | head -c 300)"
+check "W4 an Idol item's source.jpg and raw/ stay 404" '[ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/idol-chair/source.jpg")" = 404 ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/idol-chair/raw/response.json")" = 404 ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/library/idol-chair/SPLAT.SPZ")" = 404 ]'
+code=$(call idolglb PATCH /api/library/items/idol-chair '{"default_render": "glb"}')
+check "PATCH default_render glb on an Idol item is 400 (its model.glb is a stand-in box)" '[ "$code" = 400 ]' "$code $(cat "$OUT/r/idolglb.json")"
+c1=$(call samglb PATCH /api/library/items/phone-chair '{"default_render": "glb"}')
+c2=$(call samsplat PATCH /api/library/items/phone-chair '{"default_render": "splat"}')
+check "Shows as: PATCH default_render glb, then splat, on a SAM 3D item is 200 both times" '[ "$c1" = 200 ] && [ "$c2" = 200 ] && py "r(\"samglb\")[\"default_render\"] == \"glb\" and r(\"samsplat\")[\"default_render\"] == \"splat\""' "$c1 $c2 $(head -c 160 "$OUT/r/samglb.json")"
+code=$(add badeng2 image "$IMG" '{"name": "X", "engine": "nope", "dims_cm": {"w": 1, "d": 1, "h": 1}}')
+check "an unknown image engine is 400 and names idol among the choices" '[ "$code" = 400 ] && grep -q idol "$OUT/r/badeng2.json"' "$code $(cat "$OUT/r/badeng2.json")"
+evals/py evals/validate_library.py "$LIB/library.json" >"$OUT/validate2.out" 2>&1
+check "v1.1 items pass validate_library.py (stand-in box, per-axis splat, splat.spz)" '! grep -q FAIL "$OUT/validate2.out" && grep -q "^ok   idol-chair" "$OUT/validate2.out"' "$(grep FAIL "$OUT/validate2.out" | head -n 3 | tr '\n' ' ')"
 
 # --- argv safety: a name starting with "-" still works ---------------------------------------------------------------------
 code=$(add dash model fixtures/models/arrow.glb '{"name": "-Shelf", "id": "dash-shelf", "dims_cm": {"w": 40, "d": 20, "h": 10}}')

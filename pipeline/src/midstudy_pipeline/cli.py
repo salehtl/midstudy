@@ -11,7 +11,7 @@ import unicodedata
 import urllib.parse
 import warnings
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 
@@ -44,13 +44,14 @@ class Parser(argparse.ArgumentParser):
 def build_parser() -> Parser:
     p = Parser(prog="midstudy-add", description="Add a piece of furniture to the midstudy library at real-world size.")
     p.add_argument("input", metavar="INPUT", nargs="?",
-                   help="image path or URL (sam3d, trellis2, rug), or .glb/.gltf path or URL, or an OBJ .zip (glb)")
+                   help="image path or URL (idol, sam3d, trellis2, rug), or .glb/.gltf path or URL, or an OBJ .zip (glb)")
     p.add_argument("--name", help="human name, e.g. 'Strandmon wing chair' (required unless --rescale)")
     p.add_argument("--dims", help="W x D x H in cm, e.g. 75x80x95 (x or ×, spaces and decimals allowed)")
     p.add_argument("--id", help="slug; defaults to a slug of --name. An existing id is replaced")
     p.add_argument("--category", help="e.g. armchair")
-    p.add_argument("--engine", choices=["sam3d", "trellis2", "glb", "rug"], default="sam3d",
-                   help="rug: a flat rug from a top-down picture, no model call ($0); H in --dims is its thickness")
+    p.add_argument("--engine", choices=["idol", "sam3d", "trellis2", "glb", "rug"], default="idol",
+                   help="idol (default, $0.10): a lifelike splat from one photo, with a stand-in box mesh; "
+                        "rug: a flat rug from a top-down picture, no model call ($0); H in --dims is its thickness")
     p.add_argument("--prompt", help="sam3d only: the object to extract; defaults to --category or 'furniture'")
     p.add_argument("--yaw", type=int, choices=[0, 90, 180, 270], default=0,
                    help="extra counterclockwise turn about +Y (seen from above) so the front faces +Z; "
@@ -244,7 +245,9 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
         prompt: str, raw_input: str, is_url: bool, local: Path | None, mock_dir: Path | None) -> None:
     w, d, h = dims
     data = library.load(lib_dir)
-    source_input = args.source_input or raw_input
+    # library.json and costs.csv are tracked in git and library.json is served: a local file is recorded by its name
+    # only (no home-folder path), a URL as given; serve.py passes the upload's own name.
+    source_input = args.source_input or (raw_input if is_url else Path(raw_input).name)
 
     # --- build the item in a staging dir; it only moves into the library after the self-check passes --------
     mock = mock_dir is not None
@@ -289,17 +292,25 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
             say("note: a .gltf input is packed into a single GLB; source.gltf is kept without its side files")
 
         dims_m = np.array([w, h, d]) / 100  # X, Y, Z
-        glb_fit = glb.normalize(model_src, orientation(engine, "glb", args.yaw), dims_m, staging / "model.glb")
-        say(f"model.glb fit to {num(w)} x {num(d)} x {num(h)} cm (error % w/d/h: "
-            f"{glb_fit['w']}/{glb_fit['d']}/{glb_fit['h']})")
+        if model_src is None:
+            # A splat-only engine (idol): model.glb is a stand-in box exactly at --dims, never drawn (contract §1).
+            glb_fit = glb.stand_in_box(dims_m, staging / "model.glb")
+            say(f"model.glb is a stand-in box at {num(w)} x {num(d)} x {num(h)} cm ({engine} makes a splat only)")
+        else:
+            glb_fit = glb.normalize(model_src, orientation(engine, "glb", args.yaw), dims_m, staging / "model.glb")
+            say(f"model.glb fit to {num(w)} x {num(d)} x {num(h)} cm (error % w/d/h: "
+                f"{glb_fit['w']}/{glb_fit['d']}/{glb_fit['h']})")
         splat_fit = None
         if splat_src:
             splat_fit, notes = splat.normalize(splat_src, orientation(engine, "splat", args.yaw) @ splat_to_glb,
-                                               dims_m, staging / "splat.ply")
+                                               dims_m, staging / "splat.ply", engine)
             for n in notes:
                 say(f"note: {n}")
-            say(f"splat.ply scaled uniformly to h = {num(h)} cm (error % w/d/h: "
+            say(f"splat.ply fitted per axis to {num(w)} x {num(d)} x {num(h)} cm (error % w/d/h: "
                 f"{splat_fit['w']}/{splat_fit['d']}/{splat_fit['h']})")
+            spz = splat.write_spz(staging / "splat.ply", staging / "splat.spz")
+            say(f"splat.spz: {spz['count']:,} splats, {spz['bytes'] / 1e6:.1f} MB"
+                + (f" (dropped the {spz['dropped']:,} that cover the least)" if spz["dropped"] else ""))
         thumb = image_input
         if thumb:
             make_thumb(thumb_src, staging / "thumb.jpg")
@@ -330,6 +341,7 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
             "assets": {
                 "glb": f"{item_id}/model.glb",
                 "splat": f"{item_id}/splat.ply" if splat_src else None,
+                "spz": f"{item_id}/splat.spz" if splat_src else None,
                 "thumb": f"{item_id}/thumb.jpg" if thumb else None,
             },
             "default_render": "splat" if splat_src else "glb",
@@ -372,6 +384,7 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
         "item": str(item_dir),
         "glb": str(item_dir / "model.glb"),
         "splat": str(item_dir / "splat.ply") if splat_src else None,
+        "spz": str(item_dir / "splat.spz") if splat_src else None,
         "thumb": str(item_dir / "thumb.jpg") if thumb else None,
         "source": str(item_dir / source_name),
         "raw": str(item_dir / "raw") if (item_dir / "raw").is_dir() else None,
@@ -405,8 +418,11 @@ def rescale(args) -> None:
         if new_dims is not None:
             w, d, h = new_dims
         assets = entry.get("assets") or {}
+        engine = (entry.get("source") or {}).get("engine")  # the splat's extent percentiles depend on it (§1)
         glb_src = lib_dir / str(assets.get("glb") or f"{item_id}/model.glb")
         splat_src = lib_dir / assets["splat"] if assets.get("splat") else None
+        spz_rel = (str(PurePosixPath(assets["splat"]).with_name("splat.spz")) if assets.get("splat") else None)
+        spz_dst = lib_dir / spz_rel if spz_rel else None
         if not glb_src.is_file():
             raise MidstudyError(f"item '{item_id}' has no model file at {glb_src}; add it again instead")
         if splat_src is not None and not splat_src.is_file():
@@ -421,17 +437,26 @@ def rescale(args) -> None:
                 f"(error % w/d/h: {glb_fit['w']}/{glb_fit['d']}/{glb_fit['h']})")
             splat_fit = None
             if splat_src is not None:
-                splat_fit, notes = splat.normalize(splat_src, rotation, dims_m, staging / "splat.ply")
+                splat_fit, notes = splat.normalize(splat_src, rotation, dims_m, staging / "splat.ply", engine)
                 for n in notes:
                     say(f"note: {n}")
+                say(f"splat.ply refit per axis (error % w/d/h: {splat_fit['w']}/{splat_fit['d']}/{splat_fit['h']})")
+                spz = splat.write_spz(staging / "splat.ply", staging / "splat.spz")
+                say(f"splat.spz: {spz['count']:,} splats, {spz['bytes'] / 1e6:.1f} MB"
+                    + (f" (dropped the {spz['dropped']:,} that cover the least)" if spz["dropped"] else ""))
             # Commit: every file passed its self-check, so replace them in place.
             os.replace(staging / "model.glb", glb_src)
             if splat_src is not None:
                 os.replace(staging / "splat.ply", splat_src)
+                os.replace(staging / "splat.spz", spz_dst)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
         entry["dims_cm"] = {"w": num(w), "d": num(d), "h": num(h)}
+        if spz_rel:
+            # Every splat.ply has its splat.spz beside it (§1): an item from before v1.1 gains one here.
+            entry["assets"] = {"glb": assets.get("glb"), "splat": assets.get("splat"), "spz": spz_rel,
+                               "thumb": assets.get("thumb"), **{k: v for k, v in assets.items() if k not in ("glb", "splat", "spz", "thumb")}}
         entry["fit"] = {"glb_error_pct": glb_fit, "splat_error_pct": splat_fit}
         library.upsert(lib_dir, data, entry)
         say(f"refit '{item_id}' in {lib_dir / 'library.json'} ($0, no cost row)")
@@ -442,6 +467,7 @@ def rescale(args) -> None:
         "item": str(item_dir),
         "glb": str(glb_src),
         "splat": str(splat_src) if splat_src else None,
+        "spz": str(spz_dst) if spz_dst else None,
         "thumb": str(lib_dir / assets["thumb"]) if assets.get("thumb") else None,
         "source": None,
         "raw": str(item_dir / "raw") if (item_dir / "raw").is_dir() else None,
