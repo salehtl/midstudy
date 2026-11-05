@@ -1,0 +1,13 @@
+# The Rust side of the differential test (proofs/diff/run.sh): runs core/crates/media's JPEG stripper on a corpus and
+# prints what the proved Lean model (`lake exe jpegstrip`) prints, so the two can be compared file by file.
+[package]
+name = "midstudy-proofs-diff"
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+midstudy-media = { path = "../../core/crates/media" }
+
+[workspace]

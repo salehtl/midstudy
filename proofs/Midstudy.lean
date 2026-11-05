@@ -1,0 +1,21 @@
+-- midstudy proofs: the mathematics the planner, the server and the kernels rely on (docs/notes/proofs.md).
+import Midstudy.Rotation
+import Midstudy.Camera
+import Midstudy.Horizon
+import Midstudy.Depth
+import Midstudy.Item
+import Midstudy.Clamp
+import Midstudy.Units
+import Midstudy.Lighting
+import Midstudy.Jpeg.Model
+import Midstudy.Jpeg.Proofs
+import Midstudy.Turn
+import Midstudy.Plane
+import Midstudy.Png
+import Midstudy.Arith
+import Midstudy.PngFilter
+import Midstudy.Landing
+import Midstudy.Dilate
+import Midstudy.Slug
+import Midstudy.Jpeg.Frame
+import Midstudy.Glb
