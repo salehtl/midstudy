@@ -1,0 +1,13 @@
+{
+  // midstudy-add on Node 22, run directly (`node pipeline/src/cli.ts`, type stripping): `.ts` import specifiers.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "build/tsc/pipeline.tsbuildinfo"
+  },
+  "include": ["pipeline/**/*.ts"]
+}

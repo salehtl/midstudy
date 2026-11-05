@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "serve": "python3 planner/serve.py",
+    "preserve": "node scripts/build.mjs",
     "eval:scenes-api": "node evals/scenes_api.mjs",
     "eval:calib": "evals/py evals/calib_eval.py",
     "eval:planner": "node evals/planner_scene.mjs",
@@ -24,11 +25,40 @@
     "eval:real": "node evals/real_path.mjs",
     "eval:selftest": "node evals/harness_selftest.mjs",
     "fixtures:scenes": "node fixtures/make_scene.mjs",
-    "check:scenes": "evals/py fixtures/check_scenes.py"
+    "check:scenes": "evals/py fixtures/check_scenes.py",
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "check:types": "node scripts/check.mjs types",
+    "check:lint": "node scripts/check.mjs lint",
+    "check:dead": "node scripts/check.mjs dead",
+    "check:gen": "node scripts/check.mjs gen",
+    "check:tscert": "node scripts/check.mjs tscert",
+    "check:rust": "node scripts/check.mjs rust",
+    "check:fuzz": "node scripts/check.mjs fuzz",
+    "check:proofs": "node scripts/check.mjs proofs",
+    "check:py": "node scripts/check.mjs py",
+    "check:ownership": "node scripts/check.mjs ownership"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "fflate": "0.8.3",
+    "libheif-js": "1.23.5",
+    "obj2gltf": "3.2.0",
+    "parse5": "8.1.0"
   },
   "devDependencies": {
+    "@sparkjsdev/spark": "2.4.0",
+    "@types/node": "22.20.5",
+    "@types/three": "0.180.0",
     "ajv": "^8.20.0",
+    "esbuild": "0.28.2",
+    "eslint": "10.14.0",
+    "knip": "6.44.1",
     "playwright-core": "^1.64.1",
-    "three": "0.180.0"
+    "three": "0.180.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
   }
 }

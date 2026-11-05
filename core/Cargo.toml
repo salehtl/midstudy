@@ -9,7 +9,14 @@ edition = "2024"
 license = "UNLICENSED"
 publish = false
 
+[workspace.dependencies]
+# The wasm glue: exactly the wasm-bindgen-cli of the dev shell (nix/toolchain.nix), or binding fails. A crate may write
+# `wasm-bindgen = { workspace = true }` or the same pin itself.
+wasm-bindgen = "=0.2.121"
+
 [workspace.lints.rust]
+# Kani harnesses (`#[cfg(kani)]`) and cargo-fuzz builds (`cfg(fuzzing)`) are expected cfgs, not typos.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)", "cfg(fuzzing)"] }
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
 unused_must_use = "deny"

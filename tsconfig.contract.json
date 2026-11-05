@@ -1,0 +1,14 @@
+{
+  // contract/gen: the types and validators generated from the schemas (scripts/gen-contract.mjs), imported by the
+  // planner (bundler) and by Node (nodenext), so they are checked under the stricter of the two: nodenext.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "types": [],
+    "tsBuildInfoFile": "build/tsc/contract.tsbuildinfo"
+  },
+  "include": ["contract/gen/**/*.ts"]
+}

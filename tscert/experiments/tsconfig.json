@@ -1,0 +1,12 @@
+{
+  // The experiments, read as planner/logic/ modules are (tscert/tsconfig.planner.json): strict base, bundler resolution.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": [],
+    "composite": false
+  },
+  "include": ["*.ts"]
+}

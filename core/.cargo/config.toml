@@ -1,0 +1,4 @@
+# Cargo settings for the kernels (docs/REFACTOR.md §1; scripts/build.mjs). Every wasm32 build uses SIMD128: Chrome 91+,
+# Firefox 89+, Safari 16.4+ and Node 22 run it (Safari 16.0–16.3 do not: they cannot load the kernels).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

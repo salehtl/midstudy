@@ -19,15 +19,7 @@
   <link rel="stylesheet" href="./styles/panels.css">
   <link rel="stylesheet" href="./styles/scenes.css">
   <link rel="stylesheet" href="./styles/manage.css">
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
-      "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.4.0/dist/spark.module.js"
-    }
-  }
-  </script>
+  <!-- The planner is one bundle (scripts/build.mjs, `npm run build`): three.js and Spark come from node_modules, no CDN. -->
 </head>
 <body>
   <!-- Mount points (ui/shell.js): the photo and its 3D view, in-view overlays (footprint, grip, horizon, ruler), the
@@ -44,6 +36,6 @@
   <div id="pages"></div>
   <div id="toasts" aria-live="polite"></div>
   <div id="layer"></div>
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./dist/app.js"></script>
 </body>
 </html>

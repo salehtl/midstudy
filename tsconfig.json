@@ -1,0 +1,13 @@
+{
+  // The solution: one project per area, each type-checked by `tsc -b` (npm run check:types builds only the areas that
+  // have files). Editors resolve every file to its area through these references.
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.planner.json" },
+    { "path": "./tsconfig.server.json" },
+    { "path": "./tsconfig.pipeline.json" },
+    { "path": "./tsconfig.core-web.json" },
+    { "path": "./tsconfig.core-node.json" },
+    { "path": "./tsconfig.contract.json" }
+  ]
+}

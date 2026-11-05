@@ -5,32 +5,49 @@
   # packaging can be checked on the Mac.
   description = "midstudy: place real-size 3D furniture on a phone photo of a room";
 
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
+    # Rust toolchains as the official binaries (docs/REFACTOR.md §1): stable 1.95.0 with wasm32, and a dated nightly
+    # for Miri, cargo-fuzz and Kani (nix/toolchain.nix).
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+    }:
     let
       systems = [
         "aarch64-darwin"
         "x86_64-linux"
       ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      toolchain =
+        pkgs:
+        let
+          # The proofs track may pin the Lean that Mathlib needs in nix/lean.nix (a fixed-output fetch, not elan).
+          lean = if builtins.pathExists ./nix/lean.nix then import ./nix/lean.nix { inherit pkgs; } else pkgs.lean4;
+        in
+        import ./nix/toolchain.nix { inherit pkgs rust-overlay lean; };
     in
     {
-      # Tools come from here: `nix develop -c <cmd>` from the repo root (CLAUDE.md).
-      devShells = forAll (pkgs: {
-        default = pkgs.mkShell {
-          packages = [
-            pkgs.python312
-            pkgs.uv
-            pkgs.nodejs_22
-            pkgs.git
-          ];
-          # uv uses the shell's Python 3.12 instead of downloading one.
-          UV_PYTHON = "${pkgs.python312}/bin/python3.12";
-          UV_PYTHON_DOWNLOADS = "never";
-        };
-      });
+      # Tools come from here: `nix develop -c <cmd>` from the repo root (CLAUDE.md). `default` has everything the
+      # build and the checks need (python 3.12, uv, node 22, git, Rust 1.95.0 + wasm32, wasm-bindgen, wasm-opt, Lean,
+      # pyright, ruff, tscert); `nightly` is the dated nightly with Miri for `check:rust` and `check:fuzz`.
+      devShells = forAll (
+        pkgs:
+        let
+          tc = toolchain pkgs;
+        in
+        {
+          inherit (tc) default nightly;
+        }
+      );
 
       packages = forAll (
         pkgs:
@@ -50,6 +67,8 @@
           # The web app: planner/ and planner/serve.py, wired to the two above (bin/midstudy-web).
           midstudy = pkgs.callPackage ./nix/midstudy.nix { inherit midstudy-add midstudy-calib; };
           default = midstudy;
+          # TScert built at the commit nix/tscert.nix pins: `tscert build` (the dev shell's command) builds it on first use.
+          tscert = (import ./nix/tscert.nix { inherit pkgs; }).built;
         }
       );
 

@@ -1,0 +1,7 @@
+{
+  // What TScert reads server/src/logic/ with: the server's strict options, the logic modules only, no Node types (a
+  // logic module that needs node:fs belongs in a shell module).
+  "extends": "../tsconfig.server.json",
+  "compilerOptions": { "lib": ["ES2024"], "types": [], "composite": false },
+  "include": ["../server/src/logic/**/*.ts"]
+}
