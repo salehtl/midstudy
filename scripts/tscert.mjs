@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // The `tscert` command (nix/tscert.nix runs this file under TScert's pinned Node 26.13.0, with its Lean 4.33.1, OCaml
 // and dune on PATH). TScert is https://github.com/cristianoc/TScert at the commit nix/tscert.nix pins (NON-AI MIT
-// licence: used as a checker only). Everything it builds or caches stays in the git-ignored build/tscert/.
+// licence: used as a checker only). Its build is a Nix store path; its caches and temporary runs stay in the git-ignored
+// build/tscert/. `npm run check:tscert` does not use this command directly: scripts/tscert-ratchet.mjs runs
+// `tscert units` inside a Nix build (nix/tscert.nix runUnits). `tscert check` runs TScert as you.
 //
-//   tscert build                 build TScert into build/tscert/ (npm ci in tools/, lake build, dune build, the stage
-//                                runner); a no-op when the stamp matches the pinned commit and toolchain
+//   tscert build                 nix build .#tscert (TScert built in the Nix sandbox: tools/ with TypeScript 7.0.2, the
+//                                stage runner, the OCaml producer, the Lean verifier), out-link build/tscert/result
 //   tscert check FILE [--project TSCONFIG] [--omit f,g]
 //                                TScert's own CLI (pipeline/verify-source.mts): its JSON outcome; exit 0 when verified
 //   tscert units --batch JOBS.json
@@ -48,12 +50,13 @@ function toolchain() {
 }
 
 // TScert itself is the flake's `.#tscert` (nix/tscert.nix `built`): built in the Nix sandbox, kept alive by the out-link
-// build/tscert/result. A no-op when the out-link already points at the pinned build.
+// build/tscert/result. `nix build` is a no-op (about a second) when that build exists. Inside runUnits' sandbox the link
+// is given (TSCERT_PREBUILT=1) and there is no nix to call.
 function build({ quiet = false } = {}) {
   const want = toolchain()
   const link = path.join(BUILD, 'result')
   const current = () => { try { return fs.readFileSync(path.join(link, '.tscert-rev'), 'utf8').trim() === want.rev } catch { return false } }
-  if (!current()) {
+  if (env.TSCERT_PREBUILT !== '1' || !current()) {
     fs.mkdirSync(BUILD, { recursive: true })
     const t = performance.now()
     process.stderr.write(`tscert build: nix build .#tscert at ${want.rev.slice(0, 12)} (the Lean verifier takes a while the first time) … `)
@@ -77,7 +80,7 @@ function build({ quiet = false } = {}) {
 // top-level function declarations; `init` says whether the file has initialization code.
 const INIT = '(init)'
 async function units(job, vs, fp) {
-  const { file, project, functions, init } = job
+  const { file, project, functions, init, omitAlso = [] } = job
   const names = [...functions.map((f) => f.name), ...(init ? [INIT] : [])]
   const toTscert = (n) => (n === INIT ? fp.initOmission : n)
   const clean = (d) => String(d ?? '').replace(/\/nix\/var\/nix\/builds\/[^\s"')]*\/work\//g, '').replace(/\/[^\s"')]*tscert-runs-[^\s"')]*/g, '<run>').slice(0, 2000)
@@ -85,7 +88,7 @@ async function units(job, vs, fp) {
     let o
     try {
       o = await vs.checkApart(path.resolve(file), project ? path.resolve(project) : undefined, false, undefined, false,
-        { omitted: names.filter((n) => n !== name).map(toTscert), select: [toTscert(name)] })
+        { omitted: [...names, ...omitAlso].filter((n) => n !== name).map(toTscert), select: [toTscert(name)] })
     } catch (e) {
       return { status: 'error', phase: '-', detail: clean(String(e?.message || e).split('\n')[0]) }
     }
@@ -128,8 +131,22 @@ switch (cmd) {
     const vs = await import(pathToFileURL(path.join(SRC, 'pipeline/verify-source.mts')).href)
     const fp = await import(pathToFileURL(path.join(SRC, 'tools/fragment-parse.mts')).href)
     const jobs = JSON.parse(fs.readFileSync(batch, 'utf8'))
-    const done = await Promise.all(jobs.map(async (j) => [j.file, await units(j, vs, fp)]))
-    process.stdout.write(`${JSON.stringify(Object.fromEntries(done))}\n`)
+    const byFile = Object.fromEntries(await Promise.all(jobs.map(async (j) => [j.file, await units(j, vs, fp)])))
+    // A tool error (a step's timeout under load, a crashed worker) is no verdict: check those units once more, alone.
+    for (const j of jobs) {
+      const again = Object.entries(byFile[j.file]).filter(([, r]) => r.status === 'error').map(([n]) => n)
+      if (!again.length) continue
+      const fns = j.functions.filter((f) => again.includes(f.name))
+      const retried = await units({ ...j, functions: fns, init: j.init && again.includes(INIT), omitAlso: Object.keys(byFile[j.file]).filter((n) => !again.includes(n)) }, vs, fp)
+      Object.assign(byFile[j.file], retried)
+    }
+    process.stdout.write(`${JSON.stringify(byFile)}\n`)
+    const errors = Object.entries(byFile).flatMap(([f, rs]) => Object.entries(rs).filter(([, r]) => r.status === 'error').map(([n, r]) => `${f}#${n}: ${r.detail}`))
+    if (errors.length) {
+      // Not a verdict, so not a result to keep: runUnits fails, Nix caches nothing, and the next run checks again.
+      process.stderr.write(`TSCERT-UNITS-ERRORS ${JSON.stringify(errors)}\n`)
+      process.exit(3)
+    }
     process.exit(0)
     break
   }

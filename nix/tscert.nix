@@ -169,7 +169,10 @@ let
   # and build/tscert/jobs.json) with `tscert units --batch` and writes its JSON result as the output. The same inputs
   # give the same derivation, so an unchanged tree is checked once and then read from the store.
   runUnits =
-    { src }:
+    {
+      src,
+      stepLimit ? "180",
+    }:
     pkgs.runCommand "tscert-units"
       {
         inherit src;
@@ -179,6 +182,11 @@ let
         TSCERT_LEAN = "${lean}";
         TSCERT_NODE = "${node}";
         TSCERT_NO_COMPILER_SANDBOX = "1";
+        TSCERT_PREBUILT = "1";
+        # Each TScert step's limit in seconds (TScert's default is 60, its census uses 300): the Mac is shared and loaded.
+        TSCERT_STEP_LIMIT = stepLimit;
+        # The retry of a timed-out unit (scripts/tscert.mjs units) runs it again instead of replaying the recorded timeout.
+        TSCERT_RETRY_TIMEOUTS = "1";
       }
       ''
         cp -R $src work

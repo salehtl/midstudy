@@ -7,7 +7,8 @@
 //   node scripts/tscert-ratchet.mjs --update   rewrite tscert/baseline.json with everything that certifies now
 //   node scripts/tscert-ratchet.mjs --files planner/logic/a.ts,planner/logic/b.ts [--project TSCONFIG]
 //                                              just those files, one line per function, no baseline (to try a module)
-//   options: --config FILE (default tscert/config.json), --report FILE, --baseline FILE, --no-baseline, --verbose
+//   options: --config FILE (default tscert/config.json), --report FILE, --baseline FILE, --no-baseline, --verbose;
+//   MIDSTUDY_TSCERT_STEP_LIMIT sets TScert's limit per step in seconds (default 180)
 //
 // TScert itself runs inside the Nix sandbox (nix/tscert.nix runUnits, built on first use: about 6 minutes), under its
 // pinned Node 26.13.0 with its Lean-built verifier. Prints one summary line: `tscert: <certified>/<total> certified …`.
@@ -117,6 +118,7 @@ let
   above = r: x: lib.hasPrefix (r + "/") x;
 in
 t.runUnits {
+  stepLimit = ${JSON.stringify(String(Number(process.env.MIDSTUDY_TSCERT_STEP_LIMIT) || 180))};
   src = builtins.path {
     path = root;
     name = "tscert-input";
@@ -128,6 +130,13 @@ t.runUnits {
 const t0 = performance.now()
 const r = spawnSync('nix', ['build', '--impure', '--no-link', '--print-out-paths', '--expr', expr], { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 << 20 })
 if (r.error || r.status !== 0) {
+  const marker = /TSCERT-UNITS-ERRORS (\[.*\])/.exec(r.stderr || '')
+  if (marker) {
+    // Tool errors (timeouts under load): no verdict, nothing cached; the next run checks them again.
+    for (const e of JSON.parse(marker[1])) console.log(`  tool error: ${e.split('\n')[0].slice(0, 300)}`)
+    console.log('tscert: TScert reported tool errors (not verdicts), even after one retry: run it again when the machine is quieter')
+    process.exit(1)
+  }
   console.error((r.error?.message || '') + (r.stderr || '').split('\n').filter((l) => !/^(warning: Git tree|copying path|building ')/.test(l)).slice(-40).join('\n'))
   console.error('tscert: the sandboxed TScert run failed (nix build of nix/tscert.nix runUnits)')
   process.exit(1)
