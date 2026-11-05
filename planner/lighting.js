@@ -253,6 +253,26 @@ void main() {
   })
 }
 
+// A phone photo is already white-balanced by the camera, so the room's light is (nearly) neutral in it. The fit's
+// colour comes from grey-world over the room's materials, which in a beige/wood room is mostly their colour, not the
+// light's: lighting the furniture with it counts the warmth twice (a yellow cast Warmth can't undo). So for
+// source "photo" the light is divided by white_balance.rgb (luminance 1, so the level stays): the room's light becomes
+// neutral, the key keeps its colour relative to the ambient, and the shadow catcher's per-channel ratios are unchanged.
+// Warmth adds a cast back. Golden scenes (source "truth": real light colours, no camera white balance) stay as given.
+export function neutralized(lj) {
+  const wb = lj?.white_balance?.rgb
+  if (!lj || lj.source === 'truth' || !Array.isArray(wb) || wb.length !== 3 || !wb.every((v) => v > 1e-4)) return lj
+  const div = (c) => c.map((v, i) => v / wb[i])
+  const kc = div(lj.key.color)
+  const m = Math.max(...kc, 1e-9)
+  return {
+    ...lj,
+    ambient: { ...lj.ambient, sh: lj.ambient.sh.map(div) },
+    key: { ...lj.key, color: kc.map((v) => v / m), intensity: lj.key.intensity * m },
+    white_balance: { ...lj.white_balance, rgb: [1, 1, 1], room_rgb: [...wb] },
+  }
+}
+
 export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
   const catcherMat = makeCatcherMat({ photoUv, photoUniforms })
   renderer.shadowMap.enabled = true
@@ -451,7 +471,7 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
     mode, inferred, inUse, prepare, forget, fitShadow,
     maskMode(on) { catcherMat.uniforms.uMask.value = on ? 1 : 0 }, // the keep-room mask takes in the cast shadow (§4.7)
     setData(lj) {
-      data = lj && Array.isArray(lj.ambient?.sh) && lj.ambient.sh.length === 9 && Array.isArray(lj.key?.direction) ? lj : null
+      data = lj && Array.isArray(lj.ambient?.sh) && lj.ambient.sh.length === 9 && Array.isArray(lj.key?.direction) ? neutralized(lj) : null
       worldSH = null
       turned = null
       shEnv?.dispose?.()

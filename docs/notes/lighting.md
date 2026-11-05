@@ -103,3 +103,13 @@ furniture is lit too.
   measurement now leaves out pixels the scene's depth.png puts in front of the box); living-wide's light comes from
   behind the camera, so the probe's shadow fell under the real table: living-wide uses its own probe spot right of
   the sofa; single-pixel JPEG noise on the rug no longer counts as shadow (a 1 px opening).
+
+## 2026-11-05: photo light is neutralized in the planner (yellow cast fix)
+
+Real phone photos are already white-balanced by the camera, but the fit's colour is grey-world over the room's
+materials, so a beige/oak room read as a warm light (lounge: key [1, 0.87, 0.65], up-facing light R/B 1.45) and the
+furniture got the warmth twice; Warmth −1 (±14 %) could not undo it. `planner/lighting.js` `neutralized()` now divides
+the SH and key colour by `white_balance.rgb` for `source: "photo"` (key renormalized, max 1, factor into intensity), so
+the room light is neutral (lounge R/B 1.01), the key keeps its colour relative to the ambient, and the shadow catcher's
+per-channel ratios are unchanged. Splats then get `white_balance` [1, 1, 1]. `source: "truth"` scenes are untouched
+(E16 56/56, E13 50/50). Contract §4.8 still says lighting.json's colours are used as given: update it at integration.
