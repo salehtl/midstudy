@@ -60,8 +60,8 @@ MIDSTUDY_SERVER=next MIDSTUDY_ADD=next nix develop -c node scripts/eval-lock.mjs
   `check-recordings`: 397 `/api` calls, 493 bodies (answers, accepted requests, meta headers), 0 problems. Only
   `render-list` was not exercised by those three (the examples cover it).
 - Defaults change nothing: eval:scenes-api 219/219, eval:library 78/78, eval:pipeline 72/72 (the counts docs/STATUS.md
-  has for v1), eval:selftest 22/22, eval:planner 55/55; each prints `… server legacy (python3 planner/serve.py),
-  furniture CLI legacy (uv run --project pipeline midstudy-add)` first.
+  has for v1; run twice, the second time at the final commit), eval:selftest 22/22, eval:planner 55/55; each prints
+  `… server legacy (python3 planner/serve.py), furniture CLI legacy (uv run --project pipeline midstudy-add)` first.
 - File-schema restructure: old (HEAD) and new schemas give the same verdict on 4,834 instances (26 fixture and
   recorded documents and every one-key mutation: drop, null, string, ±1e6, unknown key), 1,565 accepted
   (`evals/out/schema-equivalence/check.mjs`, scratch).
