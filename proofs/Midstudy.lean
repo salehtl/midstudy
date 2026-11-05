@@ -10,3 +10,4 @@ import Midstudy.Lighting
 import Midstudy.Jpeg.Model
 import Midstudy.Jpeg.Proofs
 import Midstudy.Turn
+import Midstudy.Plane
