@@ -24,8 +24,8 @@ property tests and the golden scenes.
 
 ```sh
 cd proofs
-./run.sh lake update        # once after a fresh clone: clones Mathlib's packages and fetches its cache (no build)
-./run.sh lake exe cache get # the same cache fetch alone (if .lake/ was deleted but the manifest is there)
+./run.sh lake exe cache get # once after a fresh clone: clones Mathlib's packages at the manifest's revisions and
+                            # fetches its compiled files into proofs/.lake (no Mathlib build; ~2 min)
 ./run.sh lake build         # every proof (about 1 min from a warm cache)
 ./check.sh                  # check:proofs: lake build, no sorry/admit/native_decide/axiom in the sources, and
                             # CheckAxioms.lean: every declaration under Midstudy uses only propext,
@@ -36,7 +36,11 @@ nix develop -c proofs/diff/run.sh [N]   # (from the repo root) the differential 
 ```
 
 `nix build -f nix/lean.nix` (or `nix shell -f nix/lean.nix -c lean --version`) gives the Lean alone. From a flake:
-`pkgs.callPackage ./nix/lean.nix { }`.
+`import ./nix/lean.nix { inherit pkgs; }` (what f-toolchain's flake does) or `pkgs.callPackage ./nix/lean.nix { }`.
+
+Checked from a clean export of the committed `proofs/` and `nix/lean.nix` (2026-11-05): `./run.sh lake exe cache get`
+1 min 54 s (Mathlib cloned, 8,232 files fetched), then `./check.sh` 1 min 33 s, ok; nothing written under `~/.cache`.
+Don't run `lake update` for this: it re-resolves the dependencies.
 
 ## What is proved
 
