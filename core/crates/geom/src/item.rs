@@ -116,9 +116,14 @@ pub fn box_corners(t: &Transform, b: &LocalBox) -> [V3; 8] {
 }
 
 /// v1's `worldBounds`: the world axis-aligned bounds `(min, max)` of the item's turned box (three.js
-/// `Box3.applyMatrix4`: the 8 corners transformed, then their bounds).
+/// `Box3.applyMatrix4`: the 8 corners transformed, then their bounds; an empty box, min > max on some axis, comes back
+/// untransformed, as three.js returns it).
 #[must_use]
 pub fn world_bounds(t: &Transform, b: &LocalBox) -> (V3, V3) {
+    // three.js: "transform of empty box is an empty box" (a box with min > max on an axis is returned as is).
+    if (0..3).any(|k| b.min[k] > b.max[k]) {
+        return (b.min, b.max);
+    }
     let corners = box_corners(t, b);
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
