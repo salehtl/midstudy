@@ -55,10 +55,10 @@ never been built on Linux.
 
 | Eval | Result | Measured |
 |---|---|---|
-| E1 scenes API (`eval:scenes-api`) | **pass** 172/172 | uploads, jobs, trash/restore, allowlist (30 spellings), metadata stripping, Host/Origin rules, spend cap |
-| E2 calibration, real MoGe-2 (`eval:calib`) | **pass** 91/91 | golden + EXIF: FOV from EXIF, height within 0.6–3.3 %, depth ≤ 10 %; golden without EXIF: pitch/roll ≤ 0.7°, depth shape 0.7–1.1 %, MoGe's own FOV/scale bias (+3.6…+7.5°, −7.8…−15.4 %) inside the regression bands (known gaps, item 1). Lounge: FOV 69.63° (EXIF), height 1.432 m, floor found |
+| E1 scenes API (`eval:scenes-api`) | **pass** 219/219 | uploads, jobs, trash/restore, allowlist (30 spellings), metadata stripping, Host/Origin rules, spend cap; the Look keys, `lighting` and the old-scene light job (`POST …/light`) |
+| E2 calibration, real MoGe-2 (`eval:calib`) | **pass** 132/132 | golden + EXIF: FOV from EXIF, height within 0.6–3.3 %, depth ≤ 10 %; golden without EXIF: pitch/roll ≤ 0.7°, depth shape 0.7–1.1 %, MoGe's own FOV/scale bias (+3.6…+7.5°, −7.8…−15.4 %) inside the regression bands (known gaps, item 1). Lounge: FOV 69.63° (EXIF), height 1.432 m, floor found. Lighting: the key within 1.7–15° of the true light on the five golden scenes (living-warm the widest), brightness ×0.90–1.15, the cool/warm shift the right way; the lounge plausible (5300 K, soft, 52° up) |
 | E2 self-test (`calib_eval.py --self-test`) | **pass** 42/42 | |
-| E2 ingest (`eval:calib -- --mock`) | **pass** 51/51 | HEIC, P3, PNG, WebP, rotation, 25 MB limit, metadata stripped |
+| E2 ingest (`eval:calib -- --mock`) | **pass** 58/58 | HEIC, P3, PNG, WebP, rotation, 25 MB limit, metadata stripped; `light` with the mock |
 | E3 planner (`eval:planner`) | **pass** 55/55 | `floorToPhoto` max 0.00 px off; 2 m → 4 m shrink ratio 0.495 (projected 0.495) |
 | E4 occlusion (`eval:occlusion`) | **pass** 20/20 | hidden pixels 100 % photo; off: 100 % box; manual height ×1.25 still 100 % |
 | E5 floor (`eval:floor`) | **pass** 34/34 | horizon drag pitch −5.75° (expected −5.74°); manual/auto save and reset |
@@ -71,13 +71,14 @@ never been built on Linux.
 | E13 splats (`eval:splat`) | **pass** 50/50 | Idol default add, entries validate, `splat.spz` served; GLB composites unchanged next to splats; a splat probe within 3 % of its projected box; the Idol chair within 3 px of where its own points project; a render right after placing keeps the near splat in front; occlusion behind the sofa; keep-room mask; Shows as; the Add form (order, $0.10, 44 px on the phone); the phone loads `splat.spz` |
 | E14 product page reader (`eval:product`) | **pass** 395/395 | 57 made-up shop pages (JSON-LD, microdata, OpenGraph, Shopify and WooCommerce feeds, tables, script JSON, prose for the model, a planted injection, order keys, foreign labels), blocked and broken pages, private links and redirects, 20 s and 10 MB limits, gzip bombs, a CPU-heavy page that once froze the server, the prompt, cost rows and the cap |
 | E15 product page form (`eval:product-ui`) | **pass** 117/117 | desktop and phone: Read, sizes, pictures, notes, Make through to a done job, a blocked shop, re-reads |
+| E16 lighting (`eval:lighting`) | **pass** 55/55 | a grey probe box's faces 2–4 % from what each golden scene's light predicts, its shadow 1.5–14° from straight away from the light and hidden behind the real table; the controls, saved per scene and saving themselves; unlit pieces unchanged; no `lighting.json` = the v1 look; an old scene gets its light on first open; splats warmer in the warm room, their stand-in casting the shadow; desktop and phone |
 | Golden shop pages (`eval:product-live`) | **pass** 82/82 saved copies; live with the model 73/73 | ten real pages (IKEA AE and US, the Zennova carpet, Albany Park, Annie Selke, Boutique Rugs, Floyd, Industry West, Target, West Elm). Live with Haiku on 2026-11-05 (after landing): every shop answered, the model ran only on Industry West (no size on the page; it found none, $0.000253) |
 | Real path (`eval:real`) | **pass** 31/31 | your lounge photo, real MoGe, GLB chair, two renders, Compare, phone |
 | Harness self-test (`eval:selftest`) | **pass** 22/22 | |
-| `calib/` unit tests (pytest) | **pass** 42/42 | |
+| `calib/` unit tests (pytest) | **pass** 62/62 | |
 | `nix flake check --no-build --all-systems` | **pass** | evaluation only, nothing built |
 
-`eval:all` (E1, E3–E9, E11–E15) takes about 10 min. With Idol (v1.1) it passed 11 of 11 twice before the product page reader was merged in and 13 of 13 after, all on 2026-11-05. One earlier run failed four timing checks (E3.32, E11.14, E12.13, E13.36) while three verifiers ran beside it, and none of those came back on a quieter machine. The product page reader alone passed 12 of 12 at 14:30 (an earlier run that day failed E3, E4, E5 and E11 on page-load timeouts while other sessions held the Mac's load average above 180). Logs are in `evals/out/main/` (git-ignored). The main session
+`eval:all` (E1, E3–E9, E11–E16) takes about 12 min; with lighting merged in it passed 14 of 14 twice on 2026-11-05 (one earlier run failed E13.26 because the Idol chair's new cast shadow counted as part of its outline; E13 now turns it off for that check, as it already did contact shadows). With Idol (v1.1) it passed 11 of 11 twice before the product page reader was merged in and 13 of 13 after, all on 2026-11-05. One earlier run failed four timing checks (E3.32, E11.14, E12.13, E13.36) while three verifiers ran beside it, and none of those came back on a quieter machine. The product page reader alone passed 12 of 12 at 14:30 (an earlier run that day failed E3, E4, E5 and E11 on page-load timeouts while other sessions held the Mac's load average above 180). Logs are in `evals/out/main/` (git-ignored). The main session
 found E11.18 and E12.12 flaky (fixed timing in the evals, not the app; each then passed 3 runs out of 3).
 
 ## Live check of Idol (v1.1, 2026-11-05, $0.1398)
