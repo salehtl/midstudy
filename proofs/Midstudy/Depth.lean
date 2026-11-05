@@ -45,6 +45,54 @@ theorem depth_eq_dot_forward (p : Vec3) : c.depth p = (p - c.center) ⬝ᵥ c.fo
   simp [depth, toCamera, forward, R, camR_eq, Matrix.mulVec, dotProduct, Fin.sum_univ_three, Matrix.transpose_apply]
   ring
 
+/-- **In front means positive depth**: `d > 0` exactly in the open half-space ahead of the camera (geom LEAN.md
+property 2). -/
+theorem depth_pos_iff (p : Vec3) : 0 < c.depth p ↔ 0 < (p - c.center) ⬝ᵥ c.forward := by
+  rw [depth_eq_dot_forward]
+
+/-- **Up in the world is up in the photo, ahead of the camera's foot** (roll 0; geom LEAN.md property 7): raising a
+point by `δ` moves its pixel by `f · δ · z / (d · d')` rows (`z` its world z, `d`, `d'` its depths before and after).
+So for a point ahead of the camera's foot (`z < 0`) seen before and after, raising it moves it up the photo; behind
+the foot (`z > 0`, possible when looking steeply down) it moves down. -/
+theorem floorToPhoto_raise (hroll : c.roll_deg = 0) (p : Vec3) (δ : ℝ) (hd : c.depth p ≠ 0)
+    (hd' : c.depth (p + ![0, δ, 0]) ≠ 0) :
+    (c.floorToPhoto ph (p + ![0, δ, 0])).2 - (c.floorToPhoto ph p).2 =
+      c.focalPx ph * δ * p 2 / (c.depth p * c.depth (p + ![0, δ, 0])) := by
+  have hr0 : rad 0 = 0 := by simp [rad]
+  have hdq : c.depth (p + ![0, δ, 0]) = c.depth p + sin (rad c.pitch_deg) * δ := by
+    simp [-Matrix.add_cons, depth, toCamera, R, camR_eq, hroll, hr0, Matrix.mulVec, dotProduct,
+      Fin.sum_univ_three, Matrix.transpose_apply, center]
+    ring
+  have hyq : c.toCamera (p + ![0, δ, 0]) 1 = c.toCamera p 1 + cos (rad c.pitch_deg) * δ := by
+    simp [-Matrix.add_cons, toCamera, R, camR_eq, hroll, hr0, Matrix.mulVec, dotProduct, Fin.sum_univ_three,
+      Matrix.transpose_apply, center]
+    ring
+  have hkey : cos (rad c.pitch_deg) * c.depth p - sin (rad c.pitch_deg) * c.toCamera p 1 = -p 2 := by
+    simp [depth, toCamera, R, camR_eq, hroll, hr0, Matrix.mulVec, dotProduct, Fin.sum_univ_three,
+      Matrix.transpose_apply, center]
+    linear_combination (-(p 2)) * sin_sq_add_cos_sq (rad c.pitch_deg)
+  simp only [floorToPhoto, projectPhoto]
+  rw [hyq]
+  rw [hdq] at hd' ⊢
+  have hz : sin (rad c.pitch_deg) * c.toCamera p 1 - cos (rad c.pitch_deg) * c.depth p = p 2 := by
+    linear_combination -hkey
+  have hd'' : c.depth p + δ * sin (rad c.pitch_deg) ≠ 0 := by rwa [mul_comm δ]
+  have e : ph.h / 2 - c.focalPx ph * (c.toCamera p 1 + cos (rad c.pitch_deg) * δ) /
+        (c.depth p + sin (rad c.pitch_deg) * δ) - (ph.h / 2 - c.focalPx ph * c.toCamera p 1 / c.depth p) =
+      c.focalPx ph * δ * (sin (rad c.pitch_deg) * c.toCamera p 1 - cos (rad c.pitch_deg) * c.depth p) /
+        (c.depth p * (c.depth p + sin (rad c.pitch_deg) * δ)) := by
+    field_simp
+    ring
+  rw [e, hz]
+
+theorem floorToPhoto_up (hroll : c.roll_deg = 0) {p : Vec3} {δ : ℝ} (hδ : 0 < δ) (hz : p 2 < 0)
+    (hd : 0 < c.depth p) (hd' : 0 < c.depth (p + ![0, δ, 0])) (hf : 0 < c.focalPx ph) :
+    (c.floorToPhoto ph (p + ![0, δ, 0])).2 < (c.floorToPhoto ph p).2 := by
+  have := c.floorToPhoto_raise ph hroll p δ hd.ne' hd'.ne'
+  have hneg : c.focalPx ph * δ * p 2 / (c.depth p * c.depth (p + ![0, δ, 0])) < 0 :=
+    div_neg_of_neg_of_pos (mul_neg_of_pos_of_neg (mul_pos hf hδ) hz) (mul_pos hd hd')
+  linarith
+
 /-- The camera block with another `height_m`, everything else kept. -/
 def withHeight (h : ℝ) : CameraBlock := { c with height_m := h }
 

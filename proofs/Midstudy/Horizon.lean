@@ -72,6 +72,16 @@ theorem photoRay_one_neg_iff (hc : c.InRange) (hH : 0 < ph.h) (px py : ℝ) :
   · intro h
     exact Or.inl ⟨hk, by linarith⟩
 
+/-- The ray's world y component strictly decreases down the photo (geom LEAN.md property 6). -/
+theorem photoRay_one_strictAnti (hc : c.InRange) (hH : 0 < ph.h) (px : ℝ) :
+    StrictAnti (fun py => c.photoRay ph px py 1) := by
+  have hf := hc.focalPx_pos hH
+  have hk : 0 < cos (rad c.pitch_deg) * cos (rad c.roll_deg) / c.focalPx ph :=
+    div_pos (mul_pos hc.cos_pitch_pos hc.cos_roll_pos) hf
+  intro a b hab
+  simp only [photoRay_one_eq c ph hf.ne' hc.cos_pitch_pos.ne' hc.cos_roll_pos.ne']
+  nlinarith
+
 /-- For a camera in range, a pixel's ray is horizontal exactly on the horizon line. -/
 theorem photoRay_one_eq_zero_iff (hc : c.InRange) (hH : 0 < ph.h) (px py : ℝ) :
     c.photoRay ph px py 1 = 0 ↔ py = c.horizonAt ph px := by

@@ -158,6 +158,27 @@ theorem photoRay_floorToPhoto (hf : c.focalPx ph ≠ 0) {p : Vec3} (hd : c.depth
       field_simp
   rw [photoRay, hcam, Matrix.mulVec_smul, R_mulVec_toCamera]
 
+/-- **Projection inverts the ray** (geom LEAN.md property 3): the point at parameter `t > 0` along the ray through
+`(px, py)` projects back to `(px, py)`, at depth exactly `t` (the camera direction's z is −1). -/
+theorem projectPhoto_ray (hf : c.focalPx ph ≠ 0) (px py : ℝ) {t : ℝ} (ht : t ≠ 0) :
+    c.projectPhoto ph (c.center + t • c.photoRay ph px py) = (px, py, t) := by
+  have hcam : c.toCamera (c.center + t • c.photoRay ph px py) = t • c.camDir ph px py := by
+    rw [toCamera, add_sub_cancel_left, photoRay, Matrix.mulVec_smul, toCamera_R_mulVec]
+  have hdepth : c.depth (c.center + t • c.photoRay ph px py) = t := by
+    rw [depth, hcam]
+    simp [camDir]
+  simp only [projectPhoto, hdepth, hcam]
+  simp [camDir]
+  constructor <;> field_simp <;> ring
+
+/-- At a floor point's pixel the ray points down, with y component exactly `−height / depth` (geom LEAN.md
+property 5). -/
+theorem photoRay_floorToPhoto_y (hf : c.focalPx ph ≠ 0) {p : Vec3} (hp : p 1 = 0) (hd : 0 < c.depth p) :
+    c.photoRay ph (c.floorToPhoto ph p).1 (c.floorToPhoto ph p).2 1 = -c.height_m / c.depth p := by
+  rw [photoRay_floorToPhoto hf hd.ne']
+  simp [hp]
+  ring
+
 /-- **Floor point → pixel → floor point.** Every floor point in front of the camera comes back from its own pixel
 (for a camera above the floor and a non-degenerate focal length). -/
 theorem photoToFloor_floorToPhoto (hh : 0 < c.height_m) (hf : c.focalPx ph ≠ 0) {p : Vec3} (hp : p 1 = 0)

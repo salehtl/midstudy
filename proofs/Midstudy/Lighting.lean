@@ -247,4 +247,44 @@ theorem azElOf_dirOf {az el : ℝ} (haz : az ∈ Set.Ioc (-180) 180) (hel : el �
     unfold rad
     field_simp
 
+/-- **And every direction is named**: for a unit direction that isn't straight up or down, `dirOf(azEl(d)) = d`
+(geom LEAN.md property 21). -/
+theorem dirOf_azElOf {d : Vec3} (hd : d 0 * d 0 + d 1 * d 1 + d 2 * d 2 = 1) (hy : d 1 * d 1 < 1) :
+    dirOf (azimuthOf d) (elevationOf d) = d := by
+  have hpi := Real.pi_pos
+  have hrad : ∀ x : ℝ, rad (x / (π / 180)) = x := fun x => by unfold rad; field_simp
+  set z : ℂ := ⟨-d 2, d 0⟩ with hz
+  have hρ2 : Complex.normSq z = d 0 * d 0 + d 2 * d 2 := by rw [hz, Complex.normSq_mk]; ring
+  have hpos : 0 < d 0 * d 0 + d 2 * d 2 := by linarith
+  have hz0 : z ≠ 0 := by
+    intro h0
+    rw [h0, Complex.normSq_zero] at hρ2
+    linarith
+  have hnorm : ‖z‖ = Real.sqrt (d 0 * d 0 + d 2 * d 2) := by rw [Complex.norm_def, hρ2]
+  have hsq : Real.sqrt (d 0 * d 0 + d 2 * d 2) ≠ 0 := (Real.sqrt_pos.2 hpos).ne'
+  have hcos_el : cos (Real.arcsin (d 1)) = Real.sqrt (d 0 * d 0 + d 2 * d 2) := by
+    rw [Real.cos_arcsin]
+    congr 1
+    linarith
+  have hy1 : -1 ≤ d 1 ∧ d 1 ≤ 1 := by constructor <;> nlinarith
+  have hsq2 : Real.sqrt (d 0 ^ 2 + d 2 ^ 2) ≠ 0 := by rw [sq, sq]; exact hsq
+  have e0 : dirOf (azimuthOf d) (elevationOf d) 0 = d 0 := by
+    simp only [dirOf, azimuthOf, elevationOf, hrad, Matrix.cons_val_zero]
+    rw [hcos_el, ← hz, Complex.sin_arg, hnorm]
+    simp only [hz]
+    field_simp
+  have e1 : dirOf (azimuthOf d) (elevationOf d) 1 = d 1 := by
+    simp only [dirOf, azimuthOf, elevationOf, hrad, Matrix.cons_val_one]
+    exact Real.sin_arcsin hy1.1 hy1.2
+  have e2 : dirOf (azimuthOf d) (elevationOf d) 2 = d 2 := by
+    simp only [dirOf, azimuthOf, elevationOf, hrad, Matrix.cons_val_two, Matrix.tail_cons, Matrix.head_cons]
+    rw [hcos_el, ← hz, Complex.cos_arg hz0, hnorm]
+    simp only [hz]
+    field_simp
+  ext i
+  fin_cases i
+  · exact e0
+  · exact e1
+  · exact e2
+
 end Midstudy.Lighting

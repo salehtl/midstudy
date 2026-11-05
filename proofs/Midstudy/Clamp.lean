@@ -490,6 +490,57 @@ theorem rotateBy_four_quarters {x : ℝ} (hx : OnGrid x) (hr : x ∈ Ioc (-180) 
   have g3 : OnGrid (wrapDeg (x + 270)) := by rw [← e2]; exact wrapDeg_onGrid (g2.add h90)
   rw [rotateBy_onGrid hx h90, rotateBy_onGrid g1 h90, e1, rotateBy_onGrid g2 h90, e2, rotateBy_onGrid g3 h90, e3]
 
+/-- The stored angle `round(wrapDeg(r), 6)` lies in [−180, 180] (rounding can reach −180). -/
+theorem round6_wrapDeg_mem (r : ℝ) : round6 (wrapDeg r) ∈ Icc (-180) 180 := by
+  have hr : GridRound round6 (-180) 180 :=
+    round6_gridRound (a := -180000000) (b := 180000000) (by norm_num) (by norm_num)
+  have hm := wrapDeg_mem r
+  have := hr.clamp_mem (by norm_num) (wrapDeg r)
+  rwa [clamp_of_mem ⟨hm.1.le, hm.2⟩] at this
+
+theorem round6_onGrid (x : ℝ) : OnGrid (round6 x) :=
+  ⟨round (x * 10 ^ 6), by unfold round6; field_simp⟩
+
+/-- **Four quarter turns from a stored angle give it back, unless it is −180** (geom LEAN.md property 13, corrected):
+for `r₀ = round(wrapDeg(r), 6) ≠ −180`, `R` four times returns `r₀` exactly. -/
+theorem rotateBy_four_quarters_stored (r : ℝ) (h : round6 (wrapDeg r) ≠ -180) :
+    rotateBy (rotateBy (rotateBy (rotateBy (round6 (wrapDeg r)) 90) 90) 90) 90 = round6 (wrapDeg r) := by
+  have hm := round6_wrapDeg_mem r
+  exact rotateBy_four_quarters (round6_onGrid _) ⟨lt_of_le_of_ne hm.1 (Ne.symm h), hm.2⟩
+
+/-- **The exception**: an angle within 5·10⁻⁷ of −180 (here −179.9999999) is stored as −180, and four quarter turns
+bring it back as 180: the same rotation (`Ry_rad_wrapDeg`), another number. So "four quarter turns return
+`round(wrapDeg(r), 6)`" fails for those angles (geom's proptest `four_quarter_turns` draws them with probability
+about 10⁻⁹ per case). -/
+theorem rotateBy_four_quarters_exception :
+    round6 (wrapDeg (-179.9999999)) = -180 ∧
+      rotateBy (rotateBy (rotateBy (rotateBy (-180) 90) 90) 90) 90 = 180 := by
+  have hw : wrapDeg (-179.9999999) = -179.9999999 := wrapDeg_of_mem ⟨by norm_num, by norm_num⟩
+  have hr : round ((-179.9999999 : ℝ) * 10 ^ 6) = -180000000 := by
+    rw [round_eq, Int.floor_eq_iff]
+    norm_num
+  have h180 : OnGrid (-180) := ⟨-180000000, by norm_num⟩
+  have h90 : OnGrid 90 := ⟨90000000, by norm_num⟩
+  refine ⟨?_, ?_⟩
+  · rw [hw]
+    unfold round6
+    rw [hr]
+    norm_num
+  · have w1 : wrapDeg (-180 + 90) = -90 := by
+      rw [show (-180 : ℝ) + 90 = -90 by norm_num]
+      exact wrapDeg_of_mem ⟨by norm_num, by norm_num⟩
+    have w2 : wrapDeg (-90 + 90) = 0 := by
+      rw [show (-90 : ℝ) + 90 = 0 by norm_num]
+      exact wrapDeg_of_mem ⟨by norm_num, by norm_num⟩
+    have w3 : wrapDeg (0 + 90) = 90 := by
+      rw [show (0 : ℝ) + 90 = 90 by norm_num]
+      exact wrapDeg_of_mem ⟨by norm_num, by norm_num⟩
+    have w4 : wrapDeg (90 + 90) = 180 := by
+      rw [show (90 : ℝ) + 90 = 180 by norm_num]
+      exact wrapDeg_of_mem ⟨by norm_num, by norm_num⟩
+    rw [rotateBy_onGrid h180 h90, w1, rotateBy_onGrid (x := -90) ⟨-90000000, by norm_num⟩ h90, w2,
+      rotateBy_onGrid (x := 0) ⟨0, by norm_num⟩ h90, w3, rotateBy_onGrid (x := 90) ⟨90000000, by norm_num⟩ h90, w4]
+
 /-- engine.js `wrapAz` (in `lookFrom`): `((a + 180) % 360 + 360) % 360 − 180`, with −180 written as 180 only when
 the input was positive. -/
 def wrapAz (a : ℝ) : ℝ :=
