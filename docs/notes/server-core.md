@@ -146,7 +146,7 @@ nix develop -c npm run test:server                              # 94 tests, ~25 
 nix develop -c node --test server/test/differential.test.ts     # 1238 cases against v1's own Python
 MIDSTUDY_STRICT=1 MIDSTUDY_NO_DOTENV=1 MIDSTUDY_FAL_MOCK=fixtures/fal nix develop -c node server/src/main.ts --port 0 --daily-spend-usd 0
 MIDSTUDY_SERVER=next nix develop -c node scripts/eval-lock.mjs -- npm run eval:scenes-api
-MIDSTUDY_TSCERT_STEP_LIMIT=900 nix develop -c node scripts/tscert-ratchet.mjs [--update]   # the default 180 s step limit times out under load
+nix develop -c npm run check:tscert                             # 115/115; a tool error under load: run it again
 nix develop -c node scripts/check-ownership.mjs server-core --base 979677c
 ```
 
@@ -218,11 +218,14 @@ nix develop -c node scripts/check-ownership.mjs server-core --base 979677c
 
 ## TScert
 
-`MIDSTUDY_TSCERT_STEP_LIMIT=900 nix develop -c node scripts/tscert-ratchet.mjs`: TSCERT-RESULT. The first run certified
+`nix develop -c npm run check:tscert`: **115/115 certified, all 115 baselined still certify** (15 files, 17 s, at load 7;
+`tscert/baseline.json` holds all 115: every function and module initialization of `server/src/logic/` and
+`common/logic/`). The first run certified
 107/111 at once; the four refusals were rewritten (a function passed as `map`'s callback, an object spread, a write to an
 array index, `concat`, a `for…of` over a union array, an index read of it), each a pattern tscert/README.md lists.
-Under this machine's load (20–48 during the session) the default 180 s step limit timed out on units that certify in
-seconds when it is quiet; 900 s got verdicts. Everything in `server/src/logic/` and `common/logic/` is pure (no Node, no
+Under this machine's load (20–48 during the session) TScert's verifier steps timed out (no verdict, "tool error") even
+with a 900 s step limit, on units that certify in seconds when the machine is quiet; at load 7 the default 180 s gave
+the verdicts above. A gate that meets a tool error should simply run again. Everything in `server/src/logic/` and `common/logic/` is pure (no Node, no
 DOM), including `String.prototype.normalize` in `slugify` and `String.fromCodePoint` in the UTF-8 decoder, which certify.
 
 ## Decisions and deviations from v1
@@ -285,8 +288,9 @@ Framing names v2's two extra refusals. E1's own startup checks (lines 712, 719) 
   `MIDSTUDY_SERVER=next node contract/tools/record-examples.mjs --check` once the routes exist; `npm run test:server` into
   `npm run check` (or a gate), and delete `server/test/v1_oracle.py` and the two differential tests with
   `planner/serve.py` (they skip themselves when it's gone).
-- **f-toolchain / gates**: `check:tscert`'s default 180 s step limit times out under this machine's load (load 20–25);
-  `MIDSTUDY_TSCERT_STEP_LIMIT=900` got verdicts.
+- **f-toolchain / gates**: under heavy load (20–48) `check:tscert` reported tool errors (verifier step timeouts, even at
+  `MIDSTUDY_TSCERT_STEP_LIMIT=900`) on units that certify in 15–50 s when the machine is quieter: retry before reading a
+  tool error as a regression.
 
 ## Left
 
