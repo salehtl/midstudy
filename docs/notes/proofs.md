@@ -100,6 +100,7 @@ throughout. The table lists the main results by group; the next section maps k-g
 | `pitchFromHorizon_lipschitz`, `horizon_drag_cap` | Horizon | a horizon drag tilts the camera by at most `min(degPerCssPx, 0.12)` degrees per CSS pixel (§4.5) | geom props `horizon_drag_is_capped` |
 | `rotateBy_four_quarters_stored`, `rotateBy_four_quarters_exception` | Clamp | `R` four times returns the stored angle, except a stored −180 (from angles within 5·10⁻⁷ of −180), which comes back as 180: see Requests | geom props `four_quarter_turns` |
 | `corners_bound_x/y/z`, `footprint_centre` | Item | every point of a turned box lies within its 8 corners' bounds; the footprint's centre is the box's floor centre | geom `world_bounds`, `footprint` |
+| `scaled01_ge`, `exactCap`, `defaults_unchanged_iff` | Lighting | with the exact cap no direction drops below 5 % of band 0; at the defaults the probe is exactly lighting.json's only when the cap is ≥ 1 (see Observations) | raster `max_band_scale` |
 | `dirOf_azElOf` | Lighting | `dirOf(azEl(d)) = d` for every unit direction not straight up or down | geom `az_el_of` |
 | `landing_spec`, `landing_free`, `ringPoint_dist` | Landing | a new piece lands on the base or on the first free ring point (in front, 0.45 m clear), within 5·10⁻⁷ after rounding | geom `landing_spot` |
 | `fwd_iff`, `bwd_iff`, `rowPass_iff`, `dilate_iff` | Dilate | the keep-room mask's two-pass scan is exactly the box dilation `[x − right, x + left] × [y − down, y + up]` (§4.7) | raster props `dilation_is_a_box` |
@@ -161,6 +162,13 @@ and engine.js (`photoToFloor`, `horizonAt`, `pitchFromHorizon`, `wrapDeg`, `rota
 - **The merge order matters** (`merge_order_matters`): readings 10.5, 10, 11 cm give one candidate, 10, 11, 10.5 give
   two. The reader's order is fixed (variants first, then layers), so results are deterministic, but a port must keep
   the same order and the same first-match rule to agree with v1.
+- **§4.8's strength cap vs "exactly lighting.json"** (`scaled01_ge`, `defaults_unchanged_iff`): the planner scales
+  the ambient's directional part by `min(light_strength, cap)`, the cap keeping every direction ≥ 5 % of band 0. At the
+  defaults the light is exactly lighting.json's only when the cap is ≥ 1, i.e. when lighting.json's own darkest
+  direction is already ≥ 5 % of band 0; a fit with a darker side is dimmed a little at strength 1. Also, v1's cap is
+  taken over 96 sample directions (`maxBandScale`), which is at least the exact cap (`exactCap`, attained at
+  −L1/|L1|), so between samples a direction can come slightly under 5 %. Both are v1 behaviour; the contract's two
+  sentences agree only for such fits.
 - **§4.5's depth rescale is exact for height changes only** (`occlusion_rescale`); a changed fov, pitch or roll moves
   pixels, so the rescaled depth.png is then an approximation (v1 behaviour, as the contract describes).
 

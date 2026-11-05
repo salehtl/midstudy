@@ -287,4 +287,61 @@ theorem dirOf_azElOf {d : Vec3} (hd : d 0 * d 0 + d 1 * d 1 + d 2 * d 2 = 1) (hy
   · exact e1
   · exact e2
 
+/-! ### The strength cap (§4.8 `light_strength`: "capped so that no direction drops below 5 % of band 0") -/
+
+/-- The irradiance of bands 0–1 with the directional part scaled by `k` (lighting.js `scaleBands`), for one channel
+(or the luminance: `lum` is linear, so the same holds for it): `0.886227·L00 + k·1.023328·(L1 · n)`. -/
+def scaled01 (l00 : ℝ) (l1 : Vec3) (k : ℝ) (n : Vec3) : ℝ := 0.886227 * l00 + k * (1.023328 * (l1 ⬝ᵥ n))
+
+/-- The cap over every direction: `0.95 · 0.886227·L00 / (1.023328·|L1|)`. -/
+def exactCap (l00 : ℝ) (l1 : Vec3) : ℝ := 0.95 * (0.886227 * l00) / (1.023328 * Real.sqrt (l1 ⬝ᵥ l1))
+
+theorem dot_ge_neg_norm (l1 n : Vec3) (hn : n ⬝ᵥ n = 1) : -Real.sqrt (l1 ⬝ᵥ l1) ≤ l1 ⬝ᵥ n := by
+  have hcs : (l1 ⬝ᵥ n) ^ 2 ≤ (l1 ⬝ᵥ l1) * (n ⬝ᵥ n) := by
+    simp only [dotProduct, Fin.sum_univ_three]
+    nlinarith [sq_nonneg (l1 0 * n 1 - l1 1 * n 0), sq_nonneg (l1 0 * n 2 - l1 2 * n 0),
+      sq_nonneg (l1 1 * n 2 - l1 2 * n 1)]
+  rw [hn, mul_one] at hcs
+  have := Real.abs_le_sqrt hcs
+  linarith [neg_abs_le (l1 ⬝ᵥ n)]
+
+/-- **With the exact cap, no direction drops below 5 % of band 0**: for every scale `0 ≤ k ≤ exactCap` and every
+unit direction. (lighting.js `maxBandScale` takes the cap over its 96 sample directions instead, which is at least
+this one: between the samples a direction can come a little under 5 %.) -/
+theorem scaled01_ge {l00 : ℝ} {l1 : Vec3} (h1 : 0 < l1 ⬝ᵥ l1) {k : ℝ} (hk0 : 0 ≤ k)
+    (hk : k ≤ exactCap l00 l1) {n : Vec3} (hn : n ⬝ᵥ n = 1) : 0.05 * (0.886227 * l00) ≤ scaled01 l00 l1 k n := by
+  have hs : 0 < Real.sqrt (l1 ⬝ᵥ l1) := Real.sqrt_pos.2 h1
+  have hd := dot_ge_neg_norm l1 n hn
+  unfold exactCap at hk
+  rw [le_div_iff₀ (by positivity)] at hk
+  unfold scaled01
+  nlinarith [mul_le_mul_of_nonneg_left hd hk0]
+
+/-- **At strength 1 the light is exactly lighting.json's only when the cap allows it**: the planner applies
+`min(strength, cap)` to the directional part, so at the defaults the probe is unchanged exactly when the cap is at
+least 1 (§4.8's "at the inferred direction and light_strength 1 everything is exactly lighting.json" needs the
+lighting.json's own darkest direction to be at least 5 % of band 0). -/
+theorem defaults_unchanged_iff {l00 : ℝ} {l1 : Vec3} (h1 : l1 ≠ 0) (cap : ℝ) :
+    (∀ n, scaled01 l00 l1 (min 1 cap) n = scaled01 l00 l1 1 n) ↔ 1 ≤ cap := by
+  constructor
+  · intro h
+    by_contra hc
+    have hc' := not_le.1 hc
+    have hmin : min 1 cap = cap := min_eq_right hc'.le
+    have hl : l1 ⬝ᵥ l1 ≠ 0 := by
+      intro h0
+      apply h1
+      simp only [dotProduct, Fin.sum_univ_three] at h0
+      ext i
+      fin_cases i <;> simp <;> nlinarith [sq_nonneg (l1 0), sq_nonneg (l1 1), sq_nonneg (l1 2)]
+    have := h l1
+    unfold scaled01 at this
+    rw [hmin] at this
+    have : (cap - 1) * (1.023328 * (l1 ⬝ᵥ l1)) = 0 := by linarith
+    rcases mul_eq_zero.1 this with h2 | h2
+    · linarith
+    · exact hl (by linarith)
+  · intro h n
+    rw [min_eq_left h]
+
 end Midstudy.Lighting
