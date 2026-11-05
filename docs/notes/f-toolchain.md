@@ -110,11 +110,11 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 
 | Tool | Verdict | Evidence |
 |---|---|---|
-| TScert | **go** | Built in the Nix sandbox at `1c8abcf2` in 5 min 21 s (8 min after the patch). 90 of 111 experiment functions certify (20 s). The ratchet passes, rewrites the baseline, and fails on a planted regression. One documented patch makes the sandboxed runs work (tscert/README.md). Running it directly as the user was refused by this session's permission classifier, so `check:tscert` always uses the sandbox. |
+| TScert | **go** | Built in the Nix sandbox at `1c8abcf2` in 5 min 21 s (8 min after the patch). 103 of 126 experiment functions certify (14 s). The ratchet passes, rewrites the baseline, and fails on a planted regression. One documented patch makes the sandboxed runs work (tscert/README.md). Running it directly as the user was refused by this session's permission classifier, so `check:tscert` always uses the sandbox. |
 | Miri | **go** | `nix develop .#nightly -c cargo miri --version` → `miri 0.1.0 (8925ea358a 2026-08-20)`. A probe crate's tests ran under Miri: 1 passed. |
 | cargo-fuzz | **go** | 0.13.1 on nightly-2026-08-21 with ASan on aarch64-darwin: a probe `be16` target ran 10 s without a crash. |
 | Kani | **go** (aarch64-darwin) | Release bundle 0.68.0 (109 MB, fixed-output) with its `toolchain` link pointed at rust-overlay's nightly-2026-08-21. kani-compiler loads `librustc_driver` through `@loader_path/../toolchain/lib`. `cargo kani --version` → "Kani Rust Verifier 0.68.0 (cargo plugin)". A probe harness gave `VERIFICATION:- SUCCESSFUL`, 1 of 1 verified. Packaging took under 30 minutes. cbmc-viewer (`--visualize`) is not included, and Linux is not packaged. |
-| Aeneas + Charon | **no-go within the time box** | `nix build github:AeneasVerif/aeneas/4acbb6d7#aeneas …#charon` ran 62 min (21:42–22:44), fetched 436 store paths and was still building Charon's vendored crates (crane, nightly-2026-09-17 with rustc-dev) when it stopped ("interrupted"). No binary was produced, so there is no `.#proofs` shell. A later run resumes from the cached paths. Aeneas's Lean library pins **Lean v4.35.0** (`backends/lean/lean-toolchain`) with Mathlib `56a00585` (tag v4.35.0); Charon pin `6cc2b5f8`. |
+| Aeneas + Charon | **no-go within the time box** | `nix build github:AeneasVerif/aeneas/4acbb6d7#aeneas …#charon` ran 62 min (21:42–22:44), fetched 436 store paths and was still building Charon's vendored crates (crane, nightly-2026-09-17 with rustc-dev) when it stopped ("interrupted"). No binary was produced, so there is no `.#proofs` shell. A later run resumes from the cached paths. Aeneas's CI pulls prebuilt paths from `hacl.cachix.org`, but trusting that substituter is a machine-wide Nix setting (`determinateNix.customSettings` in the rabbit flake), which only the user can change. Aeneas's Lean library pins **Lean v4.35.0** (`backends/lean/lean-toolchain`) with Mathlib `56a00585` (tag v4.35.0); Charon pins `6cc2b5f8` and nightly-2026-09-17. |
 
 ## Decisions
 
@@ -149,7 +149,7 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 | Planner bundle: cold build / no-op | 161 ms / 4–9 ms |
 | Probe wasm build: cold / no-op | 18 s / 6 ms |
 | TScert build (sandboxed) | 5 min 21 s (first), 8 min 7 s (after the patch) |
-| TScert experiments (111 functions) / an unchanged re-run | 20 s / under 1 s (store hit) |
+| TScert experiments (126 functions, 20 files) / an unchanged re-run | 12–20 s / under 1 s (store hit) |
 | check:rust on the probe workspace (fmt, clippy, test, Miri setup + test, Kani) | 50 s |
 | Planner load, v1 vs bundle | see "Evals" |
 

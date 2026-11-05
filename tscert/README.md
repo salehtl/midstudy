@@ -66,7 +66,7 @@ Measured output (2026-11-05):
 $ nix develop -c npm run check:tscert                  # today: no logic modules yet
 check:tscert: ok — nothing to check (no file matches planner/logic/**/*.ts, server/src/logic/**/*.ts, pipeline/src/logic/**/*.ts) (0.0 s)
 $ node scripts/tscert-ratchet.mjs --config tscert/experiments/config.json --no-baseline
-tscert: 90/111 certified (19 files, 20 s; report tscert/experiments/report.json)          # exit 0
+tscert: 103/126 certified (20 files, 14 s; report tscert/experiments/report.json)         # exit 0
 # a scratch copy of the repository with camera.ts and units.ts in planner/logic/ and slug.ts in server/src/logic/:
 check:tscert: ok — 10/10 certified, all 0 baselined still certify, 10 new (add them: --update) (2 files, 3 s)
 tscert: 10/10 certified; baseline rewritten (tscert/baseline.json, 0 s)                  # --update, read from the store
@@ -80,7 +80,7 @@ function counts as lost, so rename it on purpose and then run `--update`.
 
 ## What certifies and what does not
 
-`tscert/experiments/` holds 19 files with 111 functions modelled on midstudy's code. 90 of them certify. Here is each
+`tscert/experiments/` holds 20 files with 126 functions modelled on midstudy's code. 103 of them certify. Here is each
 file, with the reason TScert gave for every refusal:
 
 | File | Certified | Refused, with TScert's reason |
@@ -103,6 +103,7 @@ file, with the reason TScert gave for every refusal:
 | `json.ts`: `JSON.parse` to `unknown`, then `Array.isArray` and `typeof` per element; reads of literal keys on `Readonly<Record<string, unknown>>` | 3/4 | `lookFromJson` (`'exposure' in v` after `typeof v === 'object'`): "unsupported: missing field exposure" |
 | `objects.ts`: `??` on an optional field, an `as const` tuple and its element type, a `switch` over that union, a default parameter | 4/5 | `withExposure` (`{ ...l, exposure: e }`, where `l` has readonly and optional fields): evidence search failed |
 | `patterns.ts`: the rewrites below, plus a generic function, recursion, a closure over a `let`, optional chaining, sequential `await`s, `new Array<number>(n).fill(0)` | 10/12 | `asRecord` (`Object.fromEntries(map)`): evidence search failed; `parseCm`: Number.parseFloat is not in the reviewed overlay (the global `parseFloat` is) |
+| `patterns2.ts`: trigonometry injected as an interface of methods and as one of function fields, `includes`, `indexOf`, `at(-1)`, `[...xs].sort((a, b) => a.localeCompare(b))`, `Array.from({ length: n }, (_, i) => i)`, `Object.keys(r).length`, `JSON.stringify(number[])`, `endsWith`, string `includes`, `repeat`, `Number.isNaN` | 13/15 | `sceneUrl`: encodeURIComponent(…) is not in the reviewed overlay of library globals; `sortedNumbers` (`xs.toSorted(…)`): "the array prototype's reviewed contract (ArrayProto) lists no member of that name" |
 
 TScert's own catalogue of the subset is its `docs/SOURCE-FRAGMENT.md`, which lists every refusal with its reason, and
 `docs/SOURCE-CONTRACTS.md` ("Library globals"), which lists the reviewed library entries. Where they disagree with a
@@ -134,7 +135,8 @@ the wasm kernels and typed arrays. Keep shells thin. A shell calls the logic and
   a readonly array into `Math.max` is fine), `Number.isFinite`/`Number.isInteger`, `toFixed`, `String(n)`, and
   literal constants (`3.141592653589793`, `0.017453292519943295`).
 - **Don't:** `Math.PI`, `Math.sqrt/sin/cos/tan/atan2/hypot/trunc/log/exp`, `Number.parseFloat`. None is reviewed.
-  Take trigonometry as a parameter, and let the shell pass `Math.tan`. This certifies:
+  Take trigonometry as a parameter, and let the shell pass `Math.tan`, or `Math` itself through an interface of
+  methods (`interface Trig { tan(x: number): number }`; both forms certify). This certifies:
 
 ```ts
 // planner/logic/horizon.ts                                   // the shell: horizonWith(p, f, Math.tan)
@@ -151,7 +153,10 @@ export function horizonWith(pitchRad: number, fovRad: number, tan: (x: number) =
   `m.entries()` loops and `[...new Set(xs)]` all certify.
 - **Do:** read a record with `Object.entries` or `Object.values`, or at a literal key (`r['exposure']`).
 - **Don't:** index a record with a run-time string (`out[key] = …`, `rec[k]`): the key might be `toString`. Use a `Map`.
-- **Don't:** use `Object.fromEntries(map)` (the search fails) or `Promise.all` with destructuring (await one at a time).
+- **Do:** `includes`, `indexOf`, `at(-1)`, `Array.from({ length: n }, (_, i) => …)`, `Object.keys(r).length`,
+  `JSON.stringify` of plain data, and a sort with `localeCompare` on a copy.
+- **Don't:** use `Object.fromEntries(map)` (the search fails), `toSorted` (not in the array contract; sort a copy), or
+  `Promise.all` with destructuring (await one at a time).
 - **Don't:** use typed arrays (`Float32Array`, `Uint8Array`, …) in logic. Their library types are outside the fragment.
   Pixel, depth and mask loops belong in the Rust kernels (`core/`) or in a shell.
 
@@ -181,8 +186,9 @@ export function withExposure(l: Look, e: number): Look {          // certifies
 ### Strings and regular expressions
 
 - **Do:** `trim`, `toLowerCase`/`toUpperCase`, `slice`, `split` (on a string or a regex literal), `padStart`, `charAt`,
-  `charCodeAt`, `lastIndexOf`, `startsWith`, `join`, template literals, `/…/.test(s)` (a literal or a module constant),
-  and `replace` with a regex literal.
+  `charCodeAt`, `lastIndexOf`, `startsWith`, `endsWith`, `includes`, `repeat`, `localeCompare`, `join`, template
+  literals, `/…/.test(s)` (a literal or a module constant), and `replace` with a regex literal.
+- **Don't:** `encodeURIComponent` (not reviewed). Build URLs in the shell.
 
 ### JSON and other untrusted input
 
