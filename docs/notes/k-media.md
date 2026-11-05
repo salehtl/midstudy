@@ -15,8 +15,9 @@ Branch `v2-k-media`. Owns `core/crates/media/**`, `core/crates/wasm-node/**`, `c
   for GLB textures), `base64` (CPython strict/lenient, WHATWG forgiving, encode), and a private strict JSON reader with
   byte spans (`json`).
 - **`core/crates/wasm-node`** (`midstudy-wasm-node`): wasm-bindgen `=0.2.121`. `api` (plain Rust, tested natively) +
-  `exports` (the `#[wasm_bindgen]` layer, the only place `unsafe_code` is allowed: the crate has its own `[lints]` with
-  `unsafe_code = "deny"`, since wasm-bindgen's glue is unsafe). Plain types only; every fallible call returns an
+  `exports` (the `#[wasm_bindgen]` layer, forwarding only). The workspace lints apply unchanged, `unsafe_code =
+  "forbid"` included: wasm-bindgen 0.2.121's glue passes it (checked on wasm32 with `--forbid=unsafe_code`), so the
+  "outside the wasm glue" exception in REFACTOR §1 isn't needed. Plain types only; every fallible call returns an
   envelope `Uint8Array`: `00` + payload, or `01` + offset u32 + code (kebab-case) + message. Nothing can panic across.
 - **`core/js/node.ts`**: the typed face (strict, no `any`, no casts but `as const`): `sniff`, `photoExt`, `stripJpeg`,
   `jpegFrame`, `jpegIsClean`, `jpegPassthrough`, `stripPng`, `pngSize`, `stripGlb` (`layout: 'compact' | 'in-place'`),

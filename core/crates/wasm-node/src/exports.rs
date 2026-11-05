@@ -1,6 +1,6 @@
-//! The `#[wasm_bindgen]` layer: one export per [`crate::api`] function, same name, plain JS types. wasm-bindgen's
-//! generated glue is unsafe code, which is why this module (and only this module) allows it; nothing here is written
-//! by hand beyond forwarding. Owned `Vec<String>` and `Option<String>` parameters are what wasm-bindgen's ABI takes.
+//! The `#[wasm_bindgen]` layer: one export per [`crate::api`] function, same name, plain JS types; nothing here is
+//! written by hand beyond forwarding. Owned `Vec<String>` and `Option<String>` parameters are what wasm-bindgen's ABI
+//! takes.
 #![allow(clippy::needless_pass_by_value)]
 
 use wasm_bindgen::prelude::wasm_bindgen;
