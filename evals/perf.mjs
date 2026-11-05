@@ -616,9 +616,11 @@ im.save(${JSON.stringify(rug)}, quality=92)`], { stdio: 'ignore' })
   },
 
   // A fresh server with the real calibration each run: two uploads of the same golden photo, one after the other.
+  // Without PYTHONDONTWRITEBYTECODE (the dev shell sets it): torch's ~2,500 modules would be compiled from source on
+  // every calibration, which an installed midstudy-calib (the Nix package ships bytecode) never does.
   async calib(t) {
     if (!t.shared.calibReady) { sh('uv', ['sync', '-q', '--project', 'calib'], t.repo, 1800000); t.shared.calibReady = true }
-    const srv = await call(t, () => t.H.startServer(t.ev, { calib: t.H.REAL_CALIB, calibMock: false }))
+    const srv = await withEnv({ PYTHONDONTWRITEBYTECODE: null }, () => call(t, () => t.H.startServer(t.ev, { calib: t.H.REAL_CALIB, calibMock: false })))
     try {
       if (!srv.up) throw new Error(`the server did not start: ${srv.why}`)
       const bytes = fs.readFileSync(path.join(t.repo, 'fixtures/scenes', LW, 'photo.jpg'))
@@ -629,7 +631,11 @@ im.save(${JSON.stringify(rug)}, quality=92)`], { stdio: 'ignore' })
         const job = id && await t.H.waitFor(async () => { const j = (await t.H.api.get(srv.base, `/api/scenes/jobs/${id}`)).json; return ['done', 'failed'].includes(j?.status) ? j : null }, { timeoutMs: 900000, intervalMs: 50 })
         const ms = now() - t0
         const sc = job ? (await t.H.api.get(srv.base, `/api/scenes/${r.json.scene}`)).json : null
-        record(t, n, ms, { source: sc?.calib ? 1 : 0 }, r.status !== 202 ? `POST /api/scenes: ${r.status} ${clip(r.text, 120)}` : job?.status !== 'done' ? `job ${job?.status ?? 'timed out'}: ${job?.message ?? ''}`
+        // the tool's own timings (calib.json): MoGe's load and inference, the floor fit, and its total
+        const mg = sc?.calib?.moge || {}
+        const sec = (v) => (Number.isFinite(v) ? round(v * 1000, 0) : null)
+        record(t, n, ms, { load_ms: sec(mg.load_s), infer_ms: sec(mg.infer_s), floor_fit_ms: sec(mg.floor_fit_s), tool_ms: sec(sc?.calib?.elapsed_s) },
+          r.status !== 202 ? `POST /api/scenes: ${r.status} ${clip(r.text, 120)}` : job?.status !== 'done' ? `job ${job?.status ?? 'timed out'}: ${job?.message ?? ''}`
           : sc?.calib?.source !== 'moge-2' ? `calib.source is ${sc?.calib?.source}` : null)
       } catch (e) { fail(t, [n], e) }
     } finally { await srv.stop?.() }
@@ -860,6 +866,38 @@ print(json.dumps({"total_ms": round(tot * 1000), "top": [{"fn": f"{fn[2]} {fn[0]
     if (top.error) console.log(`  ${clip(top.error, 300)}`)
     fs.rmSync(lib, { recursive: true, force: true })
   }
+  // the product page reader: v1's Python reader in-process (evals/perf/profile_product.py); the slowest pages
+  if (fs.existsSync(path.join(t.repo, 'planner/product_page.py'))) {
+    const paths = ['/huge', '/gzip-bomb', '/digits', '/products/oak-writing-desk']
+    const r = await timedSpawn(['python3', path.join(SELF, 'evals/perf/profile_product.py'), t.repo, s.pages.base, path.join(dir, 'product')], paths,
+      { cwd: t.repo, env: mockEnv(t, { MIDSTUDY_FETCH_ALLOW: `127.0.0.1:${s.pages.port}` }), timeoutMs: 300000 })
+    let res = null
+    try { res = JSON.parse(r.stdout.trim().split('\n').at(-1)) } catch { console.log(`\nprofile ${t.label} product_read: ${clip(r.stderr || r.stdout, 300)}`) }
+    for (const [p, x] of Object.entries(res || {})) {
+      summary[`product_read ${p}`] = x
+      console.log(`\nprofile ${t.label} product_read ${p} (${x.wall_ms} ms, status ${x.status}):`)
+      for (const y of x.top) console.log(`  ${String(y.self_ms).padStart(8)} ms ${String(y.pct).padStart(5)} %  ${y.fn} (${y.calls} calls)`)
+    }
+  } else summary.product_read = { note: 'no planner/product_page.py: profile the server process itself (node --cpu-prof)' }
+  // one real calibration (MoGe-2) under cProfile, warm bytecode as in the calib suite
+  if (A.withCalib && fs.existsSync(path.join(t.repo, 'calib/pyproject.toml'))) {
+    const out = path.join(dir, 'calib_run.pstats'), sc = path.join(dir, 'calib-scene')
+    fs.rmSync(sc, { recursive: true, force: true })
+    const env = mockEnv(t, { PYTHONDONTWRITEBYTECODE: null, MIDSTUDY_CALIB_MOCK: null })
+    const photo = path.join(t.repo, 'fixtures/scenes', LW, 'photo.jpg')
+    await timedSpawn(['uv', 'run', '--project', 'calib', 'midstudy-calib'], ['run', photo, '--out', `${sc}-warm`], { cwd: t.repo, env, timeoutMs: 900000 })
+    const r = await timedSpawn(['uv', 'run', '--project', 'calib', 'python', '-m', 'cProfile', '-o', out, '-m', 'midstudy_calib.cli'], ['run', photo, '--out', sc], { cwd: t.repo, env, timeoutMs: 900000 })
+    let top = sh('uv', ['run', '--project', 'calib', 'python', '-c', `import pstats, json
+s = pstats.Stats(${JSON.stringify(out)}); tot = s.total_tt
+self = sorted(s.stats.items(), key=lambda kv: -kv[1][2])[:15]
+cum = {fn[2]: v[3] for fn, v in s.stats.items() if fn[2] in ("load", "infer", "_infer", "_moge", "fit", "run", "ingest", "_fit_light", "_torch", "from_pretrained")}
+print(json.dumps({"total_ms": round(tot * 1000), "cumulative_ms": {k: round(v * 1000) for k, v in cum.items()}, "top": [{"fn": f"{fn[2]} {fn[0].split('site-packages/')[-1]}:{fn[1]}", "self_ms": round(v[2] * 1000, 1), "pct": round(100 * v[2] / tot, 1), "calls": v[1]} for fn, v in self]}))`], t.repo, 120000)
+    try { top = JSON.parse(top) } catch { top = { error: top } }
+    summary.calib_run = { wall_ms: round(r.ms, 0), code: r.code, ...top }
+    console.log(`\nprofile ${t.label} calib_run (${round(r.ms, 0)} ms wall, exit ${r.code}; cumulative ${JSON.stringify(top.cumulative_ms)}):`)
+    for (const x of top.top || []) console.log(`  ${String(x.self_ms).padStart(8)} ms ${String(x.pct).padStart(5)} %  ${x.fn} (${x.calls} calls)`)
+    fs.rmSync(sc, { recursive: true, force: true }); fs.rmSync(`${sc}-warm`, { recursive: true, force: true })
+  }
   fs.writeFileSync(path.join(dir, 'summary.json'), JSON.stringify(summary, null, 2))
   return summary
 }
@@ -877,6 +915,7 @@ function noteOf(name, s) {
   if (METRICS[name]?.info) return `informational${e.max ? `, max ${e.max} ms` : ''}`
   if (name === 'product_read_max') return `${e.pages} pages`
   if (name.endsWith('_server') && e.ttfb != null) return `ttfb ${e.ttfb} ms`
+  if (name.startsWith('calib_')) return `MoGe load ${e.load_ms} + inference ${e.infer_ms} + floor ${e.floor_fit_ms} ms; the tool's total ${e.tool_ms} ms`
   if (e.longtask_ms) return `long tasks ${e.longtask_ms} ms`
   return ''
 }
