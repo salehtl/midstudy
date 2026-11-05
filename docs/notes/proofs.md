@@ -96,6 +96,42 @@ throughout.
 | `foldDigits_eq`, `foldDigits_lt`, `foldDigits_prefix_lt` | Arith | Content-Length's digit fold over ≤ 15 digits stays below 10¹⁵ at every step (no overflow) and is the digits' number (AENEAS.md #7) | k-media http tests |
 | `Png.strip_idem`, `Png.strip_no_metadata`, `Png.strip_chunks`, `Png.strip_eq_self_iff` | Png | idempotent; no eXIf/tEXt/iTXt/zTXt/tIME and nothing after IEND; the other chunks byte for byte in order; unchanged exactly when there is nothing to drop (§2.8) | GLB texture stripping |
 
+## k-geom's LEAN.md, property by property
+
+`core/crates/geom/LEAN.md` (v2-k-geom 6c9b21e) lists 28 properties of the geom and raster crates. Names here follow it
+and engine.js (`photoToFloor`, `horizonAt`, `pitchFromHorizon`, `wrapDeg`, `rotateBy`, `dirOf`, `turnBetween`, …).
+
+| # | Property | Lean |
+|---|---|---|
+| 1 | R is a rotation, written out | `camR_mem_SO3`, `camR_eq` |
+| 2 | d > 0 iff in the front half-space | `depth_pos_iff`, `depth_eq_dot_forward`, `forward_dot_self` |
+| 3 | project(C + t·dir) = (px, py, t) | `projectPhoto_ray` |
+| 4 | photo → floor → photo | `floorToPhoto_photoToFloor` |
+| 5 | floor → photo → floor; the ray's y there is −h/d < 0 | `photoToFloor_floorToPhoto`, `photoRay_floorToPhoto_y` |
+| 6 | dir.y formula, strictly decreasing in py, zero exactly on the horizon | `photoRay_one`, `photoRay_one_strictAnti`, `photoRay_one_eq_zero_iff`, `photoRay_one_neg_iff` |
+| 7 | signs: roll-0 row, above centre, slope tan(roll), up is up | `horizonAt_of_roll_zero`, `horizonAt_lt_half`, `horizonAt_eq_line`, `horizonAt_strictMono`, `floorToPhoto_raise`, `floorToPhoto_up` (exactly: `Δpy = f·δ·z/(d·d')`, so up is up for points ahead of the camera's foot, z < 0; LEAN.md's "for points in front" is too broad when looking steeply down) |
+| 8 | pitchFromHorizon ∘ horizonAt = id | `pitchFromHorizon_horizonAt`, `horizonAt_withPitch_pitchFromHorizon` |
+| 9 | scale: floor points, depths, depth.png, the ruler | `photoToFloor_withHeight`, `depth_withHeight_smul`, `occlusion_rescale`, `setScale_reads_true` |
+| 10 | the horizon drag cap | `pitchFromHorizon_lipschitz`, `horizon_drag_cap` (`|Δpitch| ≤ min(degPerCssPx, 0.12)·|Δy|`) |
+| 11 | clamps in range, idempotent; round6 monotone | `clamp_*`, `round6_gridRound`, `clampCamera_*`, `lookNum_*` |
+| 12 | wraps in range, congruent, idempotent | `wrapDeg_*`, `wrapAz_*` |
+| 13 | four quarter turns return the stored angle | **false as stated**: `rotateBy_four_quarters_exception` (a stored −180, from any angle within 5·10⁻⁷ of −180, comes back as 180; the Rust does the same, checked on −179.9999999 and −179.9999996); true otherwise: `rotateBy_four_quarters_stored`, `rotateBy_four_quarters` |
+| 14 | Ry(90°)·x = −z; Ry(90°)⁴ = I | `Ry_quarter_x`, `Ry_quarter_pow_four` |
+| 15 | bounds extents `|cos|w + |sin|d`, quarter turn swaps | `worldBounds_x(_least)`, `worldBounds_z(_least)`, `worldBounds_quarter` |
+| 16 | every point within the corners' bounds; footprint centre | `corners_bound_x/y/z`, `footprint_centre` |
+| 17 | hull vertices are inputs, turn left, contain the points | not proved (left: Andrew's monotone chain needs a convexity development; geom's proptest and differential test cover it) |
+| 18 | floor-plane hit = photoToFloor | `photoToPlane_zero` |
+| 19 | a move drag keeps the grabbed point under the pointer | `drag_keeps_point_under_pointer`, `photoToPlane_floorToPhoto`, `floorToPhoto_photoToPlane` |
+| 20 | landing: the base or a free point | `landing_spec`, `landing_free`, `ringPoint_dist` (free up to the 6-decimal rounding: within 5·10⁻⁷) |
+| 21 | dirOf ∘ azEl = id, azEl ∘ dirOf = id | `dirOf_azElOf`, `azElOf_dirOf` |
+| 22 | turnBetween·a = b, a rotation | `turnBetween_apply`, `turnBetween_mem_SO3`, `turnBetween_axis`, `turnBetween_self` |
+| 23 | SH rotation exact for the irradiance | bands 0–1: `irradianceAt_rotateBand1`; band 2: `irradianceAt_rotateSHExact` (the exact turned probe exists in closed form); the 96 × 9 design's rank 9 is numeric, not proved |
+| 24 | splat level 1 at defaults, monotone | `splatLevel_defaults`, `splatGain_defaults`, `splatLevel_mono`, `splatLevel_mem` |
+| 25 | PNG unfilter ∘ filter = id; Paeth = spec | `unfilter_filter`, `unfilter_filter_types`, `paeth_eq_spec` |
+| 26 | the PNG decoder is total | a Rust property (no panics); fuzz and props cover it |
+| 27 | the two-pass dilation is the box dilation | `fwd_iff`, `bwd_iff`, `rowPass_iff`, `dilate_iff` |
+| 28 | half floats round to nearest even, round-trip | not proved (IEEE half/single formats; the Rust test checks all 65,536 values) |
+
 ## Decisions
 
 - **Model the code, not an idealisation, where it matters**: JS's `%` (truncated), `Math.round` (= Mathlib `round`),
@@ -151,6 +187,13 @@ about 4,000 files a second.
 - **k-media**: the differential harness reads `midstudy_media::jpeg::{strip, is_clean}` and `png::strip` by these
   names; keep them, or tell proofs. `proofs/diff/run.sh` needs the crate on the branch it runs on.
 - **server-core / server-routes**: the azimuth observation above.
+- **k-geom**: LEAN.md property 13 and the proptest `four_quarter_turns` claim that four `rotate_by(·, 90)` return
+  `round_to(wrap_deg(r), 6)`; for the 4 angles `k/1e7`, `k ∈ [−1,799,999,999, −1,799,999,996]`, the stored angle is
+  −180 and comes back as 180 (proved over ℝ, `rotateBy_four_quarters_exception`, and seen in the Rust:
+  `evals/out/proofs-geom/`). The test passes only because proptest rarely draws those k. Either restate it (compare
+  `wrap_deg` of both, or skip r₀ = −180) or, if v1's −180 isn't wanted, normalise after rounding (a v1 behaviour
+  change: say so). Also LEAN.md 7's "up is up for points in front" holds exactly for points ahead of the camera's
+  foot (z < 0): `floorToPhoto_raise`.
 
 ## Status and what's left
 
