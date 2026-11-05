@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-deleted.schema.json",
+  "title": "LibraryDeleted",
+  "description": "DELETE /api/library/items/<id> (contract §2.8): the entry and its folder moved to library/.trash/<id>-<UTC stamp>/. v1 also says where (relative to the library).",
+  "type": "object",
+  "required": ["ok", "trash"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "const": true },
+    "trash": { "description": ".trash/<id>-<YYYYMMDD-HHMMSS>[-n]", "type": "string", "pattern": "^\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?$" }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-detail.schema.json",
+  "title": "SceneDetail",
+  "description": "GET /api/scenes/<name> and the 200 of PUT /api/scenes/<name> (contract §4.4, §4.8): scene.json, the scene object's fields, calib (public), lighting and the light's status.",
+  "type": "object",
+  "required": ["version", "name", "title", "created", "saved", "camera", "camera_source", "photo_url", "thumb_url", "depth_url", "w", "h", "floor_found", "layouts", "calib_status", "calib_error", "calib", "lighting", "lighting_status", "lighting_error"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "$ref": "scene-object.schema.json#/properties/name" },
+    "title": { "$ref": "scene-object.schema.json#/properties/title" },
+    "created": { "$ref": "scene-object.schema.json#/properties/created" },
+    "saved": { "$ref": "scene-object.schema.json#/properties/saved" },
+    "camera": { "$ref": "../calib.schema.json#/$defs/camera", "description": "The camera in use, clamped." },
+    "camera_source": { "$ref": "scene-object.schema.json#/properties/camera_source" },
+    "look": { "$ref": "../scene.schema.json#/$defs/look" },
+    "upload": { "$ref": "../scene.schema.json#/$defs/upload" },
+    "photo_url": { "$ref": "scene-object.schema.json#/properties/photo_url" },
+    "thumb_url": { "$ref": "scene-object.schema.json#/properties/thumb_url" },
+    "depth_url": { "$ref": "scene-object.schema.json#/properties/depth_url" },
+    "w": { "$ref": "scene-object.schema.json#/properties/w" },
+    "h": { "$ref": "scene-object.schema.json#/properties/h" },
+    "floor_found": { "$ref": "scene-object.schema.json#/properties/floor_found" },
+    "layouts": { "$ref": "scene-object.schema.json#/properties/layouts" },
+    "calib_status": { "$ref": "scene-object.schema.json#/properties/calib_status" },
+    "calib_error": { "$ref": "scene-object.schema.json#/properties/calib_error" },
+    "calib": { "description": "calib.json without exif.make and exif.model, or null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/publicCalib" }, { "type": "null" }] },
+    "lighting": { "description": "lighting.json as it is, or null without one.", "anyOf": [{ "$ref": "../lighting.schema.json" }, { "type": "null" }] },
+    "lighting_status": {
+      "description": "done with lighting.json; else the newest light job's pending, running, failed or none (it found no light), unless a newer calibration decides (pending, running); else missing.",
+      "enum": ["done", "pending", "running", "failed", "none", "missing"]
+    },
+    "lighting_error": { "description": "A failed light job's sentence, else null.", "type": ["string", "null"] }
+  }
+}

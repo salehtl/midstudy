@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/light-done.schema.json",
+  "title": "LightDone",
+  "description": "200 of POST /api/scenes/<name>/light (contract §4.4) when the scene already has lighting.json: no job.",
+  "type": "object",
+  "required": ["lighting_status"],
+  "additionalProperties": false,
+  "properties": {
+    "lighting_status": { "const": "done" }
+  }
+}

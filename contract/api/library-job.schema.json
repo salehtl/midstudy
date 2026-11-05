@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-job.schema.json",
+  "title": "LibraryJob",
+  "description": "A library job (contract §2.8 Jobs): GET /api/library/jobs/<id>, and inside the jobs list and the 202 answers. One queue, one job at a time, in memory.",
+  "type": "object",
+  "required": ["id", "kind", "item_id", "status", "engine", "cost_usd_estimate", "cost_usd", "mock", "created", "started", "finished", "message", "item"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "description": "l-…", "type": "string", "pattern": "^l-[0-9a-z-]+$" },
+    "kind": { "description": "add: midstudy-add on an upload or a download; rescale: PATCH dims_cm or yaw (midstudy-add --rescale).", "enum": ["add", "rescale"] },
+    "item_id": { "$ref": "common.schema.json#/$defs/slug" },
+    "status": { "$ref": "common.schema.json#/$defs/jobStatus" },
+    "engine": { "description": "The add's engine; v1 records glb for every rescale.", "enum": ["idol", "sam3d", "trellis2", "glb", "rug"] },
+    "cost_usd_estimate": { "$ref": "common.schema.json#/$defs/usd" },
+    "cost_usd": { "description": "What it cost, once done (midstudy-add's summary); null until then and when it failed.", "anyOf": [{ "$ref": "common.schema.json#/$defs/usd" }, { "type": "null" }] },
+    "mock": { "type": "boolean" },
+    "created": { "$ref": "common.schema.json#/$defs/dateTime" },
+    "started": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+    "finished": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+    "message": { "description": "A status line; a failed job's is midstudy-add's stderr line; an upsert says it replaced the item.", "type": "string" },
+    "item": { "description": "The library entry, once done.", "anyOf": [{ "$ref": "../library.schema.json#/$defs/item" }, { "type": "null" }] }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/trash.schema.json",
+  "title": "Trash",
+  "description": "What the server writes beside a deleted scene or library item (contract §1, §2.8, §4.4), so that restore can bring it back. Never served. Not a file itself.",
+  "$defs": {
+    "scene": {
+      "title": "SceneTrash",
+      "description": "scenes/.trash/<name>-<UTC stamp>/trash.json. A folder trashed before this file existed is read from its name instead.",
+      "type": "object",
+      "required": ["name", "title", "deleted"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "title": { "type": ["string", "null"] },
+        "deleted": { "type": "string", "format": "date-time" }
+      }
+    },
+    "item": {
+      "title": "LibraryTrash",
+      "description": "library/.trash/<id>-<UTC stamp>/entry.json: the item's library entry as it was (its folder sits beside it).",
+      "type": "object",
+      "required": ["deleted", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "deleted": { "type": "string", "format": "date-time" },
+        "entry": { "$ref": "library.schema.json#/$defs/item" }
+      }
+    }
+  }
+}

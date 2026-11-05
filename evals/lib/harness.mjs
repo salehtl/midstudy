@@ -4,9 +4,15 @@
 // What it gives every eval:
 // - createEval(): one "PASS|FAIL <id> <name> — <measured>" line per check, a summary, exit code 1 on any FAIL, a
 //   watchdog, and cleanup (servers and browsers are always stopped, also on a crash or Ctrl-C).
-// - startServer(): planner/serve.py on a free port with its own scenes/layouts/renders/library dirs and costs file under
+// - startServer(): the server on a free port with its own scenes/layouts/renders/library dirs and costs file under
 //   evals/out/<eval>/, fal mocked (MIDSTUDY_FAL_MOCK=fixtures/fal, MIDSTUDY_NO_DOTENV=1, no FAL_KEY,
 //   --daily-spend-usd 0 unless an eval tests the cap with mock costs) and the calib stub with MIDSTUDY_CALIB_MOCK.
+// - v2 switches (docs/REFACTOR.md §1): MIDSTUDY_SERVER=legacy|next picks the server (planner/serve.py, or
+//   node server/src/main.ts with the same flags), MIDSTUDY_ADD=legacy|next the furniture CLI it gets through
+//   --midstudy-add (uv run --project pipeline midstudy-add, or node pipeline/src/cli.ts); either next sets
+//   MIDSTUDY_STRICT=1. Before the first server, node scripts/build.mjs runs once when it exists. Every eval's first
+//   line says what it runs against. MIDSTUDY_RECORD_API=<dir> records every /api call raw() makes (one JSON line
+//   each) for contract/tools/check-recordings.mjs.
 // - a guard that the repo's own scenes/, layouts/, renders/ and library/ are left untouched.
 // - the §4.1 projection (and its inverse) in plain JS, to compute expectations independently of the planner.
 // - headless Chrome + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
@@ -30,6 +36,24 @@ if (!BROWSER) console.error('harness: no headless browser: set PUPPETEER_EXECUTA
 export const BROWSER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
   ...(process.env.MIDSTUDY_WEBGPU === '0' ? [] : ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'])]
 export const STUB_CALIB = 'python3 fixtures/stub_calib.py'
+// v2 switches (contract §0): the server and the furniture CLI the evals run, legacy (v1) by default.
+const pick = (name, choices) => {
+  const v = process.env[name] || 'legacy'
+  if (!(v in choices)) throw new Error(`${name} must be ${Object.keys(choices).join(' or ')}, not ${JSON.stringify(v)}`)
+  return { which: v, cmd: choices[v] }
+}
+const SERVER_SWITCH = pick('MIDSTUDY_SERVER', { legacy: ['python3', 'planner/serve.py'], next: ['node', 'server/src/main.ts'] })
+const ADD_SWITCH = pick('MIDSTUDY_ADD', { legacy: 'uv run --project pipeline midstudy-add', next: 'node pipeline/src/cli.ts' })
+export const SERVER = SERVER_SWITCH.which          // 'legacy' | 'next'
+export const SERVER_CMD = SERVER_SWITCH.cmd        // argv prefix, run from the repo root
+export const ADD = ADD_SWITCH.which                // 'legacy' | 'next'
+export const ADD_CMD = ADD_SWITCH.cmd              // what the server gets as --midstudy-add
+export const STRICT = SERVER === 'next' || ADD === 'next'  // MIDSTUDY_STRICT=1 for the v2 server and CLI (contract §0)
+export const SERVER_NAME = SERVER === 'next' ? 'server/src/main.ts' : 'serve.py'
+// The server's argv for these flags: {cmd, args}, for an eval that spawns the server itself.
+export const serverCommand = (flags) => ({ cmd: SERVER_CMD[0], args: [...SERVER_CMD.slice(1), ...flags] })
+export const RECORD_DIR = process.env.MIDSTUDY_RECORD_API ? path.resolve(process.env.MIDSTUDY_RECORD_API) : ''
+let recordTag = 'harness'
 export const REAL_CALIB = 'uv run --project calib midstudy-calib'
 export const GOLDEN = ['living-wide', 'steep-roll', 'portrait']
 export const DEFAULT_CAMERA = { fov_y_deg: 55, height_m: 1.4, pitch_deg: -10, roll_deg: 0 }
@@ -54,6 +78,8 @@ export const golden = (id) => ({
 
 // --- results ---------------------------------------------------------------------------------------------------------------
 export function createEval(id, slug, { timeoutS = 600 } = {}) {
+  console.log(`${id} ${slug}: server ${SERVER} (${SERVER_CMD.join(' ')}), furniture CLI ${ADD} (${ADD_CMD})${STRICT ? ', MIDSTUDY_STRICT=1' : ''}${RECORD_DIR ? `, recording /api calls to ${path.relative(REPO, RECORD_DIR) || '.'}` : ''}`)
+  recordTag = slug
   const out = path.join(REPO, 'evals/out', slug)
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(out, { recursive: true })
@@ -143,6 +169,7 @@ export function raw(base, method, p, { headers = {}, body = null, chunked = fals
         const b = Buffer.concat(parts), text = b.toString('utf8')
         let json = null
         try { json = JSON.parse(text) } catch { /* not JSON */ }
+        if (RECORD_DIR) record(method, p, h, buf, res, json, text)
         finish({ status: res.statusCode, headers: res.headers, text, json, buf: b })
       })
       res.on('error', (e) => finish({ status: res.statusCode, headers: res.headers, text: '', json: null, buf: Buffer.alloc(0), error: String(e) }))
@@ -155,6 +182,32 @@ export function raw(base, method, p, { headers = {}, body = null, chunked = fals
     req.end()
   })
 }
+// MIDSTUDY_RECORD_API: one JSON line per /api call, {eval, method, path, status, request: {meta?, body?}, response:
+// {contentType, body}}. Long request strings (data URIs) are cut to 200 characters; raw uploads are recorded by size.
+let recordFile = ''
+function record(method, p, headers, buf, res, json, text) {
+  if (!String(p).startsWith('/api')) return
+  try {
+    if (!recordFile) {
+      fs.mkdirSync(RECORD_DIR, { recursive: true })
+      recordFile = path.join(RECORD_DIR, `${recordTag}-${process.pid}.jsonl`)
+    }
+    const hv = (name) => Object.entries(headers).find(([k]) => k.toLowerCase() === name)?.[1]
+    const request = {}
+    const meta = hv('x-midstudy-meta')
+    if (meta != null) { try { request.meta = JSON.parse(Buffer.from(String(meta), 'base64').toString('utf8')) } catch { request.meta = String(meta) } }
+    if (buf) {
+      const ctype = String(hv('content-type') || '')
+      let body
+      if (ctype.includes('json')) { try { body = JSON.parse(buf.toString('utf8')) } catch { /* not JSON */ } }
+      const cut = (v) => (typeof v === 'string' && v.length > 200 ? v.slice(0, 200) : Array.isArray(v) ? v.map(cut) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cut(x)])) : v)
+      request.body = body !== undefined ? cut(body) : { bytes: buf.length }
+    }
+    const response = { contentType: res.headers['content-type'] || null, body: json, ...(json === null && text ? { text: text.slice(0, 200) } : {}) }
+    fs.appendFileSync(recordFile, `${JSON.stringify({ eval: recordTag, method, path: p, status: res.statusCode, request, response })}\n`)
+  } catch (e) { console.error(`harness: could not record ${method} ${p}: ${e}`) }
+}
+
 // JSON helpers: every mutation carries X-Midstudy: 1 (§2.9) unless `forged`.
 export const api = {
   get: (base, p, o = {}) => raw(base, 'GET', p, o),
@@ -187,9 +240,27 @@ export async function waitScene(base, name, timeoutMs = 60000) {
 
 // --- the server ---------------------------------------------------------------------------------------------------------------
 let serverCount = 0
-// Starts planner/serve.py with scratch dirs. Returns {base, port, dirs, log(), stop(), exited}. Never throws: when the
-// server doesn't come up, `up` is false and `why` says what happened (e.g. an unknown flag before the feature exists).
+// v2 (docs/REFACTOR.md §5): when scripts/build.mjs exists, it builds the planner (planner/dist/, the wasm kernels) once
+// per eval process, before the first server starts. Reported as a check, so a broken build is a FAIL, not a mystery.
+let built = null
+export function ensureBuilt(ev) {
+  const script = path.join(REPO, 'scripts/build.mjs')
+  if (built || !fs.existsSync(script)) return built
+  const t0 = Date.now()
+  try {
+    execFileSync(process.execPath, [script], { cwd: REPO, encoding: 'utf8', timeout: 900000, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
+    built = { ok: true, secs: ((Date.now() - t0) / 1000).toFixed(1) }
+  } catch (e) {
+    built = { ok: false, why: clip(`${e.stderr || ''}${e.stdout || ''}${e.message || e}`.trim().split('\n').slice(-6).join(' | '), 500) }
+  }
+  ev?.check('node scripts/build.mjs builds the planner (once per eval)', built.ok, built.ok ? `${built.secs} s` : built.why)
+  return built
+}
+// Starts the server (MIDSTUDY_SERVER: planner/serve.py, or node server/src/main.ts) with scratch dirs. Returns {base,
+// port, dirs, log(), stop(), exited}. Never throws: when the server doesn't come up, `up` is false and `why` says what
+// happened (e.g. an unknown flag before the feature exists).
 export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
+  ensureBuilt(ev)
   const n = ++serverCount
   const data = path.join(ev.out, `server-${n}`)
   const dirs = { data, scenes: path.join(data, 'scenes'), layouts: path.join(data, 'layouts'), renders: path.join(data, 'renders'), library: path.join(data, 'library') }
@@ -205,13 +276,15 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   delete childEnv.FAL_KEY
   if (mockCost) childEnv.MIDSTUDY_FAL_MOCK_COST = '1'
   else delete childEnv.MIDSTUDY_FAL_MOCK_COST
+  if (STRICT) childEnv.MIDSTUDY_STRICT = '1'
   // Hard limits (CLAUDE.md): never without the fal mock, never without a spend cap flag.
-  if (!childEnv.MIDSTUDY_FAL_MOCK || spendUsd == null) throw new Error('refusing to start serve.py without the fal mock and a spend cap')
-  const argv = ['planner/serve.py', '--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
-    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, '--daily-spend-usd', String(spendUsd), ...args]
+  if (!childEnv.MIDSTUDY_FAL_MOCK || spendUsd == null) throw new Error(`refusing to start ${SERVER_NAME} without the fal mock and a spend cap`)
+  const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
+    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, '--midstudy-add', ADD_CMD,
+    '--daily-spend-usd', String(spendUsd), ...args])
   const logPath = path.join(data, 'server.log')
-  let log = `$ python3 ${argv.join(' ')}\n`
-  const proc = spawn('python3', argv, { cwd: REPO, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+  let log = `$ ${cmd} ${argv.join(' ')}\n`
+  const proc = spawn(cmd, argv, { cwd: REPO, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
   const srv = { n, base, port, dirs, proc, logPath, up: false, why: '', exited: null, log: () => log }
   proc.stdout.on('data', (d) => { log += d })
   proc.stderr.on('data', (d) => { log += d })
@@ -233,7 +306,7 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   if (!srv.up) {
     await sleep(200)
     const tail = log.trim().split('\n').slice(-4).join(' | ')
-    srv.why = srv.exited ? `serve.py exited (${srv.exited.code ?? srv.exited.sig}): ${tail}` : `serve.py did not answer on ${base}: ${tail}`
+    srv.why = srv.exited ? `${SERVER_NAME} exited (${srv.exited.code ?? srv.exited.sig}): ${tail}` : `${SERVER_NAME} did not answer on ${base}: ${tail}`
   }
   return srv
 }

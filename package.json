@@ -37,7 +37,10 @@
     "check:fuzz": "node scripts/check.mjs fuzz",
     "check:proofs": "node scripts/check.mjs proofs",
     "check:py": "node scripts/check.mjs py",
-    "check:ownership": "node scripts/check.mjs ownership"
+    "check:ownership": "node scripts/check.mjs ownership",
+    "gen:contract": "node scripts/gen-contract.mjs",
+    "test:contract": "node --test contract/test/contract.test.mjs && node contract/test/typecheck.mjs",
+    "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {
     "@gltf-transform/core": "4.5.1",

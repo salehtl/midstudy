@@ -1,0 +1,44 @@
+{
+  "route": "GET /api/layouts",
+  "contract": "§2.7",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/layout-list.schema.json",
+      "type": "LayoutList",
+      "note": null,
+      "body": {
+        "layouts": [
+          "corner",
+          "front"
+        ],
+        "details": [
+          {
+            "name": "corner",
+            "title": null,
+            "items": 1,
+            "updated": "2026-11-05T18:20:40Z"
+          },
+          {
+            "name": "front",
+            "title": "Front",
+            "items": 2,
+            "updated": "2026-11-05T18:20:40Z"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "no scene",
+      "body": {
+        "error": "add ?scene=<name>: layouts belong to a scene"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

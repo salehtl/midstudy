@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-deleted.schema.json",
+  "title": "SceneDeleted",
+  "description": "200 of DELETE /api/scenes/<name> (contract §4.4): the folder and layouts/<name>/ moved to scenes/.trash/<name>-<UTC stamp> (v1 names the scenes folder as it is called: scenes by default).",
+  "type": "object",
+  "required": ["ok", "trash"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "const": true },
+    "trash": { "description": "<scenes dir name>/.trash/<name>-<YYYYMMDD-HHMMSS>[-n]", "type": "string", "pattern": "^[^/]+/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?$" }
+  }
+}

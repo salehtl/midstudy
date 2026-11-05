@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-add-accepted.schema.json",
+  "title": "LibraryAddAccepted",
+  "description": "202 of POST /api/library/items and POST /api/library/items/from-url (contract §2.8): the queued job and the engine's price (§3.2).",
+  "type": "object",
+  "required": ["job", "cost_usd_estimate"],
+  "additionalProperties": false,
+  "properties": {
+    "job": { "$ref": "library-job.schema.json" },
+    "cost_usd_estimate": { "$ref": "common.schema.json#/$defs/usd" }
+  }
+}

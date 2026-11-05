@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/product-request.schema.json",
+  "title": "ProductRequest",
+  "description": "POST /api/library/product (contract §2.11): {url, llm?} for the server to read the page, or {html, url?, llm?} for a page the user's browser copied (then nothing is fetched). llm: false skips the language model.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [{ "required": ["url"] }, { "required": ["html"] }],
+  "properties": {
+    "url": { "description": "The product page's link (http or https). v1 refuses one over 4096 characters (400).", "type": "string", "maxLength": 4096 },
+    "html": { "description": "The page's source, not blank; over 10 MB it is cut, with a warning.", "type": "string", "pattern": "\\S" },
+    "llm": { "type": "boolean" }
+  }
+}

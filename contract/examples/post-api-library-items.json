@@ -1,0 +1,97 @@
+{
+  "route": "POST /api/library/items",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "header X-Midstudy-Meta",
+      "schema": "midstudy/api/library-meta.schema.json",
+      "type": "LibraryMeta",
+      "note": "a GLB",
+      "body": {
+        "name": "Arrow sign",
+        "dims_cm": {
+          "w": 100,
+          "d": 40,
+          "h": 30
+        },
+        "category": "decor"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/library-add-accepted.schema.json",
+      "type": "LibraryAddAccepted",
+      "note": "a GLB",
+      "body": {
+        "job": {
+          "id": "l-20261105-182040-3e17",
+          "kind": "add",
+          "item_id": "arrow-sign",
+          "status": "queued",
+          "engine": "glb",
+          "cost_usd_estimate": 0,
+          "cost_usd": null,
+          "mock": true,
+          "created": "2026-11-05T18:20:40Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the queue",
+          "item": null
+        },
+        "cost_usd_estimate": 0
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "no dims_cm",
+      "body": {
+        "error": "dims_cm is required: {\"w\": ..., \"d\": ..., \"h\": ...} in cm, all greater than 0"
+      }
+    },
+    {
+      "kind": "header X-Midstudy-Meta",
+      "schema": "midstudy/api/library-meta.schema.json",
+      "type": "LibraryMeta",
+      "note": "a photo: Idol, the default engine",
+      "body": {
+        "name": "Morris chair",
+        "dims_cm": {
+          "w": 80,
+          "d": 90,
+          "h": 95
+        },
+        "category": "chair"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/library-add-accepted.schema.json",
+      "type": "LibraryAddAccepted",
+      "note": "a photo: Idol, the default engine",
+      "body": {
+        "job": {
+          "id": "l-20261105-182041-c933",
+          "kind": "add",
+          "item_id": "morris-chair",
+          "status": "queued",
+          "engine": "idol",
+          "cost_usd_estimate": 0.1,
+          "cost_usd": null,
+          "mock": true,
+          "created": "2026-11-05T18:20:41Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the queue",
+          "item": null
+        },
+        "cost_usd_estimate": 0.1
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

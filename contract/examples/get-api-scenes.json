@@ -1,0 +1,97 @@
+{
+  "route": "GET /api/scenes",
+  "contract": "§4.4",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-list.schema.json",
+      "type": "SceneList",
+      "note": "no scenes yet",
+      "body": {
+        "scenes": [],
+        "trash": []
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-list.schema.json",
+      "type": "SceneList",
+      "note": "one scene, one in the trash",
+      "body": {
+        "scenes": [
+          {
+            "name": "scene-20261105-182038",
+            "title": "Living room, morning",
+            "created": "2026-11-05T18:20:38Z",
+            "saved": "2026-11-05T18:20:39Z",
+            "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
+            "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839",
+            "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902839",
+            "w": 1600,
+            "h": 1200,
+            "camera_source": "manual",
+            "floor_found": true,
+            "layouts": 0,
+            "calib_status": "done",
+            "calib_error": null
+          }
+        ],
+        "trash": [
+          {
+            "name": "scene-20261105-182039",
+            "title": null,
+            "created": "2026-11-05T18:20:39Z",
+            "deleted": "2026-11-05T18:20:40Z"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-list.schema.json",
+      "type": "SceneList",
+      "note": "two scenes",
+      "body": {
+        "scenes": [
+          {
+            "name": "scene-20261105-182039",
+            "title": null,
+            "created": "2026-11-05T18:20:39Z",
+            "saved": null,
+            "photo_url": "/scenes/scene-20261105-182039/photo.jpg?v=1793902839",
+            "thumb_url": null,
+            "depth_url": "/scenes/scene-20261105-182039/depth.png?v=1793902839",
+            "w": 1200,
+            "h": 1600,
+            "camera_source": "auto",
+            "floor_found": true,
+            "layouts": 0,
+            "calib_status": "done",
+            "calib_error": null
+          },
+          {
+            "name": "scene-20261105-182038",
+            "title": "Living room, morning",
+            "created": "2026-11-05T18:20:38Z",
+            "saved": "2026-11-05T18:20:39Z",
+            "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
+            "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839",
+            "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902839",
+            "w": 1600,
+            "h": 1200,
+            "camera_source": "manual",
+            "floor_found": true,
+            "layouts": 0,
+            "calib_status": "done",
+            "calib_error": null
+          }
+        ],
+        "trash": []
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

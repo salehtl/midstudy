@@ -1,0 +1,58 @@
+{
+  "route": "PUT /api/library/items/{id}/thumb",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/thumb-put.schema.json",
+      "type": "ThumbPut",
+      "note": "the planner's render of a 3D-file piece",
+      "body": {
+        "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAYACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDpvstvKSzxKW9cVBcx2VqVDW4Yv0C9T9KW+1COwgdzh3GMJnmsZvEhkYbrKJivQk5xWSSZbdjoIbe3ZFYQquex6097dGdFQAEHnFc5a3ttqOohrm38ohMB1dhgDtitlLy3WZIraRGESBcA8ipk1sEeZ69DktVuQmVPL5yeent9ayGnMmFeXYCw5Ve1FFZU9FZHpeyjON3uR+Y8MqvBM5wOvQ5rp7G5E0O4Bd4xuwOT6GiipqpNXKlTUErH/9k="
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/library.schema.json#/$defs/item",
+      "type": "LibraryItem",
+      "note": "the planner's render of a 3D-file piece",
+      "body": {
+        "id": "arrow-sign",
+        "name": "Arrow",
+        "category": null,
+        "dims_cm": {
+          "w": 120,
+          "d": 40,
+          "h": 30
+        },
+        "assets": {
+          "glb": "arrow-sign/model.glb",
+          "splat": null,
+          "spz": null,
+          "thumb": "arrow-sign/thumb.jpg"
+        },
+        "default_render": "glb",
+        "source": {
+          "engine": "glb",
+          "input": "arrow.glb",
+          "prompt": null,
+          "cost_usd": 0,
+          "mock": true,
+          "created": "2026-11-05T18:20:40Z"
+        },
+        "fit": {
+          "glb_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          },
+          "splat_error_pct": null
+        },
+        "notes": null,
+        "mount": "wall"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

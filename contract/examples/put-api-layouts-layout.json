@@ -1,0 +1,159 @@
+{
+  "route": "PUT /api/layouts/{layout}",
+  "contract": "§2.7",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/layout-put.schema.json",
+      "type": "LayoutPut",
+      "note": "as the planner saves it",
+      "body": {
+        "version": 1,
+        "name": "front",
+        "title": "Front",
+        "scene_name": "scene-20261105-182038",
+        "library": "/library/library.json",
+        "items": [
+          {
+            "uid": "probe-box-1",
+            "id": "probe-box",
+            "render": "glb",
+            "position": [
+              0.4,
+              0,
+              -2.6
+            ],
+            "rotation_y_deg": 15,
+            "dims_cm": {
+              "w": 80,
+              "d": 50,
+              "h": 120
+            }
+          },
+          {
+            "uid": "gone-1",
+            "id": "deleted-chair",
+            "render": "glb",
+            "position": [
+              -0.8,
+              0.45,
+              -3.1
+            ],
+            "rotation_y_deg": -90,
+            "dims_cm": {
+              "w": 60,
+              "d": 60,
+              "h": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/layout.schema.json",
+      "type": "Layout",
+      "note": "as the planner saves it",
+      "body": {
+        "version": 1,
+        "name": "front",
+        "title": "Front",
+        "scene_name": "scene-20261105-182038",
+        "library": "/library/library.json",
+        "updated": "2026-11-05T18:20:40Z",
+        "items": [
+          {
+            "uid": "probe-box-1",
+            "id": "probe-box",
+            "render": "glb",
+            "position": [
+              0.4,
+              0,
+              -2.6
+            ],
+            "rotation_y_deg": 15,
+            "dims_cm": {
+              "w": 80,
+              "d": 50,
+              "h": 120
+            }
+          },
+          {
+            "uid": "gone-1",
+            "id": "deleted-chair",
+            "render": "glb",
+            "position": [
+              -0.8,
+              0.45,
+              -3.1
+            ],
+            "rotation_y_deg": -90,
+            "dims_cm": {
+              "w": 60,
+              "d": 60,
+              "h": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/layout-put.schema.json",
+      "type": "LayoutPut",
+      "note": "the least v1 takes: uid, render, rotation filled in",
+      "body": {
+        "items": [
+          {
+            "id": "probe-box",
+            "position": [
+              1,
+              0,
+              -2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/layout.schema.json",
+      "type": "Layout",
+      "note": "the least v1 takes: uid, render, rotation filled in",
+      "body": {
+        "version": 1,
+        "name": "corner",
+        "title": null,
+        "scene_name": "scene-20261105-182038",
+        "library": null,
+        "updated": "2026-11-05T18:20:40Z",
+        "items": [
+          {
+            "uid": "probe-box-1",
+            "id": "probe-box",
+            "render": "glb",
+            "position": [
+              1,
+              0,
+              -2
+            ],
+            "rotation_y_deg": 0
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "not a slug",
+      "body": {
+        "error": "layout name must be a slug like \"reading-corner\" (a-z, 0-9, -): 'Bad Name'"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

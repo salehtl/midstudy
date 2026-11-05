@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-get.schema.json",
+  "title": "LibraryListing",
+  "description": "GET /api/library (contract §2.8): library.json (empty items when there's none) plus the trashed items, newest first.",
+  "type": "object",
+  "required": ["version", "items", "trash"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "items": { "type": "array", "items": { "$ref": "../library.schema.json#/$defs/item" } },
+    "trash": {
+      "type": "array",
+      "items": {
+        "title": "TrashedItem",
+        "type": "object",
+        "required": ["id", "name", "deleted"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "name": { "type": "string" },
+          "deleted": { "$ref": "common.schema.json#/$defs/dateTime" }
+        }
+      }
+    }
+  }
+}

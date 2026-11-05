@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-created.schema.json",
+  "title": "SceneCreated",
+  "description": "202 of POST /api/scenes (contract §4.4): the queued calibration (run) and the new scene's name. The scene exists (and is listed, calib_status pending) from this moment.",
+  "type": "object",
+  "required": ["job", "scene"],
+  "additionalProperties": false,
+  "properties": {
+    "job": { "$ref": "scene-job.schema.json#/$defs/calibrate" },
+    "scene": { "$ref": "common.schema.json#/$defs/slug" }
+  }
+}

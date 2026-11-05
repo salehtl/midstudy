@@ -1,0 +1,68 @@
+{
+  "route": "POST /api/scenes",
+  "contract": "§4.4",
+  "examples": [
+    {
+      "kind": "header X-Midstudy-Meta",
+      "schema": "midstudy/api/scene-meta.schema.json",
+      "type": "SceneMeta",
+      "note": "a golden photo",
+      "body": {
+        "title": "Living room"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/scene-created.schema.json",
+      "type": "SceneCreated",
+      "note": "a golden photo",
+      "body": {
+        "job": {
+          "id": "c-20261105-182038-4057",
+          "kind": "calibrate",
+          "scene": "scene-20261105-182038",
+          "status": "queued",
+          "created": "2026-11-05T18:20:38Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the calibration queue",
+          "calib": null
+        },
+        "scene": "scene-20261105-182038"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "not an image",
+      "body": {
+        "error": "that file isn't a JPEG, PNG, HEIC or WebP image"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/scene-created.schema.json",
+      "type": "SceneCreated",
+      "note": "no title",
+      "body": {
+        "job": {
+          "id": "c-20261105-182039-97f9",
+          "kind": "calibrate",
+          "scene": "scene-20261105-182039",
+          "status": "queued",
+          "created": "2026-11-05T18:20:39Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for the calibration queue",
+          "calib": null
+        },
+        "scene": "scene-20261105-182039"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

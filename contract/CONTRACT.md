@@ -4,7 +4,19 @@ The shared spec between the **planner** (`planner/`, with its server `planner/se
 
 Sections 1–3 are nook's contract with the scan, rooms, iOS and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals. **v1.1 (2026-11-05, PLAN.md §12):** the `idol` engine (the default), the stand-in box for splat-only items, `splat.spz`, per-axis splat fitting, and the planner drawing splats with Spark (§1, §3.2, §3.4, §4.5 Splats).
 
-Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json), [lighting.schema.json](lighting.schema.json).
+Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json), [lighting.schema.json](lighting.schema.json), [trash.schema.json](trash.schema.json), [add-summary.schema.json](add-summary.schema.json); the HTTP API's in [api/](api/README.md) (§0).
+
+---
+
+## 0. v2 (2026-11-05, [docs/REFACTOR.md](../docs/REFACTOR.md))
+
+v2 rebuilds midstudy on the branch `v2` without changing what this contract says it does: the server in TypeScript on Node 22 (`node server/src/main.ts`, §2.1), `midstudy-add` in TypeScript (`node pipeline/src/cli.ts`, §3.1), the planner in strict TypeScript bundled by esbuild into `planner/dist/` (`node scripts/build.mjs`), hot kernels in Rust compiled to WebAssembly (`core/`), calibration still Python (§4.3). v1 (`planner/serve.py`, the Python `midstudy-add`) stays runnable until the cutover.
+
+- **The API schemas are normative.** Every JSON payload of the HTTP API, request and answer, has a JSON Schema (draft 2020-12) in `contract/api/`, and [api/routes.json](api/routes.json) says which one each route takes and answers with, by status. A payload that doesn't match its schema breaks the contract, whatever the prose says; prose and schema are fixed together. They reuse the file schemas (the camera block, the look, the library item, the layout) by `$ref`. [api/README.md](api/README.md) lists the routes and each place where a schema follows v1 because this text is silent.
+- **Generated types and validators.** `node scripts/gen-contract.mjs` turns every schema (files and API) into `contract/gen/types.ts` (TypeScript types, deeply readonly), `contract/gen/validate.js` and `validate.d.ts` (Ajv standalone validators, ESM: a type guard per type, `validators` by schema URI, `violation()`), `contract/gen/routes.js` and `routes.d.ts` (routes.json with `matchRoute()` and `responseSchema()`) and `core/crates/contract/schema.json`, which the `midstudy-contract` crate's build script turns into serde types with typify. They are never edited by hand; `node scripts/gen-contract.mjs --check` fails when they are stale.
+- **Strict mode** (`MIDSTUDY_STRICT=1`; the evals set it for the v2 server and CLI): the server validates every answer against the schema routes.json names for its route and status, and every JSON file it writes against its schema (`scene.json`, layouts, `library.json`, `renders/<name>.json`, `trash.json`, `entry.json`); `midstudy-add` validates `library.json` before writing it and its summary line (add-summary.schema.json) before printing it. A violation is never sent or written: the server answers `500 {"error": "contract violation: <schema> <path>"}` instead (the schema's URI, e.g. `midstudy/api/scene-detail.schema.json`, and the JSON pointer of the first value that breaks it, `/` for the whole body), and the CLI exits 1 with `midstudy-add: contract violation: <schema> <path>` on stderr. Without strict mode nothing is validated at run time.
+- **Examples.** `contract/examples/<route>.json` are real requests and answers of every route, recorded from v1 with the eval mocks (`node contract/tools/record-examples.mjs`); the validators (`node --test contract/test/contract.test.mjs`) and the Rust types (`cargo test -p midstudy-contract`) are tested on them. An eval run records every API call it makes with `MIDSTUDY_RECORD_API=<dir>`, and `node contract/tools/check-recordings.mjs <dir>` checks them against routes.json.
+- **Evals** run v1 or v2 by switch (§5.3): `MIDSTUDY_SERVER=legacy|next` and `MIDSTUDY_ADD=legacy|next`, both `legacy` (v1) by default.
 
 ---
 
@@ -52,8 +64,10 @@ python3 planner/serve.py [--port 8765] [--host 127.0.0.1] [--library-dir library
                          [--layouts-dir layouts] [--renders-dir renders] [--scenes-dir scenes]
                          [--calib "uv run --project calib midstudy-calib"] [--midstudy-add "uv run --project pipeline midstudy-add"]
                          [--daily-spend-usd 2] [--allowed-host NAME ...]
+node server/src/main.ts  ...the same flags, defaults and meanings...                       # v2 (§0)
 ```
 
+- **v2:** `node server/src/main.ts` (TypeScript run by Node 22's type stripping, no build step for the server) takes exactly these flags with the same defaults, and answers every route as below; with `MIDSTUDY_STRICT=1` it validates what it sends and writes (§0). The planner it serves is the bundle in `planner/dist/` (`node scripts/build.mjs`).
 - Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types (`.spz` is `application/octet-stream`, sent as stored: no `Content-Encoding`), `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
 - All `/api` responses are JSON (errors are `{"error": "<one sentence>"}`).
 - Removed from nook: `/api/room`, `/api/rooms*`, `--room-file`, `--room-dir`, `--scan-api` and `/api/scan/*`, flat (scene-less) layouts.
@@ -259,15 +273,17 @@ uv run --project pipeline midstudy-add INPUT --name NAME --dims WxDxH
     [--id SLUG] [--category TEXT] [--engine idol|sam3d|trellis2|glb|rug] [--prompt TEXT]
     [--yaw 0|90|180|270] [--resolution 512|1024|1536] [--library DIR] [--notes TEXT] [--mount floor|wall]
 uv run --project pipeline midstudy-add --rescale ID [--dims WxDxH] [--yaw 0|90|180|270] [--library DIR]
+node pipeline/src/cli.ts ...the same arguments...                                          # v2 (§0)
 ```
 
+- **v2:** `node pipeline/src/cli.ts` takes exactly these arguments (the server also passes `--source-input`, as v1's does) and environment (`FAL_KEY`, `MIDSTUDY_FAL_MOCK`, `MIDSTUDY_FAL_MOCK_COST`, `MIDSTUDY_FAL_MOCK_NO_MASKS`, `MIDSTUDY_NO_DOTENV`), writes the same files and prints the same lines; the server runs it with `--midstudy-add "node pipeline/src/cli.ts"`. With `MIDSTUDY_STRICT=1` it validates `library.json` and its summary line before writing them (§0).
 - `INPUT`: a local image or image URL (`idol`, `sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
 - `--dims`: centimeters `W x D x H` (`x` or `×`, spaces and decimals allowed). Required for adds.
 - `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `idol`.
 - Image engines get a metadata-free, upright copy of the photo (`raw/engine-input.<ext>`, §2.8 Privacy); `source.<ext>` keeps the input as given.
 - `--yaw`: extra rotation around Y after the engine's default orientation; positive is counterclockwise seen from above, so `--yaw 90` turns +X into −Z. The planner's `rotation_y_deg` uses the same sign.
 - `--rescale ID` refits an existing item from its normalized assets: no model call, `cost_usd: 0`, no cost row.
-- Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}` (`paths.spz` beside `paths.splat`). Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
+- Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}` (`paths.spz` beside `paths.splat`; [add-summary.schema.json](add-summary.schema.json)). Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
 
 ### 3.2 Engines
 
@@ -602,7 +618,7 @@ resetLighting(): void
 
 ### 5.1 Golden scenes (`fixtures/scenes/`, `fixtures/calib/`)
 
-`fixtures/make_scene.mjs` renders one textured room (oak plank floor, plaster walls, rug, door with casing, window, painting, floor lamp) with three.js 0.180.0 in headless Helium from a known camera under known lights. Each scene has a box **sofa** (2.0 × 0.82 × 0.9 m) and a **table** (1.0 × 0.42 × 0.55 m, top and four legs, turned 12°) at known positions. Same room and objects, three cameras, and two more lightings with the living-wide camera:
+`fixtures/make_scene.mjs` renders one textured room (oak plank floor, plaster walls, rug, door with casing, window, painting, floor lamp) with three.js 0.180.0 in headless Chrome (§5.3) from a known camera under known lights. Each scene has a box **sofa** (2.0 × 0.82 × 0.9 m) and a **table** (1.0 × 0.42 × 0.55 m, top and four legs, turned 12°) at known positions. Same room and objects, three cameras, and two more lightings with the living-wide camera:
 
 | id | size | camera |
 |---|---|---|
@@ -642,4 +658,5 @@ The evals track added PLAN.md §6.2 (`eval:scenes-api`, `eval:calib`, `eval:plan
 - Calibration in fast evals: `--calib "python3 fixtures/stub_calib.py"` or the real CLI with `MIDSTUDY_CALIB_MOCK=fixtures/calib`. `eval:calib` runs the real model.
 - Real photos in `fixtures/photos/` are git-ignored and never copied anywhere tracked; `fixtures/photos/private/` is never opened.
 - Servers pick a free port and are stopped at the end. Scratch output goes to `evals/out/`.
-- Headless browser: Helium (`/Applications/Helium.app/Contents/MacOS/Helium`, or `MIDSTUDY_BROWSER`) with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`, driven by `playwright-core`.
+- Headless browser (v2, 2026-11-05): headless Chrome from the user's flake, `$PUPPETEER_EXECUTABLE_PATH` (or `MIDSTUDY_BROWSER`), driven by `playwright-core`, with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist` (WebGL on SwiftShader) plus `--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader` (WebGPU on Dawn's SwiftShader adapter, which needs a secure-context page: the evals' `http://127.0.0.1` is one). `MIDSTUDY_WEBGPU=0` leaves the WebGPU flags out, to exercise the WebGL2 fallback. The flags live in `BROWSER_ARGS` (`evals/lib/harness.mjs`). Never Helium or any browser the user browses with: automation takes it over.
+- v2 switches, in `evals/lib/harness.mjs`, `evals/library_api.sh` and `evals/pipeline_offline.sh` (§0): `MIDSTUDY_SERVER=legacy|next` starts `python3 planner/serve.py` or `node server/src/main.ts` with the same flags; `MIDSTUDY_ADD=legacy|next` is the furniture CLI the server gets as `--midstudy-add` and E8 runs, `uv run --project pipeline midstudy-add` or `node pipeline/src/cli.ts` with the same arguments and environment. Either `next` sets `MIDSTUDY_STRICT=1`. Before the first server of an eval, `node scripts/build.mjs` runs once when it exists (the planner bundle). Each eval's first line says which server and CLI it ran against.

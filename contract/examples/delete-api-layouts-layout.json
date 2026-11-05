@@ -1,0 +1,20 @@
+{
+  "route": "DELETE /api/layouts/{layout}",
+  "contract": "§2.7",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/layout-deleted.schema.json",
+      "type": "LayoutDeleted",
+      "note": null,
+      "body": {
+        "ok": true,
+        "name": "corner",
+        "scene": "scene-20261105-182038",
+        "trash": "layouts/scene-20261105-182038/.trash/corner-20261105-182040.json"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

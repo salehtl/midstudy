@@ -4,8 +4,26 @@
 # and a canary port records any connection the fetcher should never have made.
 # Usage: bash evals/library_api.sh   (or npm run eval:library). Output lands in evals/out/library-api/.
 # The first server runs with --daily-spend-usd 0: mock calls count for nothing, so the mocked adds still go through.
+# v2 switches (contract §0): MIDSTUDY_SERVER=legacy|next (planner/serve.py, or node server/src/main.ts with the same
+# flags), MIDSTUDY_ADD=legacy|next (the --midstudy-add the server gets: uv run --project pipeline midstudy-add, or node
+# pipeline/src/cli.ts); either next sets MIDSTUDY_STRICT=1. node scripts/build.mjs runs first when it exists.
+# MIDSTUDY_RECORD_API=<dir> records each API call made through add/call/wait_job (contract/tools/check-recordings.mjs).
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+case "${MIDSTUDY_SERVER:-legacy}" in
+  legacy) SERVER_CMD=(python3 planner/serve.py) ;;
+  next) SERVER_CMD=(node server/src/main.ts) ;;
+  *) echo "FAIL MIDSTUDY_SERVER must be legacy or next, not ${MIDSTUDY_SERVER}"; exit 2 ;;
+esac
+case "${MIDSTUDY_ADD:-legacy}" in
+  legacy) ADD_CMD="uv run --project pipeline midstudy-add" ;;
+  next) ADD_CMD="node pipeline/src/cli.ts" ;;
+  *) echo "FAIL MIDSTUDY_ADD must be legacy or next, not ${MIDSTUDY_ADD}"; exit 2 ;;
+esac
+STRICT=""
+if [ "${MIDSTUDY_SERVER:-legacy}" = next ] || [ "${MIDSTUDY_ADD:-legacy}" = next ]; then STRICT=1; fi
+echo "E7 library-api: server ${MIDSTUDY_SERVER:-legacy} (${SERVER_CMD[*]}), furniture CLI ${MIDSTUDY_ADD:-legacy} ($ADD_CMD)${STRICT:+, MIDSTUDY_STRICT=1}${MIDSTUDY_RECORD_API:+, recording /api calls to $MIDSTUDY_RECORD_API}"
 
 OUT=evals/out/library-api
 LIB="$OUT/library"
@@ -32,27 +50,60 @@ r = lambda n: json.load(open(f"{OUT}/r/{n}.json"))
 f = lambda p: json.load(open(p))
 sys.exit(0 if eval(sys.argv[1]) else 1)' "$1"; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+# record METHOD PATH STATUS RESPONSE-FILE [REQUEST-JSON] [META-JSON]: with MIDSTUDY_RECORD_API=<dir>, one JSON line per
+# API call, as evals/lib/harness.mjs writes them
+record() {
+  [ -n "${MIDSTUDY_RECORD_API:-}" ] || return 0
+  mkdir -p "$MIDSTUDY_RECORD_API"
+  python3 - "$MIDSTUDY_RECORD_API/library-api-$$.jsonl" "$@" <<'PY'
+import json, sys
+out, method, path, status, resp = sys.argv[1:6]
+extra = sys.argv[6:] + ["", ""]
+def load(t):
+    try:
+        return json.loads(t)
+    except ValueError:
+        return t
+try:
+    body = json.load(open(resp))
+except (OSError, ValueError):
+    body = None
+request = {}
+if extra[0]:
+    request["body"] = load(extra[0])
+if extra[1]:
+    request["meta"] = load(extra[1])
+rec = {"eval": "library-api", "method": method, "path": path, "status": int(status) if status.isdigit() else 0,
+       "request": request, "response": {"body": body}}
+open(out, "a").write(json.dumps(rec) + "\n")
+PY
+}
 # add NAME KIND FILE META-JSON [curl args...]: raw-body upload (§2.8); saves the response, prints the status
 add() {
-  local n=$1 kind=$2 file=$3 meta=$4; shift 4
-  curl -s -o "$OUT/r/$n.json" -w '%{http_code}' -X POST -H 'X-Midstudy: 1' -H "X-Midstudy-Kind: $kind" \
+  local n=$1 kind=$2 file=$3 meta=$4 code; shift 4
+  code=$(curl -s -o "$OUT/r/$n.json" -w '%{http_code}' -X POST -H 'X-Midstudy: 1' -H "X-Midstudy-Kind: $kind" \
     -H "X-Midstudy-Filename: $(basename "$file")" -H "X-Midstudy-Meta: $(b64 "$meta")" -H 'Content-Type: application/octet-stream' \
-    --data-binary "@$file" "$@" "$BASE/api/library/items"
+    --data-binary "@$file" "$@" "$BASE/api/library/items")
+  record POST /api/library/items "$code" "$OUT/r/$n.json" "" "$meta"
+  echo "$code"
 }
 # call NAME METHOD PATH [JSON]: a JSON mutation or read with X-Midstudy
 call() {
-  local args=(-s -o "$OUT/r/$1.json" -w '%{http_code}' -X "$2" -H 'X-Midstudy: 1')
+  local args=(-s -o "$OUT/r/$1.json" -w '%{http_code}' -X "$2" -H 'X-Midstudy: 1') code
   [ -n "${4:-}" ] && args+=(-H 'Content-Type: application/json' --data-binary "$4")
-  curl "${args[@]}" "$BASE$3"
+  code=$(curl "${args[@]}" "$BASE$3")
+  record "$2" "$3" "$code" "$OUT/r/$1.json" "${4:-}"
+  echo "$code"
 }
 wait_job() {  # wait_job NAME JOB-ID: polls until done/failed (60 s); saves the job as NAME, prints its status
-  local s=""
+  local s="" code=""
   for _ in $(seq 1 120); do
-    curl -s -o "$OUT/r/$1.json" "$BASE/api/library/jobs/$2"
+    code=$(curl -s -o "$OUT/r/$1.json" -w '%{http_code}' "$BASE/api/library/jobs/$2")
     s=$(python3 -c "import json; print(json.load(open('$OUT/r/$1.json')).get('status', ''))" 2>/dev/null)
     [[ "$s" =~ ^(done|failed)$ ]] && break
     sleep 0.5
   done
+  record GET "/api/library/jobs/$2" "$code" "$OUT/r/$1.json"
   echo "$s"
 }
 jid() { python3 -c "import json; print(json.load(open('$OUT/r/$1.json')).get('job', {}).get('id', ''))" 2>/dev/null; }
@@ -86,18 +137,24 @@ PY
 WEB_PID=$!
 
 SERVER_PID=""
-start_server() {  # start_server [serve.py args...]
+start_server() {  # start_server [server args...]
   env -u FAL_KEY MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 MIDSTUDY_FAL_MOCK=fixtures/fal MIDSTUDY_FETCH_ALLOW="127.0.0.1:$IMGPORT" ${MIDSTUDY_FAL_MOCK_COST:+MIDSTUDY_FAL_MOCK_COST=1} \
-    python3 planner/serve.py --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --scenes-dir "$OUT/scenes" \
-    --layouts-dir "$OUT/layouts" --renders-dir "$OUT/renders" "$@" >>"$OUT/server.log" 2>&1 &
+    ${STRICT:+MIDSTUDY_STRICT=1} "${SERVER_CMD[@]}" --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --scenes-dir "$OUT/scenes" \
+    --layouts-dir "$OUT/layouts" --renders-dir "$OUT/renders" --midstudy-add "$ADD_CMD" "$@" >>"$OUT/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 50); do curl -sf "$BASE/api/library" >/dev/null && return 0; sleep 0.2; done
   return 1
 }
 stop_server() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null && wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""; }
 trap 'stop_server; kill "$WEB_PID" 2>/dev/null' EXIT
-uv sync -q --project pipeline || { echo "FAIL uv sync --project pipeline"; exit 1; }
-start_server --daily-spend-usd 0 || { echo "FAIL planner/serve.py did not answer GET /api/library (log: $OUT/server.log)"; tail -n 5 "$OUT/server.log"; exit 1; }
+if [ "${MIDSTUDY_ADD:-legacy}" = legacy ]; then
+  uv sync -q --project pipeline || { echo "FAIL uv sync --project pipeline"; exit 1; }
+fi
+if [ -f scripts/build.mjs ]; then
+  node scripts/build.mjs >"$OUT/build.log" 2>&1; built=$?
+  check "node scripts/build.mjs builds the planner" '[ "$built" = 0 ]' "$(tail -n 3 "$OUT/build.log" | tr '\n' ' ')"
+fi
+start_server --daily-spend-usd 0 || { echo "FAIL ${SERVER_CMD[*]} did not answer GET /api/library (log: $OUT/server.log)"; tail -n 5 "$OUT/server.log"; exit 1; }
 
 # --- reads ------------------------------------------------------------------------------------------------------------------------
 code=$(call lib0 GET /api/library)

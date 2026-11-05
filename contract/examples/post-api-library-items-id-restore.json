@@ -1,0 +1,69 @@
+{
+  "route": "POST /api/library/items/{id}/restore",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/library.schema.json#/$defs/item",
+      "type": "LibraryItem",
+      "note": "back from the trash",
+      "body": {
+        "id": "arrow-sign",
+        "name": "Arrow",
+        "category": null,
+        "dims_cm": {
+          "w": 120,
+          "d": 40,
+          "h": 30
+        },
+        "assets": {
+          "glb": "arrow-sign/model.glb",
+          "splat": null,
+          "spz": null,
+          "thumb": "arrow-sign/thumb.jpg"
+        },
+        "default_render": "glb",
+        "source": {
+          "engine": "glb",
+          "input": "arrow.glb",
+          "prompt": null,
+          "cost_usd": 0,
+          "mock": true,
+          "created": "2026-11-05T18:20:40Z"
+        },
+        "fit": {
+          "glb_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          },
+          "splat_error_pct": null
+        },
+        "notes": null,
+        "mount": "wall"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 409,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "it exists again",
+      "body": {
+        "error": "an item 'arrow-sign' exists again: remove it (or rename the new one) first"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "never deleted",
+      "body": {
+        "error": "'never-there' isn't in the library's trash"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

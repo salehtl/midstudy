@@ -82,12 +82,14 @@
   },
   "$defs": {
     "size": {
+      "title": "ImageSize",
       "type": "object",
       "required": ["w", "h"],
       "additionalProperties": false,
       "properties": { "w": { "type": "integer", "minimum": 1 }, "h": { "type": "integer", "minimum": 1 } }
     },
     "camera": {
+      "title": "Camera",
       "description": "The camera block (contract §4.1). Ranges are clamped by every writer.",
       "type": "object",
       "required": ["fov_y_deg", "height_m", "pitch_deg", "roll_deg"],

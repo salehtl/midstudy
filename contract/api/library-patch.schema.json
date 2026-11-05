@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-patch.schema.json",
+  "title": "LibraryPatch",
+  "description": "PATCH /api/library/items/<id> (contract §2.8): any of these. 200 the item, or 202 {job} when dims_cm or yaw changed (a rescale, $0). default_render must name an asset the item has, and an Idol piece can't show its stand-in box (400).",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "pattern": "\\S" },
+    "category": { "type": ["string", "null"] },
+    "mount": { "enum": ["floor", "wall"] },
+    "yaw": { "description": "Relative to now, degrees.", "enum": [0, 90, 180, 270] },
+    "default_render": { "enum": ["glb", "splat"] },
+    "dims_cm": { "$ref": "../library.schema.json#/$defs/dims" }
+  }
+}

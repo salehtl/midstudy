@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/add-summary.schema.json",
+  "title": "AddSummary",
+  "description": "midstudy-add's last stdout line on success (contract §3.1), which the server reads after a library job. v1 names the engine rescale for --rescale and gives paths as it was given --library (relative or absolute); a path is null when the item has no such file.",
+  "type": "object",
+  "required": ["id", "engine", "cost_usd", "mock", "paths", "fit"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "engine": { "enum": ["idol", "sam3d", "trellis2", "glb", "rug", "rescale"] },
+    "cost_usd": { "type": "number", "minimum": 0 },
+    "mock": { "type": "boolean" },
+    "paths": {
+      "title": "AddPaths",
+      "type": "object",
+      "required": ["library", "item", "glb", "splat", "spz", "thumb", "source", "raw", "costs"],
+      "additionalProperties": false,
+      "properties": {
+        "library": { "description": "library.json", "type": "string" },
+        "item": { "description": "The item's folder.", "type": "string" },
+        "glb": { "type": "string" },
+        "splat": { "type": ["string", "null"] },
+        "spz": { "description": "Beside splat (contract §1).", "type": ["string", "null"] },
+        "thumb": { "type": ["string", "null"] },
+        "source": { "description": "Null for --rescale.", "type": ["string", "null"] },
+        "raw": { "type": ["string", "null"] },
+        "costs": { "description": "costs.csv", "type": "string" }
+      }
+    },
+    "fit": {
+      "title": "AddFit",
+      "type": "object",
+      "required": ["glb_error_pct", "splat_error_pct"],
+      "additionalProperties": false,
+      "properties": {
+        "glb_error_pct": { "$ref": "library.schema.json#/$defs/axisErr" },
+        "splat_error_pct": { "anyOf": [{ "$ref": "library.schema.json#/$defs/axisErr" }, { "type": "null" }] }
+      }
+    }
+  }
+}

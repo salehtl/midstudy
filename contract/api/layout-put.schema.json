@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/layout-put.schema.json",
+  "title": "LayoutPut",
+  "description": "PUT /api/layouts/<layout>?scene=<name> (contract §2.7): a layout (layout.schema.json); the server sets name, scene_name and updated, and answers the stored layout. v1 also fills a missing uid (<id>-<n>), render (glb) and rotation_y_deg (0), so only id and position are required of an item.",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "$ref": "common.schema.json#/$defs/slug" },
+    "title": { "description": "The name as the user typed it; whitespace is collapsed, at most 120 characters after that (400 otherwise).", "type": ["string", "null"] },
+    "scene_name": { "$ref": "common.schema.json#/$defs/slug" },
+    "library": { "type": ["string", "null"] },
+    "updated": { "type": ["string", "null"] },
+    "notes": { "type": ["string", "null"] },
+    "items": {
+      "type": "array",
+      "items": {
+        "title": "LayoutItemPut",
+        "type": "object",
+        "required": ["id", "position"],
+        "additionalProperties": false,
+        "properties": {
+          "uid": { "type": "string", "minLength": 1 },
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "render": { "enum": ["glb", "splat"] },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "rotation_y_deg": { "type": "number" },
+          "mounted": { "enum": ["floor", "wall"] },
+          "dims_cm": { "type": "object", "properties": { "w": { "type": "number" }, "d": { "type": "number" }, "h": { "type": "number" } } }
+        }
+      }
+    }
+  }
+}

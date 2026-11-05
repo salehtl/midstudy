@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/render-meta.schema.json",
+  "title": "RenderMeta",
+  "description": "A render's metadata (contract §2.6, §4.7): the 200 answer of POST /api/render, what renders/<name>.json holds, and each entry of GET /api/renders.",
+  "type": "object",
+  "required": ["name", "url", "input_url", "raw_url", "model", "endpoint", "cost_usd", "mock", "prompt", "created", "scene", "layout", "reference", "keep_room", "aligned", "width", "height", "out_w", "out_h"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "description": "render-YYYYMMDD-HHMMSS (UTC), with -2, -3… on collision.", "type": "string", "pattern": "^render-\\d{8}-\\d{6}(-\\d+)?$" },
+    "url": { "description": "The result.", "type": "string", "pattern": "^/renders/render-\\d{8}-\\d{6}(-\\d+)?\\.jpg$" },
+    "input_url": { "description": "The capture as sent (without its metadata).", "type": "string", "pattern": "^/renders/render-\\d{8}-\\d{6}(-\\d+)?-input\\.jpg$" },
+    "raw_url": { "description": "fal's output before keep-room's align; null without keep-room.", "type": ["string", "null"], "pattern": "^/renders/render-\\d{8}-\\d{6}(-\\d+)?-raw\\.jpg$" },
+    "model": { "enum": ["kontext", "nano-banana", "qwen"] },
+    "endpoint": { "enum": ["fal-ai/flux-pro/kontext", "fal-ai/nano-banana/edit", "fal-ai/qwen-image-edit"] },
+    "cost_usd": { "$ref": "common.schema.json#/$defs/usd" },
+    "mock": { "type": "boolean" },
+    "prompt": { "description": "The prompt sent (the default one when none was given).", "type": "string" },
+    "created": { "$ref": "common.schema.json#/$defs/dateTime" },
+    "scene": { "description": "The scene rendered, or null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/slug" }, { "type": "null" }] },
+    "layout": { "description": "The layout shown, or null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/slug" }, { "type": "null" }] },
+    "reference": { "description": "The scene photo was sent as image 2 (nano-banana with a scene).", "type": "boolean" },
+    "keep_room": { "type": "boolean" },
+    "aligned": {
+      "description": "Keep-room's align result; null without keep-room.",
+      "anyOf": [
+        { "type": "null" },
+        {
+          "title": "AlignResult",
+          "type": "object",
+          "required": ["applied", "inliers", "residual_px"],
+          "additionalProperties": false,
+          "properties": {
+            "applied": { "type": "boolean" },
+            "inliers": { "type": ["integer", "null"], "minimum": 0 },
+            "residual_px": { "type": ["number", "null"], "minimum": 0 },
+            "reason": { "description": "Why it didn't apply.", "type": "string" }
+          }
+        }
+      ]
+    },
+    "width": { "description": "The capture's size.", "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "out_w": { "description": "The result's size; null when its frame header can't be read.", "type": ["integer", "null"], "minimum": 1 },
+    "out_h": { "type": ["integer", "null"], "minimum": 1 }
+  }
+}

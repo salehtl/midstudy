@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/library-rescale-accepted.schema.json",
+  "title": "LibraryRescaleAccepted",
+  "description": "202 of PATCH /api/library/items/<id> when dims_cm or yaw changed (contract §2.8): the queued rescale job ($0).",
+  "type": "object",
+  "required": ["job"],
+  "additionalProperties": false,
+  "properties": {
+    "job": { "$ref": "library-job.schema.json" }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "route": "files beside a deleted scene or library item",
+  "contract": null,
+  "examples": [
+    {
+      "kind": "file scenes/.trash/<name>-<stamp>/trash.json",
+      "schema": "midstudy/trash.schema.json#/$defs/scene",
+      "type": "SceneTrash",
+      "note": "a deleted scene",
+      "body": {
+        "name": "scene-20261105-182039",
+        "title": null,
+        "deleted": "2026-11-05T18:20:40Z"
+      }
+    },
+    {
+      "kind": "file library/.trash/<id>-<stamp>/entry.json",
+      "schema": "midstudy/trash.schema.json#/$defs/item",
+      "type": "LibraryTrash",
+      "note": "a deleted GLB piece",
+      "body": {
+        "deleted": "2026-11-05T18:20:43Z",
+        "entry": {
+          "id": "arrow-sign",
+          "name": "Arrow",
+          "category": null,
+          "dims_cm": {
+            "w": 120,
+            "d": 40,
+            "h": 30
+          },
+          "assets": {
+            "glb": "arrow-sign/model.glb",
+            "splat": null,
+            "spz": null,
+            "thumb": "arrow-sign/thumb.jpg"
+          },
+          "default_render": "glb",
+          "source": {
+            "engine": "glb",
+            "input": "arrow.glb",
+            "prompt": null,
+            "cost_usd": 0,
+            "mock": true,
+            "created": "2026-11-05T18:20:40Z"
+          },
+          "fit": {
+            "glb_error_pct": {
+              "w": 0,
+              "d": 0,
+              "h": 0
+            },
+            "splat_error_pct": null
+          },
+          "notes": null,
+          "mount": "wall"
+        }
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/layout-list.schema.json",
+  "title": "LayoutList",
+  "description": "GET /api/layouts?scene=<name> (contract §2.7): the scene's layouts, sorted by name.",
+  "type": "object",
+  "required": ["layouts", "details"],
+  "additionalProperties": false,
+  "properties": {
+    "layouts": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/slug" } },
+    "details": {
+      "type": "array",
+      "items": {
+        "title": "LayoutSummary",
+        "type": "object",
+        "required": ["name", "title", "items", "updated"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/slug" },
+          "title": { "description": "The name as the user typed it, or null.", "type": ["string", "null"], "maxLength": 120 },
+          "items": { "description": "How many pieces it places.", "type": "integer", "minimum": 0 },
+          "updated": { "$ref": "common.schema.json#/$defs/dateTime", "description": "The layout's updated, else its file's modification time." }
+        }
+      }
+    }
+  }
+}

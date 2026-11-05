@@ -1,0 +1,18 @@
+{
+  "route": "DELETE /api/library/items/{id}",
+  "contract": "§2.8",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/library-deleted.schema.json",
+      "type": "LibraryDeleted",
+      "note": "to the trash",
+      "body": {
+        "ok": true,
+        "trash": ".trash/arrow-sign-20261105-182043"
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

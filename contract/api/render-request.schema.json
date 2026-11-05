@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/render-request.schema.json",
+  "title": "RenderRequest",
+  "description": "POST /api/render (contract §2.6, §4.7). A model that isn't listed, an image that isn't a JPEG (or whose size can't be read) and keep_room without scene or mask are 400; an unknown scene is 404.",
+  "type": "object",
+  "required": ["image"],
+  "additionalProperties": false,
+  "properties": {
+    "image": { "$ref": "common.schema.json#/$defs/jpegDataUri", "description": "The capture: the full photo frame with the furniture." },
+    "model": { "description": "Default nano-banana.", "enum": ["kontext", "nano-banana", "qwen"] },
+    "prompt": { "description": "Replaces the default prompt when it isn't blank.", "type": "string" },
+    "scene": { "$ref": "common.schema.json#/$defs/slug", "description": "The scene rendered; required for the reference photo and keep-room (§4.7)." },
+    "layout": { "description": "The layout shown; a value that isn't a slug is recorded as null.", "type": "string" },
+    "keep_room": { "description": "Keep room exact (§4.7): needs scene and mask.", "type": "boolean" },
+    "mask": { "$ref": "common.schema.json#/$defs/pngDataUri", "description": "Items white on black at the photo's size (keep_room only)." }
+  }
+}

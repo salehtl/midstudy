@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/product-result.schema.json",
+  "title": "ProductResult",
+  "description": "200 of POST /api/library/product (contract §2.11): what the product page says. It adds nothing. Every key is always present.",
+  "type": "object",
+  "required": ["url", "name", "category", "is_rug", "dims_candidates", "variants", "images", "source_layers_used", "cost_usd", "mock", "warnings"],
+  "additionalProperties": false,
+  "properties": {
+    "url": { "description": "The page's final URL after redirects (a pasted page: the address it gives), without user:password@ or #fragment.", "type": "string", "pattern": "^https?://" },
+    "name": { "type": ["string", "null"] },
+    "category": {
+      "description": "One plain word or two, or null.",
+      "enum": ["rug", "sofa", "armchair", "chair", "stool", "bench", "coffee table", "side table", "dining table", "table", "desk", "bed", "bedside table", "dresser", "wardrobe", "bookcase", "shelf", "cabinet", "sideboard", "tv stand", "lamp", "mirror", "ottoman", "plant", null]
+    },
+    "is_rug": { "type": "boolean" },
+    "dims_candidates": { "description": "Every distinct size reading, best first.", "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/candidate" } },
+    "variants": {
+      "description": "The shop's size options when it has more than one; the size the link names first.",
+      "type": "array",
+      "items": {
+        "title": "ProductVariant",
+        "type": "object",
+        "required": ["label", "dims_index"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "dims_index": { "description": "Index into dims_candidates; null when the label couldn't be read.", "type": ["integer", "null"], "minimum": 0, "maximum": 15 }
+        }
+      }
+    },
+    "images": {
+      "description": "The product's pictures (links only: the server never downloads them), product first.",
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "title": "ProductImage",
+        "type": "object",
+        "required": ["url", "w", "h", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string", "pattern": "^https?://" },
+          "w": { "type": ["integer", "null"], "minimum": 1 },
+          "h": { "type": ["integer", "null"], "minimum": 1 },
+          "kind": { "enum": ["product", "variant", "og", "page"] }
+        }
+      }
+    },
+    "source_layers_used": {
+      "description": "The layers that gave something, in this order; llm only when the model was called.",
+      "type": "array",
+      "items": { "enum": ["jsonld", "microdata", "opengraph", "title", "shopify", "woocommerce", "text", "llm"] }
+    },
+    "cost_usd": { "$ref": "common.schema.json#/$defs/usd", "description": "What the language model cost (0 without it)." },
+    "mock": { "description": "True only when the model was called in mock mode.", "type": "boolean" },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "candidate": {
+      "title": "DimsCandidate",
+      "description": "One size reading, in cm rounded to 0.1.",
+      "type": "object",
+      "required": ["w", "d", "h", "unit", "label", "unit_note", "notes", "quote", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "w": { "type": "number", "minimum": 1, "maximum": 2000 },
+        "d": { "type": "number", "minimum": 1, "maximum": 2000 },
+        "h": { "description": "Null when the page has no height (never for a rug: its thickness, 1 cm when the page has none). v1 reads a rug's thickness from 0.1 cm.", "type": ["number", "null"], "minimum": 0.1, "maximum": 2000 },
+        "unit": { "description": "The unit the page used.", "enum": ["cm", "mm", "m", "in", "ft"] },
+        "label": { "type": ["string", "null"] },
+        "unit_note": { "description": "How it was converted when the page's unit wasn't cm.", "type": ["string", "null"] },
+        "notes": { "description": "How labels were mapped.", "type": "array", "items": { "type": "string" } },
+        "quote": { "description": "The text, structured value or feed text the numbers came from.", "type": "string", "maxLength": 200 },
+        "source": { "enum": ["jsonld", "microdata", "shopify", "woocommerce", "text", "llm"] }
+      }
+    }
+  }
+}

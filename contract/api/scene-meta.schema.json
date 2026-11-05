@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/scene-meta.schema.json",
+  "title": "SceneMeta",
+  "description": "The optional X-Midstudy-Meta header of POST /api/scenes (contract §4.4): base64 of this JSON. title is trimmed, at most 200 characters (400 otherwise).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": { "type": ["string", "null"] }
+  }
+}
