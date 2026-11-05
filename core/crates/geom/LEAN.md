@@ -173,7 +173,9 @@ splat level = (A · ambient + K · strength) / (A + K), A = lum(E_world(0, 1, 0)
 27. **Dilation**: v1's two-pass scan (`since` counters left→right with reach `right`, right→left with `left`, then per
     column top→bottom with `down` and bottom→top with `up`) equals the box dilation
     `out(x, y) = ∃ x' ∈ [x − right, x + left], y' ∈ [y − down, y + up]: src(x', y') ≠ 0` (clipped to the image).
-    [raster props `dilation_is_a_box`]
+    The kernel's row pass fills `[s − left, e − 1 + right]` for each run `[s, e)` of set pixels instead; prove that
+    this is the same set (the union of `[x − left, x + right]` over a run of consecutive `x` is that interval).
+    [raster props `dilation_is_a_box`, unit test against v1's scan transcribed]
 28. **Half floats**: `f32_to_f16` rounds to nearest, ties to even, and `f16_to_f32 ∘ f32_to_f16` is the identity on
     every half value. [raster `half` tests: all 65 536 values]
 
