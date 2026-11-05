@@ -198,15 +198,25 @@ export function createGridMaterial(): { material: NodeMaterial, opacity: { value
   return { material: m, opacity }
 }
 
-/** renderer.clear() that clears on both backends. three.js 0.180's WebGL2 backend forces the depth mask on before a
- * clear but not the colour mask, so a colour clear right after a colorWrite: false draw (the depth pre-pass, the
- * catcher's shadow map) did nothing: the previous frame's furniture stayed in the target (measured: a removed piece
- * showed up in the next capture). WebGPU clears with load ops and is unaffected. */
+/** renderer.clear() that clears what it should on both backends. three.js 0.180's WebGL2 backend has two bugs here
+ * (WebGPU clears with load ops and has neither):
+ *  - it forces the depth mask on before a clear but not the colour mask, so a colour clear right after a
+ *    colorWrite: false draw (the depth pre-pass, the catcher's shadow map) did nothing: the previous frame's
+ *    furniture stayed in the target (measured: a removed piece showed up in the next capture);
+ *  - clearing the canvas (no render target) doesn't bind the default framebuffer, so the clear hit whatever was
+ *    bound last (the furniture target's resolve framebuffer after its MSAA blit): the composite then painted the
+ *    clear colour over the whole photo (measured: a black view on WebGL2).
+ * So: colour mask on, and the default framebuffer bound when the target is the canvas. */
 export function clearTarget(renderer: WebGPURenderer, color = true, depth = true, stencil = true): void {
-  if (color) {
-    const state: unknown = Reflect.get(renderer.backend, 'state')
-    const set: unknown = state && typeof state === 'object' ? Reflect.get(state, 'setColorMask') : null
-    if (typeof set === 'function') Reflect.apply(set, state, [true])
+  const state: unknown = Reflect.get(renderer.backend, 'state')
+  const gl: unknown = Reflect.get(renderer.backend, 'gl')
+  if (state && typeof state === 'object') {
+    const setMask: unknown = Reflect.get(state, 'setColorMask')
+    if (color && typeof setMask === 'function') Reflect.apply(setMask, state, [true])
+    const bind: unknown = Reflect.get(state, 'bindFramebuffer')
+    if (renderer.getRenderTarget() === null && typeof bind === 'function' && typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext) {
+      Reflect.apply(bind, state, [gl.FRAMEBUFFER, null])
+    }
   }
   renderer.clear(color, depth, stencil)
 }
