@@ -9,7 +9,7 @@
 //   --daily-spend-usd 0 unless an eval tests the cap with mock costs) and the calib stub with MIDSTUDY_CALIB_MOCK.
 // - a guard that the repo's own scenes/, layouts/, renders/ and library/ are left untouched.
 // - the §4.1 projection (and its inverse) in plain JS, to compute expectations independently of the planner.
-// - Helium + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
+// - headless Chrome ($PUPPETEER_EXECUTABLE_PATH) + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
 //   missing ("hook missing: getScreenRect"), find the photo on screen, touch drags, 44 px target checks.
 // - a probe library: a magenta, unlit 0.8 × 0.5 × 1.2 m box GLB (easy to find in a composite, exact bounds).
 import { spawn, execFileSync } from 'node:child_process'
@@ -20,7 +20,9 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 
 export const REPO = path.resolve(import.meta.dirname, '../..')
-export const BROWSER = process.env.MIDSTUDY_BROWSER || '/Applications/Helium.app/Contents/MacOS/Helium'
+// The headless Chrome the Mac's flake provides ($PUPPETEER_EXECUTABLE_PATH: Chrome for Testing's headless shell), or
+// MIDSTUDY_BROWSER. Never a browser the user browses with (Helium): automation takes it over (global CLAUDE.md).
+export const BROWSER = process.env.MIDSTUDY_BROWSER || process.env.PUPPETEER_EXECUTABLE_PATH || ''
 export const BROWSER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
 export const STUB_CALIB = 'python3 fixtures/stub_calib.py'
 export const REAL_CALIB = 'uv run --project calib midstudy-calib'
@@ -394,9 +396,51 @@ export function pyHelper(args, { timeoutMs = 300000, env = {} } = {}) {
 // --- browser -----------------------------------------------------------------------------------------------------------------
 export async function launchBrowser(ev) {
   const { chromium } = await import('playwright-core')
+  if (!BROWSER) throw new Error('no browser: set PUPPETEER_EXECUTABLE_PATH (the flake\'s headless Chrome) or MIDSTUDY_BROWSER')
   const browser = await chromium.launch({ executablePath: BROWSER, headless: true, args: BROWSER_ARGS })
   ev.onCleanup(() => browser.close())
+  const b = await blockerReady(browser)
+  if (!b.ready) ev.note(`uBlock Origin wasn't ready after ${b.ms} ms: a page opened now may be reloaded under the eval`)
   return browser
+}
+
+// Only for MIDSTUDY_BROWSER pointing at Helium (the default headless Chrome has no extensions: this returns in ~1 s).
+// Helium builds in uBlock Origin as a component extension (--disable-extensions doesn't stop it). Every launch has a
+// fresh profile, so it starts as a first install, and a page opened before it is ready to filter gets reloaded about 5 s
+// later ("Execution context was destroyed" in the eval: seen 2026-11-05 with Helium 0.21.1.1 / Chromium 157). Waits
+// until its background page reports µBlock.readyToFilter (about 3.5 s), then pages load once. → { ready, ms, note? }
+export async function blockerReady(browser, { maxMs = 15000 } = {}) {
+  const t0 = Date.now()
+  const cdp = await browser.newBrowserCDPSession()
+  let id = 0
+  let sessionId = null
+  const pending = new Map()
+  cdp.on('Target.receivedMessageFromTarget', (e) => { const m = JSON.parse(e.message); pending.get(m.id)?.(m); pending.delete(m.id) })
+  const evalIn = (expression) => new Promise((res) => {
+    const i = ++id
+    pending.set(i, res)
+    cdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id: i, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }) }).catch(() => res(null))
+    setTimeout(() => res(null), 1500)
+  })
+  try {
+    while (Date.now() - t0 < maxMs) {
+      if (!sessionId) {
+        const { targetInfos } = await cdp.send('Target.getTargets')
+        const bg = targetInfos.find((t) => t.type === 'background_page' && /uBlock/i.test(t.title))
+        // Helium's uBlock target is there as soon as the browser is (measured: on the first poll); a browser without it
+        // (the headless Chrome) gets through in about a second.
+        if (!bg && Date.now() - t0 > 1000) return { ready: true, ms: Date.now() - t0, note: 'no uBlock Origin in this browser' }
+        if (bg) sessionId = (await cdp.send('Target.attachToTarget', { targetId: bg.targetId, flatten: false })).sessionId
+      }
+      if (sessionId && (await evalIn('typeof µBlock !== "undefined" && µBlock.readyToFilter === true'))?.result?.result?.value === true) return { ready: true, ms: Date.now() - t0 }
+      await sleep(200)
+    }
+    return { ready: false, ms: Date.now() - t0 }
+  } catch (e) {
+    return { ready: false, ms: Date.now() - t0, note: String(e?.message || e) }
+  } finally {
+    await cdp.detach().catch(() => {})
+  }
 }
 // Opens the planner in a fresh context and waits for window.midstudy.ready. Returns {page, context, errors, hook}.
 // `hook` is null when window.midstudy never appeared (then every hook call fails with "hook missing: window.midstudy").
