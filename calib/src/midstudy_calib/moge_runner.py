@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import importlib
 import os
+import sys
 import time
+import types
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +83,47 @@ def _torch() -> None:
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 
+def _real_signal() -> types.ModuleType:
+    """scipy.signal itself (the stand-in, if it is still registered, steps aside first)."""
+    if isinstance(sys.modules.get("scipy.signal"), _DeferredSignal):
+        del sys.modules["scipy.signal"]
+    return importlib.import_module("scipy.signal")
+
+
+def _deferred_fftconvolve(*args: object, **kwargs: object) -> object:
+    real: Callable[..., object] = getattr(_real_signal(), "fftconvolve")  # noqa: B009 - a module's attribute by name
+    return real(*args, **kwargs)
+
+
+class _DeferredSignal(types.ModuleType):
+    """Stands in for scipy.signal while MoGe imports: `fftconvolve` imports the real module on its first call, any
+    other attribute as soon as it is asked for."""
+
+    fftconvolve = staticmethod(_deferred_fftconvolve)
+
+    def __getattr__(self, name: str) -> object:
+        if name.startswith("__"):  # the import system asks for __path__ and the like: not a reason to load scipy
+            raise AttributeError(name)
+        return getattr(_real_signal(), name)
+
+
+def import_moge() -> None:
+    """Import MoGe-2's network module without scipy.signal. moge/utils/geometry_numpy.py imports it at the top for a
+    blur that inference never calls, and it costs 1.6-2.1 s (scipy.stats, interpolate and optimize behind it), a third
+    of a one-shot run's start. While MoGe imports, _DeferredSignal answers `from scipy.signal import fftconvolve`; then
+    it leaves sys.modules, so everything else gets the real module (MoGe's own solver imports scipy.optimize when it
+    first runs, as before)."""
+    if "moge.model.v2" in sys.modules or "scipy.signal" in sys.modules:
+        return
+    stand_in = _DeferredSignal("scipy.signal")
+    sys.modules["scipy.signal"] = stand_in
+    try:
+        importlib.import_module("moge.model.v2")
+    finally:
+        if sys.modules.get("scipy.signal") is stand_in:
+            del sys.modules["scipy.signal"]
+
+
 def pick_device(want: Device) -> RealDevice:
     """auto: cuda, then mps, then cpu (contract §4.3). An explicit choice that isn't available falls back to cpu."""
     _torch()
@@ -139,6 +183,8 @@ def _build(checkpoint: Path) -> MogeNet:
     """MoGeModel.from_pretrained's work (moge/model/v2.py) with the initialization skipped; when the checkpoint doesn't
     cover every parameter, built and loaded exactly as MoGe does (strict=False)."""
     import torch
+
+    import_moge()
     from moge.model.v2 import MoGeModel  # pyright: ignore[reportMissingTypeStubs]
 
     ck = cast(dict[str, object], torch.load(checkpoint, map_location="cpu", weights_only=True))

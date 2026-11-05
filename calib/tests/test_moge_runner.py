@@ -3,6 +3,9 @@ checkpoint), the default model's revision is pinned, and a process keeps one mod
 MoGe's own from_pretrained needs the vitl weights in the Hugging Face cache and is skipped without them."""
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import cast
@@ -125,3 +128,23 @@ def test_build_is_moge_from_pretrained() -> None:
     b = mr.infer(mr.Loaded(net=cast(mr.MogeNet, ref), model="vitl", repo="x", load_s=0.0), rgb, "cpu", 0.0)
     assert np.array_equal(a.points, b.points, equal_nan=True) and np.array_equal(a.mask, b.mask)
     assert t_fast < t_ref, (t_fast, t_ref)
+
+
+def test_moge_imports_without_scipy_signal() -> None:
+    """import_moge leaves scipy.signal unloaded (1.6-2.1 s saved per one-shot run); MoGe's fftconvolve still works,
+    through the real module, which is what everyone else gets."""
+    code = (
+        "import json, sys\n"
+        "import numpy as np\n"
+        "from midstudy_calib import moge_runner as mr\n"
+        "mr.import_moge()\n"
+        "before = 'scipy.signal' in sys.modules\n"
+        "import moge.utils.geometry_numpy as g\n"
+        "a, k = np.random.default_rng(0).random((16, 16)), np.ones((3, 3))\n"
+        "got = g.fftconvolve(a, k, mode='same')\n"
+        "import scipy.signal as ss\n"
+        "print(json.dumps([before, type(sys.modules['scipy.signal']).__name__, bool(np.allclose(got, ss.fftconvolve(a, k, mode='same'))),\n"
+        "                  hasattr(ss, 'welch')]))\n")
+    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout.strip().splitlines()[-1]) == [False, "module", True, True]

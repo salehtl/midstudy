@@ -73,9 +73,17 @@ CHANNEL_KEEP = 0.25     # how much of each colour channel's own crease fit is ke
 EMITTER = 1.0           # albedo above this (after the level is set) is a light source or a highlight, not a surface
 
 
-def srgb_to_linear(u8: U8) -> F64:
-    c = u8.astype(np.float64) / 255.0
+def _srgb_lut() -> F64:
+    c = np.arange(256, dtype=np.float64) / 255.0
     return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+SRGB_LUT = _srgb_lut()  # the sRGB transfer function of every 8-bit value
+
+
+def srgb_to_linear(u8: U8) -> F64:
+    """Linear values of sRGB bytes: a lookup per pixel instead of the power function (the same numbers, 6x faster)."""
+    return SRGB_LUT[u8]
 
 
 def aces(radiance: F64, exposure: float = 1.0) -> F64:
@@ -128,26 +136,30 @@ def ref_normals() -> F64:
 
 
 def _crease_pairs(n: F64, p: F64, chroma: F64, ok: Bools) -> tuple[NDArray[np.intp], NDArray[np.intp]]:
-    """Flat indices (into h * w) of the two samples of every crease pair."""
+    """Flat indices (into h * w) of the two samples of every crease pair, in row-major order per offset. The tests run
+    on the pairs whose two samples are both usable only (the same arithmetic per pair as on the whole grid)."""
     h, w = int(ok.shape[0]), int(ok.shape[1])
     K = PAIR_OFFSET
     cos_crease = math.cos(math.radians(CREASE_DEG))
     A: list[NDArray[np.intp]] = []
     B: list[NDArray[np.intp]] = []
     flat_idx = np.arange(h * w).reshape(h, w)
+    nf, pf, cf = n.reshape(-1, 3), p.reshape(-1, 3), chroma.reshape(-1, 2)
     for dy, dx in ((0, K), (K, 0), (K, K), (K, -K)):
         y0, y1 = 0, h - dy
         x0, x1 = max(0, -dx), w - max(0, dx)
         sa = (slice(y0, y1), slice(x0, x1))
         sb = (slice(y0 + dy, y1 + dy), slice(x0 + dx, x1 + dx))
-        m = ok[sa] & ok[sb]
-        m &= (n[sa] * n[sb]).sum(-1) < cos_crease
-        dist = np.linalg.norm(p[sa] - p[sb], axis=-1)
-        zmin = np.minimum(-p[sa][..., 2], -p[sb][..., 2])
-        m &= dist < 0.035 * zmin + 0.02
-        m &= np.linalg.norm(chroma[sa] - chroma[sb], axis=-1) < SAME_CHROMA
-        A.append(flat_idx[sa][m])
-        B.append(flat_idx[sb][m])
+        both = ok[sa] & ok[sb]
+        ia, ib = flat_idx[sa][both], flat_idx[sb][both]
+        keep = (nf[ia] * nf[ib]).sum(-1) < cos_crease
+        ia, ib = ia[keep], ib[keep]
+        pa, pb = pf[ia], pf[ib]
+        dist = np.linalg.norm(pa - pb, axis=-1)
+        zmin = np.minimum(-pa[:, 2], -pb[:, 2])
+        keep = (dist < 0.035 * zmin + 0.02) & (np.linalg.norm(cf[ia] - cf[ib], axis=-1) < SAME_CHROMA)
+        A.append(ia[keep])
+        B.append(ib[keep])
     return np.concatenate(A), np.concatenate(B)
 
 
@@ -163,13 +175,29 @@ class _DirFit:
     M2: F64
 
 
-def _fit_dirs(n1: F64, n2: F64, ratio: F64, dirs: F64, w: F64, beta: float = BETA) -> _DirFit:
-    """For every direction: (b, I) with a = 1 from E(n1) - ratio E(n2) = 0, i.e.
-    (n1y - ratio n2y) b + (m1 - ratio m2) I = ratio - 1, weighted, with the prior LAM_B (b - beta)^2."""
+@dataclass(frozen=True)
+class _System:
+    """The parts of _fit_dirs's least squares that don't depend on the weights: the clamped cosines of both samples
+    (N, J) and the design (xb (N,), xi (N, J)) and target (y (N,)). The robust iterations reuse them."""
+
+    M1: F64
+    M2: F64
+    xb: F64
+    xi: F64
+    y: F64
+
+
+def _system(n1: F64, n2: F64, ratio: F64, dirs: F64) -> _System:
     M1, M2 = np.maximum(n1 @ dirs.T, 0), np.maximum(n2 @ dirs.T, 0)
-    xb = n1[:, 1] - ratio * n2[:, 1]
-    xi = M1 - ratio[:, None] * M2
-    y = ratio - 1
+    return _System(M1=M1, M2=M2, xb=n1[:, 1] - ratio * n2[:, 1], xi=M1 - ratio[:, None] * M2, y=ratio - 1)
+
+
+def _fit_dirs(n1: F64, n2: F64, ratio: F64, dirs: F64, w: F64, beta: float = BETA, system: _System | None = None) -> _DirFit:
+    """For every direction: (b, I) with a = 1 from E(n1) - ratio E(n2) = 0, i.e.
+    (n1y - ratio n2y) b + (m1 - ratio m2) I = ratio - 1, weighted, with the prior LAM_B (b - beta)^2. `system`: the
+    weight-free parts, when the caller has them already (the same directions and pairs)."""
+    s = system or _system(n1, n2, ratio, dirs)
+    M1, M2, xb, xi, y = s.M1, s.M2, s.xb, s.xi, s.y
     lam = LAM_B * w.sum()
     g11 = (w * xb * xb).sum() + lam
     g12 = (w[:, None] * xb[:, None] * xi).sum(0)
@@ -210,8 +238,9 @@ def _direction(n1: F64, n2: F64, ratio: F64) -> _Direction:
     w = np.ones(len(ratio))
     res = np.zeros(len(dirs))
     j = 0
+    system = _system(n1, n2, ratio, dirs)
     for _ in range(6):
-        f = _fit_dirs(n1, n2, ratio, dirs, w)
+        f = _fit_dirs(n1, n2, ratio, dirs, w, system=system)
         res = f.res * pen
         j = int(np.argmin(res))
         E1 = 1 + f.b[j] * n1[:, 1] + f.i_key[j] * f.M1[:, j]
@@ -270,8 +299,12 @@ def fit(rgb: U8, points_cv: Floats, normals_cv: Floats, valid: Bools, camera: Ca
         return None
     flat = ok.copy()
     cos_flat = math.cos(math.radians(FLAT_DEG))
-    for dy, dx in ((0, 2), (2, 0), (0, -2), (-2, 0)):
-        flat &= (n * np.roll(n, (dy, dx), (0, 1))).sum(-1) > cos_flat
+    # each normal against its neighbours 2 px away, wrapping at the edges as np.roll does: n[j] . n[j + 2] serves
+    # both neighbours (n[j] . n[j - 2] is the same product rolled by 2), so each dot product is computed once
+    dh = (n * np.roll(n, -2, 1)).sum(-1)
+    dv = (n * np.roll(n, -2, 0)).sum(-1)
+    for d in (dh, np.roll(dh, 2, 1), dv, np.roll(dv, 2, 0)):
+        flat &= d > cos_flat
     lg = np.log(rad + 0.003)
     chroma = np.stack([lg[..., 0] - lg[..., 1], lg[..., 2] - lg[..., 1]], -1)
 

@@ -97,8 +97,8 @@ def fit_floor(points: Floats, normals: Floats | None, valid: Bools, *, rng_seed:
     finite = valid & np.isfinite(points).all(-1) & (points[..., 2] > 0)
     up_cv = np.array([0.0, -1.0, 0.0])
     cand = finite.copy()
-    if normals is not None:
-        nn = np.nan_to_num(normals)
+    nn = None if normals is None else np.nan_to_num(normals)
+    if nn is not None:
         # Floors face the camera's up side for any pitch the contract allows. Walls facing a downward-looking camera
         # and ceilings fail this; side walls only pass with a large roll.
         cand &= (nn @ up_cv) > MIN_UP
@@ -110,7 +110,7 @@ def fit_floor(points: Floats, normals: Floats | None, valid: Bools, *, rng_seed:
     if idx.size < 200:
         return None
     P = points.reshape(-1, 3)[idx]
-    Nrm = None if normals is None else np.nan_to_num(normals).reshape(-1, 3)[idx]
+    Nrm = None if nn is None else nn.reshape(-1, 3)[idx]
     weight = 0.2 + (rows.reshape(-1)[idx] / h) ** 2  # the bottom rows count about 6x the top ones
     z = P[:, 2]
     thr = np.maximum(MASK_M, 0.012 * z)  # MoGe's error grows with distance
@@ -149,7 +149,7 @@ def fit_floor(points: Floats, normals: Floats | None, valid: Bools, *, rng_seed:
 
     # refine on the full grid: least squares on the inliers, three times
     Pall = points.reshape(-1, 3)
-    Nall = None if normals is None else np.nan_to_num(normals).reshape(-1, 3)
+    Nall = None if nn is None else nn.reshape(-1, 3)
     fin = finite.reshape(-1)
     zall = np.where(fin, Pall[:, 2], np.inf)
     thr_all = np.maximum(MASK_M, 0.012 * zall)
