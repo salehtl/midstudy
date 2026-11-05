@@ -48,7 +48,7 @@ interface ModalContent {
 }
 type CompareMode = 'side' | 'split' | 'swipe'
 
-/** @public planner/main.js mounts every area: mod.mount(ctx). */
+/** @public planner/main.ts mounts every area: mod.mount(ctx) (knip does not follow the areas list). */
 export function mount(ctx: UiContext): void {
   const { engine, shell, kit } = ctx
   const { h, button, segmented, toggle } = kit

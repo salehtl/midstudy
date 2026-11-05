@@ -1,5 +1,5 @@
 // midstudy planner shell: phone vs desktop chrome, panels (desktop side panel / phone bottom sheets), pages (Scenes),
-// toasts, confirm dialogs, "…" menus and tooltips. Area modules (workspace, panels, rooms) build on it; see main.js.
+// toasts, confirm dialogs, "…" menus and tooltips. Area modules (workspace, panels, rooms) build on it; see main.ts.
 //
 // createShell({ engine }) → shell
 //   mode, isPhone()                 'phone' (≤ 760 px wide or a coarse pointer) | 'desktop'; switches live on resize

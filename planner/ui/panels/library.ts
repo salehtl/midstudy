@@ -18,7 +18,7 @@ import {
 } from '../logic/library.js'
 import { libName } from '../../logic/library.js'
 
-/** @public planner/main.js mounts every area: mod.mount(ctx). */
+/** @public planner/main.ts mounts every area: mod.mount(ctx) (knip does not follow the areas list). */
 export function mount(ctx: UiContext): void {
   const { engine, shell, kit, lib } = ctx
   const { h, chip } = kit

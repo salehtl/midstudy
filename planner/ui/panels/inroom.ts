@@ -5,7 +5,7 @@ import { dimsText, quiet, type ItemInfo, type UiContext } from '../seam.js'
 import { pic, itemThumb, emptyState } from './common.js'
 import { placedMark } from '../logic/library.js'
 
-/** @public planner/main.js mounts every area: mod.mount(ctx). */
+/** @public planner/main.ts mounts every area: mod.mount(ctx) (knip does not follow the areas list). */
 export function mount({ engine, shell, kit }: UiContext): void {
   const { h, button } = kit
   const panel = shell.registerPanel({ id: 'inroom', label: 'In the scene', short: 'In scene', icon: 'in-room', phoneDetent: 'half', mount: () => { /* filled below */ } })

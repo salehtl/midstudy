@@ -53,7 +53,7 @@ const setHint = (row: Element, words: string): void => {
   if (hint) hint.textContent = words
 }
 
-/** @public planner/main.js mounts every area: mod.mount(ctx). */
+/** @public planner/main.ts mounts every area: mod.mount(ctx) (knip does not follow the areas list). */
 export function mount(ctx: UiContext): void {
   const { engine, scenes, shell, kit } = ctx
   const { h, button, toggle, slider } = kit
