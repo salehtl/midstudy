@@ -1,0 +1,9 @@
+# PNG tokens for libFuzzer (-dict=png.dict)
+"\x89PNG\x0d\x0a\x1a\x0a"
+"IHDR"
+"IDAT"
+"IEND"
+"tEXt"
+"\x00\x00\x00\x0dIHDR"
+"\x10\x00\x00\x00\x00"
+"\x08\x00\x00\x00\x00"

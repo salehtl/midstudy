@@ -228,7 +228,7 @@ fn next_chunk(rest: &[u8]) -> Result<Chunk<'_>, PngError> {
     let (data, rest) = rest.split_at_checked(len).ok_or(PngError::Truncated)?;
     let (crc, rest) = rest.split_at_checked(4).ok_or(PngError::Truncated)?;
     let ty: [u8; 4] = ty.try_into().map_err(|_| PngError::Truncated)?;
-    if be_u32(crc) != Some(crc32(&[&ty, data])) {
+    if !cfg!(feature = "fuzzing") && be_u32(crc) != Some(crc32(&[&ty, data])) {
         return Err(PngError::BadCrc(ty));
     }
     Ok((ty, data, rest))
