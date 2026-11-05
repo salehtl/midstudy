@@ -127,7 +127,7 @@ const checks = {
     for (const t of ['test:engine', 'test:ui']) {
       const r = sh('npm', ['run', '--silent', t])
       if (r.code !== 0) return { ok: false, line: `npm run ${t} failed`, out: r.out }
-      lines.push(r.out.trim().split('\n').filter((l) => /groups pass|logic-vs-v1: ok|bus: ok/.test(l)).map((l) => l.replace(/^.*?: /, '')).join('; '))
+      lines.push(...r.out.trim().split('\n').filter((l) => /groups pass|^logic-vs-v1: ok|^bus: ok/.test(l)).map((l) => l.replace(/ \(seed.*$/, '').replace(': ok — ', ': ')))
     }
     return { ok: true, line: lines.join('; ') }
   },

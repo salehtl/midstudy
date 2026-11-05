@@ -25,6 +25,7 @@
     "eval:real": "node evals/real_path.mjs",
     "eval:selftest": "node evals/harness_selftest.mjs",
     "eval:perf": "node evals/perf.mjs",
+    "eval:ui-smoke": "node planner/ui/test/smoke.mjs",
     "fixtures:scenes": "node fixtures/make_scene.mjs",
     "check:scenes": "evals/py fixtures/check_scenes.py",
     "build": "node scripts/build.mjs",
@@ -44,7 +45,6 @@
     "test:contract": "node --test contract/test/contract.test.mjs && node contract/test/typecheck.mjs",
     "test:engine": "node planner/engine.test.mjs",
     "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
-    "test:ui-smoke": "node planner/ui/test/smoke.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {
