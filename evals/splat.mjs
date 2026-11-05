@@ -169,10 +169,11 @@ const rdOut = composite(mA) && composite(mB) ? pyHelper(['region-diff', '--a', c
 ev.check('the photo is drawn as is away from the furniture (corners: mean ≤ 2)', rdOut.mean != null && rdOut.mean <= 2, rdOut.error || fmt(rdOut))
 
 // --- true size and place ------------------------------------------------------------------------------------------------------
-ev.section('splat items draw at their true size and place (occlusion and contact shadows off)')
+ev.section('splat items draw at their true size and place (occlusion, contact and cast shadows off)')
 await hook(P.page, 'clearItems')
 await hook(P.page, 'setOcclusion', [false])
 await hook(P.page, 'setRenderSettings', [{ contactShadows: false }])
+await hook(P.page, 'setLighting', [{ cast_shadows: false }]) // the floor shadow from the photo's light (§4.8) isn't the piece's outline
 const pS2 = await place(SPROBE.id, [-1.0, 0, -2.4])
 st = await state(P.page)
 const sI = itemOf(st, pS2.uid)
@@ -262,6 +263,7 @@ const aO2 = composite(mO2) && oI ? pyHelper(['occlusion', '--composite', composi
 ev.check('occlusion off: the hidden part shows the splat (≥ 85 %)', aO2.hidden_magenta >= 0.85, aO2.error || `${pct(aO2.hidden_magenta)} magenta`)
 await hook(P.page, 'setOcclusion', [true])
 await hook(P.page, 'setRenderSettings', [{ contactShadows: true }])
+await hook(P.page, 'setLighting', [{ cast_shadows: true }])
 
 // --- keep-room mask ---------------------------------------------------------------------------------------------------------------
 ev.section('Render: the keep-room mask covers splat items (§4.7)')

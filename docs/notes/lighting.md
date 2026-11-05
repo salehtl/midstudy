@@ -66,9 +66,8 @@ the committed photo by 1.1 grey levels on average, JPEG noise).
 
 ## Planner side (`planner/lighting.js`, engine "look and lighting")
 
-Built on main `b766898` (before Idol), mesh furniture and Flat rug only; splat colour-matching is a follow-up once Idol's
-splat drawing is on main (`lights.splatGrade()` is the hook for it: a per-channel gain from `white_balance` and the
-ambient setting).
+Built on main `b766898`, then merged with main after the product page import and Idol landed (`a79a6c3`+), so splat
+furniture is lit too.
 
 - **With `lighting.json`:** a `LightProbe` with the SH turned to the world frame (refit over 96 directions, exact for
   bands 0–2), one `DirectionalLight` (colour × intensity × `light_strength`), and an environment map made from the same
@@ -79,9 +78,24 @@ ambient setting).
   an invisible floor at y = 0 with a PCSS shader (blocker search, then a 32-tap filter whose width grows with the
   distance to the blocker, so it's sharp where a leg meets the floor and softer away from it). It is black with an
   alpha, drawn in the furniture pass, so the occlusion pre-pass hides it behind real things and the photo is only ever
-  darkened. Its darkness is the key's share of the floor's light, `key·l_y / (ambient(up) + key·l_y)`, a little lighter
-  for soft light; the alpha is converted for the composite's sRGB blending (blending a linear alpha over sRGB bytes
-  made shadows ~2× too dark). The keep-room mask takes the visible shadow in, so a render doesn't cut it off.
+  darkened. How dark: the catcher reads the photo's own pixel under it, takes it back to radiance (sRGB → linear → ACES
+  undone, as lighting.json's fit does), keeps `ambient(up) / (ambient(up) + key·l_y)` of it per channel where the key is
+  blocked, applies ACES again and turns that into the alpha of black over the photo's bytes. Two earlier versions were
+  wrong: a linear alpha over sRGB bytes made shadows ~2× too dark, and a share in radiance without the tone curve (plus
+  extra lightening for soft light) left them much lighter than the photo's real shadows (the verifier measured
+  living-warm's sofa shadow at 0.32 of the lit floor, ours at 0.48). The keep-room mask takes the visible shadow in,
+  so a render doesn't cut it off.
+- **Splats** (Idol, SAM 3D splats): not lit; the splat pass's plain multiplier (exposure × warmth, §4.5) also takes the
+  room light's colour (`white_balance.rgb`) and level (the share of the light the strength and ambient controls keep,
+  1 at the defaults). A copy of each splat item's hidden GLB or stand-in box with a material that writes no colour and
+  no depth casts its floor shadow (three.js's shadow pass draws every visible caster; the hidden original isn't one).
+- **The Look saves itself** (`PUT {look}` 0.7 s after the last change, at once on a scene switch or `pagehide`), so a
+  lighting tweak is never lost; Save scene is for the camera. A browser context closed by a test isn't a page hide:
+  E16 dispatches `pagehide` before it closes one.
+- **Phone:** a vertical swipe across the light dial or a Look slider scrolls the sheet and changes nothing. The sun has
+  a 48 px touch grip (`touch-action: none`), a sideways drag or a tap elsewhere on the dial moves the light, and Look
+  sliders move by a sideways drag on their row (their native input takes no touches on the phone: Chrome jumps a range
+  thumb to the finger on touch-down, before it knows the gesture is a scroll).
 - Measured with `evals/lib/images.py lighting` (E16) on the three living-* golden scenes, the grey probe box's faces
   come out 2–4 % brighter than lighting.json predicts (the reflections' share), and its shadow's direction is within
   1.5–14° of straight away from the light.

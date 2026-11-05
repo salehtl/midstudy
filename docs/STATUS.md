@@ -27,6 +27,14 @@ never been built on Linux.
   piece has no mesh: an invisible box at its size does the picking, dragging and contact shadow. SAM 3D pieces show
   their splat too, with **Shows as** (Splat / Mesh) in the Edit sheet. Each splat is served as `splat.spz` (about
   3 MB). PLAN.md §12, contract §1 and §4.5, notes in `docs/notes/idol.md`.
+- **Lighting from the photo** (added 2026-11-05): calibration also infers the room's light (`lighting.json`: an ambient
+  light plus one key light with its direction, colour, strength and softness, about a second on MoGe's output), and
+  the furniture is lit by it: meshes by a light probe and a key light, splats colour-matched to the room's light, and
+  every piece casts a soft shadow on the photo's floor, as dark as the photo's own shadows and hidden behind real
+  furniture. **Scene › Light & look**: Auto lighting and Reset, a dial to drag the light's direction (mouse, touch,
+  keys), strength, softness, ambient, exposure, warmth, floor and contact shadows; it saves itself per scene. Scenes
+  calibrated before this get their light the first time they open (the lighting step alone, about 12 s on the lounge;
+  nothing else changes). Contract §4.8, notes in `docs/notes/lighting.md`.
 - **Layouts** per scene. A scene reopens with its layout on any device.
 - **Render** (nano-banana with your photo as a reference), **Keep room exact** (on by default since the live check),
   the Renders panel and **Compare** (side by side or split, Swap). Tested in mock mode, plus the live check below.
