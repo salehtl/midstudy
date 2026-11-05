@@ -1,5 +1,7 @@
 import Midstudy.Camera
 import Mathlib.Analysis.SpecialFunctions.Trigonometric.Arctan
+import Mathlib.Analysis.SpecialFunctions.Trigonometric.ArctanDeriv
+import Mathlib.Analysis.Calculus.MeanValue
 
 /-!
 # The horizon (contract §4.1 "Signs")
@@ -195,6 +197,82 @@ theorem pitchFromHorizon_horizonAt (hf : c.focalPx ph ≠ 0) (hr : cos (rad c.ro
   unfold rad
   have := Real.pi_pos
   field_simp
+
+/-! ### The horizon drag is capped (contract §4.5, geom LEAN.md property 10) -/
+
+theorem arctan_lipschitz : LipschitzWith 1 Real.arctan := by
+  apply lipschitzWith_of_nnnorm_deriv_le Real.differentiable_arctan
+  intro x
+  rw [Real.deriv_arctan, ← NNReal.coe_le_coe, coe_nnnorm, Real.norm_eq_abs, NNReal.coe_one]
+  have h : 0 < 1 + x ^ 2 := by positivity
+  rw [abs_of_pos (by positivity), div_le_one h]
+  nlinarith [sq_nonneg x]
+
+theorem abs_arctan_sub_le (x y : ℝ) : |Real.arctan x - Real.arctan y| ≤ |x - y| := by
+  have := arctan_lipschitz.dist_le_mul x y
+  simpa [Real.dist_eq] using this
+
+/-- The pitch the horizon sets moves by at most one focal length's worth of degrees per photo pixel. -/
+theorem pitchFromHorizon_lipschitz (hf : 0 < c.focalPx ph) (hr : 0 < cos (rad c.roll_deg)) (a b : ℝ) :
+    |c.pitchFromHorizon ph a - c.pitchFromHorizon ph b| ≤ |a - b| / (c.focalPx ph * (π / 180)) := by
+  have hpi := Real.pi_pos
+  have hcr : cos (rad c.roll_deg) ≤ 1 := Real.cos_le_one _
+  unfold pitchFromHorizon
+  rw [show -Real.arctan (cos (rad c.roll_deg) * (-(a - ph.h / 2) / c.focalPx ph)) / (π / 180) -
+      -Real.arctan (cos (rad c.roll_deg) * (-(b - ph.h / 2) / c.focalPx ph)) / (π / 180) =
+      (Real.arctan (cos (rad c.roll_deg) * (-(b - ph.h / 2) / c.focalPx ph)) -
+        Real.arctan (cos (rad c.roll_deg) * (-(a - ph.h / 2) / c.focalPx ph))) / (π / 180) by ring,
+    abs_div, abs_of_pos (by positivity : (0 : ℝ) < π / 180)]
+  have h1 := abs_arctan_sub_le (cos (rad c.roll_deg) * (-(b - ph.h / 2) / c.focalPx ph))
+    (cos (rad c.roll_deg) * (-(a - ph.h / 2) / c.focalPx ph))
+  have h2 : |cos (rad c.roll_deg) * (-(b - ph.h / 2) / c.focalPx ph) -
+      cos (rad c.roll_deg) * (-(a - ph.h / 2) / c.focalPx ph)| ≤ |a - b| / c.focalPx ph := by
+    rw [show cos (rad c.roll_deg) * (-(b - ph.h / 2) / c.focalPx ph) -
+        cos (rad c.roll_deg) * (-(a - ph.h / 2) / c.focalPx ph) = cos (rad c.roll_deg) * ((a - b) / c.focalPx ph) by
+        field_simp; ring, abs_mul, abs_of_pos hr, abs_div, abs_of_pos hf]
+    calc cos (rad c.roll_deg) * (|a - b| / c.focalPx ph) ≤ 1 * (|a - b| / c.focalPx ph) :=
+          mul_le_mul_of_nonneg_right hcr (by positivity)
+      _ = |a - b| / c.focalPx ph := one_mul _
+  rw [div_le_div_iff₀ (by positivity) (by positivity)]
+  calc |Real.arctan (cos (rad c.roll_deg) * (-(b - ph.h / 2) / c.focalPx ph)) -
+        Real.arctan (cos (rad c.roll_deg) * (-(a - ph.h / 2) / c.focalPx ph))| * (c.focalPx ph * (π / 180))
+      ≤ |a - b| / c.focalPx ph * (c.focalPx ph * (π / 180)) :=
+        mul_le_mul_of_nonneg_right (h1.trans h2) (by positivity)
+    _ = |a - b| * (π / 180) := by field_simp
+
+/-- workspace.js's horizon drag: degrees per CSS pixel, `(360/π) · tan(fov/2) / rect_h`. -/
+def degPerCssPx (c : CameraBlock) (rectH : ℝ) : ℝ := (360 / π) * tan (rad c.fov_y_deg / 2) / rectH
+
+/-- **The horizon drag tilts at most `min(degPerCssPx, 0.12)` degrees per CSS pixel** (§4.5: "at most 0.12° of tilt
+per CSS pixel on a small photo"): the drag asks for row `py₀ + (Δy / s) · gain` with
+`gain = min(1, 0.12 / degPerCssPx)`, the photo shown `s` CSS px per photo px (`rect_h = s · H`). -/
+theorem horizon_drag_cap (hH : 0 < ph.h) (hfov : 0 < c.fov_y_deg) (hfov' : c.fov_y_deg < 180)
+    (hr : 0 < cos (rad c.roll_deg)) {s : ℝ} (hs : 0 < s) (py0 dy : ℝ) :
+    |c.pitchFromHorizon ph (py0 + dy / s * min 1 (0.12 / c.degPerCssPx (s * ph.h))) - c.pitchFromHorizon ph py0| ≤
+      min (c.degPerCssPx (s * ph.h)) 0.12 * |dy| := by
+  have hpi := Real.pi_pos
+  have hf := focalPx_pos (c := c) hH hfov hfov'
+  have ht : 0 < tan (rad c.fov_y_deg / 2) := by
+    have : 0 < c.focalPx ph := hf
+    unfold focalPx at this
+    have h2 : 0 < ph.h / 2 := by linarith
+    exact (div_pos_iff_of_pos_left h2).1 this
+  have hk : 0 < c.degPerCssPx (s * ph.h) := by unfold degPerCssPx; positivity
+  have hkey : 1 / (s * c.focalPx ph * (π / 180)) = c.degPerCssPx (s * ph.h) := by
+    unfold degPerCssPx focalPx
+    field_simp
+    ring
+  have hg : 0 ≤ min 1 (0.12 / c.degPerCssPx (s * ph.h)) := le_min (by norm_num) (by positivity)
+  have hgk : min 1 (0.12 / c.degPerCssPx (s * ph.h)) * c.degPerCssPx (s * ph.h) =
+      min (c.degPerCssPx (s * ph.h)) 0.12 := by
+    rw [min_mul_of_nonneg _ _ hk.le, one_mul, div_mul_cancel₀ _ hk.ne']
+  calc _ ≤ |py0 + dy / s * min 1 (0.12 / c.degPerCssPx (s * ph.h)) - py0| / (c.focalPx ph * (π / 180)) :=
+        pitchFromHorizon_lipschitz hf hr _ _
+    _ = |dy| * min 1 (0.12 / c.degPerCssPx (s * ph.h)) * (1 / (s * c.focalPx ph * (π / 180))) := by
+        rw [add_sub_cancel_left, abs_mul, abs_div, abs_of_pos hs, abs_of_nonneg hg]
+        field_simp
+    _ = min (c.degPerCssPx (s * ph.h)) 0.12 * |dy| := by
+        rw [hkey, mul_assoc, hgk, mul_comm]
 
 end CameraBlock
 
