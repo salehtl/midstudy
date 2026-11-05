@@ -24,7 +24,7 @@ export type ElementOf<S extends string> = TagOf<S> extends keyof HTMLElementTagN
 type Scalar = string | number | boolean | null | undefined
 type Handlers = { readonly [K in keyof HTMLElementEventMap as `on${K}`]?: ((e: HTMLElementEventMap[K]) => void) | null | undefined }
 interface Props {
-  readonly dataset?: Readonly<Record<string, string | undefined>> | null | undefined
+  readonly dataset?: Readonly<Record<string, string | null | undefined>> | null | undefined
   readonly style?: Readonly<Record<string, string>> | null | undefined
   readonly class?: string | undefined
   readonly id?: string | undefined

@@ -51,12 +51,14 @@ export function emptyState({ icon: ic, title, body, action }: { readonly icon: s
   return h('div.p-empty', h('span.p-empty-icon', pic(ic, { size: 20 })), h('h3.p-empty-title', title), body ? h('p.p-empty-body', body) : null, action ?? null)
 }
 
-// An error's message: an Error's (else "Error"), or a string thrown as it is.
-export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message || String(err) : typeof err === 'string' ? err : ''
+// What v1 read as `e.message`: an Error's message, or a message an object carries ("" otherwise).
+export function messageOf(err: unknown): string {
+  if (err instanceof Error) return err.message
+  return typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string' ? err.message : ''
 }
-// Errors from fetch() failing (no HTTP status): the engine words them "the server isn't answering".
-export const isOffline = (err: unknown): boolean => isOfflineText(errorMessage(err))
+// Errors from fetch() failing (no HTTP status): the engine words them "the server isn't answering". (v1 read the
+// message, else the error as text.)
+export const isOffline = (err: unknown): boolean => isOfflineText(messageOf(err) || (typeof err === 'string' ? err : err instanceof Error ? String(err) : ''))
 export const OFFLINE_BODY = "Your changes stay in this tab. Check the server is running and you're on its network, then retry."
 
 type When = string | number | Date | null | undefined

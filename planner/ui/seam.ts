@@ -411,8 +411,8 @@ export interface LibraryStore {
   readonly events: Events<LibEvents>
   readonly getState: () => LibState
   readonly spend: () => Promise<unknown>
-  readonly addFromFile: (file: File, meta: AddMeta) => Promise<LibJob | null>
-  readonly addFromUrl: (url: string, meta: AddMeta) => Promise<LibJob | null>
+  readonly addFromFile: (file: File | null, meta: AddMeta) => Promise<LibJob | null>
+  readonly addFromUrl: (url: string | null, meta: AddMeta) => Promise<LibJob | null>
   /** §2.11: the server's answer (untyped JSON: productsrc parses it); rejects with the server's sentence, plus blocked. */
   readonly readProduct: (url: string, opts: { readonly html: string } | undefined) => Promise<unknown>
   readonly edit: (id: string, patch: EditPatch) => Promise<{ readonly kind?: string | null } | null | undefined>

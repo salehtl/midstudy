@@ -5,7 +5,7 @@
 // logic/layouts.ts.
 import { SLUG, quiet, sceneTitle, type DeletedLayout, type LayoutDetail, type UiContext } from '../seam.js'
 import type { ConfirmAction } from '../shell.js'
-import { pic, withIcon, shortDate, isOffline, errorMessage, OFFLINE_BODY } from './common.js'
+import { pic, withIcon, shortDate, isOffline, messageOf, OFFLINE_BODY } from './common.js'
 import { cardMeta, cardTitle, checkName, loadBody, noLayoutsText, pretty, rowMeta, savedWithText, sortLayouts } from '../logic/layouts.js'
 
 interface Failure {
@@ -46,7 +46,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
       if (!quietly) shell.toast(`Layout saved as ${show(name)}`, { kind: 'ok', id: 'layout-saved' })
       return true
     } catch (e) {
-      failure = { message: errorMessage(e), offline: isOffline(e), retry: () => { quiet(save(name, { title })) } }
+      failure = { message: messageOf(e), offline: isOffline(e), retry: () => { quiet(save(name, { title })) } }
       return false
     } finally {
       busy = false
@@ -162,7 +162,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
         e.stopPropagation()
         shell.menu(e.currentTarget instanceof Element ? e.currentTarget : null, [
           ...(isCur ? [] : [{ label: 'Load', icon: 'layouts', onSelect: () => { quiet(load(d.name)) } }]),
-          { label: 'Save current over it', icon: 'bookmark', onSelect: () => { quiet(saveOver(d, isCur)) } },
+          { label: 'Save current over it', icon: 'bookmark', onSelect: () => { void saveOver(d, isCur) } },
           '-', { label: 'Delete…', icon: 'trash', danger: true, onSelect: () => { quiet(del(d.name)) } },
         ], { align: 'end' })
       } }, pic('more', { size: 18 }))
