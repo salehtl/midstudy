@@ -12,7 +12,7 @@ import { RENDER_MODELS, REFERENCE_MODELS, renderPrice, quiet } from '../../engin
 import { pic, withIcon, emptyState, dayDate, clock, money, modelShort, imageShot } from './common.js'
 
 const ABOUT = 25 // seconds a render usually takes
-const MODEL_NOTE = { 'nano-banana': 'Uses the photo as a reference', kontext: 'Freer light, may move things', qwen: 'Restyles more, slower', 'gpt-image': 'OpenAI, uses the photo as a reference' }
+const MODEL_NOTE = { 'nano-banana': 'Uses the photo as a reference', kontext: 'Freer light, may move things', qwen: 'Restyles more, slower', 'gpt-image': 'OpenAI, the scene as you see it' }
 // The server's default prompts (planner/serve.py): shown as "the default", not as a custom prompt.
 const DEFAULT_PROMPTS = [/^Image 1 is a photo of a room with 3D models of furniture/, /^Turn this 3D planning render into a photorealistic/]
 
@@ -186,7 +186,7 @@ export function mount(ctx) {
       const facts = h('div.rc-facts',
         h('span.caps', 'What gets sent'),
         h('p', h('strong', whatText), h('span', 'At the photo’s size')),
-        h('p.tnum', h('strong', sizeText), h('span', 'Nano Banana and GPT Image also get the photo')),
+        h('p.tnum', h('strong', sizeText), h('span', 'Nano Banana also gets the photo')),
         h('p', h('strong', 'To fal, via the server'), h('span', `The key stays there. About ${ABOUT} s.`)))
       const mockNote = engine.isRenderMock() ? h('p.rc-mock', 'Mock mode: nothing goes to fal and nothing is charged.') : null
       const closeBtn = h('button.btn.btn-icon.btn-quiet.rc-close', { type: 'button', 'aria-label': 'Close', onclick: close }, pic('close', { size: 16 }))

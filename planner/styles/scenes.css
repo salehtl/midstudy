@@ -109,7 +109,9 @@
 
 /* --- the Scenes page -------------------------------------------------------------------------------------------- */
 .sc-file { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
-.sc-new { gap: 6px; }
+.sc-new, .sc-settings { gap: 6px; }
+[data-mode="phone"] .sc-settings span { display: none; }
+[data-mode="phone"] .sc-settings { height: 44px; width: 44px; padding: 0; justify-content: center; border-radius: 14px; }
 [data-mode="phone"] .sc-new { height: 44px; padding: 0 16px; border-radius: 14px; }
 .sc-root { display: flex; flex-direction: column; gap: 12px; padding: 4px 20px 24px; }
 .sc-root.is-phone { padding: 4px 12px calc(24px + var(--safe-bottom)); }

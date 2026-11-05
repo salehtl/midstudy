@@ -183,6 +183,18 @@ export function createLibrary({ engine = null } = {}) {
     emit('spend', { spend: body })
     return body
   }
+  // §2.9 Settings: the daily fal budget. locked when the server was started with --daily-spend-usd.
+  async function settings() {
+    try { return await fetchJson('/api/settings') } catch (e) { throw report('Could not read the settings', e) }
+  }
+  async function setBudget(usd) {
+    let body
+    try {
+      body = await fetchJson('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ daily_spend_usd: usd }) })
+    } catch (e) { throw report('Could not save the daily budget', e) }
+    quiet(spend())
+    return body
+  }
   async function refreshTrash() {
     try {
       const body = await fetchJson('/api/library')
@@ -271,7 +283,7 @@ export function createLibrary({ engine = null } = {}) {
   }
 
   return {
-    events, start, jobs, spend, addFromFile, addFromUrl, readProduct, edit, remove, restore, estimate: estimateCost,
+    events, start, jobs, spend, settings, setBudget, addFromFile, addFromUrl, readProduct, edit, remove, restore, estimate: estimateCost,
     getState: () => ({ ...state, jobs: state.jobs.slice(), trash: state.trash.slice() }),
     refreshTrash,
   }

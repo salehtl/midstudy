@@ -55,6 +55,7 @@ library/_inbox/
 library/.lock
 library/.trash/
 library/costs.csv.lock
+library/settings.json
 /scenes/
 /layouts/
 /renders/

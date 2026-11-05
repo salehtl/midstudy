@@ -67,9 +67,9 @@ in
     };
 
     dailySpendUsd = lib.mkOption {
-      type = lib.types.numbers.nonnegative;
+      type = lib.types.nullOr lib.types.numbers.nonnegative;
       default = 2;
-      description = "Cap on paid fal calls per UTC day, in USD (`midstudy-web --daily-spend-usd`, contract §2.9). 0 blocks them all.";
+      description = "Cap on paid fal calls per UTC day, in USD (`midstudy-web --daily-spend-usd`, contract §2.9). 0 blocks them all. Set, it is fixed; null lets the app's Settings set it (anyone who can reach the server could then raise it).";
     };
 
     allowedHosts = lib.mkOption {
@@ -174,6 +174,8 @@ in
               "${dir}/renders"
               "--calib"
               calibCmd
+            ]
+            ++ lib.optionals (cfg.dailySpendUsd != null) [
               "--daily-spend-usd"
               (toString cfg.dailySpendUsd)
             ]

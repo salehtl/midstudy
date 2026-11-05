@@ -43,8 +43,9 @@ nix develop -c npm run serve                # http://127.0.0.1:8765/
 - **fal key.** Paid calls (furniture from a photo or link, renders) read `FAL_KEY` from the environment or from a
   `.env` file at the repo root (`FAL_KEY=...`, git-ignored). Without it, everything else still works, including GLB
   and OBJ furniture.
-- **Spend cap.** The server refuses paid calls past **$2 per UTC day** by default (`--daily-spend-usd`, `0` blocks
-  them all). Every paid call is logged in `library/costs.csv`.
+- **Spend cap.** The server refuses paid calls past a daily budget, **$2 per UTC day** until you change it in
+  **Settings** (Scenes page, or ⌘,). Starting the server with `--daily-spend-usd N` fixes it at `N` instead (`0` blocks
+  them all), and Settings then only shows it. Every paid call is logged in `library/costs.csv`.
 - **First calibration.** The first photo you upload downloads the MoGe-2 ViT-L weights (1.32 GB, about 20 s on a fast
   line) into `~/.cache/huggingface/hub`, outside the repo. After that, each photo takes about 10 s on an M-series Mac
   (MPS), of which about 4 s is loading the model.

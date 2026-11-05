@@ -184,7 +184,7 @@ export async function waitScene(base, name, timeoutMs = 60000) {
 let serverCount = 0
 // Starts planner/serve.py with scratch dirs. Returns {base, port, dirs, log(), stop(), exited}. Never throws: when the
 // server doesn't come up, `up` is false and `why` says what happened (e.g. an unknown flag before the feature exists).
-export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
+export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', appBudget = false, mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
   const n = ++serverCount
   const data = path.join(ev.out, `server-${n}`)
   const dirs = { data, scenes: path.join(data, 'scenes'), layouts: path.join(data, 'layouts'), renders: path.join(data, 'renders'), library: path.join(data, 'library') }
@@ -201,9 +201,10 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   if (mockCost) childEnv.MIDSTUDY_FAL_MOCK_COST = '1'
   else delete childEnv.MIDSTUDY_FAL_MOCK_COST
   // Hard limits (CLAUDE.md): never without the fal mock, never without a spend cap flag.
-  if (!childEnv.MIDSTUDY_FAL_MOCK || spendUsd == null) throw new Error('refusing to start serve.py without the fal mock and a spend cap')
+  // appBudget: no --daily-spend-usd, so the budget is the app's Settings (§2.9); allowed only with the mock, in a temp library.
+  if (!childEnv.MIDSTUDY_FAL_MOCK || (spendUsd == null && !appBudget)) throw new Error('refusing to start serve.py without the fal mock and a spend cap')
   const argv = ['planner/serve.py', '--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
-    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, '--daily-spend-usd', String(spendUsd), ...args]
+    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, ...(appBudget ? [] : ['--daily-spend-usd', String(spendUsd)]), ...args]
   const logPath = path.join(data, 'server.log')
   let log = `$ python3 ${argv.join(' ')}\n`
   const proc = spawn('python3', argv, { cwd: REPO, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })

@@ -11,7 +11,7 @@ See contract/CONTRACT.md §2 (carried from nook) and §4.4 / §4.7 (scenes, rend
     python3 planner/serve.py [--port 8765] [--host 127.0.0.1] [--scenes-dir scenes] [--layouts-dir layouts]
                              [--renders-dir renders] [--library-dir library] [--costs-file <library-dir>/costs.csv]
                              [--calib "uv run --project calib midstudy-calib"]
-                             [--midstudy-add "uv run --project pipeline midstudy-add"] [--daily-spend-usd 2]
+                             [--midstudy-add "uv run --project pipeline midstudy-add"] [--daily-spend-usd N]
                              [--allowed-host NAME ...]
 
 Relative paths are resolved against the repo root. FAL_KEY comes from the environment, else from <repo>/.env (unless
@@ -71,11 +71,13 @@ RENDER_MODELS = {
     "qwen": {"endpoint": "fal-ai/qwen-image-edit", "image_key": "image_url", "cost": lambda mp: round(0.03 * mp, 4)},
     # OpenAI's model on fal. Billed by tokens, so the price is an estimate: fal's table gives $0.043-0.068 for medium
     # quality at 1-3.7 MP with one input image; the scene photo is a second one. Reserved and recorded as $0.07.
+    # Gets the composite alone (no reference photo): given the photo as image 2 it redrew that photo, dropping the
+    # furniture (seen 2026-11-05 on an empty-room scene).
     "gpt-image": {"endpoint": "openai/gpt-image-2/edit", "image_key": "image_urls", "cost": lambda mp: 0.07,
-                  "args": {"quality": "medium", "image_size": "auto"}},
+                  "args": {"quality": "medium", "image_size": "auto"}, "prompt": "composite"},
 }
 # Models that take the scene photo as image 2 with REFERENCE_RENDER_PROMPT (contract §4.7)
-REFERENCE_MODELS = ("nano-banana", "gpt-image")
+REFERENCE_MODELS = ("nano-banana",)
 DEFAULT_RENDER_PROMPT = (
     "Turn this 3D planning render into a photorealistic interior photograph. Keep the exact camera angle, "
     "room geometry, and every piece of furniture with its position, size, shape and color. Realistic materials, "
@@ -88,6 +90,13 @@ REFERENCE_RENDER_PROMPT = (
     "reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in "
     "it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or "
     "move anything."
+)
+# The composite alone: a real photo with 3D furniture drawn into it (gpt-image, contract §4.7)
+COMPOSITE_RENDER_PROMPT = (
+    "This is a photo of a room with 3D models of furniture placed in it. Make every piece of furniture look like it "
+    "was really photographed in this room: realistic materials and textures, lighting, reflections and soft contact "
+    "shadows that match the room's light. Keep every piece of furniture: its position, size, shape and color. Keep the "
+    "camera, the room and everything else in the photo exactly as it is. Do not add, remove or move anything."
 )
 RENDER_NAME = re.compile(r"^render-\d{8}-\d{6}(-\d+)?\Z")
 COSTS_HEADER = ["date", "id", "engine", "cost_usd", "mock", "input"]
@@ -608,14 +617,27 @@ class Busy(Exception):
     pass
 
 
+DEFAULT_CAP_USD = 2.0
+MAX_CAP_USD = 10000.0
+
+
+def valid_cap(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 0 <= v <= MAX_CAP_USD
+
+
 class LibraryService:
     """The library's one queue of midstudy-add jobs, its writes under <library>/.lock, and the daily spend cap."""
 
-    def __init__(self, lib_dir: Path, costs_file: Path, midstudy_add: list[str], cap_usd: float):
+    def __init__(self, lib_dir: Path, costs_file: Path, midstudy_add: list[str], cap_usd: float | None):
         self.dir = lib_dir
         self.costs_file = costs_file
         self.midstudy_add = midstudy_add
-        self.cap = cap_usd
+        # --daily-spend-usd given: the cap is that and the app can't change it (a hosted server, or an agent's $0 run).
+        # Not given: the app's setting in <library>/settings.json, else DEFAULT_CAP_USD (§2.9 Settings).
+        self.cap_locked = cap_usd is not None
+        stored = read_json_file(lib_dir / "settings.json")
+        saved = stored.get("daily_spend_usd") if isinstance(stored, dict) else None
+        self.cap = cap_usd if self.cap_locked else (float(saved) if valid_cap(saved) else DEFAULT_CAP_USD)
         self.mutex = threading.Lock()        # jobs and reservations (in-process state)
         self.write_lock = threading.Lock()   # this process's library writes, with the flock below for other processes
         self.jobs: dict[str, dict] = {}
@@ -727,6 +749,18 @@ class LibraryService:
                 return {"error": error, "spent_usd": spent, "cap_usd": self.cap}
             self.reserved[key] = amount
         return None
+
+    def settings(self) -> dict:
+        return {"daily_spend_usd": self.cap, "default_usd": DEFAULT_CAP_USD, "max_usd": MAX_CAP_USD, "locked": self.cap_locked}
+
+    def set_cap(self, usd: float) -> None:
+        """Save the app's daily budget to <library>/settings.json and use it from now on. Call only when not locked."""
+        with self.mutex:
+            data = read_json_file(self.dir / "settings.json")
+            data = data if isinstance(data, dict) else {}
+            data["daily_spend_usd"] = usd
+            atomic_write_bytes(self.dir / "settings.json", (json.dumps(data, indent=2) + "\n").encode("utf-8"))
+            self.cap = usd
 
     def release(self, key: str) -> None:
         with self.mutex:
@@ -1698,6 +1732,8 @@ class Handler(SimpleHTTPRequestHandler):
             m = re.fullmatch(r"/api/library/items/([^/]*)/thumb", api)
             if m:
                 return self.put_library_thumb(m.group(1))
+            if api == "/api/settings":
+                return self.put_settings()
             return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: PUT {api}")
         except Busy:
             return self.library_busy()
@@ -1811,6 +1847,8 @@ class Handler(SimpleHTTPRequestHandler):
                     HTTPStatus.NOT_FOUND, f"no library job {m.group(1)!r}: GET /api/library/jobs lists them")
             if api == "/api/spend":
                 return self.send_json(HTTPStatus.OK, self.library.spend())
+            if api == "/api/settings":
+                return self.send_json(HTTPStatus.OK, self.library.settings())
             return self.error_json(HTTPStatus.NOT_FOUND, f"no such endpoint: GET {api}")
         except Exception as e:
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}")
@@ -2040,6 +2078,22 @@ class Handler(SimpleHTTPRequestHandler):
         if data is None:
             return self.error_json(HTTPStatus.INTERNAL_SERVER_ERROR, f"layout {name!r} of scene {scene!r} is unreadable: fix or delete it")
         return self.send_json(HTTPStatus.OK, data)
+
+    def put_settings(self):
+        try:
+            body = self.read_json_body()
+        except ValueError as e:
+            return self.error_json(HTTPStatus.BAD_REQUEST, str(e))
+        if not isinstance(body, dict) or "daily_spend_usd" not in body:
+            return self.error_json(HTTPStatus.BAD_REQUEST, "send {\"daily_spend_usd\": <dollars>}")
+        usd = body["daily_spend_usd"]
+        if not valid_cap(usd):
+            return self.error_json(HTTPStatus.BAD_REQUEST, f"daily_spend_usd must be a number from 0 to {MAX_CAP_USD:g}")
+        if self.library.cap_locked:
+            return self.error_json(HTTPStatus.CONFLICT, f"the daily budget is set by the server's --daily-spend-usd "
+                                   f"(${self.library.cap:.2f}): restart it without that flag to set it here")
+        self.library.set_cap(round(float(usd), 2))
+        return self.send_json(HTTPStatus.OK, self.library.settings())
 
     def put_layout(self, name: str):
         scene = self.layout_scene()
@@ -2468,7 +2522,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.error_json(HTTPStatus.BAD_REQUEST, f"the mask is {w} x {h}, but it must be the photo's size ({psize[0]} x {psize[1]})")
         reference = model in REFERENCE_MODELS and photo is not None
         if not prompt or not prompt.strip():
-            prompt = REFERENCE_RENDER_PROMPT if reference else DEFAULT_RENDER_PROMPT
+            prompt = (REFERENCE_RENDER_PROMPT if reference
+                      else COMPOSITE_RENDER_PROMPT if RENDER_MODELS[model].get("prompt") == "composite" and scene
+                      else DEFAULT_RENDER_PROMPT)
         spec = RENDER_MODELS[model]
         size = jpeg_size(data)
         if not size:
@@ -2621,11 +2677,12 @@ def main(argv=None):
                     help=f"the command that adds furniture, run with --library <library-dir> (default: {DEFAULT_MIDSTUDY_ADD})")
     ap.add_argument("--allowed-host", action="append", default=[], metavar="NAME",
                     help="also answer requests with this Host name, e.g. midstudy.example.com (repeatable; loopback names always work)")
-    ap.add_argument("--daily-spend-usd", type=float, default=2.0,
-                    help="cap on paid fal calls (library adds and renders) per UTC day, in USD (default 2)")
+    ap.add_argument("--daily-spend-usd", type=float, default=None,
+                    help="cap on paid fal calls (library adds and renders) per UTC day, in USD. Given, it is fixed and "
+                         "the app's Settings can't change it; left out, the app sets it (default 2)")
     args = ap.parse_args(argv)
-    if args.daily_spend_usd < 0:
-        ap.error("--daily-spend-usd can't be negative")
+    if args.daily_spend_usd is not None and not (0 <= args.daily_spend_usd <= MAX_CAP_USD):
+        ap.error(f"--daily-spend-usd must be from 0 to {MAX_CAP_USD:g}")
     calib = shlex.split(args.calib)
     if not calib:
         ap.error("--calib can't be empty")

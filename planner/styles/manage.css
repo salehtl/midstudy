@@ -47,6 +47,7 @@
 .ms-row { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ms-label { font: 600 var(--text-label)/14px var(--font-text); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--color-muted); }
 .ms-hint { color: var(--color-muted); font-size: 12px; line-height: 16px; }
+.ms-hint.is-error { color: var(--color-danger, #c0392b); }
 .ms.is-phone .ms-hint { font-size: 13px; line-height: 18px; }
 .ms-input {
   height: 32px; width: 100%; min-width: 0; padding: 0 10px; border-radius: var(--radius-control); background: var(--color-raised);

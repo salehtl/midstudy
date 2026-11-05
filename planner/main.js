@@ -17,6 +17,7 @@ import * as renders from './ui/panels/renders.js'
 import * as scenesPage from './ui/scenes.js'
 import * as shortcuts from './ui/shortcuts.js'
 import * as exporter from './ui/export.js'
+import * as settings from './ui/settings.js'
 
 // One keymap for every shortcut (keymap.js): input.js registers the engine's, each UI module its own, and the
 // Shortcuts sheet (⌘?) lists them all.
@@ -31,7 +32,7 @@ window.midstudyCtx = ctx // for manual checks from the console; evals use window
 
 // Panels register in rail/dock order: Library, In scene, Layouts, Scene, Renders.
 // Shortcuts and Export first: the panels show their keys (keys.lookup) when they mount.
-for (const [name, mod] of Object.entries({ shortcuts, exporter, workspace, library, inscene, layouts, scene: scenePanel, renders, scenes: scenesPage })) {
+for (const [name, mod] of Object.entries({ shortcuts, exporter, settings, workspace, library, inscene, layouts, scene: scenePanel, renders, scenes: scenesPage })) {
   try { mod.mount(ctx) } catch (e) { engine.reportError(`Could not set up the ${name} UI`, e) }
 }
 
