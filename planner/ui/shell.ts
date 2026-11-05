@@ -28,12 +28,13 @@
 // page is open, every key is swallowed (they handle their own).
 import { icon, ring, unsavedGlyph } from './icons.js'
 import { h, kbd } from './kit.js'
-import { Bus } from './bus.js'
+import { Bus } from '../bus.js'
 import {
   chromeMetrics, detentPx, dockSplit, dragSheetHeight, isDetent, menuSpot, modeFor, movedAway, phoneToastCloses, settleDetent,
   tapDetent, tipSpot, toastIcon, toastLife, usableHeight,
-  type Detent, type Edges, type Mode, type ToastKind,
+  type Detent, type Edges, type Mode,
 } from './logic/chrome.js'
+import type { ToastKind } from '../logic/messages.js'
 import type { Engine, RenderMeta } from './seam.js'
 
 interface Safe {

@@ -3,7 +3,6 @@
 // delete; a scene that's still calibrating shows its photo with a spinner and opens when it's done. Styles:
 // styles/scenes.css (.sc-*). The file input (data-midstudy="scene-file") stays in the page at all times. The words:
 // logic/scenes.ts.
-// ctx.scenesPage = { open(), pick() (opens the file picker), upload(file) }
 import { icon, ring } from './icons.js'
 import { fmtBytes, quiet, relDate, sceneTitle, type SceneSummary, type TrashedScene, type UiContext } from './seam.js'
 import { openSheet } from './sheet.js'
@@ -168,5 +167,4 @@ export function mount(ctx: UiContext): void {
     if (!isPhotoFile(f.type, f.name)) { shell.toast(`${f.name} isn't a photo`, { kind: 'error' }); return }
     quiet(upload(f))
   })
-  ctx.scenesPage = { open: () => { shell.openPage('scenes') }, pick, upload }
 }

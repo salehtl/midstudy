@@ -8,11 +8,11 @@
 //                (drag it to set the pitch); the ruler's points and distance
 //   cards        opening / calibrating a scene, no scene open, the one-time gesture hint (phone)
 // It also tells the engine which part of the window the photo may use (engine.setStageInsets).
-// ctx.workspace: { requestRender(), setAdjust(on) }
+// ctx.workspace: { setAdjust(on) } (the Scene panel's Adjust floor… button)
 // Shell events it sends (cancelable; preventDefault() to take over): 'render-request' {}, 'open-render' { meta }
 // The decisions, placements and words: logic/workspace.ts.
 import { ring, unsavedGlyph, icon, svgFrom } from './icons.js'
-import { dimsText, quiet, sceneTitle, MAX_ELEVATION, CAMERA_RANGE, type CameraKey, type CameraPatch, type RemovedItem, type UiContext } from './seam.js'
+import { dimsText, quiet, sceneTitle, MAX_ELEVATION, CAMERA_RANGE, type CameraKey, type CameraPatch, type ItemSnapshot, type UiContext } from './seam.js'
 import type { Child } from './kit.js'
 import type { ToastHandle } from './shell.js'
 import { keyboardInset } from './logic/chrome.js'
@@ -72,7 +72,7 @@ export function mount(ctx: UiContext): void {
   const root = document.documentElement
   const phone = (): boolean => shell.isPhone()
   let rendering: { readonly t0: number } | null = null    // while a render runs
-  let lastRemoved: { readonly snap: RemovedItem; readonly toast: ToastHandle; readonly undo: () => void } | null = null  // for Undo / ⌘Z
+  let lastRemoved: { readonly snap: ItemSnapshot; readonly toast: ToastHandle; readonly undo: () => void } | null = null  // for Undo / ⌘Z
 
   // --- top bar ---------------------------------------------------------------------------------------------------
   const switcher = h('button.ws-switcher', { type: 'button', 'aria-label': 'Scenes', dataset: { tip: 'All scenes' }, onclick: () => { shell.openPage('scenes') } })
@@ -374,9 +374,9 @@ export function mount(ctx: UiContext): void {
     return row
   }
   function buildAdjust(): void {
-    const [hl = 0, hh = 0] = CAMERA_RANGE.height_m
-    const [fl = 0, fh = 0] = CAMERA_RANGE.fov_y_deg
-    const [rl = 0, rh = 0] = CAMERA_RANGE.roll_deg
+    const [hl, hh] = CAMERA_RANGE.height_m
+    const [fl, fh] = CAMERA_RANGE.fov_y_deg
+    const [rl, rh] = CAMERA_RANGE.roll_deg
     const note = h('p.ws-adj-note')
     const pitch = h('span.ws-adj-pitch.tnum')
     const rulerBtn = h('button.ws-adj-btn.is-quiet', { type: 'button', 'aria-pressed': 'false', onclick: () => { engine.setRulerActive(!engine.getRuler().active) } }, glyph(G.ruler, 18), h('span', 'Ruler'))
@@ -629,10 +629,10 @@ export function mount(ctx: UiContext): void {
       const g = gripSpot(front, engine.getVisiblePhotoRect(), vw(), vh(), selBar.hidden ? vh() : selBar.getBoundingClientRect().top, liftLeft)
       px(grip, g.x, g.y)
       const where = upText(it.position[1])
-      const text = `${it.name}|${dimsText(it.lib?.dims_cm)}|${where}|${it.missing ? '1' : '0'}`
+      const text = `${it.name}|${dimsText(it.lib.dims_cm)}|${where}|${it.missing ? '1' : '0'}`
       if (label.dataset['text'] !== text) {
         label.dataset['text'] = text
-        fill(label, h('b', it.missing ? `${it.name} · missing` : it.name), it.lib?.dims_cm ? h('span', dimsText(it.lib.dims_cm)) : null, where ? h('span.ws-label-up', where) : null)
+        fill(label, h('b', it.missing ? `${it.name} · missing` : it.name), it.lib.dims_cm ? h('span', dimsText(it.lib.dims_cm)) : null, where ? h('span.ws-label-up', where) : null)
       }
       if (it.position[1] > 0.02) {
         const top = engine.worldToScreen([f.center[0], it.position[1], f.center[2]])
@@ -713,7 +713,7 @@ export function mount(ctx: UiContext): void {
   vv?.addEventListener('scroll', syncKb)
   syncKb()
 
-  ctx.workspace = { requestRender, setAdjust }
+  ctx.workspace = { setAdjust }
   buildTools()
   sync()
   syncStage()

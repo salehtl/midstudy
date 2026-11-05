@@ -6,7 +6,7 @@
 import { h, segmented } from '../kit.js'
 import { openSheet, formRow, textInput, type Sheet } from '../sheet.js'
 import { pic, messageOf } from './common.js'
-import { estimateCost, fmtUsd, DEFAULT_IMAGE_ENGINE, LIB_PRICE, type Dims, type LibItem, type LibJob, type Spend, type UiContext } from '../seam.js'
+import { estimateCost, fmtUsd, isLibraryJob, DEFAULT_IMAGE_ENGINE, LIB_PRICE, type DimsCm, type LibraryEntry, type LibraryJob, type Spend, type UiContext } from '../seam.js'
 import { productSource } from './productsrc.js'
 import {
   addMeta, addProblem, budgetLine, changes, costWord, dimsOf, editPatch, editedText, engineHint, ENGINES, goLabel, modelFileText,
@@ -17,10 +17,10 @@ const usd = (v: number): string => priceWord(v, fmtUsd)
 
 /** W × D × H in cm: three fields in a row. value(): the size, when all three are numbers above 0. */
 export type DimsFields = HTMLDivElement & {
-  readonly value: () => Dims | null
+  readonly value: () => DimsCm | null
   readonly inputs: readonly [HTMLInputElement, HTMLInputElement, HTMLInputElement]
 }
-function dimsFields(dims: Dims | null | undefined, onInput: () => void): DimsFields {
+function dimsFields(dims: DimsCm | null | undefined, onInput: () => void): DimsFields {
   const f = (k: 'w' | 'd' | 'h', label: string): { readonly row: HTMLLabelElement; readonly input: HTMLInputElement } => {
     const input = textInput({ value: dims?.[k] ?? '', inputmode: 'decimal', label: `${label} in cm`, onInput })
     return { row: h('label.ms-dim', h('span.ms-dim-k', label), input, h('span.ms-dim-u', 'cm')), input }
@@ -49,7 +49,7 @@ interface AddState {
 }
 
 // --- Add furniture ---------------------------------------------------------------------------------------------
-export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (job: LibJob | null, meta: AddMeta) => void } = {}): Sheet {
+export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (job: LibraryJob | null, meta: AddMeta) => void } = {}): Sheet {
   const { shell, lib } = ctx
   const st: AddState = { source: 'product', file: null, model: null, engine: DEFAULT_IMAGE_ENGINE, resolution: 1024, busy: false, error: '' }
   let preview: string | null = null
@@ -198,7 +198,7 @@ export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (
 }
 
 // --- Edit a library item -----------------------------------------------------------------------------------------
-export function openEditSheet(ctx: UiContext, item: LibItem, { onRemove }: { readonly onRemove?: (item: LibItem) => void } = {}): Sheet {
+export function openEditSheet(ctx: UiContext, item: LibraryEntry, { onRemove }: { readonly onRemove?: (item: LibraryEntry) => void } = {}): Sheet {
   const { shell, lib } = ctx
   const st = { turn: 0, render: (item.default_render ?? '') || 'glb', busy: false, error: '' }
   const name = textInput({ value: (item.name ?? '') || item.id, maxLength: 120, label: 'Name', onInput: () => { sync() } })
@@ -247,7 +247,7 @@ export function openEditSheet(ctx: UiContext, item: LibItem, { onRemove }: { rea
     try {
       const res = await lib.edit(item.id, p)
       sheet.close()
-      shell.toast(editedText(res?.kind === 'rescale', String((p.name ?? '') || item.name)), { kind: 'ok', id: `lib-edit-${item.id}` })
+      shell.toast(editedText(isLibraryJob(res) && res.kind === 'rescale', String((p.name ?? '') || item.name)), { kind: 'ok', id: `lib-edit-${item.id}` })
     } catch (e) {
       st.busy = false
       st.error = messageOf(e)

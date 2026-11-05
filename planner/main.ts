@@ -1,6 +1,7 @@
 // midstudy planner entry: the engine (engine.ts) and its input (input.ts), the scenes and library stores (data.ts), the
-// shell (ui/shell.js) and the area modules that fill it, plus the window.midstudy test hook. Spec: contract/CONTRACT.md
-// §2.4 and §4.6. Every UI module exports mount(ctx), ctx = { engine, scenes, lib, shell, icons, kit }.
+// shell (ui/shell.ts) and the area modules that fill it, plus the window.midstudy test hook. Spec: contract/CONTRACT.md
+// §2.4 and §4.6. Every UI module exports mount(ctx), ctx: UiContext = { engine, scenes, lib, shell, icons, kit }
+// (ui/seam.ts).
 import { engine } from './engine.js'
 import { installInput } from './input.js'
 import { createScenes, createLibrary } from './data.js'
@@ -14,28 +15,20 @@ import * as layouts from './ui/panels/layouts.js'
 import * as scenePanel from './ui/panels/scene.js'
 import * as renders from './ui/panels/renders.js'
 import * as scenesPage from './ui/scenes.js'
+import type { UiContext } from './ui/seam.js'
 import { renderSettingsArgs } from './logic/messages.js'
 
-/** What the entry uses of the shell (ui/shell.js createShell). */
-interface ShellApi {
-  readonly mounts: { readonly view: HTMLElement | null }
-  toast(text: string, opts: { kind: string; ms?: number }): unknown
-  openPage(id: string): unknown
-  closePage(): unknown
-}
-
 engine.input = installInput(engine)
-const shell: ShellApi = createShell({ engine })
-const viewMount = shell.mounts.view
-if (viewMount) engine.mount(viewMount)
+const shell = createShell({ engine })
+engine.mount(shell.mounts.view)
 const scenes = createScenes({ engine })
 const lib = createLibrary({ engine })
-const ctx = { engine, scenes, lib, shell, icons, kit }
+const ctx: UiContext = { engine, scenes, lib, shell, icons, kit }
 
 declare global {
   interface Window {
     /** for manual checks from the console; evals use window.midstudy only (and read the photo rect from here) */
-    midstudyCtx: typeof ctx
+    midstudyCtx: UiContext
     /** the test hook (contract §2.4, §4.6) */
     midstudy: typeof hook
   }
@@ -43,7 +36,7 @@ declare global {
 window.midstudyCtx = ctx
 
 // Panels register in rail/dock order: Library, In scene, Layouts, Scene, Renders.
-const areas: [string, { mount: (c: typeof ctx) => unknown }][] = [
+const areas: [string, { mount: (c: UiContext) => void }][] = [
   ['workspace', workspace], ['library', library], ['inscene', inscene], ['layouts', layouts], ['scene', scenePanel], ['renders', renders], ['scenes', scenesPage],
 ]
 for (const [name, mod] of areas) {
@@ -52,17 +45,10 @@ for (const [name, mod] of areas) {
 
 // Engine messages become toasts (errors stay until closed).
 engine.events.addEventListener('toast', (e) => {
-  const d: unknown = e instanceof CustomEvent ? e.detail : null
-  if (typeof d !== 'object' || d === null) return
-  const textLine: unknown = Reflect.get(d, 'text')
-  const kind: unknown = Reflect.get(d, 'kind')
-  const ms: unknown = Reflect.get(d, 'ms')
-  shell.toast(String(textLine), { kind: String(kind), ms: kind === 'error' ? 0 : typeof ms === 'number' ? ms : 6000 })
+  const { text, kind, ms } = e.detail
+  shell.toast(text, { kind, ms: kind === 'error' ? 0 : ms })
 })
-engine.events.addEventListener('error', (e) => {
-  const d: unknown = e instanceof CustomEvent ? e.detail : null
-  if (typeof d === 'object' && d !== null) shell.toast(String(Reflect.get(d, 'text')), { kind: 'error' })
-})
+engine.events.addEventListener('error', (e) => { shell.toast(e.detail.text, { kind: 'error' }) })
 
 // Unsaved camera, look or layout: ask before leaving the page.
 window.addEventListener('beforeunload', (e) => {

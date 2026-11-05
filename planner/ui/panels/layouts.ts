@@ -3,7 +3,7 @@
 // layouts: item count, saved date, the current one marked, Load (asks first when the furniture has unsaved changes),
 // and a "…" menu with Save current over it and Delete…. Frames C3 (phone) and C6 sections. The rules and words:
 // logic/layouts.ts.
-import { SLUG, quiet, sceneTitle, type DeletedLayout, type LayoutDetail, type UiContext } from '../seam.js'
+import { SLUG, quiet, sceneTitle, type DeletedLayout, type LayoutSummary, type UiContext } from '../seam.js'
 import type { ConfirmAction } from '../shell.js'
 import { pic, withIcon, shortDate, isOffline, messageOf, OFFLINE_BODY } from './common.js'
 import { cardMeta, cardTitle, checkName, loadBody, noLayoutsText, pretty, rowMeta, savedWithText, sortLayouts } from '../logic/layouts.js'
@@ -90,7 +90,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
     t.el.querySelector('.toast-action')?.setAttribute('data-midstudy', 'layout-undo')
   }
 
-  async function saveOver(d: LayoutDetail, isCur: boolean): Promise<void> {
+  async function saveOver(d: LayoutSummary, isCur: boolean): Promise<void> {
     if (!isCur && !(await shell.confirm({ title: `Save over ${show(d.name)}?`, body: `It becomes the furniture in the scene now (${String(engine.getItems().length)} items).`, confirm: 'Save over it' }))) return
     quiet(save(d.name))
   }
@@ -153,7 +153,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
     return [...head, h('div.ly-actions', btns)]
   }
 
-  function rowView(d: LayoutDetail, cur: string): HTMLDivElement {
+  function rowView(d: LayoutSummary, cur: string): HTMLDivElement {
     const isCur = d.name === cur
     const parts = [isCur && !shell.isPhone() ? h('span.ly-cur-word', 'Current') : null, rowMeta(d.items, d.updated ? shortDate(d.updated) : null)]
     const meta: (Node | string)[] = []

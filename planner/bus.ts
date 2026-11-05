@@ -1,8 +1,10 @@
-// Typed events for the planner UI. Events<M> is how the UI listens: to the shell's own Bus, and (declared in
-// ui/seam.ts) to the engine's and the data stores' EventTargets, which send CustomEvents with these details.
-// Bus<M> is the shell's: listeners per type in registration order, each called once even if added twice, one removed
-// during a dispatch not called; a listener that throws is reported (window.reportError, as an EventTarget does) and
-// the others still run. emit() returns false when a cancelable event was cancelled, as dispatchEvent does.
+// Typed events for the planner: the engine's (engine.events, EngineEvents), the data stores' (scenes.events,
+// lib.events: data.ts) and the shell's (shell.events). Events<M> is how a listener sees them: addEventListener and
+// removeEventListener by name, the listener getting a CustomEvent with that event's detail. Bus<M> is the emitter
+// behind each: listeners per type in registration order, each called once even if added twice, one removed during a
+// dispatch not called; a listener that throws is reported (window.reportError, as an EventTarget does) and the others
+// still run. emit() returns false when a cancelable event was cancelled, as dispatchEvent does (ui/test/bus.mjs checks
+// it against an EventTarget: v1's engine, stores and shell each sent CustomEvents from one).
 
 export type Listener<D> = (e: CustomEvent<D>) => void
 

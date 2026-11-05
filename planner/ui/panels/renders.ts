@@ -5,11 +5,9 @@
 // and Compare (full screen: side by side on the desktop, a draggable split on both, swipe between them on the phone).
 //
 // The workspace's Render button sends shell event 'render-request' and its "Render ready · View" toast 'open-render'
-// { meta }; this panel takes both (preventDefault). engine.compare(a, b) (the hook) opens Compare. Also on ctx.renders:
-//   openConfirm({ from?: RenderMeta, retry?: failedEntry }) → Promise    openViewer(name | RenderMeta)
-//   openCompare(a, b)    getPending() → [{ id, model, started, state, error? }]    events: 'state' 'done' 'failed'
+// { meta }; this panel takes both (preventDefault). engine.compare(a, b) (the hook) opens Compare.
 // The words: logic/renders.ts.
-import { RENDER_MODELS, renderPrice, quiet, type PendingRender, type RenderMeta, type Shot, type UiContext } from '../seam.js'
+import { RENDER_MODELS, isRenderModel, renderPrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
 import type { SegOption } from '../kit.js'
 import { pic, withIcon, emptyState, dayDate, clock, money, modelShort, imageShot, messageOf } from './common.js'
 import { dots } from '../logic/text.js'
@@ -54,8 +52,6 @@ type CompareMode = 'side' | 'split' | 'swipe'
 export function mount(ctx: UiContext): void {
   const { engine, shell, kit } = ctx
   const { h, button, segmented, toggle } = kit
-  const events = new EventTarget()
-  const emit = (name: string, detail: unknown): void => { events.dispatchEvent(new CustomEvent(name, { detail })) }
   let pending: Pending[] = []
   let seq = 0
   let tick: ReturnType<typeof setInterval> | null = null
@@ -139,9 +135,7 @@ export function mount(ctx: UiContext): void {
     const going = pending.some((p) => p.state === 'rendering')
     if (going && !tick) tick = setInterval(render, 5000)
     if (!going && tick) { clearInterval(tick); tick = null }
-    emit('state', { pending: getPending() })
   }
-  const getPending = (): PendingRender[] => pending.map(({ id, model, started, state, error }) => ({ id, model, started, state, error }))
 
   // --- modal plumbing (dialog on desktop, full-height sheet on the phone) ------------------------------------------
   function openModal(kind: ModalKind, build: (o: { readonly phone: boolean; readonly close: () => void }) => ModalContent): Modal {
@@ -181,7 +175,7 @@ export function mount(ctx: UiContext): void {
   async function openConfirm({ from = null, retry = null }: { readonly from?: RenderMeta | null; readonly retry?: Pending | null } = {}): Promise<void> {
     if (!engine.getSceneName()) { shell.toast('Open a scene first.', { id: 'no-scene' }); return }
     let shot: SentShot | null = retry?.shot ?? null
-    let model = (retry?.model ?? '') || (from && RENDER_MODELS[from.model] ? from.model : Object.keys(RENDER_MODELS)[0] ?? '')
+    let model = (retry?.model ?? '') || (from && isRenderModel(from.model) ? from.model : Object.keys(RENDER_MODELS)[0] ?? '')
     let prompt = retry ? retry.prompt : ownPrompt(from?.prompt)
     const current = !from && !retry?.fromPast
     // On by default since the live check (PLAN.md §8, 2026-11-05): the room stays the photo at full size, sharp.
@@ -269,7 +263,6 @@ export function mount(ctx: UiContext): void {
       const meta = shot ? await engine.postRender(shot, { model, prompt: prompt || undefined }) : await engine.renderViewInternal({ model, prompt: prompt || undefined, keepRoom })
       pending = pending.filter((x) => x !== p)
       changed()
-      emit('done', { meta })
       if (meta.keep_room && meta.aligned && !meta.aligned.applied) shell.toast(notAlignedText(meta.aligned.reason), { id: `align-${meta.name}`, ms: 9000 })
     } catch (e) {
       const msg = messageOf(e)
@@ -278,7 +271,6 @@ export function mount(ctx: UiContext): void {
       p.error = msg
       p.reason = failureReason(msg)
       changed()
-      emit('failed', { error: msg })
     }
   }
 
@@ -322,7 +314,7 @@ export function mount(ctx: UiContext): void {
         h('button.btn.btn-icon.btn-quiet', { type: 'button', 'aria-label': 'Older', dataset: { tip: 'Older', kbd: '→' }, onclick: () => { step(1) } }, pic('chevron-right', { size: 16 }))) : null
       return { label: `Render, ${dayDate(r.created)}`, el: h('div.rv-desk',
         h('header.rv-head', h('h2.rv-title.tnum', `Render · ${dayDate(r.created)}`),
-          h('span.rv-sub.tnum', dots([layoutOf(r) || null, (RENDER_MODELS[r.model]?.label ?? '') || r.model, renderCost(r)])),
+          h('span.rv-sub.tnum', dots([layoutOf(r) || null, isRenderModel(r.model) ? RENDER_MODELS[r.model].label : r.model, renderCost(r)])),
           h('span.rv-spacer'),
           h('a.btn.btn-quiet', { href: (side === 'raw' ? r.raw_url : r.url) ?? undefined, target: '_blank', rel: 'noopener' }, 'Open image'), nav, h('span.rv-sep'), closeBtn),
         h('div.rv-pair',
@@ -414,5 +406,4 @@ export function mount(ctx: UiContext): void {
   shell.events.addEventListener('render-request', (e) => { e.preventDefault(); quiet(openConfirm()) })
   shell.events.addEventListener('open-render', (e) => { e.preventDefault(); openViewer(e.detail.meta) })
   render()
-  ctx.renders = { openConfirm, openViewer, openCompare, getPending, events }
 }

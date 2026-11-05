@@ -5,7 +5,7 @@
 // the default lights), Auto lighting, the light direction dial (ui/sun-dial.ts), strength, softness, ambient, exposure
 // and warmth, the floor and contact shadows, Save scene when anything changed and Reset. All of it applies to the
 // furniture only, never the photo (§4.5). Styles: styles/scenes.css (.sp-*, .sd-*). The words: logic/look.ts.
-import { friendlyDate, quiet, sceneTitle, type Lighting, type UiContext } from '../seam.js'
+import { friendlyDate, quiet, sceneTitle, type LightingReport, type UiContext } from '../seam.js'
 import type { Slider } from '../kit.js'
 import { pic, withIcon } from './common.js'
 import { ring } from '../icons.js'
@@ -139,7 +139,7 @@ export function mount(ctx: UiContext): void {
 
   // Where the light comes from (§4.8): lighting.json's source, else the backfill's status. Rebuilt only when it changes.
   let srcKey = ''
-  function renderSource(l: Lighting): void {
+  function renderSource(l: LightingReport): void {
     const inf = l.inferred
     const sun = (tone: string, color: string | null = null): SVGSVGElement => {
       const g = pic('sun', { size: 18 })
@@ -165,7 +165,7 @@ export function mount(ctx: UiContext): void {
   // The Look's values (every 'look' and 'lighting' event, so many times a second while the dial is dragged).
   function renderLook(): void {
     if (!engine.getScene()) return
-    let l: Lighting
+    let l: LightingReport
     try { l = engine.getLighting() } catch { return }
     renderSource(l)
     auto.input.checked = l.auto_light

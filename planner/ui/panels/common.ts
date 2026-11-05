@@ -3,7 +3,7 @@
 // logic/text.ts, logic/dates.ts, logic/renders.ts.
 import { h } from '../kit.js'
 import { icon, svgFrom } from '../icons.js'
-import { RENDER_MODELS, type Engine, type LibItem } from '../seam.js'
+import { RENDER_MODELS, isRenderModel, type Engine, type LibraryEntry } from '../seam.js'
 import { isOfflineText, monogram } from '../logic/text.js'
 import { clockText, dayDateText, shortDateText, type DateParts } from '../logic/dates.js'
 import { strokeWidth } from '../logic/glyphs.js'
@@ -38,7 +38,7 @@ export function withIcon<B extends HTMLElement>(btn: B, name: string, size = 18)
 }
 
 // A library item's thumbnail, or its monogram when there's none (or it fails to load).
-export function itemThumb(engine: Engine, lib: LibItem | null | undefined, cls = 'p-thumb'): HTMLElement {
+export function itemThumb(engine: Engine, lib: LibraryEntry | null | undefined, cls = 'p-thumb'): HTMLElement {
   const mono = (): HTMLElement => h(`span.${cls}.is-mono`, { 'aria-hidden': 'true' }, monogram((lib?.name ?? '') || lib?.id))
   const rel = lib?.assets?.thumb
   if (!rel) return mono()
@@ -89,7 +89,7 @@ export function dayDate(v: When): string {
 }
 
 export { money } from '../logic/text.js'
-export const modelShort = (m: string | null | undefined): string => shortName(m, m ? RENDER_MODELS[m]?.label : undefined)
+export const modelShort = (m: string | null | undefined): string => shortName(m, m && isRenderModel(m) ? RENDER_MODELS[m].label : undefined)
 
 // Fetch an image URL as a JPEG data URL plus its size (Render again from a past render's input).
 export async function imageShot(url: string): Promise<{ readonly dataUrl: string; readonly width: number; readonly height: number }> {

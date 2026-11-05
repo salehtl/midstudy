@@ -7,17 +7,22 @@
 //   getScenes()             the §4.4 scene objects, newest first;   getScene(name);   getState() { loaded, offline }
 //   upload(file, { title, onProgress(loaded, total) }) → Promise<{ job, scene }>   POST /api/scenes (XHR, for progress)
 //   rename(name, title) / remove(name)   PUT title / DELETE (moves it to scenes/.trash on the server)
-// Events (scenes.events): 'scenes' { scenes }   'ready' { scene } a scene finished calibrating while this page was open
-//   'failed' { scene }   'upload' { loaded, total, name } while a photo uploads
+// Events (scenes.events, ScenesEvents): 'scenes' { scenes }   'ready' { scene } a scene finished calibrating while this
+//   page was open   'failed' { scene }
 // Helpers: friendlyDate(iso|Date) ("Sun 26 Oct, 09:36"), relDate ("Today, 09:36"), clock, sceneTitle(scene), fmtBytes(n)
 // The decisions and the wording are planner/logic/ (text.ts, money.ts, messages.ts, library.ts, scenes.ts).
 import { RequestError, quiet, withMidstudy } from './engine.js'
-import type { Engine, JsonObject, Req } from './engine.js'
+import type { Engine, Req } from './engine.js'
+import { Bus } from './bus.js'
+import type { Events } from './bus.js'
+import { libraryEntry, libraryJob, libraryJobs, sceneCreated, spendOf, trashedItems } from './wire.js'
+import type { LibraryEntry, LibraryJob, SceneCreated, SceneSummary, Spend, TrashedItem } from './wire.js'
 import * as libLogic from './logic/library.js'
 import * as msg from './logic/messages.js'
 import * as money from './logic/money.js'
 import * as sceneLogic from './logic/scenes.js'
 import * as text from './logic/text.js'
+import type { JsonObject } from './logic/num.js'
 
 type When = Date | string | number | null | undefined
 // v1's new Date(when): null is the epoch, undefined isn't a date.
@@ -80,45 +85,48 @@ function b64json(o: unknown): string {
 const statusOf = (e: unknown): number | null => (e instanceof RequestError ? e.status : null)
 const offlineOf = (e: unknown): boolean => e instanceof RequestError && e.offline
 
+/** What the scenes store's events carry (scenes.events). */
+export interface ScenesEvents {
+  scenes: { scenes: SceneSummary[] }
+  ready: { scene: SceneSummary }
+  failed: { scene: SceneSummary }
+}
+
 /** The scenes store (§4.4, §4.5). */
 export function createScenes({ engine }: { engine: Engine }) {
-  const events = new EventTarget()
-  const emit = (name: string, detail: unknown): void => { events.dispatchEvent(new CustomEvent(name, { detail })) }
+  const events = new Bus<ScenesEvents>()
   const state = { loaded: false, offline: false }
-  let list: JsonObject[] = []
+  let list: SceneSummary[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   const seen = new Map<string, unknown>() // name -> last calib_status
 
   engine.events.addEventListener('scenes', (e) => {
-    const detail: unknown = e instanceof CustomEvent ? e.detail : null
-    const scenes: unknown = isRecord(detail) ? detail['scenes'] : null
-    list = Array.isArray(scenes) ? scenes.filter(isRecord) : []
+    list = e.detail.scenes.slice()
     state.loaded = true
     state.offline = false
     for (const s of list) {
-      const name = typeof s['name'] === 'string' ? s['name'] : ''
-      const now = s['calib_status']
-      const fin = sceneLogic.sceneFinished(seen.get(name), now)
-      if (fin) emit(fin, { scene: s })
-      seen.set(name, now)
+      const now = s.calib_status
+      const fin = sceneLogic.sceneFinished(seen.get(s.name), now)
+      if (fin) events.emit(fin, { scene: s })
+      seen.set(s.name, now)
     }
-    emit('scenes', { scenes: list.slice() })
+    events.emit('scenes', { scenes: list.slice() })
     schedule()
   })
   function schedule(): void {
     clearTimeout(timer)
-    if (list.some((s) => sceneLogic.sceneBusy(s['calib_status']))) timer = setTimeout(() => { quiet(refresh()) }, 1500)
+    if (list.some((s) => sceneLogic.sceneBusy(s.calib_status))) timer = setTimeout(() => { quiet(refresh()) }, 1500)
   }
   async function refresh(): Promise<void> {
     try { await engine.listScenesInternal() } catch (e) {
       state.offline = true
-      emit('scenes', { scenes: list.slice() })
+      events.emit('scenes', { scenes: list.slice() })
       clearTimeout(timer)
       timer = setTimeout(() => { quiet(refresh()) }, 10000)
       throw e
     }
   }
-  function upload(file: unknown, opts: { title?: string | null; onProgress?: ((loaded: number, total: number) => void) | null } = {}): Promise<unknown> {
+  function upload(file: unknown, opts: { title?: string | null; onProgress?: ((loaded: number, total: number) => void) | null } = {}): Promise<SceneCreated> {
     if (!(file instanceof Blob)) return Promise.reject(engine.reportError('Pick a photo first'))
     const title = opts.title ?? null
     const name = text.uploadName(file instanceof File ? file.name : '', 'photo.jpg')
@@ -129,36 +137,32 @@ export function createScenes({ engine }: { engine: Engine }) {
       xhr.setRequestHeader('X-Midstudy-Filename', name)
       if (title?.trim()) xhr.setRequestHeader('X-Midstudy-Meta', b64json({ title: title.trim() }))
       xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
-      xhr.upload.onprogress = (e) => {
-        const total = e.total || file.size
-        opts.onProgress?.(e.loaded, total)
-        emit('upload', { loaded: e.loaded, total, name })
-      }
+      xhr.upload.onprogress = (e) => { opts.onProgress?.(e.loaded, e.total || file.size) }
       xhr.onerror = () => { reject(engine.reportError("Couldn't upload the photo: the server isn't answering")) }
       xhr.onload = () => {
         let body: unknown = null
         try { body = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
-        const b = isRecord(body) ? body : null
-        const scene = b?.['scene']
-        if (xhr.status !== 202 || !scene) {
-          const err = b?.['error']
+        const created = sceneCreated(body)
+        if (xhr.status !== 202 || !created?.scene) {
+          const err = isRecord(body) ? body['error'] : null
           const why = err ? textOf(err) : `HTTP ${String(xhr.status)}`
           reject(engine.reportError(msg.uploadErrorText(xhr.status, why)))
           return
         }
-        seen.set(textOf(scene), 'pending')
+        seen.set(created.scene, 'pending')
         quiet(refresh())
-        resolve(body)
+        resolve(created)
       }
       xhr.send(file)
     })
   }
   const rename = (name: string, title: unknown): Promise<void> => engine.renameScene(name, title)
   const remove = (name: unknown): Promise<void> => engine.deleteScene(name)
+  const listen: Events<ScenesEvents> = events
   return {
-    events, start: (): Promise<void> => refresh(), refresh, upload, rename, remove,
-    getScenes: (): JsonObject[] => list.slice(),
-    getScene: (name: string): JsonObject | null => list.find((s) => s['name'] === name) ?? null,
+    events: listen, start: (): Promise<void> => refresh(), refresh, upload, rename, remove,
+    getScenes: (): SceneSummary[] => list.slice(),
+    getScene: (name: string | null): SceneSummary | null => list.find((s) => s.name === name) ?? null,
     getState: (): { loaded: boolean; offline: boolean } => ({ ...state }),
   }
 }
@@ -177,7 +181,7 @@ export type Scenes = ReturnType<typeof createScenes>
 //   remove(id) / restore(id)  DELETE → move to the library's trash / POST …/restore → the item
 //   spend() → Promise<spend>  GET /api/spend
 //   estimate(meta, kind)      the price an add will reserve ($0 for a model)
-// Events (lib.events): 'jobs' { jobs }   'job-done' { job }   'job-failed' { job }   'spend' { spend }   'trash' { trash }
+// Events (lib.events, LibEvents): 'jobs' { jobs }   'job-done' { job }   'job-failed' { job }   'spend' { spend }   'trash' { trash }
 // Actions reject with a reported error; a library change reloads the engine's library.
 // idol is the default image engine (contract §2.8, §3.2): $0.10, a splat with a stand-in box.
 export const LIB_PRICE = { glb: 0, rug: 0, idol: 0.1, sam3d: 0.02, trellis2: { 512: money.trellisPrice(512), 1024: money.trellisPrice(1024), 1536: money.trellisPrice(1536) } } as const
@@ -204,67 +208,78 @@ class ProductReadError extends Error {
   }
 }
 
+/** What the library store's events carry (lib.events). */
+export interface LibEvents {
+  jobs: { jobs: LibraryJob[] }
+  'job-done': { job: LibraryJob }
+  'job-failed': { job: LibraryJob }
+  spend: { spend: Spend | null }
+  trash: { trash: TrashedItem[] }
+}
+interface LibState {
+  api: boolean | null
+  jobs: LibraryJob[]
+  trash: TrashedItem[]
+  spend: Spend | null
+}
+
 export function createLibrary({ engine = null }: { engine?: Engine | null } = {}) {
-  const events = new EventTarget()
-  const emit = (name: string, detail: unknown): void => { events.dispatchEvent(new CustomEvent(name, { detail })) }
+  const events = new Bus<LibEvents>()
   const report = (m: string, e: unknown): Error => (engine ? engine.reportError(m, e) : new Error(`${m}: ${e instanceof Error ? e.message : textOf(e)}`))
   const custom = typeof location !== 'undefined' && new URLSearchParams(location.search).has('library')
-  const state: { api: boolean | null; jobs: JsonObject[]; trash: JsonObject[]; spend: unknown } = { api: custom ? false : null, jobs: [], trash: [], spend: null }
+  const state: LibState = { api: custom ? false : null, jobs: [], trash: [], spend: null }
   const status = new Map<string, unknown>() // job id → last status seen
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const reload = (): Promise<void> | undefined => engine?.reloadLibrary()
-  const idOf = (j: JsonObject): string => textOf(j['id'])
-  function setJobs(list: unknown): void {
-    const next = Array.isArray(list) ? list.filter(isRecord) : []
+  function setJobs(next: LibraryJob[]): void {
     for (const j of next) {
-      const change = libLogic.jobChange(status.get(idOf(j)), j['status'])
-      if (change === 'done') { quiet(reload()); emit('job-done', { job: j }); quiet(spend()) }
-      if (change === 'failed') { emit('job-failed', { job: j }); quiet(spend()) }
-      status.set(idOf(j), j['status'])
+      const change = libLogic.jobChange(status.get(j.id), j.status)
+      if (change === 'done') { quiet(reload()); events.emit('job-done', { job: j }); quiet(spend()) }
+      if (change === 'failed') { events.emit('job-failed', { job: j }); quiet(spend()) }
+      status.set(j.id, j.status)
     }
     state.jobs = next
-    emit('jobs', { jobs: next.slice() })
+    events.emit('jobs', { jobs: next.slice() })
     schedule()
   }
-  function track(job: unknown): unknown {
-    if (!isRecord(job) || !job['id']) return job
-    if (!status.has(idOf(job))) status.set(idOf(job), job['status'])
-    state.jobs = [job, ...state.jobs.filter((j) => j['id'] !== job['id'])]
-    emit('jobs', { jobs: state.jobs.slice() })
+  function track(job: LibraryJob | null): LibraryJob | null {
+    if (!job?.id) return job
+    if (!status.has(job.id)) status.set(job.id, job.status)
+    state.jobs = [job, ...state.jobs.filter((j) => j.id !== job.id)]
+    events.emit('jobs', { jobs: state.jobs.slice() })
     schedule()
     return job
   }
-  const busy = (): boolean => state.jobs.some((j) => libLogic.jobBusy(j['status']))
+  const busy = (): boolean => state.jobs.some((j) => libLogic.jobBusy(j.status))
   function schedule(): void {
     clearTimeout(timer)
     if (busy()) timer = setTimeout(() => { quiet(jobs()) }, 1500)
   }
 
-  async function jobs(): Promise<JsonObject[]> {
+  async function jobs(): Promise<LibraryJob[]> {
     let body: unknown
     try { body = await fetchJson('/api/library/jobs') } catch (e) { schedule(); throw report('Could not list the library jobs', e) }
-    setJobs(isRecord(body) ? body['jobs'] : null)
+    setJobs(libraryJobs(isRecord(body) ? body['jobs'] : null))
     return state.jobs.slice()
   }
-  async function spend(): Promise<unknown> {
+  async function spend(): Promise<Spend | null> {
     let body: unknown
     try { body = await fetchJson('/api/spend') } catch (e) { throw report("Could not read today's spend", e) }
-    state.spend = body
-    emit('spend', { spend: body })
-    return body
+    state.spend = spendOf(body)
+    events.emit('spend', { spend: state.spend })
+    return state.spend
   }
   async function refreshTrash(): Promise<void> {
     try {
       const body = await fetchJson('/api/library')
       state.api = true
-      const trash = isRecord(body) ? body['trash'] : null
-      state.trash = Array.isArray(trash) ? trash.filter(isRecord) : []
-      emit('trash', { trash: state.trash.slice() })
+      state.trash = trashedItems(isRecord(body) ? body['trash'] : null)
+      events.emit('trash', { trash: state.trash.slice() })
     } catch (e) {
       const st = statusOf(e)
       if (st === 404 || st === 405 || st === 501) state.api = false
-      emit('trash', { trash: state.trash.slice() })
+      events.emit('trash', { trash: state.trash.slice() })
     }
   }
   async function start(): Promise<void> {
@@ -273,15 +288,15 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     if (state.api) await Promise.allSettled([jobs(), spend()])
   }
 
-  const jobOf = (body: unknown): unknown => {
+  const jobOf = (body: unknown): LibraryJob | null => {
     const b = isRecord(body) ? body : null
     const inner = b?.['job']
     const job: unknown = isRecord(inner) ? { ...inner } : body
     const estimate = b?.['cost_usd_estimate']
-    if (isRecord(job) && estimate !== null && estimate !== undefined && (job['cost_usd_estimate'] === null || job['cost_usd_estimate'] === undefined)) return { ...job, cost_usd_estimate: estimate }
-    return job
+    if (isRecord(job) && estimate !== null && estimate !== undefined && (job['cost_usd_estimate'] === null || job['cost_usd_estimate'] === undefined)) return libraryJob({ ...job, cost_usd_estimate: estimate })
+    return libraryJob(job)
   }
-  async function addFromFile(file: unknown, meta: unknown = {}): Promise<unknown> {
+  async function addFromFile(file: unknown, meta: unknown = {}): Promise<LibraryJob | null> {
     if (!(file instanceof Blob)) throw report('addItemFromFile needs a File', undefined)
     const name = file instanceof File && file.name ? file.name : 'upload'
     const kind = money.isModelName(name) ? 'model' : 'image'
@@ -295,7 +310,7 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     quiet(spend())
     return track(jobOf(body))
   }
-  async function addFromUrl(url: unknown, meta: unknown = {}): Promise<unknown> {
+  async function addFromUrl(url: unknown, meta: unknown = {}): Promise<LibraryJob | null> {
     let body: unknown
     try {
       body = await fetchJson('/api/library/items/from-url', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(isRecord(meta) ? meta : {}), image_url: url }) })
@@ -327,7 +342,8 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
       throw new ProductReadError(base ? base.message : why ? textOf(why) : e instanceof Error ? e.message : textOf(e), st, !!body?.['blocked'], offline)
     }
   }
-  async function edit(id: unknown, patch: unknown = {}): Promise<unknown> {
+  /** PATCH: the rescale job (dims_cm or yaw changed), else the item as the server has it now. */
+  async function edit(id: unknown, patch: unknown = {}): Promise<LibraryJob | LibraryEntry | null> {
     const sid = textOf(id)
     let body: unknown
     try {
@@ -335,7 +351,7 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     } catch (e) { throw report(msg.editErrorText(sid, offlineOf(e)), e) }
     if (isRecord(body) && body['job']) return track(jobOf(body))
     await reload()
-    return body
+    return libraryEntry(body)
   }
   async function remove(id: unknown): Promise<void> {
     const sid = textOf(id)
@@ -344,20 +360,20 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     }
     await Promise.allSettled([reload(), refreshTrash()])
   }
-  async function restore(id: unknown): Promise<unknown> {
+  async function restore(id: unknown): Promise<LibraryEntry | null> {
     const sid = textOf(id)
     let item: unknown
     try { item = await fetchJson(`/api/library/items/${encodeURIComponent(sid)}/restore`, { method: 'POST' }) } catch (e) {
       throw report(msg.restoreErrorText(sid, statusOf(e)), e)
     }
     await Promise.allSettled([reload(), refreshTrash()])
-    return item
+    return libraryEntry(item)
   }
 
+  const listen: Events<LibEvents> = events
   return {
-    events, start, jobs, spend, addFromFile, addFromUrl, readProduct, edit, remove, restore, estimate: estimateCost,
-    getState: (): { api: boolean | null; jobs: JsonObject[]; trash: JsonObject[]; spend: unknown } => ({ ...state, jobs: state.jobs.slice(), trash: state.trash.slice() }),
-    refreshTrash,
+    events: listen, start, jobs, spend, addFromFile, addFromUrl, readProduct, edit, remove, restore,
+    getState: (): Readonly<LibState> => ({ ...state, jobs: state.jobs.slice(), trash: state.trash.slice() }),
   }
 }
 /** The library manager's store (ctx.lib). @public */

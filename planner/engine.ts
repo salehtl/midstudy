@@ -111,9 +111,13 @@ import * as text from './logic/text.js'
 import type { DimsCm } from './logic/text.js'
 import * as viewLogic from './logic/view.js'
 import type { Box, ViewReport, ViewState, Xform } from './logic/view.js'
+import { Bus } from './bus.js'
+import type { Events } from './bus.js'
+import { layoutSummaries, libraryEntries, libraryEntry, renderMeta, renderMetas, sceneSummaries, sceneSummary, trashedScenes, calibInfo } from './wire.js'
+import type { CalibInfo, LayoutSummary, LibraryEntry, RenderMeta, SceneSummary, TrashedScene } from './wire.js'
 
-/** The engine's value types (planner/logic/). @public */
-export type { Camera, DimsCm, JsonObject, LightingReport, LookView, ViewReport }
+/** The engine's value types (planner/logic/, planner/wire.ts). */
+export type { Camera, LightingReport, LibraryEntry, RenderMeta }
 export type Vec3 = [number, number, number]
 
 /** The slug every id, layout and scene name is (CLAUDE.md conventions). */
@@ -180,10 +184,6 @@ const isMesh = (o: unknown): o is THREE.Mesh => o instanceof THREE.Mesh
 const isLine = (o: unknown): o is THREE.Line => o instanceof THREE.Line
 const isObject3D = (o: unknown): o is THREE.Object3D => o instanceof THREE.Object3D
 /** A JSON object the engine keeps and updates in place, as v1 did (library entries, the scenes list). */
-type JsonRecord = Record<string, unknown>
-function isMutable(x: unknown): x is JsonRecord {
-  return typeof x === 'object' && x !== null
-}
 const rec = (x: unknown): JsonObject | null => (isRecord(x) ? x : null)
 /** v1 interpolated values into its messages as they were (`${x}`). */
 function asText(x: unknown): string {
@@ -214,10 +214,10 @@ function measure(step: string, t0: number): void {
 }
 
 // --- events, errors + toasts ------------------------------------------------
-/** What each engine event carries (engine.events, CustomEvent.detail). @public (the UI port types its listeners with it) */
-export interface EngineEvents {
+/** What each engine event carries (engine.events, CustomEvent.detail). */
+interface EngineEvents {
   scene: { phase: string; name: string | null }
-  scenes: { scenes: JsonObject[] }
+  scenes: { scenes: SceneSummary[] }
   camera: { camera: Camera; source: string }
   adjust: { on: boolean; note?: string | null }
   occlusion: { on: boolean }
@@ -229,19 +229,19 @@ export interface EngineEvents {
   drag: { mode: DragMode; uid: string; phase: 'start' | 'end' }
   look: LookView
   library: { items: LibraryEntry[] }
-  layouts: { names?: string[]; details?: JsonObject[]; name?: string }
-  renders: { renders: JsonObject[] }
-  render: { phase: 'start' | 'done' | 'failed'; model: string; meta?: JsonObject; error?: string }
+  layouts: { names?: string[]; details?: LayoutSummary[]; name?: string }
+  renders: { renders: RenderMeta[] }
+  render: { phase: 'start' | 'done' | 'failed'; model: string; meta?: RenderMeta; error?: string }
   compare: { a: string; b: string }
   ruler: RulerState
   error: { text: string }
-  toast: { text: string; kind: string; ms: number }
+  toast: { text: string; kind: msg.ToastKind; ms: number }
   lighting: LightingStatus
 }
-const events = new EventTarget()
+const events = new Bus<EngineEvents>()
 function emit<K extends keyof EngineEvents>(name: K, detail: EngineEvents[K]): void {
   wake()
-  events.dispatchEvent(new CustomEvent(name, { detail }))
+  events.emit(name, detail)
 }
 // On-demand rendering: draw while something changes (input, any engine event) and for a short tail after. A wake
 // always gets at least one frame, however late the browser's next frame comes (a slow GPU, or software rendering
@@ -255,7 +255,7 @@ function wake(ms = 400): void {
 }
 for (const t of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'keyup', 'resize', 'touchmove']) window.addEventListener(t, () => { wake() }, { passive: true, capture: true })
 const errors: string[] = []
-function toast(textLine: string, kind = 'info', ms = 6000): void {
+function toast(textLine: string, kind: msg.ToastKind = 'info', ms = 6000): void {
   emit('toast', { text: textLine, kind, ms })
 }
 /** An error's own text (v1: err.message, else String(err)). */
@@ -603,21 +603,16 @@ function syncShadow(r: ItemRec): void {
 }
 
 // --- library + items --------------------------------------------------------------------------------------------------
-/** A library.json entry as it is (§2.4 getLibrary: "items from library.json, as-is"), or a placeholder the planner
- * made for a piece the library lost (missing: true). */
-export type LibraryEntry = Record<string, unknown> & { readonly id: string }
-function isLibraryEntry(x: unknown): x is LibraryEntry {
-  return isMutable(x) && typeof x['id'] === 'string'
-}
+// A library entry (planner/wire.ts LibraryEntry) is library.json's as it is (§2.4 getLibrary: "items from library.json,
+// as-is"), or a placeholder the planner made for a piece the library lost (missing: true).
 /** The fields of an entry the engine decides on (logic/library.ts). */
 function libView(l: LibraryEntry): LibView {
-  const assets = rec(l['assets'])
+  const a = l.assets
   return {
-    id: l.id, name: str(l['name']), glb: str(assets?.['glb']), spz: str(assets?.['spz']), splat: str(assets?.['splat']),
-    thumb: str(assets?.['thumb']), defaultRender: l['default_render'], engine: rec(l['source'])?.['engine'], missing: !!l['missing'],
+    id: l.id, name: str(l.name), glb: str(a?.glb), spz: str(a?.spz), splat: str(a?.splat), thumb: str(a?.thumb),
+    defaultRender: l.default_render, engine: l.source?.engine, missing: !!l.missing,
   }
 }
-const dimsOf = (l: JsonObject): JsonObject | null => rec(l['dims_cm'])
 type Render = 'glb' | 'splat'
 interface ItemRec {
   readonly uid: string
@@ -670,8 +665,7 @@ async function readLibrary(): Promise<void> {
       const data: unknown = await res.json()
       const raw = rec(data)?.['items']
       if (!Array.isArray(raw)) throw new Error('missing "items" array')
-      const all: unknown[] = raw
-      list = all.filter(isLibraryEntry)
+      list = libraryEntries(raw)
     }
   } catch (e) {
     reportError(`Could not read library ${LIBRARY_URL}`, e)
@@ -684,7 +678,7 @@ async function readLibrary(): Promise<void> {
 
 // What a placed copy depends on in its library entry: when this changes (Shows as, a rescale, a re-add), the copy is
 // rebuilt in place (reloadLibrary).
-const libSig = (l: LibraryEntry): string => JSON.stringify([l['default_render'] ?? null, l['assets'] ?? null, l['dims_cm'] ?? null, rec(l['source'])?.['created'] ?? null, l['fit'] ?? null])
+const libSig = (l: LibraryEntry): string => JSON.stringify([l.default_render ?? null, l.assets ?? null, l.dims_cm ?? null, l.source?.created ?? null, l.fit ?? null])
 // After a library change (Shows as, a rescale, a re-add: data.ts reloads the library), placed copies whose entry
 // changed what they draw are rebuilt in place: same uid, group (position, rotation, elevation) and selection. A copy
 // whose entry is gone keeps drawing what it has; renames just take the new entry.
@@ -743,10 +737,10 @@ async function makeMissingThumbs(): Promise<void> {
       let image: string
       try { image = await modelThumbnail(l) } catch (e) { console.warn('[midstudy] no thumbnail for', l.id, e); continue }
       try {
-        const item = rec(await apiJson(`/api/library/items/${encodeURIComponent(l.id)}/thumb`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image }) }))
-        const thumb: unknown = rec(item?.['assets'])?.['thumb']
+        const item = libraryEntry(await apiJson(`/api/library/items/${encodeURIComponent(l.id)}/thumb`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image }) }))
+        const thumb = item?.assets?.thumb
         const cur = library.find((x) => x.id === l.id)
-        if (cur && thumb) { cur['assets'] = { ...(rec(cur['assets']) ?? {}), thumb }; emit('library', { items: library.slice() }) }
+        if (cur && thumb) { cur.assets = { ...(cur.assets ?? {}), thumb }; emit('library', { items: library.slice() }) }
       } catch (e) { console.warn('[midstudy] could not store the thumbnail of', l.id, e) }
     }
   } finally { thumbsRunning = false }
@@ -936,7 +930,7 @@ interface Built extends Child {
 // the GLB (for idol, its stand-in box), with a non-blocking error.
 async function buildChild(l: LibraryEntry): Promise<Built> {
   const v = libView(l)
-  const dims = libLogic.validDims(dimsOf(l)) ?? libLogic.MISSING_DIMS
+  const dims = libLogic.validDims(l.dims_cm ?? null) ?? libLogic.MISSING_DIMS
   if (v.missing) return { ...missingChild(dims), splat: null, render: 'glb' }
   if (libLogic.pickRender(v) === 'splat') {
     const [base, splat] = await Promise.allSettled([v.glb ? glbChild(v.glb) : Promise.resolve(boxChild(dims)), loadSplatMesh(v)])
@@ -1031,8 +1025,7 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   let l = library.find((x) => x.id === id) ?? null
   const missingDims = o['missing']
   if (!l && missingDims && typeof id === 'string' && id) {
-    const given = rec(missingDims)
-    l = { id, name: layoutLogic.prettyLayout(id), dims_cm: given && libLogic.validDims(given) ? { ...given } : { ...libLogic.MISSING_DIMS }, assets: {}, missing: true }
+    l = { id, name: layoutLogic.prettyLayout(id), dims_cm: libLogic.validDims(rec(missingDims)) ?? { ...libLogic.MISSING_DIMS }, assets: {}, missing: true }
   }
   if (!l) throw reportError(`Unknown library item "${asText(id)}"`)
   if (!sceneName) throw reportError('Open a scene first, then add furniture')
@@ -1053,7 +1046,7 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   group.rotation.set(0, rot * DEG, 0)
   group.userData['uid'] = uid
   group.name = `item:${uid}`
-  const r: ItemRec = { uid, id: l.id, lib: l, sig: libSig(l), group, child: null, splat: null, render: 'glb', localBox: null, rotationDeg: rot, shadow: null, caster: null, missing: !!l['missing'], noGlb: false, build: 0 }
+  const r: ItemRec = { uid, id: l.id, lib: l, sig: libSig(l), group, child: null, splat: null, render: 'glb', localBox: null, rotationDeg: rot, shadow: null, caster: null, missing: !!l.missing, noGlb: false, build: 0 }
   try {
     attachBuilt(r, await buildChild(l)) // a splat item: its GLB and its splat have both loaded
   } catch (e) {
@@ -1148,9 +1141,8 @@ export interface ItemInfo {
   noGlb: boolean
 }
 function itemInfo(r: ItemRec): ItemInfo {
-  const name = r.lib['name']
   return {
-    uid: r.uid, id: r.id, name: typeof name === 'string' && name ? name : r.id, lib: r.lib, render: r.render,
+    uid: r.uid, id: r.id, name: libLogic.libName(r.lib), lib: r.lib, render: r.render,
     position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg,
     missing: r.missing, noGlb: r.noGlb,
   }
@@ -1283,9 +1275,7 @@ export interface ItemSnapshot {
 function removeItemWithUndo(uid: string): ItemSnapshot | null {
   const r = items.get(uid)
   if (!r) return null
-  const name = r.lib['name']
-  const dims = dimsOf(r.lib)
-  const snapItem: ItemSnapshot = { uid, id: r.id, name: typeof name === 'string' && name ? name : r.id, position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg, missing: r.missing ? { ...(dims ?? {}) } : undefined }
+  const snapItem: ItemSnapshot = { uid, id: r.id, name: libLogic.libName(r.lib), position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg, missing: r.missing ? { ...(r.lib.dims_cm ?? {}) } : undefined }
   removeItemInternal(uid)
   return snapItem
 }
@@ -1389,22 +1379,22 @@ let lightingToken = 0
 let adjustFloor = false
 let occlusion = true
 let floorNote: string | null = null
-let scenesList: JsonRecord[] = []
-let scenesTrash: JsonObject[] = [] // [{name, title, deleted}] deleted scenes the server keeps (scenes/.trash)
+let scenesList: SceneSummary[] = []
+let scenesTrash: TrashedScene[] = [] // deleted scenes the server keeps (scenes/.trash)
 let sceneToken = 0
 /** What the Scenes page shows while a scene opens. */
 export interface SceneLoad {
   loading: boolean
   phase: 'calibrating' | 'photo' | null
   name: string | null
-  scene: JsonObject | null
+  scene: SceneSummary | null
 }
 const sceneLoad: SceneLoad = { loading: false, phase: null, name: null, scene: null }
 function setLoad(loading: boolean, phase: SceneLoad['phase'], name: string | null, scn: JsonObject | null): void {
   sceneLoad.loading = loading
   sceneLoad.phase = phase
   sceneLoad.name = name
-  sceneLoad.scene = scn
+  sceneLoad.scene = scn && sceneSummary(scn)
 }
 const dirty = { scene: false, layout: false }
 let quietItems = 0
@@ -1427,17 +1417,11 @@ async function quietly<T>(fn: () => T | Promise<T>): Promise<T> {
   quietItems++
   try { return await fn() } finally { quietItems-- }
 }
-const objects = (x: unknown): JsonRecord[] => {
-  if (!Array.isArray(x)) return []
-  const all: unknown[] = x
-  return all.filter(isMutable)
-}
-
-async function listScenesInternal(): Promise<JsonObject[]> {
+async function listScenesInternal(): Promise<SceneSummary[]> {
   let data: JsonObject | null
   try { data = rec(await apiJson('/api/scenes')) } catch (e) { throw reportError('Could not list the scenes', e) }
-  scenesList = objects(data?.['scenes'])
-  scenesTrash = objects(data?.['trash'])
+  scenesList = sceneSummaries(data?.['scenes'])
+  scenesTrash = trashedScenes(data?.['trash'])
   emit('scenes', { scenes: scenesList.slice() })
   return scenesList.slice()
 }
@@ -1589,7 +1573,7 @@ async function openScene(name: unknown): Promise<void> {
     if (sceneLogic.sceneBusy(data['calib_status'])) {
       setLoad(sceneLoad.loading, 'calibrating', sceneLoad.name, data)
       emit('scene', { phase: 'calibrating', name })
-      await waitForScene(name, { onTick: (s) => { if (token === sceneToken) { sceneLoad.scene = s; emit('scene', { phase: 'calibrating', name }) } } })
+      await waitForScene(name, { onTick: (s) => { if (token === sceneToken) { sceneLoad.scene = sceneSummary(s); emit('scene', { phase: 'calibrating', name }) } } })
       if (token !== sceneToken) return
       data = await getSceneInternal(name)
     }
@@ -1772,25 +1756,25 @@ async function saveThumbnail(): Promise<string | null> {
     res = rec(await apiJson(`${sceneUrl(name)}/thumb`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: c.toDataURL('image/jpeg', 0.82) }) }))
   } catch (e) { throw reportError('Could not save the scene thumbnail', e) }
   const url = str(res?.['thumb_url'])
-  const entry = scenesList.find((s) => s['name'] === name)
-  if (entry) entry['thumb_url'] = url ?? entry['thumb_url']
+  const entry = scenesList.find((s) => s.name === name)
+  if (entry && url !== null) entry.thumb_url = url
   emit('scenes', { scenes: scenesList.slice() })
   return url
 }
 
 // Calibrate again (POST …/calibrate): waits for the job, then takes the new calibration (and depth) without touching
 // the placed furniture. The server replaces the camera only when it wasn't set by hand.
-async function recalibrate(): Promise<JsonObject> {
+async function recalibrate(): Promise<SceneSummary | null> {
   const name = sceneName
   if (!name) throw reportError('No scene is open')
   try { await apiJson(`${sceneUrl(name)}/calibrate`, { method: 'POST' }) } catch (e) { throw reportError(msg.recalibrateText(statusOf(e)), e) }
   emit('scene', { phase: 'recalibrating', name })
   const done = await waitForScene(name)
-  if (name !== sceneName) return done
+  if (name !== sceneName) return sceneSummary(done)
   const data = await getSceneInternal(name)
   const depthUrl = str(data['depth_url'])
   const depth = depthUrl ? await loadDepth(depthUrl).catch(() => null) : null
-  if (name !== sceneName || !photo.image) return data
+  if (name !== sceneName || !photo.image) return sceneSummary(data)
   setPhoto(photo.image, depth)
   sceneData = data
   lightingToken++
@@ -1810,7 +1794,7 @@ async function recalibrate(): Promise<JsonObject> {
   emit('scene', { phase: failed ? 'recalibrate-failed' : 'recalibrated', name })
   emit('adjust', { on: adjustFloor, note: floorNote })
   if (failed) toast(`Calibration failed: ${str(data['calib_error']) ?? 'see the server log'}`, 'error')
-  return data
+  return sceneSummary(data)
 }
 
 // --- the camera: Adjust floor (§4.5) ----------------------------------------------------------------------------------
@@ -1852,7 +1836,7 @@ function setGridVisible(on: unknown): void {
 
 // --- layouts (per scene, contract §2.7) --------------------------------------------------------------------------------
 let layoutNames: string[] = []
-let layoutDetails: JsonObject[] = []
+let layoutDetails: LayoutSummary[] = []
 let layoutName = ''
 let layoutTitle = '' // the name as typed ("Phone A"), shown instead of the slug
 function setLayoutName(name: unknown, title: unknown = null): void {
@@ -1864,11 +1848,8 @@ export const prettyLayout = (name: unknown): string => layoutLogic.prettyLayout(
 /** The listing's details as the layout logic reads them. */
 function details(): LayoutDetail[] {
   return layoutDetails.map((d) => {
-    const n = d['name']
-    const t = d['title']
-    const u = d['updated']
-    const ms = Date.parse(u ? asText(u) : '')
-    return { name: typeof n === 'string' ? n : '', title: typeof t === 'string' ? t : null, updatedMs: Number.isNaN(ms) ? 0 : ms }
+    const ms = Date.parse(d.updated ?? '')
+    return { name: d.name, title: d.title ?? null, updatedMs: Number.isNaN(ms) ? 0 : ms }
   })
 }
 function layoutDisplayName(name: unknown): string {
@@ -1914,7 +1895,7 @@ function layoutDoc(name: string, title: string | null = null): LayoutDoc {
     version: 1, name, title: str(title), scene_name: sceneName, library: LIBRARY_URL,
     items: [...items.values()].map((r) => {
       const it = layoutLogic.docItem({ uid: r.uid, id: r.id, render: r.render, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg })
-      const dims = dimsOf(r.lib)
+      const dims = r.lib.dims_cm ?? null
       // a placeholder's size if the piece goes missing (§2.8)
       return dims && libLogic.validDims(dims) ? { ...it, dims_cm: { ...dims } } : it
     }),
@@ -1924,7 +1905,7 @@ function layoutDoc(name: string, title: string | null = null): LayoutDoc {
 async function saveLayoutInternal(name: unknown, opts: unknown = {}): Promise<void> {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(msg.saveLayoutNameText(asText(name)))
   if (!sceneName) throw reportError('Open a scene first, then save a layout')
-  const kept = name === layoutName ? layoutTitle : layoutDetails.find((d) => d['name'] === name)?.['title']
+  const kept = name === layoutName ? layoutTitle : layoutDetails.find((d) => d.name === name)?.title
   const title = layoutLogic.layoutTitle(rec(opts)?.['title'], kept)
   let stored: JsonObject | null
   try {
@@ -1970,8 +1951,10 @@ async function loadLayoutInternal(name: unknown): Promise<void> {
   markLayoutClean()
   emit('layouts', { name })
 }
+/** A deleted layout as it was, plus whether it was the current one: what restoreLayoutInternal puts back (Undo). */
+export type DeletedLayout = JsonObject
 // Deletes a layout (the server keeps it in layouts/<scene>/.trash). Resolves with the layout as it was, for Undo.
-async function deleteLayoutInternal(name: string): Promise<JsonObject | null> {
+async function deleteLayoutInternal(name: string): Promise<DeletedLayout | null> {
   let doc: JsonObject | null = null
   try { doc = rec(await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`)) } catch { /* deleted below anyway */ }
   try { await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`, { method: 'DELETE' }) } catch (e) { throw reportError(`Could not delete layout "${name}"`, e) }
@@ -2004,7 +1987,7 @@ async function listLayoutsInternal(): Promise<string[]> {
   const all: unknown[] = Array.isArray(raw) ? raw : []
   const names = all.filter((n): n is string => typeof n === 'string')
   const det = data?.['details']
-  layoutDetails = Array.isArray(det) ? objects(det) : names.map((n) => ({ name: n }))
+  layoutDetails = Array.isArray(det) ? layoutSummaries(det) : names.map((n) => ({ name: n }))
   return names
 }
 async function refreshLayouts(): Promise<void> {
@@ -2149,16 +2132,12 @@ function drawTo(target: THREE.WebGLRenderTarget | null, furniture = true): void 
 }
 function renderFrame(): void { drawTo(null, !!sceneName) }
 
-/** A capture of the full photo frame (§4.7): a JPEG data URL and its size. @public */
+/** A capture of the full photo frame (§4.7): a JPEG data URL and its size. */
 export interface Shot {
-  dataUrl: string
-  width: number
-  height: number
+  readonly dataUrl: string
+  readonly width: number
+  readonly height: number
 }
-/** captureComposite's answer: a Promise (WebGPU reads back asynchronously, Phase 4). Phase 2 bridge: the shot's fields
- * are also on the Promise itself, because the legacy ui/panels/renders.js still reads them synchronously; integration
- * drops them once ui/panels/renders.ts awaits. @public */
-export type ShotPromise = Promise<Shot> & Shot
 
 // The full photo frame at the photo's resolution (or scaled to maxPx): photo + furniture, no view offset, no grid.
 function captureShot(maxPx: number | null, quality: number): Shot {
@@ -2182,11 +2161,9 @@ function captureShot(maxPx: number | null, quality: number): Shot {
     return shot
   } finally { out.dispose() }
 }
-// A capture that can't be made throws at once (as v1 did, for the legacy renders.js's try/catch; an awaiting caller's
-// try/catch sees it the same way).
-function captureComposite(opts: { maxPx?: number | null; quality?: number } = {}): ShotPromise {
-  const shot = captureShot(opts.maxPx ?? null, opts.quality ?? 0.92)
-  return Object.assign(Promise.resolve(shot), shot)
+// A Promise (WebGPU reads back asynchronously, Phase 4); the capture is made at once, and one that can't be made rejects.
+function captureComposite(opts: { maxPx?: number | null; quality?: number } = {}): Promise<Shot> {
+  return new Promise((resolve) => { resolve(captureShot(opts.maxPx ?? null, opts.quality ?? 0.92)) })
 }
 // The keep-room mask (§4.7): items white on black at the photo's size (what the photo hides of them stays black),
 // dilated by 3 % of the photo's width, and twice that below each piece for its shadow, and its PNG: the kernels, here
@@ -2259,36 +2236,41 @@ export function renderPrice(model: string, shot: { width: number; height: number
   if (!money.isRenderModel(model)) throw new TypeError("Cannot read properties of undefined (reading 'price')")
   return RENDER_MODELS[model].price(shot ? money.megapixels(shot.width, shot.height) : 1)
 }
-let renders: JsonObject[] = []
+let renders: RenderMeta[] = []
 let renderMock = false
 // opts: { model, prompt, keepRoom, mask (from captureMask, when keepRoom) }
-async function postRender(shot: Shot, opts: { model?: string; prompt?: string | null; keepRoom?: boolean; mask?: MaskShot | null } = {}): Promise<JsonObject> {
+async function postRender(shot: Shot, opts: { model?: string; prompt?: string | null | undefined; keepRoom?: boolean; mask?: MaskShot | null } = {}): Promise<RenderMeta> {
   const model = str(opts.model) ?? 'nano-banana'
   const layout = layoutName.trim()
   const scn = sceneName
-  let meta: JsonObject
+  let answer: unknown
   emit('render', { phase: 'start', model })
   try {
-    meta = rec(await apiJson('/api/render', {
+    answer = await apiJson('/api/render', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         image: shot.dataUrl, model, prompt: str(opts.prompt) ?? undefined, scene: str(scn) ?? undefined,
         layout: SLUG.test(layout) ? layout : undefined,
         ...(opts.keepRoom ? { keep_room: true, mask: opts.mask?.dataUrl } : {}),
       }),
-    })) ?? {}
+    })
   } catch (e) {
     emit('render', { phase: 'failed', model, error: detailOf(e) })
     throw reportError(msg.renderFailText(statusOf(e)), e)
   }
+  const meta = renderMeta(answer)
+  if (!meta) {
+    emit('render', { phase: 'failed', model, error: 'not a render' })
+    throw reportError(msg.renderFailText(null), new Error("the server's answer isn't a render"))
+  }
   emit('render', { phase: 'done', model, meta })
-  if (meta['scene'] === sceneName) {
-    renders = [meta, ...renders.filter((r) => r['name'] !== meta['name'])]
+  if (meta.scene === sceneName) {
+    renders = [meta, ...renders.filter((r) => r.name !== meta.name)]
     emit('renders', { renders: renders.slice() })
   }
   return meta
 }
-async function renderViewInternal(opts: unknown = {}): Promise<JsonObject> {
+async function renderViewInternal(opts: unknown = {}): Promise<RenderMeta> {
   const o = rec(opts) ?? {}
   const model = o['model']
   const a = msg.renderArgs(model, asText(model), o['prompt'], !!o['keepRoom'], Object.keys(RENDER_MODELS))
@@ -2308,10 +2290,10 @@ async function renderViewInternal(opts: unknown = {}): Promise<JsonObject> {
   } finally { holdFrames--; wake() }
   return postRender(shot, { model: a.model, prompt: a.prompt, keepRoom: a.keepRoom, mask })
 }
-async function listRendersInternal(): Promise<JsonObject[]> {
+async function listRendersInternal(): Promise<RenderMeta[]> {
   let data: JsonObject | null
   try { data = rec(await apiJson(sceneName ? `/api/renders?scene=${encodeURIComponent(sceneName)}` : '/api/renders')) } catch (e) { throw reportError('Could not list renders', e) }
-  renders = objects(data?.['renders'])
+  renders = renderMetas(data?.['renders'])
   renderMock = data?.['mock'] === true
   emit('renders', { renders: renders.slice() })
   return renders.slice()
@@ -2417,11 +2399,23 @@ function getRenderSettings(): RenderSettings {
   }
 }
 
+/** The open scene as the UI reads it (getScene()): its scene object, calib.json's public part, and the photo size,
+ * camera and depth in use. */
+interface SceneInfo extends SceneSummary {
+  readonly name: string
+  readonly w: number
+  readonly h: number
+  readonly camera: Camera
+  readonly camera_source: string
+  readonly hasDepth: boolean
+  readonly calib: CalibInfo | null
+}
+
 // The first page state (§4.5): ?scene=<name>; else the scene last opened on this device, if it still exists; else none
 // (the UI shows the Scenes page). → the scene name opened, or null
 async function startScene(): Promise<string | null> {
   const list = await listScenesInternal().catch(() => null)
-  const names = list ? list.map((s) => s['name']).filter((n): n is string => typeof n === 'string') : null
+  const names = list ? list.map((s) => s.name) : null
   const go = sceneLogic.landing(params.get('scene'), store.get(LAST_SCENE_KEY), names)
   if (go.kind === 'open') { await openScene(go.name).catch(() => undefined); return sceneName }
   if (go.kind === 'missing') {
@@ -2447,18 +2441,20 @@ export interface InputHandle {
 }
 const noInput = (): InputHandle | null => null
 
+/** engine.events: what the UI listens to (only the engine emits). */
+const engineEvents: Events<EngineEvents> = events
 export const engine = {
-  events, errors, canvas,
+  events: engineEvents, errors, canvas,
   three: { scene, camera, renderer, get spark(): SparkRenderer | null { return spark } },
   /** planner/input.ts's handle, set by main.ts (ui/shell.js gives it its key filter) */
   input: noInput(),
   // setup
   init, mount, setStageInsets,
   // state
-  getScene: (): (JsonObject & { name: string; w: number; h: number; camera: Camera; camera_source: string; hasDepth: boolean }) | null => (sceneName ? { ...sceneData, name: sceneName, w: photo.w, h: photo.h, camera: cameraLogic.cameraCopy(cam), camera_source: cameraSource, hasDepth: !!photo.depthTexture } : null),
+  getScene: (): SceneInfo | null => (sceneName ? { ...(sceneSummary(sceneData) ?? { name: sceneName }), name: sceneName, w: photo.w, h: photo.h, camera: cameraLogic.cameraCopy(cam), camera_source: cameraSource, hasDepth: !!photo.depthTexture, calib: calibInfo(sceneData?.['calib']) } : null),
   getSceneName: (): string | null => sceneName,
   getSceneLoad: (): SceneLoad => ({ ...sceneLoad }),
-  getScenesList: (): JsonObject[] => scenesList.slice(),
+  getScenesList: (): SceneSummary[] => scenesList.slice(),
   getCamera: (): Camera => cameraLogic.cameraCopy(cam),
   getCameraSource: (): string => cameraSource,
   getCalibCamera: (): Camera | null => { const c = rec(sceneData?.['calib'])?.['camera']; return c ? clampCamera(c) : null },
@@ -2473,15 +2469,15 @@ export const engine = {
   isLayoutDirty: (): boolean => dirty.layout,
   getDirty: (): { scene: boolean; layout: boolean } => ({ ...dirty }),
   getItems: (): ItemInfo[] => [...items.values()].map(itemInfo),
-  getItem: (uid: string): ItemInfo | null => { const r = items.get(uid); return r ? itemInfo(r) : null },
+  getItem: (uid: string | null): ItemInfo | null => { const r = uid === null ? undefined : items.get(uid); return r ? itemInfo(r) : null },
   getItemBounds: (uid: string): { min: Vec3; max: Vec3 } | null => { const r = items.get(uid); if (!r) return null; const b = worldBounds(r); return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] } },
   getSelected: (): string | null => selected,
   getDrag: (): { mode: DragMode; uid: string } | null => (drag.mode && drag.uid ? { mode: drag.mode, uid: drag.uid } : null),
   getFootprint, hitItemAt, itemAt, getScreenRect, getElevation,
   getLook, getLibrary: (): LibraryEntry[] => library.slice(), assetUrl,
-  getLayouts: (): string[] => layoutNames.slice(), getLayoutDetails: (): JsonObject[] => layoutDetails.map((d) => ({ ...d })), getLayoutName: (): string => layoutName,
-  getLayoutTitle: (): string => layoutDisplayName(layoutName), layoutDisplayName, getScenesTrash: (): JsonObject[] => scenesTrash.map((t) => ({ ...t })),
-  getRenders: (): JsonObject[] => renders.slice(), isRenderMock: (): boolean => renderMock,
+  getLayouts: (): string[] => layoutNames.slice(), getLayoutDetails: (): LayoutSummary[] => layoutDetails.map((d) => ({ ...d })), getLayoutName: (): string => layoutName,
+  getLayoutTitle: (): string => layoutDisplayName(layoutName), layoutDisplayName, getScenesTrash: (): TrashedScene[] => scenesTrash.map((t) => ({ ...t })),
+  getRenders: (): RenderMeta[] => renders.slice(), isRenderMock: (): boolean => renderMock,
   getRuler, getState, getRenderSettings, horizonAt,
   // scenes
   listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, restoreScene, renameScene, saveScene, saveThumbnail, recalibrate,

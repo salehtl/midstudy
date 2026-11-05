@@ -3,7 +3,6 @@
 // still need a thumbnail, and when a job is busy. v1's splatAsset, isStandIn, pickRender, validDims and the
 // thumbnail filter (engine.js), busy (data.js). Pure, for TScert: the shell reads the JSON into a LibView.
 import type { DimsCm } from './text.js'
-import type { JsonObject } from './num.js'
 
 /** A library entry's fields the engine decides on (the shell reads them from the entry as it is). */
 export interface LibView {
@@ -37,12 +36,19 @@ export function pickRender(l: LibView): 'glb' | 'splat' {
   return !l.missing && l.defaultRender === 'splat' && splatAsset(l) !== null ? 'splat' : 'glb'
 }
 
+/** A size as it may come in (a library entry's dims_cm, a layout item's): anything per field. */
+export interface DimsInput {
+  readonly w?: unknown
+  readonly d?: unknown
+  readonly h?: unknown
+}
+
 /** v1's validDims: w, d and h all positive finite numbers. */
-export function validDims(d: JsonObject | null): DimsCm | null {
+export function validDims(d: DimsInput | null): DimsCm | null {
   if (d === null) return null
-  const w = d['w']
-  const dd = d['d']
-  const h = d['h']
+  const w = d.w
+  const dd = d.d
+  const h = d.h
   if (typeof w !== 'number' || !Number.isFinite(w) || !(w > 0)) return null
   if (typeof dd !== 'number' || !Number.isFinite(dd) || !(dd > 0)) return null
   if (typeof h !== 'number' || !Number.isFinite(h) || !(h > 0)) return null
@@ -52,9 +58,15 @@ export function validDims(d: JsonObject | null): DimsCm | null {
 /** A placeholder's size when the layout gave none (v1's MISSING_DIMS, 50 cm cubed). */
 export const MISSING_DIMS: DimsCm = { w: 50, d: 50, h: 50 }
 
-/** The name a piece goes by in messages: its name, else its id. */
-export function libName(l: LibView): string {
-  return l.name ?? l.id
+/** A piece as its name is read: a library entry, a placed piece's, a job's or a trashed one's. */
+export interface Named {
+  readonly id: string
+  readonly name?: string | null
+}
+
+/** The name a piece goes by (v1: `name || id`): its name, else its id. */
+export function libName(l: Named): string {
+  return (l.name ?? '') || l.id
 }
 
 /** v1's makeMissingThumbs filter: a GLB without a thumbnail that is what's drawn (not a splat, not a stand-in, not

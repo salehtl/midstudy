@@ -17,7 +17,7 @@ import { h } from '../kit.js'
 import { textInput } from '../sheet.js'
 import { ring } from '../icons.js'
 import { pic, messageOf } from './common.js'
-import { fmtUsd, type LibraryStore } from '../seam.js'
+import { fmtUsd, type Library } from '../seam.js'
 import type { DimsFields } from './libsheets.js'
 import { clipText, dimsLabel, pageSize, readDecimal, sentence } from '../logic/text.js'
 import {
@@ -118,7 +118,7 @@ interface ReadState {
 type PutKey = 'name' | 'w' | 'd' | 'h' | 'category'
 type StatusKind = 'busy' | 'ok' | 'warn' | null
 
-export function productSource({ lib, form, onChange, onUseLink }: { readonly lib: LibraryStore; readonly form: ProductForm; readonly onChange?: () => void; readonly onUseLink?: (imageUrl: string | null) => void }): ProductSource {
+export function productSource({ lib, form, onChange, onUseLink }: { readonly lib: Library; readonly form: ProductForm; readonly onChange?: () => void; readonly onUseLink?: (imageUrl: string | null) => void }): ProductSource {
   const st: ReadState = { busy: false, data: null, readUrl: '', size: 0, picture: -1, failed: new Set(), error: null, seq: 0, active: true }
   // what the last prefill put in each field: a field still holding it (or empty) is ours to replace
   const last: Record<PutKey, string> = { name: '', w: '', d: '', h: '', category: '' }

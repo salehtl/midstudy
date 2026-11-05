@@ -1,7 +1,7 @@
 // Panel (area C): In the scene, the furniture placed on the open scene's photo. Rows: thumbnail, name, W × D × H cm, its
 // height above the floor when raised, and Remove (with an Undo toast). Tapping a row selects the piece (the phone sheet
 // drops to peek so you can see it). Frames C2 (phone) and C6 sections.
-import { dimsText, quiet, type PlacedItem, type UiContext } from '../seam.js'
+import { dimsText, quiet, type ItemInfo, type UiContext } from '../seam.js'
 import { pic, itemThumb, emptyState } from './common.js'
 import { placedMark } from '../logic/library.js'
 
@@ -33,7 +33,7 @@ export function mount({ engine, shell, kit }: UiContext): void {
     if (shell.isPhone()) shell.setDetent('peek')
   }
 
-  function row(it: PlacedItem, selected: boolean): HTMLDivElement {
+  function row(it: ItemInfo, selected: boolean): HTMLDivElement {
     const mode = h('span.ir-mode', placedMark(it.missing, it.noGlb, it.position[1]))
     const del = h('button.ir-del', { type: 'button', 'aria-label': `Remove ${it.name}`, dataset: { tip: 'Remove', kbd: 'Del' }, onclick: (e) => { e.stopPropagation(); remove(it.uid) } }, pic('trash', { size: 18 }))
     const r: HTMLDivElement = h(`div.ir-row${selected ? '.is-selected' : ''}`, {
@@ -46,7 +46,7 @@ export function mount({ engine, shell, kit }: UiContext): void {
       },
     },
     itemThumb(engine, it.lib, 'ir-thumb'),
-    h('span.ir-text', h('span.ir-name', it.name), h('span.ir-meta.tnum', dimsText(it.lib?.dims_cm))),
+    h('span.ir-text', h('span.ir-name', it.name), h('span.ir-meta.tnum', dimsText(it.lib.dims_cm))),
     h('span.ir-modeslot', mode), del)
     return r
   }

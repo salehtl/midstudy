@@ -2,9 +2,10 @@
 // settles, the chrome's metrics, the dock's split under More, toasts' lifetimes, and where a menu or a tooltip goes.
 // Pure, TScert-checked.
 
+import type { ToastKind } from '../../logic/messages.js'
+
 export type Mode = 'phone' | 'desktop'
 export type Detent = 'peek' | 'half' | 'full'
-export type ToastKind = 'info' | 'ok' | 'error'
 
 const PEEK = 176 // the Paper detents at 390 × 844 (usable height 696)
 const HALF = 422

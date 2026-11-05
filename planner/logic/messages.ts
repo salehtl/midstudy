@@ -3,6 +3,9 @@
 // didn't answer. Pure, for TScert.
 import { isSlug } from './layout.js'
 
+/** A message's kind (the engine's 'toast' event; the shell's toasts): info and ok go by themselves, an error stays. */
+export type ToastKind = 'info' | 'ok' | 'error'
+
 /** §2.9: every POST, PUT, PATCH and DELETE the page makes carries X-Midstudy: 1 (v1's withMidstudy test). */
 export function needsMidstudyHeader(method: string): boolean {
   return /^(POST|PUT|PATCH|DELETE)$/i.test(method)

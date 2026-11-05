@@ -6,7 +6,7 @@
 // file; the price and today's budget before you confirm: panels/libsheets.ts), the jobs making pieces (progress,
 // Place when ready, failures), "…" per row (Edit, Remove with Undo = restore) and Recently removed (Restore).
 // The lists' rules and words: logic/library.ts.
-import { dimsText, fmtUsd, quiet, type LibItem, type LibJob, type TrashedItem, type UiContext } from '../seam.js'
+import { dimsText, fmtUsd, quiet, type LibraryEntry, type LibraryJob, type TrashedItem, type UiContext } from '../seam.js'
 import type { ToastHandle } from '../shell.js'
 import { pic, itemThumb } from './common.js'
 import { ring } from '../icons.js'
@@ -56,7 +56,7 @@ export function mount(ctx: UiContext): void {
 
   const counts = (): Map<string, number> => countBy(engine.getItems(), (it) => it.id)
 
-  async function add(item: LibItem): Promise<void> {
+  async function add(item: LibraryEntry): Promise<void> {
     if (!engine.getSceneName()) { shell.toast('Open a scene first, then add furniture to it.', { id: 'no-scene' }); shell.openPage('scenes'); return }
     let uid: string
     const name = itemName(item)
@@ -86,7 +86,7 @@ export function mount(ctx: UiContext): void {
       },
     })
   }
-  function itemMenu(item: LibItem, anchor: Element | null): void {
+  function itemMenu(item: LibraryEntry, anchor: Element | null): void {
     shell.menu(anchor, [
       { label: 'Place in the scene', icon: 'plus', onSelect: () => { quiet(add(item)) } },
       { label: 'Edit…', icon: 'pencil', onSelect: () => { openEditSheet(ctx, item, { onRemove: (it) => { quiet(removeFromLibrary(it)) } }) } },
@@ -94,19 +94,19 @@ export function mount(ctx: UiContext): void {
       { label: 'Remove from library', icon: 'trash', danger: true, midstudy: 'lib-remove', onSelect: () => { quiet(removeFromLibrary(item)) } },
     ], { align: 'end' })
   }
-  async function removeFromLibrary(item: LibItem): Promise<void> {
+  async function removeFromLibrary(item: LibraryEntry): Promise<void> {
     const name = itemName(item)
     try { await lib.remove(item.id) } catch { return } // reported
     const t = shell.toast(`${name} removed from the library`, { id: `lib-removed:${item.id}`, icon: 'trash', ms: 10000, action: { label: 'Undo', onClick: () => { quiet(restore(item)) } } })
     t.el.querySelector('.toast-action')?.setAttribute('data-midstudy', 'lib-undo')
   }
-  async function restore(item: LibItem | TrashedItem): Promise<void> {
+  async function restore(item: LibraryEntry | TrashedItem): Promise<void> {
     try { await lib.restore(item.id) } catch { return }
     shell.toast(`${itemName(item)} is back in the library`, { kind: 'ok', id: `lib-restored:${item.id}` })
   }
 
   // --- rows --------------------------------------------------------------------------------------------------------
-  function row(item: LibItem, n: number, selectedId: string | undefined, manage: boolean): HTMLElement {
+  function row(item: LibraryEntry, n: number, selectedId: string | undefined, manage: boolean): HTMLElement {
     const name = itemName(item)
     const inRoom = n > 0
     const meta = [h('span.lib-dims.tnum', dimsText(item.dims_cm))]
@@ -132,7 +132,7 @@ export function mount(ctx: UiContext): void {
     if (!shown.length) { jobsEl.replaceChildren(); return }
     const libItems = engine.getLibrary()
     jobsEl.replaceChildren(h('div.lib-jobs-head', h('span.caps', 'Being made'), h('span.lib-jobs-note', 'One at a time on the server')),
-      ...shown.map((j: LibJob) => {
+      ...shown.map((j: LibraryJob) => {
         const item = j.item ?? libItems.find((l) => l.id === j.item_id)
         const title = (item?.name ?? '') || j.item_id
         const kind = jobKind(j.status)
@@ -219,6 +219,5 @@ export function mount(ctx: UiContext): void {
     input.focus()
     return true
   })
-  ctx.library = { openAdd }
   render()
 }

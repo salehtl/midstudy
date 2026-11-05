@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ui/bus.ts against an EventTarget: the shell's events used to be one (v1), so Bus must dispatch as it did. Each case runs
+// planner/bus.ts against an EventTarget: the shell's events used to be one (v1), so Bus must dispatch as it did. Each case runs
 // the same listeners on both and compares what happened. Run: nix develop -c node planner/ui/test/bus.mjs
 import { build } from 'esbuild'
 import fs from 'node:fs'
@@ -8,7 +8,7 @@ import path from 'node:path'
 
 const ROOT = path.resolve(import.meta.dirname, '../../..')
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-bus-'))
-await build({ entryPoints: [path.join(ROOT, 'planner/ui/bus.ts')], bundle: true, format: 'esm', platform: 'node', outfile: path.join(dir, 'bus.mjs'), logLevel: 'error' })
+await build({ entryPoints: [path.join(ROOT, 'planner/bus.ts')], bundle: true, format: 'esm', platform: 'node', outfile: path.join(dir, 'bus.mjs'), logLevel: 'error' })
 const { Bus } = await import(path.join(dir, 'bus.mjs'))
 fs.rmSync(dir, { recursive: true, force: true })
 
