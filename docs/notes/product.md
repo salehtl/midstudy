@@ -35,3 +35,26 @@ Learned: Shopify rate-limits bursts from one IP (429 on `.json`, then on pages t
 - `eval:product` (E13): synthetic pages in `fixtures/product-pages/` served by `evals/lib/pages_server.mjs`, model mocked; in `eval:all`.
 - `eval:product-ui` (E14): the form on desktop and phone; in `eval:all`.
 - `eval:product-live`: the golden set, live (`--live`) or from the snapshots (default), model off unless `--llm` (which needs the main session and the user's OK); not in `eval:all`.
+
+## Phase 1: two builders in parallel (workflow, 2 agents)
+
+- **A, extractor:** `planner/product_page.py` (stdlib), the route in `serve.py` (three small hunks), E13, `eval:product-live`. See `docs/notes/product-extractor.md`. E13 273/273; golden snapshots 80/81, the one miss being my golden error (Floyd does give its size, in an accordion: `16” W x 13” L x 7” H`).
+- **B, form:** `planner/ui/panels/productsrc.js`, small hooks in `libsheets.js`, `lib.readProduct`, the `readProductPage` hook, CSS, E14. See `docs/notes/product-form.md`. E14 115/115 against A's real route.
+- Folded into the contract afterwards: W and L in one reading, unlabelled pairs, unitless numbers in text, which page pictures count, feed descriptions as `text`, `mock`/`llm` only when the model ran, no cost row for a refused call, 400 for a host that doesn't resolve, form errors vs app errors.
+
+## Phase 2: integration
+
+`eval:all` on 2026-11-05 13:30: E1, E6–E9, E12–E14 passed; E3, E4, E5 and E11 failed on 30 s page-load timeouts while the Mac's load average was 185–330 (other sessions' simulators and evals). Rerun after the fixes, at normal load (below).
+
+## Phase 3: black-box verifiers (workflow, 3 agents) and fixes
+
+32 findings: security 6, UX 11, accuracy 15. Fixed here, each with a regression in E13 or E14:
+
+- **High:** a long digit run or an unterminated escaped-quote string froze the whole server for 20+ s (quadratic regexes hold the GIL). Number patterns are bounded, script strings are scanned in one pass, and the work after the download has its own 10 s limit. E13 reads a 12,000-digit, 20,000-escaped-quote page in well under a second while `/api/spend` stays responsive.
+- **High:** a second size of the same rug replaced the first (same id). A product with several sizes now gets `<name>-<w>x<d>` ids, and the sheet says when Make would replace a piece already in the library.
+- **High:** order keys ("(H x W x D)", "W x D x H:") were ignored or misread. They're now read as keys, never as one number's label.
+- **Medium:** a failed read left the last page's size, category and Flat rug in the form; sizes in "related products" blocks could come first; the size picked in the link (`?variant=`) was ignored; "L x W" put a sofa's length in depth (now the longer of L and W is the width, except beds); a rug word as a material ("Kilim Ottoman") made a rug; size chips cut their text; no-picture-loads was a dead end.
+- **Low, fixed:** private picture links (the browser would request them), `user:password@` kept in `costs.csv`, deep JSON failing a read, three IPv6 private ranges, Python names in error sentences, labels after numbers, dia, foreign axis words, ranges, structured `Width (cm)` names, unitless sizes that only fit in cm, untrue notes (unit order, rug thickness without a unit), picture copies (largest, https), samples as sizes, dual units, sofa beds, focus after Read, the phone keyboard after Go, the model credited when it found nothing, a missing height.
+- **Not fixed (follow-ups):** Tab leaves the Add furniture sheet (a general `ui/sheet.js` issue, every sheet has it); seater-named Shopify options linked to sizes in the description, and filling a missing height from a lone "Height: 75 cm"; the four Shopify golden shops answer 429 from this Mac's IP (Cloudflare `local_rate_limited` after today's probing; untested from another network or later).
+
+After the fixes, at normal load (2026-11-05 14:30): `eval:all` 12/12 (E13 395/395, E14 117/117), golden snapshots 82/82, harness self-test 22/22. Live without the model: 48/48 with 4 WARN (the Shopify shops' 429).
