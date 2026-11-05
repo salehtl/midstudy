@@ -26,7 +26,11 @@ function hextet(s: string): number | null {
 /** An IPv6 address as its eight 16-bit groups, or null. Python's ipaddress rules, step by step: an IPv4 tail becomes
  *  two groups, at most nine parts, one `::` at most, a leading or trailing `:` only as part of `::`, 1–4 hex digits a
  *  group. */
-export function parseIpv6(s: string): readonly number[] | null {
+export function parseIpv6(text: string): readonly number[] | null {
+  // A scope (`fe80::1%en0`) is allowed and ignored; an empty one, or a second `%`, is not.
+  const pct = text.indexOf('%')
+  if (pct >= 0 && (pct === text.length - 1 || text.slice(pct + 1).includes('%'))) return null
+  const s = pct < 0 ? text : text.slice(0, pct)
   if (s === '') return null
   const parts = s.split(':')
   if (parts.length < 3) return null

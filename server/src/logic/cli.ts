@@ -107,37 +107,44 @@ function classify(word: string): Word {
   return { kind: 'unknown' }
 }
 
-/** argparse over v1's flags. Values are checked later (main.ts): only their types here. */
-export function parseCli(argv: readonly string[]): CliParse {
-  let port = 8765
-  let host = '127.0.0.1'
-  let scenesDir = 'scenes'
-  let libraryDir: string | null = null
-  let layoutsDir = 'layouts'
-  let rendersDir = 'renders'
-  let costsFile: string | null = null
-  let calib = DEFAULT_CALIB
-  let midstudyAdd = DEFAULT_MIDSTUDY_ADD
-  const allowedHosts: string[] = []
-  let dailySpendUsd = 2
-  const extra: string[] = []
+/** One flag and its value, as argparse paired them. */
+interface FlagValue {
+  readonly flag: Flag
+  readonly value: string
+}
+
+type Pairing =
+  | { readonly kind: 'pairs'; readonly pairs: readonly FlagValue[]; readonly extra: readonly string[] }
+  | { readonly kind: 'help' }
+  | { readonly kind: 'error'; readonly message: string }
+
+/** argparse's type check of a value as it reads it (`type=int`, `type=float`): its error, or null. */
+function typeProblem(flag: Flag, value: string): string | null {
+  if (flag === '--port' && pyInt(value) === null) return 'argument --port: invalid int value: ' + pyRepr(value)
+  if (flag === '--daily-spend-usd' && pyFloat(value) === null) return 'argument --daily-spend-usd: invalid float value: ' + pyRepr(value)
+  return null
+}
+
+/** Left to right, as argparse reads: each flag with its value (the first error stops it), the words it didn't
+ *  take, `-h` at once. */
+function pairUp(argv: readonly string[]): Pairing {
   const dash = argv.indexOf('--')
   const words = dash < 0 ? argv : argv.slice(0, dash)
-  const kinds = words.map(classify)
-  for (const k of kinds) {
-    if (k.kind === 'ambiguous') return { kind: 'error', message: k.message }
-  }
+  const kinds = words.map((w) => classify(w))
+  const ambiguous = kinds.find((k) => k.kind === 'ambiguous')
+  if (ambiguous?.kind === 'ambiguous') return { kind: 'error', message: ambiguous.message }
+  const pairs: FlagValue[] = []
+  const extra: string[] = []
   let i = 0
   while (i < words.length) {
     const word = words[i] ?? ''
-    const k = kinds[i] ?? { kind: 'value' }
+    const k = kinds[i]
     i += 1
-    if (k.kind === 'value' || k.kind === 'unknown' || k.kind === 'ambiguous') {
+    if (k?.kind !== 'flag') {
       extra.push(word)
       continue
     }
-    const flag = k.flag
-    if (flag === '--help') {
+    if (k.flag === '--help') {
       if (k.explicit !== null) return { kind: 'error', message: 'argument -h/--help: ignored explicit argument ' + pyRepr(k.explicit) }
       return { kind: 'help' }
     }
@@ -148,41 +155,50 @@ export function parseCli(argv: readonly string[]): CliParse {
       const next = words[i]
       const nextKind = kinds[i]
       if (next === undefined || nextKind?.kind !== 'value') {
-        return { kind: 'error', message: 'argument ' + flag + ': expected one argument' }
+        return { kind: 'error', message: 'argument ' + k.flag + ': expected one argument' }
       }
       value = next
       i += 1
     }
-    switch (flag) {
-      case '--port': {
-        const n = pyInt(value)
-        if (n === null) return { kind: 'error', message: 'argument --port: invalid int value: ' + pyRepr(value) }
-        port = n
-        break
-      }
-      case '--daily-spend-usd': {
-        const n = pyFloat(value)
-        if (n === null) return { kind: 'error', message: 'argument --daily-spend-usd: invalid float value: ' + pyRepr(value) }
-        dailySpendUsd = n
-        break
-      }
-      case '--host': host = value; break
-      case '--scenes-dir': scenesDir = value; break
-      case '--library-dir': libraryDir = value; break
-      case '--layouts-dir': layoutsDir = value; break
-      case '--renders-dir': rendersDir = value; break
-      case '--costs-file': costsFile = value; break
-      case '--calib': calib = value; break
-      case '--midstudy-add': midstudyAdd = value; break
-      case '--allowed-host': allowedHosts.push(value); break
-    }
+    const problem = typeProblem(k.flag, value)
+    if (problem !== null) return { kind: 'error', message: problem }
+    pairs.push({ flag: k.flag, value })
   }
-  if (dash >= 0) extra.push(...argv.slice(dash + 1))
-  if (extra.length > 0) return { kind: 'error', message: 'unrecognized arguments: ' + extra.join(' ') }
-  return {
-    kind: 'run',
-    options: { port, host, scenesDir, libraryDir, layoutsDir, rendersDir, costsFile, calib, midstudyAdd, allowedHosts, dailySpendUsd },
+  const rest = dash < 0 ? [] : argv.slice(dash)
+  return { kind: 'pairs', pairs, extra: [...extra, ...rest] }
+}
+
+/** The last value given for `flag` (argparse's store action), or null. */
+function lastValue(pairs: readonly FlagValue[], flag: Flag): string | null {
+  let v: string | null = null
+  for (const p of pairs) {
+    if (p.flag === flag) v = p.value
   }
+  return v
+}
+
+/** argparse over v1's flags. Values are checked later (main.ts): only their types here. */
+export function parseCli(argv: readonly string[]): CliParse {
+  const paired = pairUp(argv)
+  if (paired.kind !== 'pairs') return paired
+  if (paired.extra.length > 0) return { kind: 'error', message: 'unrecognized arguments: ' + paired.extra.join(' ') }
+  const pairs = paired.pairs
+  const portText = lastValue(pairs, '--port')
+  const spendText = lastValue(pairs, '--daily-spend-usd')
+  const options: CliOptions = {
+    port: portText === null ? 8765 : (pyInt(portText) ?? 8765),
+    host: lastValue(pairs, '--host') ?? '127.0.0.1',
+    scenesDir: lastValue(pairs, '--scenes-dir') ?? 'scenes',
+    libraryDir: lastValue(pairs, '--library-dir'),
+    layoutsDir: lastValue(pairs, '--layouts-dir') ?? 'layouts',
+    rendersDir: lastValue(pairs, '--renders-dir') ?? 'renders',
+    costsFile: lastValue(pairs, '--costs-file'),
+    calib: lastValue(pairs, '--calib') ?? DEFAULT_CALIB,
+    midstudyAdd: lastValue(pairs, '--midstudy-add') ?? DEFAULT_MIDSTUDY_ADD,
+    allowedHosts: pairs.filter((p) => p.flag === '--allowed-host').map((p) => p.value),
+    dailySpendUsd: spendText === null ? 2 : (pyFloat(spendText) ?? 2),
+  }
+  return { kind: 'run', options }
 }
 
 /** v1's checks after parsing that need no file system: a negative cap (and, v2, one that isn't a finite number:

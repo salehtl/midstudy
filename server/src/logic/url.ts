@@ -35,8 +35,7 @@ function bracketedOk(netloc: string): boolean {
   if (host.startsWith('v')) return /^v[a-fA-F0-9]+\..+$/.test(host)
   // ipaddress.ip_address(host) must be an IPv6 address (an IPv4 one in brackets is refused)
   if (parseIpv4(host) !== null) return false
-  const pct = host.indexOf('%')
-  return parseIpv6(pct < 0 ? host : host.slice(0, pct)) !== null
+  return parseIpv6(host) !== null
 }
 
 /** Python's `urlsplit(url, scheme)`; null where it raises ValueError (a malformed bracketed host). */
@@ -138,9 +137,9 @@ function urlparse(url: string, scheme: string): ParsedUrl | null {
   if (USES_PARAMS.includes(s.scheme) && s.path.includes(';')) {
     const slash = s.path.lastIndexOf('/')
     const semi = slash >= 0 ? s.path.indexOf(';', slash) : s.path.indexOf(';')
-    if (semi >= 0) return { ...s, path: s.path.slice(0, semi), params: s.path.slice(semi + 1) }
+    if (semi >= 0) return { scheme: s.scheme, netloc: s.netloc, path: s.path.slice(0, semi), params: s.path.slice(semi + 1), query: s.query, fragment: s.fragment }
   }
-  return { ...s, params: '' }
+  return { scheme: s.scheme, netloc: s.netloc, path: s.path, params: '', query: s.query, fragment: s.fragment }
 }
 
 function urlunparse(p: ParsedUrl): string {

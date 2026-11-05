@@ -108,19 +108,19 @@ export function rawHeadHosts(head: string): string[] {
   const block = end < 0 ? head : head.slice(0, end)
   const lines = block.split(/\r?\n/).slice(1)
   const hosts: string[] = []
-  let current = -1
+  let lastWasHost = false
   for (const line of lines) {
     if (line.startsWith(' ') || line.startsWith('\t')) {
-      const prev = current >= 0 ? hosts[current] : undefined
-      if (prev !== undefined) hosts[current] = (prev + ' ' + line.trim()).trim()
+      const prev = lastWasHost ? hosts.pop() : undefined
+      if (prev !== undefined) hosts.push((prev + ' ' + line.trim()).trim())
       continue
     }
-    current = -1
+    lastWasHost = false
     const colon = line.indexOf(':')
     if (colon <= 0) continue
     if (line.slice(0, colon).trim().toLowerCase() !== 'host') continue
     hosts.push(line.slice(colon + 1).trim())
-    current = hosts.length - 1
+    lastWasHost = true
   }
   return hosts
 }

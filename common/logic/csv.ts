@@ -28,7 +28,7 @@ export function csvField(v: string): string {
 
 /** One record, `\n`-terminated (`csv.writer(..., lineterminator="\n").writerow`). */
 export function csvLine(fields: readonly string[]): string {
-  return fields.map(csvField).join(',') + '\n'
+  return fields.map((f) => csvField(f)).join(',') + '\n'
 }
 
 /** The fields of a cost row as v1 wrote them: `fmt_cost` for the amount, `true`/`false` for mock. */
