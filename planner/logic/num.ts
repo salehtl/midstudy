@@ -22,11 +22,6 @@ export function clampNum(v: unknown, lo: number, hi: number, dflt: number): numb
   return Math.min(hi, Math.max(lo, v))
 }
 
-/** Math.min(hi, Math.max(lo, v)), v1's clamp (NaN stays NaN). */
-export function clamp(v: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, v))
-}
-
 /** v1's wrapDeg: degrees into (−180, 180]. */
 export function wrapDeg(d: number): number {
   let x = ((((d + 180) % 360) + 360) % 360) - 180
@@ -61,11 +56,6 @@ export function nudged(y: number, dy: number): number {
 /** v1's setElevation: the stored elevation for a requested one. */
 export function elevationOf(y: number): number {
   return round(clampElev(y), 6)
-}
-
-/** Rec. 709 luminance of a linear RGB triple (v1's lum). */
-export function lum(c: readonly [number, number, number]): number {
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
 }
 
 /** Each number of a list rounded with round(v, n) (v1's r3 in getLighting). */

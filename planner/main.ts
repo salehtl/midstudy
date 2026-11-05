@@ -14,6 +14,7 @@ import * as layouts from './ui/panels/layouts.js'
 import * as scenePanel from './ui/panels/scene.js'
 import * as renders from './ui/panels/renders.js'
 import * as scenesPage from './ui/scenes.js'
+import { renderSettingsArgs } from './logic/messages.js'
 
 /** What the entry uses of the shell (ui/shell.js createShell). */
 interface ShellApi {
@@ -98,8 +99,9 @@ const hook = {
   getRenderSettings: () => engine.getRenderSettings(),
   setRenderSettings: (s: unknown) => {
     if (!isObject(s)) { engine.reportError('setRenderSettings needs an object'); return }
-    if (s['exposure'] !== undefined || s['warmth'] !== undefined) engine.setLook(s)
-    if (typeof s['contactShadows'] === 'boolean') engine.setContactShadows(s['contactShadows'])
+    const a = renderSettingsArgs(s['exposure'], s['warmth'], s['contactShadows'])
+    if (a.look) engine.setLook(s)
+    if (a.contactShadows !== null) engine.setContactShadows(a.contactShadows)
   },
   // lighting inferred from the photo (§4.8)
   getLighting: () => engine.getLighting(),

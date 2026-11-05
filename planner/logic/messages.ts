@@ -94,7 +94,7 @@ export function renderFailText(status: number | null): string {
 }
 
 /** renderView's model check (contract §4.7): the models, the default first. */
-export function unknownModelText(model: string, models: readonly string[]): string {
+function unknownModelText(model: string, models: readonly string[]): string {
   return `Unknown render model "${model}" (use ${models.join(', ')})`
 }
 

@@ -1,8 +1,7 @@
 // Prices (contract §2.6 renders, §2.8/§3.2 library adds): what a render or an add will cost, as v1 shows it before
 // asking (engine.js RENDER_MODELS and renderPrice; data.js LIB_PRICE, estimateCost). Pure, for TScert.
 
-export const RENDER_MODEL_NAMES = ['nano-banana', 'kontext', 'qwen'] as const
-export type RenderModel = (typeof RENDER_MODEL_NAMES)[number]
+export type RenderModel = 'nano-banana' | 'kontext' | 'qwen'
 
 /** The render models, the default first (Nano Banana takes the scene photo as a reference). */
 export function isRenderModel(m: string): m is RenderModel {
@@ -37,8 +36,7 @@ export function megapixels(width: number, height: number): number {
   return (width * height) / 1e6
 }
 
-/** The image engines and what an add costs on each (contract §3.2); a model upload (glb) is free. */
-export const IMAGE_ENGINES = ['idol', 'sam3d', 'trellis2', 'rug'] as const
+/** The default image engine (contract §2.8, §3.2): $0.10, a splat with a stand-in box. */
 export const DEFAULT_IMAGE_ENGINE = 'idol'
 
 /** TRELLIS 2's price by resolution (512 by default and for any other value). */

@@ -72,7 +72,7 @@ function rgbOf(v: unknown): Rgb | null {
 const isRecord = (x: unknown): x is JsonObject => typeof x === 'object' && x !== null
 
 /** v1's setData test (ambient.sh 9 rows, key.direction an array), with every number the lights read checked. */
-export function lightData(lj: JsonObject | null): LightData | null {
+function lightData(lj: JsonObject | null): LightData | null {
   if (lj === null) return null
   const ambient = lj['ambient']
   const key = lj['key']
@@ -402,4 +402,3 @@ export function createLighting({ renderer, scene, photo }: { renderer: THREE.Web
   }
 }
 
-export type Lighting = ReturnType<typeof createLighting>

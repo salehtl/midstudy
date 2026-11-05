@@ -9,7 +9,7 @@ export interface DimsCm {
 }
 
 /** v1's fmtCm: whole centimetres as they are, else one decimal. */
-export function fmtCm(v: number): string {
+function fmtCm(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(1)
 }
 
@@ -37,7 +37,7 @@ export interface DateParts {
 }
 
 /** Two digits (v1's pad). */
-export function pad2(n: number): string {
+function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 

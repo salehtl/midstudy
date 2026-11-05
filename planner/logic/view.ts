@@ -45,7 +45,7 @@ export interface ViewReport {
   readonly fit: boolean
 }
 
-export const MAX_ZOOM = 4
+const MAX_ZOOM = 4
 
 /** v1's setStageInsets: each inset a positive finite number, else 0. */
 export function insetsFrom(left: unknown, right: unknown, top: unknown, bottom: unknown): Insets {
@@ -61,7 +61,7 @@ export function stageOf(canvas: Box, ins: Insets): Box {
 }
 
 /** v1's fitScale: the photo contained in the stage. */
-export function fitScale(st: Box, photo: Size): number {
+function fitScale(st: Box, photo: Size): number {
   return Math.min(st.w / photo.w, st.h / photo.h)
 }
 
@@ -72,7 +72,7 @@ export function xformOf(st: Box, photo: Size, v: ViewState): Xform {
 }
 
 /** v1's clampCenter lim(): a centre coordinate kept so the photo covers the stage when it is larger than it. */
-export function limitCenter(c: number, len: number, stageLen: number, s: number): number {
+function limitCenter(c: number, len: number, stageLen: number, s: number): number {
   if (s * len <= stageLen + 0.5) return len / 2
   return Math.min(len - stageLen / (2 * s), Math.max(stageLen / (2 * s), c))
 }

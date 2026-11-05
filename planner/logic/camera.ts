@@ -73,8 +73,6 @@ export function sceneSig(c: Camera): string {
   return JSON.stringify([c.fov_y_deg, c.height_m, c.pitch_deg, c.roll_deg])
 }
 
-export type CameraSource = 'auto' | 'manual' | 'default'
-
 /** v1's camera_source after a live change: the saved one while the camera equals the saved camera, else manual. */
 export function sourceAfterChange(cam: Camera, saved: Camera | null, savedSource: string): string {
   return saved !== null && sameCamera(cam, saved) ? savedSource : 'manual'

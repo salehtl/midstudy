@@ -21,12 +21,6 @@ export interface LookState {
   readonly cast_shadows: boolean | null
 }
 
-/** v1's LOOK_KEYS: the order every Look object keeps (and the PUT body's). */
-export const LOOK_KEYS = [
-  'exposure', 'warmth', 'light_azimuth_deg', 'light_elevation_deg', 'light_softness', 'light_strength', 'ambient',
-  'contact_shadows', 'auto_light', 'cast_shadows',
-] as const
-
 /** v1's LOOK_DEFAULT (exposure and warmth). */
 export const LOOK_DEFAULT = { exposure: 1, warmth: 0 } as const
 
@@ -74,7 +68,7 @@ export function defaultLook(): LookState {
 }
 
 /** v1's setLighting: a direction or softness given without auto_light turns Auto lighting off (as does auto_light false). */
-export function goesManual(p: JsonObject): boolean {
+function goesManual(p: JsonObject): boolean {
   const some = isNum(p['light_azimuth_deg']) || isNum(p['light_elevation_deg']) || isNum(p['light_softness'])
   return (some && typeof p['auto_light'] !== 'boolean') || p['auto_light'] === false
 }
@@ -343,7 +337,7 @@ export function keepPhoto(amb: Vec3, even: Vec3, keyColor: Vec3, keyIntensity: n
 }
 
 /** One channel of keepPhoto. */
-export function keepChannel(amb: number, even: number, keyColor: number, keyIntensity: number, ambient: number, strength: number, upY: number): number {
+function keepChannel(amb: number, even: number, keyColor: number, keyIntensity: number, ambient: number, strength: number, upY: number): number {
   const t = Math.max(1e-4, amb * ambient + keyColor * keyIntensity * strength * upY)
   return Math.min(1, Math.max(0.08, Math.min(even * ambient, amb * ambient) / t))
 }

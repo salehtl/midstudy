@@ -112,6 +112,7 @@ import type { DimsCm } from './logic/text.js'
 import * as viewLogic from './logic/view.js'
 import type { Box, ViewReport, ViewState, Xform } from './logic/view.js'
 
+/** The engine's value types (planner/logic/). @public */
 export type { Camera, DimsCm, JsonObject, LightingReport, LookView, ViewReport }
 export type Vec3 = [number, number, number]
 
@@ -123,21 +124,21 @@ const DEG = Math.PI / 180
 const str = (x: unknown): string | null => (typeof x === 'string' && x !== '' ? x : null)
 
 const params = new URLSearchParams(location.search)
-/** §2.2: ?library=<url>, default /library/library.json. */
+/** §2.2: ?library=<url>, default /library/library.json. @public (a v1 export name, kept for the UI port) */
 export const LIBRARY_URL = str(params.get('library')) ?? '/library/library.json'
 const libraryBase = new URL(LIBRARY_URL, location.href)
 
-/** v1's round(v, n). */
+/** v1's round(v, n). @public (a v1 export name) */
 export const round = num.round
-/** A deep copy of plain JSON data (v1's clone). */
+/** A deep copy of plain JSON data (v1's clone). @public (a v1 export name) */
 export function clone<T>(o: T): T {
   return o === null || o === undefined ? o : structuredClone(o)
 }
-/** A finite number (v1's isNum). */
+/** A finite number (v1's isNum). @public (a v1 export name) */
 export const isNum = num.isNum
 /** "W × D × H cm" (v1's dimsText). */
 export const dimsText = (d: DimsCm | null | undefined): string => text.dimsText(d)
-/** Degrees into (−180, 180] (v1's wrapDeg). */
+/** Degrees into (−180, 180] (v1's wrapDeg). @public (a v1 export name) */
 export const wrapDeg = num.wrapDeg
 /** Fire-and-forget wrapper for UI handlers: failures are already reported, never thrown. */
 export function quiet(p: unknown): void {
@@ -161,11 +162,13 @@ export const MAX_ELEVATION = num.MAX_ELEVATION
 
 // --- the camera block (contract §4.1) ------------------------------------------------------------------------------
 export const CAMERA_RANGE = cameraLogic.CAMERA_RANGE
+/** The camera without a calibration (§4.1). @public (a v1 export name) */
 export const DEFAULT_CAMERA: Camera = cameraLogic.DEFAULT_CAMERA
-/** v1's clampCamera(c, base): each field clamped and rounded to 6 decimals. */
+/** v1's clampCamera(c, base): each field clamped and rounded to 6 decimals. @public (a v1 export name) */
 export function clampCamera(c: unknown, base: Camera = DEFAULT_CAMERA): Camera {
   return cameraLogic.clampCamera(isRecord(c) ? c : null, base)
 }
+/** v1's LOOK_DEFAULT. @public (a v1 export name) */
 export const LOOK_DEFAULT = lookLogic.LOOK_DEFAULT
 
 // --- small typed helpers for JSON from the server -------------------------------------------------------------------
@@ -211,7 +214,7 @@ function measure(step: string, t0: number): void {
 }
 
 // --- events, errors + toasts ------------------------------------------------
-/** What each engine event carries (engine.events, CustomEvent.detail). */
+/** What each engine event carries (engine.events, CustomEvent.detail). @public (the UI port types its listeners with it) */
 export interface EngineEvents {
   scene: { phase: string; name: string | null }
   scenes: { scenes: JsonObject[] }
@@ -282,8 +285,8 @@ const LAST_SCENE_KEY = 'midstudy.lastScene'
 // --- the kernels (core/js/web.ts) ------------------------------------------------------------------------------------
 // The wasm loads while the renderer and the lights are set up; the module waits for it before its first kernel call.
 const kernelsReady = loadKernels()
-// depth.png and the keep-room mask go to a worker (planner/engine.worker.ts); the main thread is the fallback when the
-// worker can't start or dies.
+// depth.png's decode goes to a worker (planner/engine.worker.ts); the main thread is the fallback when the worker can't
+// start, dies, or fails (a damaged file then fails again here, with the decoder's own words).
 let kernelWorker: KernelWorker | null = null
 let workerDown: Promise<never> | null = null
 function worker(): { k: KernelWorker; down: Promise<never> } | null {
@@ -303,15 +306,14 @@ function worker(): { k: KernelWorker; down: Promise<never> } | null {
     return null
   }
 }
-/** A heavy kernel in the worker, or on the main thread when there is none. */
+/** A heavy kernel in the worker, or on the main thread when there is none (or it failed). */
 async function inWorker<T>(call: (k: KernelWorker) => Promise<T>, here: () => T): Promise<T> {
   const w = worker()
   if (!w) return here()
   try {
     return await Promise.race([call(w.k), w.down])
-  } catch (e) {
-    if (kernelWorker) throw e // the kernel's own error
-    return here() // the worker went away: do it here
+  } catch {
+    return here()
   }
 }
 
@@ -1166,7 +1168,8 @@ function select(uid: unknown): void {
   emit('selection', { uid: selected })
 }
 function setSnap(on: unknown): void { snap = !!on }
-/** Footprint corners [front-left, front-right, back-right, back-left] on the floor (front faces +Z), centre, box, height. */
+/** Footprint corners [front-left, front-right, back-right, back-left] on the floor (front faces +Z), centre, box, height.
+ * @public */
 export interface Footprint {
   corners: Vec3[]
   center: Vec3
@@ -1262,7 +1265,7 @@ function endItemDrag(): void {
   drag.uid = null
   emit('drag', { ...d, phase: 'end' })
 }
-/** What Undo puts back (removeItemWithUndo → restoreItem). */
+/** What Undo puts back (removeItemWithUndo → restoreItem). @public */
 export interface ItemSnapshot {
   uid: string
   id: string
@@ -1287,6 +1290,7 @@ async function restoreItem(s: ItemSnapshot): Promise<string> {
 }
 
 // --- the ruler (Adjust floor): two taps on the floor, the distance between them -------------------------------------
+/** getRuler() and the 'ruler' event. @public */
 export interface RulerState {
   active: boolean
   points: Vec3[]
@@ -1849,7 +1853,7 @@ function setLayoutName(name: unknown, title: unknown = null): void {
   layoutName = name === null || name === undefined ? '' : asText(name)
   layoutTitle = layoutLogic.currentTitle(layoutName, title)
 }
-/** v1's prettyLayout: "two-chairs" → "Two chairs". */
+/** v1's prettyLayout: "two-chairs" → "Two chairs". @public (a v1 export name) */
 export const prettyLayout = (name: unknown): string => layoutLogic.prettyLayout(name ? asText(name) : '')
 /** The listing's details as the layout logic reads them. */
 function details(): LayoutDetail[] {
@@ -2139,7 +2143,7 @@ function drawTo(target: THREE.WebGLRenderTarget | null, furniture = true): void 
 }
 function renderFrame(): void { drawTo(null, !!sceneName) }
 
-/** A capture of the full photo frame (§4.7): a JPEG data URL and its size. */
+/** A capture of the full photo frame (§4.7): a JPEG data URL and its size. @public */
 export interface Shot {
   dataUrl: string
   width: number
@@ -2147,7 +2151,7 @@ export interface Shot {
 }
 /** captureComposite's answer: a Promise (WebGPU reads back asynchronously, Phase 4). Phase 2 bridge: the shot's fields
  * are also on the Promise itself, because the legacy ui/panels/renders.js still reads them synchronously; integration
- * drops them once ui/panels/renders.ts awaits. */
+ * drops them once ui/panels/renders.ts awaits. @public */
 export type ShotPromise = Promise<Shot> & Shot
 
 // The full photo frame at the photo's resolution (or scaled to maxPx): photo + furniture, no view offset, no grid.
@@ -2179,8 +2183,10 @@ function captureComposite(opts: { maxPx?: number | null; quality?: number } = {}
   return Object.assign(Promise.resolve(shot), shot)
 }
 // The keep-room mask (§4.7): items white on black at the photo's size (what the photo hides of them stays black),
-// dilated by 3 % of the photo's width, and twice that below each piece for its shadow (the kernels, in the worker).
+// dilated by 3 % of the photo's width, and twice that below each piece for its shadow, and its PNG: the kernels, here
+// (a few ms at 2048 × 1152: the worker's copy and round trip would cost more than they free).
 // → { dataUrl, width, height, coverage }
+/** @public */
 export interface MaskShot {
   dataUrl: string
   width: number
@@ -2218,8 +2224,7 @@ async function captureMask(): Promise<MaskShot> {
     for (const o of shown) o.visible = false
     rt.dispose()
   }
-  const copy = pixels.slice() // the worker takes the buffer; the copy is the main thread's fallback
-  const m: KeepRoomMask = await inWorker((k) => k.keepRoomMask(pixels.buffer, w, h, { png: true }), () => keepRoomMask(copy, w, h, { png: true }))
+  const m: KeepRoomMask = keepRoomMask(pixels, w, h, { png: true })
   if (!m.png) throw new Error('the mask has no PNG')
   const dataUrl = await pngDataUrl(m.png)
   measure('mask-build', t0)
@@ -2339,7 +2344,7 @@ renderer.setAnimationLoop(() => {
 })
 
 // --- state for window.midstudy (contract §2.4, §4.6) --------------------------------------------------------------------
-/** getState().scene (§4.6). */
+/** getState().scene (§4.6). @public */
 export interface SceneState {
   name: string
   title: unknown
@@ -2357,7 +2362,7 @@ function getSceneState(): SceneState | null {
     floor_found: rec(rec(sceneData?.['calib'])?.['floor'])?.['found'] ?? null, hasDepth: !!photo.depthTexture, occlusion, adjustFloor,
   }
 }
-/** getState().items[] (§4.6). */
+/** getState().items[] (§4.6). @public */
 export interface StateItem {
   uid: string
   id: string
@@ -2368,7 +2373,7 @@ export interface StateItem {
   missing?: true
   worldBounds: { min: Vec3; max: Vec3 }
 }
-/** window.midstudy.getState() (§4.6). */
+/** window.midstudy.getState() (§4.6). @public */
 export interface PlannerState {
   scene: SceneState | null
   items: StateItem[]
@@ -2391,7 +2396,7 @@ function getState(): PlannerState {
     dirty: dirty.layout,
   }
 }
-/** window.midstudy.getRenderSettings() (§2.4). */
+/** window.midstudy.getRenderSettings() (§2.4). @public */
 export interface RenderSettings {
   toneMapping: 'aces'
   exposure: number
@@ -2424,7 +2429,7 @@ async function init(): Promise<string | null> {
   return first.status === 'fulfilled' ? first.value : null
 }
 
-/** Points the UI reads as client px (worldToScreen) or photo px. */
+/** Points the UI reads as client px (worldToScreen) or photo px. @public */
 export type { PointLike, Rect }
 
 /** What planner/input.ts installs (installInput). */

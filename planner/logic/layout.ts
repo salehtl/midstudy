@@ -22,7 +22,7 @@ export interface PlacedPose {
 
 /** One piece as v1's layoutSig row read as text: the id, the position in 0.1 mm and the turn in 0.01°, comma-joined
  * (the numbers have no commas, so the row is unambiguous). */
-export function poseText(p: PlacedPose): string {
+function poseText(p: PlacedPose): string {
   return `${p.id},${String(Math.round(p.x * 1e4))},${String(Math.round(p.y * 1e4))},${String(Math.round(p.z * 1e4))},${String(Math.round(wrapDeg(p.rotation_y_deg) * 100))}`
 }
 

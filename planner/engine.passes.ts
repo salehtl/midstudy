@@ -40,7 +40,7 @@ function fsMesh(material: THREE.Material, renderOrder = 0): THREE.Mesh {
 }
 
 /** The photo's rectangle in the target's pixels (top-left origin) → uv with v down; outside the photo: false. */
-export const PHOTO_UV = `
+const PHOTO_UV = `
 uniform vec4 uRect;
 uniform vec2 uTarget;
 vec2 photoUv() {
@@ -280,7 +280,7 @@ export function sizeTargets(p: Passes, w: number, h: number): void {
 }
 
 /** The one place a target is cleared (the WebGPU swap's clear workarounds go here). */
-export function clearTarget(renderer: THREE.WebGLRenderer, target: THREE.WebGLRenderTarget | null, color: THREE.ColorRepresentation, alpha: number, bits: { color: boolean; depth: boolean; stencil: boolean }): void {
+function clearTarget(renderer: THREE.WebGLRenderer, target: THREE.WebGLRenderTarget | null, color: THREE.ColorRepresentation, alpha: number, bits: { color: boolean; depth: boolean; stencil: boolean }): void {
   renderer.setRenderTarget(target)
   renderer.setClearColor(color, alpha)
   renderer.clear(bits.color, bits.depth, bits.stencil)

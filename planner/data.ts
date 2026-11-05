@@ -29,7 +29,7 @@ export function friendlyDate(when: When): string {
   if (Number.isNaN(d.getTime())) return ''
   return text.friendlyText(parts(d))
 }
-/** "09:36". */
+/** "09:36". @public (a v1 export name) */
 export function clock(when: When): string {
   const d = asDate(when)
   return Number.isNaN(d.getTime()) ? '' : text.clockText(parts(d))
@@ -162,6 +162,7 @@ export function createScenes({ engine }: { engine: Engine }) {
     getState: (): { loaded: boolean; offline: boolean } => ({ ...state }),
   }
 }
+/** The scenes store (ctx.scenes). @public */
 export type Scenes = ReturnType<typeof createScenes>
 
 // --- the library manager's store (§2.8, §2.9) -------------------------------------------------------------------
@@ -181,6 +182,7 @@ export type Scenes = ReturnType<typeof createScenes>
 // idol is the default image engine (contract §2.8, §3.2): $0.10, a splat with a stand-in box.
 export const LIB_PRICE = { glb: 0, rug: 0, idol: 0.1, sam3d: 0.02, trellis2: { 512: money.trellisPrice(512), 1024: money.trellisPrice(1024), 1536: money.trellisPrice(1536) } } as const
 export const DEFAULT_IMAGE_ENGINE = money.DEFAULT_IMAGE_ENGINE
+/** Model file names (v1's MODEL_EXT; money.isModelName decides). @public (a v1 export name) */
 export const MODEL_EXT = /\.(glb|zip|gltf|usdz|obj|fbx)$/i
 /** The price an add will reserve: $0 for a model file, else the engine's (contract §3.2). */
 export function estimateCost(meta: unknown = {}, kind = 'image'): number {
@@ -190,7 +192,7 @@ export function estimateCost(meta: unknown = {}, kind = 'image'): number {
 }
 
 /** What readProduct rejects with: the server's sentence, its status, and whether the shop blocks reading (§2.11). */
-export class ProductReadError extends Error {
+class ProductReadError extends Error {
   readonly status: number | null
   readonly blocked: boolean
   readonly offline: boolean
@@ -358,4 +360,5 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     refreshTrash,
   }
 }
+/** The library manager's store (ctx.lib). @public */
 export type Library = ReturnType<typeof createLibrary>
