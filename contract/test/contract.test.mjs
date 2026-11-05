@@ -8,6 +8,7 @@ import test from 'node:test'
 import { CONTRACT, loadRoutes, loadSchemas, makeAjv, matchRoute, responseSchema } from '../tools/schemas.mjs'
 import { generate, schemaTypeNames } from '../../scripts/gen-contract.mjs'
 import * as gen from '../gen/validate.js'
+import * as genRoutes from '../gen/routes.js'
 
 const ajv = makeAjv()
 const routes = loadRoutes()
@@ -40,6 +41,18 @@ test('routes match the paths the planner and evals use, first match wins', () =>
   assert.equal(responseSchema(routes, product, 422), 'midstudy/api/product-error.schema.json')
   assert.equal(responseSchema(routes, product, 500), routes.errors)
   assert.equal(responseSchema(routes, product, 201), null)
+})
+
+test('contract/gen/routes.js matches requests and picks schemas as the tools do', () => {
+  assert.deepEqual(genRoutes.routes, routes)
+  const cases = [['GET', '/api/scenes/jobs'], ['GET', '/api/scenes/jobs/c-1'], ['GET', '/api/scenes/a?x=1'], ['GET', '/api/scenes/'],
+    ['PUT', '/api/layouts/front?scene=s'], ['DELETE', '/api/library/items/a'], ['GET', '/api/%E0%A4%A'], ['POST', '/api/nope'], ['HEAD', '/api/spend']]
+  for (const r of routes.routes) cases.push([r.method, r.path.replace(/\{\w+\}/g, 'x1')])
+  for (const [m, p] of cases) {
+    const a = matchRoute(routes, m, p), b = genRoutes.matchRoute(m, p)
+    assert.deepEqual(b && { path: b.route.path, params: b.params }, a && { path: a.route.path, params: a.params }, `${m} ${p}`)
+    if (a) for (const s of [200, 201, 202, 400, 402, 404, 422, 500]) assert.equal(genRoutes.responseSchema(b.route, s), responseSchema(routes, a.route, s), `${m} ${p} ${s}`)
+  }
 })
 
 test('contract/gen/ and the Rust bundle are up to date (node scripts/gen-contract.mjs)', () => {

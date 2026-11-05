@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
-  createEval, startServer, waitScene, waitFor, raw, api, b64json, dataUri, maskPng, golden, sleep, clip, SERVER, ADD,
+  createEval, startServer, waitScene, waitFor, raw, api, b64json, dataUri, maskPng, golden, sleep, clip, SERVER, ADD, ADD_CMD, STRICT,
 } from '../../evals/lib/harness.mjs'
 import { syntheticPages, startPagesServer } from '../../evals/lib/pages_server.mjs'
 import { makeAjv, loadRoutes, matchRoute, responseSchema, errorText, REPO, CONTRACT } from './schemas.mjs'
@@ -34,6 +34,18 @@ const tinyJpeg = (() => {
 const TINY = dataUri('image/jpeg', tinyJpeg)
 
 const fileFor = (route) => `${route.method.toLowerCase()}${route.path.replace(/[{}]/g, '').replace(/\//g, '-')}.json`
+
+// A file or stdout line that has a schema but no route: checked like an answer, kept in <file>.
+function keep(file, title, kind, schema, body, note) {
+  const v = ajv.getSchema(schema)
+  const ok = v(body)
+  if (!ok) problems++
+  ev.check(`${kind} matches ${schema}${note ? ` (${note})` : ''}`, ok, ok ? 'valid' : errorText(v.errors))
+  if (!ok) return
+  if (!files.has(file)) files.set(file, { route: title, contract: null, examples: [] })
+  files.get(file).examples.push({ kind, schema, type: TYPES[schema], note: note || null, body })
+}
+const trashed = (dir, file) => fs.readdirSync(path.join(dir, '.trash')).map((d) => path.join(dir, '.trash', d, file)).filter((f) => fs.existsSync(f))
 
 // One call; the answer (and, for a 2xx, the JSON request) becomes an example of its route.
 async function call(method, p, body, { note, headers = {}, forged = false, meta, rawBody, keep = true, timeoutMs = 60000 } = {}) {
@@ -118,6 +130,7 @@ r = await call('POST', '/api/scenes', undefined, { rawBody: fs.readFileSync(PT.p
 const P = r.json?.scene
 await waitScene(B, P)
 await call('DELETE', `/api/scenes/${P}`, undefined, { note: 'to the trash' })
+for (const f of trashed(srv.dirs.scenes, 'trash.json')) keep('files-trash.json', 'files beside a deleted scene or library item', 'file scenes/.trash/<name>-<stamp>/trash.json', 'midstudy/trash.schema.json#/$defs/scene', JSON.parse(fs.readFileSync(f, 'utf8')), 'a deleted scene')
 await call('GET', '/api/scenes', undefined, { note: 'one scene, one in the trash' })
 await call('POST', `/api/scenes/${P}/restore`, undefined, { note: 'back from the trash' })
 await call('POST', `/api/scenes/${P}/restore`, undefined, { note: 'none left in the trash' })
@@ -169,6 +182,7 @@ await call('PATCH', '/api/library/items/morris-chair', { default_render: 'glb' }
 await call('PATCH', '/api/library/items/no-such-item', { name: 'x' }, { note: 'unknown item' })
 await call('PUT', '/api/library/items/arrow-sign/thumb', { image: TINY }, { note: 'the planner\'s render of a 3D-file piece' })
 await call('DELETE', '/api/library/items/arrow-sign', undefined, { note: 'to the trash' })
+for (const f of trashed(srv.dirs.library, 'entry.json')) keep('files-trash.json', 'files beside a deleted scene or library item', 'file library/.trash/<id>-<stamp>/entry.json', 'midstudy/trash.schema.json#/$defs/item', JSON.parse(fs.readFileSync(f, 'utf8')), 'a deleted GLB piece')
 await call('GET', '/api/library', undefined, { note: 'items and the trash' })
 await call('POST', '/api/library/items/arrow-sign/restore', undefined, { note: 'back from the trash' })
 await call('POST', '/api/library/items/arrow-sign/restore', undefined, { note: 'it exists again' })
@@ -182,6 +196,27 @@ await call('POST', '/api/library/product', { html: `<!-- midstudy-page: https://
 await call('POST', '/api/library/product', { url: `${pages.base}/blocked` }, { note: 'the shop refuses (403)' })
 await call('POST', '/api/library/product', { url: `${pages.base}/picture.jpg` }, { note: 'a picture, not a page' })
 await call('POST', '/api/library/product', { llm: true }, { note: 'neither url nor html' })
+
+ev.section('midstudy-add (§3.1): the summary line')
+{
+  // The furniture CLI the harness picks (MIDSTUDY_ADD), with the environment the server gives it; a relative --library,
+  // so the paths in the line are repo-relative.
+  const lib = path.relative(REPO, path.join(ev.out, 'cli-library'))
+  const [cmd, ...pre] = ADD_CMD.split(' ')
+  const env = { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), ...(STRICT ? { MIDSTUDY_STRICT: '1' } : {}) }
+  delete env.FAL_KEY
+  delete env.MIDSTUDY_FAL_MOCK_COST
+  const add = (args, note) => {
+    let last = ''
+    try { last = execFileSync(cmd, [...pre, ...args, `--library=${lib}`], { cwd: REPO, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 }).trim().split('\n').at(-1) } catch (e) { last = `${e.stderr || e}`.trim().split('\n').at(-1) }
+    let body = null
+    try { body = JSON.parse(last) } catch { problems++; ev.check(`midstudy-add ${note} prints its summary line`, false, clip(last, 200)); return }
+    keep('cli-midstudy-add.json', 'midstudy-add: the last stdout line on success', 'stdout (last line)', 'midstudy/add-summary.schema.json', body, note)
+  }
+  add(['fixtures/models/arrow.glb', '--engine=glb', '--name=Arrow', '--id=cli-arrow', '--dims=100x40x30'], 'a GLB')
+  add(['fixtures/fal/sam-3-3d-objects/input.jpg', '--name=Morris chair', '--id=cli-chair', '--dims=80x90x95'], 'a photo, Idol')
+  add(['--rescale=cli-arrow', '--dims=120x40x30'], '--rescale')
+}
 
 ev.section('the spend cap (§2.9)')
 const capped = await startServer(ev, { spendUsd: '0.03', mockCost: true })
@@ -204,7 +239,7 @@ for (const [file, doc] of [...files.entries()].sort()) {
 }
 const covered = new Set([...files.values()].map((d) => d.route))
 const missing = routes.routes.map((rt) => `${rt.method} ${rt.path}`).filter((k) => !covered.has(k))
-ev.check('every route in routes.json has an example', missing.length === 0, missing.length ? missing.join(', ') : `${covered.size} routes, ${[...files.values()].reduce((n, d) => n + d.examples.length, 0)} examples in ${path.relative(REPO, OUT_DIR)}`)
+ev.check('every route in routes.json has an example', missing.length === 0, missing.length ? missing.join(', ') : `${routes.routes.length} routes (and ${files.size - routes.routes.length} files and stdout lines), ${[...files.values()].reduce((n, d) => n + d.examples.length, 0)} examples in ${path.relative(REPO, OUT_DIR)}`)
 ev.check('every answer matched its schema', problems === 0, `${problems} problem(s)`)
 await sleep(10)
 await ev.finish()

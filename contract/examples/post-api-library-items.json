@@ -25,7 +25,7 @@
       "note": "a GLB",
       "body": {
         "job": {
-          "id": "l-20261105-180705-ea10",
+          "id": "l-20261105-182040-3e17",
           "kind": "add",
           "item_id": "arrow-sign",
           "status": "queued",
@@ -33,7 +33,7 @@
           "cost_usd_estimate": 0,
           "cost_usd": null,
           "mock": true,
-          "created": "2026-11-05T18:07:05Z",
+          "created": "2026-11-05T18:20:40Z",
           "started": null,
           "finished": null,
           "message": "waiting for the queue",
@@ -75,7 +75,7 @@
       "note": "a photo: Idol, the default engine",
       "body": {
         "job": {
-          "id": "l-20261105-180706-cadf",
+          "id": "l-20261105-182041-c933",
           "kind": "add",
           "item_id": "morris-chair",
           "status": "queued",
@@ -83,7 +83,7 @@
           "cost_usd_estimate": 0.1,
           "cost_usd": null,
           "mock": true,
-          "created": "2026-11-05T18:07:06Z",
+          "created": "2026-11-05T18:20:41Z",
           "started": null,
           "finished": null,
           "message": "waiting for the queue",

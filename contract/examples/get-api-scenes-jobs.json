@@ -11,67 +11,13 @@
       "body": {
         "jobs": [
           {
-            "id": "c-20261105-180704-5a2f",
+            "id": "c-20261105-182038-4057",
             "kind": "calibrate",
-            "scene": "scene-20261105-180704",
+            "scene": "scene-20261105-182038",
             "status": "done",
-            "created": "2026-11-05T18:07:04Z",
-            "started": "2026-11-05T18:07:04Z",
-            "finished": "2026-11-05T18:07:04Z",
-            "message": "calibrated (truth)",
-            "calib": {
-              "version": 1,
-              "source": "truth",
-              "model": null,
-              "image": {
-                "w": 1600,
-                "h": 1200
-              },
-              "camera": {
-                "fov_y_deg": 55,
-                "height_m": 1.4,
-                "pitch_deg": -10,
-                "roll_deg": 0
-              },
-              "principal": [
-                0.5,
-                0.5
-              ],
-              "floor": {
-                "found": true,
-                "inlier_ratio": 0.2889,
-                "rmse_m": 0
-              },
-              "depth": {
-                "file": "depth.png",
-                "w": 1024,
-                "h": 768,
-                "floor_masked": true
-              },
-              "exif": null,
-              "device": null,
-              "elapsed_s": 0.001
-            }
-          }
-        ]
-      }
-    },
-    {
-      "kind": "response",
-      "status": 200,
-      "schema": "midstudy/api/scene-jobs.schema.json",
-      "type": "SceneJobs",
-      "note": "calibration and light jobs",
-      "body": {
-        "jobs": [
-          {
-            "id": "c-20261105-180704-1f4f",
-            "kind": "calibrate",
-            "scene": "scene-20261105-180704",
-            "status": "done",
-            "created": "2026-11-05T18:07:04Z",
-            "started": "2026-11-05T18:07:04Z",
-            "finished": "2026-11-05T18:07:04Z",
+            "created": "2026-11-05T18:20:38Z",
+            "started": "2026-11-05T18:20:38Z",
+            "finished": "2026-11-05T18:20:38Z",
             "message": "calibrated (truth)",
             "calib": {
               "version": 1,
@@ -106,27 +52,26 @@
               "device": null,
               "elapsed_s": 0.002
             }
-          },
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-jobs.schema.json",
+      "type": "SceneJobs",
+      "note": "calibration and light jobs",
+      "body": {
+        "jobs": [
           {
-            "id": "l-20261105-180704-12b1",
-            "kind": "light",
-            "scene": "scene-20261105-180704",
-            "status": "done",
-            "created": "2026-11-05T18:07:04Z",
-            "started": "2026-11-05T18:07:04Z",
-            "finished": "2026-11-05T18:07:04Z",
-            "message": "lighting inferred (5493 K)",
-            "calib": null,
-            "lighting": true
-          },
-          {
-            "id": "c-20261105-180704-5a2f",
+            "id": "c-20261105-182039-bba1",
             "kind": "calibrate",
-            "scene": "scene-20261105-180704",
+            "scene": "scene-20261105-182038",
             "status": "done",
-            "created": "2026-11-05T18:07:04Z",
-            "started": "2026-11-05T18:07:04Z",
-            "finished": "2026-11-05T18:07:04Z",
+            "created": "2026-11-05T18:20:39Z",
+            "started": "2026-11-05T18:20:39Z",
+            "finished": "2026-11-05T18:20:39Z",
             "message": "calibrated (truth)",
             "calib": {
               "version": 1,
@@ -160,6 +105,61 @@
               "exif": null,
               "device": null,
               "elapsed_s": 0.001
+            }
+          },
+          {
+            "id": "l-20261105-182039-4a48",
+            "kind": "light",
+            "scene": "scene-20261105-182038",
+            "status": "done",
+            "created": "2026-11-05T18:20:39Z",
+            "started": "2026-11-05T18:20:39Z",
+            "finished": "2026-11-05T18:20:39Z",
+            "message": "lighting inferred (5493 K)",
+            "calib": null,
+            "lighting": true
+          },
+          {
+            "id": "c-20261105-182038-4057",
+            "kind": "calibrate",
+            "scene": "scene-20261105-182038",
+            "status": "done",
+            "created": "2026-11-05T18:20:38Z",
+            "started": "2026-11-05T18:20:38Z",
+            "finished": "2026-11-05T18:20:38Z",
+            "message": "calibrated (truth)",
+            "calib": {
+              "version": 1,
+              "source": "truth",
+              "model": null,
+              "image": {
+                "w": 1600,
+                "h": 1200
+              },
+              "camera": {
+                "fov_y_deg": 55,
+                "height_m": 1.4,
+                "pitch_deg": -10,
+                "roll_deg": 0
+              },
+              "principal": [
+                0.5,
+                0.5
+              ],
+              "floor": {
+                "found": true,
+                "inlier_ratio": 0.2889,
+                "rmse_m": 0
+              },
+              "depth": {
+                "file": "depth.png",
+                "w": 1024,
+                "h": 768,
+                "floor_masked": true
+              },
+              "exif": null,
+              "device": null,
+              "elapsed_s": 0.002
             }
           }
         ]

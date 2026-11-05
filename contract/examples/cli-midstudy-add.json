@@ -1,0 +1,104 @@
+{
+  "route": "midstudy-add: the last stdout line on success",
+  "contract": null,
+  "examples": [
+    {
+      "kind": "stdout (last line)",
+      "schema": "midstudy/add-summary.schema.json",
+      "type": "AddSummary",
+      "note": "a GLB",
+      "body": {
+        "id": "cli-arrow",
+        "engine": "glb",
+        "cost_usd": 0,
+        "mock": true,
+        "paths": {
+          "library": "evals/out/contract-examples/cli-library/library.json",
+          "item": "evals/out/contract-examples/cli-library/cli-arrow",
+          "glb": "evals/out/contract-examples/cli-library/cli-arrow/model.glb",
+          "splat": null,
+          "spz": null,
+          "thumb": null,
+          "source": "evals/out/contract-examples/cli-library/cli-arrow/source.glb",
+          "raw": null,
+          "costs": "evals/out/contract-examples/cli-library/costs.csv"
+        },
+        "fit": {
+          "glb_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          },
+          "splat_error_pct": null
+        }
+      }
+    },
+    {
+      "kind": "stdout (last line)",
+      "schema": "midstudy/add-summary.schema.json",
+      "type": "AddSummary",
+      "note": "a photo, Idol",
+      "body": {
+        "id": "cli-chair",
+        "engine": "idol",
+        "cost_usd": 0,
+        "mock": true,
+        "paths": {
+          "library": "evals/out/contract-examples/cli-library/library.json",
+          "item": "evals/out/contract-examples/cli-library/cli-chair",
+          "glb": "evals/out/contract-examples/cli-library/cli-chair/model.glb",
+          "splat": "evals/out/contract-examples/cli-library/cli-chair/splat.ply",
+          "spz": "evals/out/contract-examples/cli-library/cli-chair/splat.spz",
+          "thumb": "evals/out/contract-examples/cli-library/cli-chair/thumb.jpg",
+          "source": "evals/out/contract-examples/cli-library/cli-chair/source.jpg",
+          "raw": "evals/out/contract-examples/cli-library/cli-chair/raw",
+          "costs": "evals/out/contract-examples/cli-library/costs.csv"
+        },
+        "fit": {
+          "glb_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          },
+          "splat_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "stdout (last line)",
+      "schema": "midstudy/add-summary.schema.json",
+      "type": "AddSummary",
+      "note": "--rescale",
+      "body": {
+        "id": "cli-arrow",
+        "engine": "rescale",
+        "cost_usd": 0,
+        "mock": true,
+        "paths": {
+          "library": "evals/out/contract-examples/cli-library/library.json",
+          "item": "evals/out/contract-examples/cli-library/cli-arrow",
+          "glb": "evals/out/contract-examples/cli-library/cli-arrow/model.glb",
+          "splat": null,
+          "spz": null,
+          "thumb": null,
+          "source": null,
+          "raw": null,
+          "costs": "evals/out/contract-examples/cli-library/costs.csv"
+        },
+        "fit": {
+          "glb_error_pct": {
+            "w": 0,
+            "d": 0,
+            "h": 0
+          },
+          "splat_error_pct": null
+        }
+      }
+    }
+  ],
+  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+}

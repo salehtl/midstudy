@@ -11,7 +11,7 @@
       "body": {
         "jobs": [
           {
-            "id": "l-20261105-180706-fbfd",
+            "id": "l-20261105-182041-12bf",
             "kind": "add",
             "item_id": "cane-chair",
             "status": "queued",
@@ -19,14 +19,14 @@
             "cost_usd_estimate": 0.02,
             "cost_usd": null,
             "mock": true,
-            "created": "2026-11-05T18:07:06Z",
+            "created": "2026-11-05T18:20:41Z",
             "started": null,
             "finished": null,
             "message": "waiting for the queue",
             "item": null
           },
           {
-            "id": "l-20261105-180706-cadf",
+            "id": "l-20261105-182041-c933",
             "kind": "add",
             "item_id": "morris-chair",
             "status": "running",
@@ -34,14 +34,14 @@
             "cost_usd_estimate": 0.1,
             "cost_usd": null,
             "mock": true,
-            "created": "2026-11-05T18:07:06Z",
-            "started": "2026-11-05T18:07:06Z",
+            "created": "2026-11-05T18:20:41Z",
+            "started": "2026-11-05T18:20:41Z",
             "finished": null,
             "message": "making morris-chair (idol)",
             "item": null
           },
           {
-            "id": "l-20261105-180705-ea10",
+            "id": "l-20261105-182040-3e17",
             "kind": "add",
             "item_id": "arrow-sign",
             "status": "done",
@@ -49,9 +49,9 @@
             "cost_usd_estimate": 0,
             "cost_usd": 0,
             "mock": true,
-            "created": "2026-11-05T18:07:05Z",
-            "started": "2026-11-05T18:07:05Z",
-            "finished": "2026-11-05T18:07:05Z",
+            "created": "2026-11-05T18:20:40Z",
+            "started": "2026-11-05T18:20:40Z",
+            "finished": "2026-11-05T18:20:40Z",
             "message": "added arrow-sign",
             "item": {
               "id": "arrow-sign",
@@ -75,7 +75,7 @@
                 "prompt": null,
                 "cost_usd": 0,
                 "mock": true,
-                "created": "2026-11-05T18:07:05Z"
+                "created": "2026-11-05T18:20:40Z"
               },
               "fit": {
                 "glb_error_pct": {

@@ -24,7 +24,10 @@
     "eval:real": "node evals/real_path.mjs",
     "eval:selftest": "node evals/harness_selftest.mjs",
     "fixtures:scenes": "node fixtures/make_scene.mjs",
-    "check:scenes": "evals/py fixtures/check_scenes.py"
+    "check:scenes": "evals/py fixtures/check_scenes.py",
+    "gen:contract": "node scripts/gen-contract.mjs",
+    "test:contract": "node --test contract/test/contract.test.mjs && node contract/test/typecheck.mjs",
+    "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

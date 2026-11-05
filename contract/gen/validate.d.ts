@@ -11,6 +11,8 @@ export interface ValidationError {
 /** A type guard: true when data matches the schema; then .errors is null, else the reasons. */
 export type Validator<V> = ((data: unknown) => data is V) & { errors?: readonly ValidationError[] | null }
 
+/** midstudy/add-summary.schema.json */
+export declare const isAddSummary: Validator<T.AddSummary>
 /** midstudy/api/error.schema.json */
 export declare const isApiError: Validator<T.ApiError>
 /** midstudy/library.schema.json#/$defs/axisErr */
@@ -67,6 +69,8 @@ export declare const isLibraryMeta: Validator<T.LibraryMeta>
 export declare const isLibraryPatch: Validator<T.LibraryPatch>
 /** midstudy/api/library-rescale-accepted.schema.json */
 export declare const isLibraryRescaleAccepted: Validator<T.LibraryRescaleAccepted>
+/** midstudy/trash.schema.json#/$defs/item */
+export declare const isLibraryTrash: Validator<T.LibraryTrash>
 /** midstudy/api/light-accepted.schema.json */
 export declare const isLightAccepted: Validator<T.LightAccepted>
 /** midstudy/api/light-done.schema.json */
@@ -121,6 +125,8 @@ export declare const isSceneObject: Validator<T.SceneObject>
 export declare const isScenePut: Validator<T.ScenePut>
 /** midstudy/api/scene-thumb-saved.schema.json */
 export declare const isSceneThumbSaved: Validator<T.SceneThumbSaved>
+/** midstudy/trash.schema.json#/$defs/scene */
+export declare const isSceneTrash: Validator<T.SceneTrash>
 /** midstudy/api/common.schema.json#/$defs/slug */
 export declare const isSlug: Validator<T.Slug>
 /** midstudy/api/spend.schema.json */
@@ -136,8 +142,9 @@ export declare const isUpload: Validator<T.Upload>
 /** midstudy/api/common.schema.json#/$defs/usd */
 export declare const isUsd: Validator<T.Usd>
 
-export type SchemaUri = "midstudy/api/error.schema.json" | "midstudy/library.schema.json#/$defs/axisErr" | "midstudy/calib.schema.json" | "midstudy/api/calibrate-accepted.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/calibrate" | "midstudy/calib.schema.json#/$defs/camera" | "midstudy/scene.schema.json#/$defs/camera" | "midstudy/api/common.schema.json#/$defs/dateTime" | "midstudy/library.schema.json#/$defs/dims" | "midstudy/api/product-result.schema.json#/$defs/candidate" | "midstudy/calib.schema.json#/$defs/size" | "midstudy/api/common.schema.json#/$defs/jobStatus" | "midstudy/api/common.schema.json#/$defs/jpegDataUri" | "midstudy/layout.schema.json" | "midstudy/api/layout-deleted.schema.json" | "midstudy/layout.schema.json#/$defs/item" | "midstudy/api/layout-list.schema.json" | "midstudy/api/layout-put.schema.json" | "midstudy/library.schema.json" | "midstudy/api/library-add-accepted.schema.json" | "midstudy/api/library-deleted.schema.json" | "midstudy/api/library-from-url.schema.json" | "midstudy/library.schema.json#/$defs/item" | "midstudy/api/library-job.schema.json" | "midstudy/api/library-jobs.schema.json" | "midstudy/api/library-get.schema.json" | "midstudy/api/library-meta.schema.json" | "midstudy/api/library-patch.schema.json" | "midstudy/api/library-rescale-accepted.schema.json" | "midstudy/api/light-accepted.schema.json" | "midstudy/api/light-done.schema.json" | "midstudy/lighting.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/light" | "midstudy/scene.schema.json#/$defs/look" | "midstudy/library.schema.json#/$defs/pct" | "midstudy/api/common.schema.json#/$defs/pngDataUri" | "midstudy/api/product-error.schema.json" | "midstudy/api/product-request.schema.json" | "midstudy/api/product-result.schema.json" | "midstudy/api/common.schema.json#/$defs/publicCalib" | "midstudy/library.schema.json#/$defs/relpath" | "midstudy/api/render-list.schema.json" | "midstudy/api/render-meta.schema.json" | "midstudy/api/render-request.schema.json" | "midstudy/lighting.schema.json#/$defs/rgb" | "midstudy/scene.schema.json" | "midstudy/api/scene-created.schema.json" | "midstudy/api/scene-deleted.schema.json" | "midstudy/api/scene-detail.schema.json" | "midstudy/api/scene-job.schema.json" | "midstudy/api/scene-jobs.schema.json" | "midstudy/api/scene-list.schema.json" | "midstudy/api/scene-meta.schema.json" | "midstudy/api/scene-object.schema.json" | "midstudy/api/scene-put.schema.json" | "midstudy/api/scene-thumb-saved.schema.json" | "midstudy/api/common.schema.json#/$defs/slug" | "midstudy/library.schema.json#/$defs/slug" | "midstudy/api/spend.schema.json" | "midstudy/api/spend-refused.schema.json" | "midstudy/api/thumb-put.schema.json" | "midstudy/lighting.schema.json#/$defs/unit" | "midstudy/scene.schema.json#/$defs/upload" | "midstudy/api/common.schema.json#/$defs/usd"
+export type SchemaUri = "midstudy/add-summary.schema.json" | "midstudy/api/error.schema.json" | "midstudy/library.schema.json#/$defs/axisErr" | "midstudy/calib.schema.json" | "midstudy/api/calibrate-accepted.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/calibrate" | "midstudy/calib.schema.json#/$defs/camera" | "midstudy/scene.schema.json#/$defs/camera" | "midstudy/api/common.schema.json#/$defs/dateTime" | "midstudy/library.schema.json#/$defs/dims" | "midstudy/api/product-result.schema.json#/$defs/candidate" | "midstudy/calib.schema.json#/$defs/size" | "midstudy/api/common.schema.json#/$defs/jobStatus" | "midstudy/api/common.schema.json#/$defs/jpegDataUri" | "midstudy/layout.schema.json" | "midstudy/api/layout-deleted.schema.json" | "midstudy/layout.schema.json#/$defs/item" | "midstudy/api/layout-list.schema.json" | "midstudy/api/layout-put.schema.json" | "midstudy/library.schema.json" | "midstudy/api/library-add-accepted.schema.json" | "midstudy/api/library-deleted.schema.json" | "midstudy/api/library-from-url.schema.json" | "midstudy/library.schema.json#/$defs/item" | "midstudy/api/library-job.schema.json" | "midstudy/api/library-jobs.schema.json" | "midstudy/api/library-get.schema.json" | "midstudy/api/library-meta.schema.json" | "midstudy/api/library-patch.schema.json" | "midstudy/api/library-rescale-accepted.schema.json" | "midstudy/trash.schema.json#/$defs/item" | "midstudy/api/light-accepted.schema.json" | "midstudy/api/light-done.schema.json" | "midstudy/lighting.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/light" | "midstudy/scene.schema.json#/$defs/look" | "midstudy/library.schema.json#/$defs/pct" | "midstudy/api/common.schema.json#/$defs/pngDataUri" | "midstudy/api/product-error.schema.json" | "midstudy/api/product-request.schema.json" | "midstudy/api/product-result.schema.json" | "midstudy/api/common.schema.json#/$defs/publicCalib" | "midstudy/library.schema.json#/$defs/relpath" | "midstudy/api/render-list.schema.json" | "midstudy/api/render-meta.schema.json" | "midstudy/api/render-request.schema.json" | "midstudy/lighting.schema.json#/$defs/rgb" | "midstudy/scene.schema.json" | "midstudy/api/scene-created.schema.json" | "midstudy/api/scene-deleted.schema.json" | "midstudy/api/scene-detail.schema.json" | "midstudy/api/scene-job.schema.json" | "midstudy/api/scene-jobs.schema.json" | "midstudy/api/scene-list.schema.json" | "midstudy/api/scene-meta.schema.json" | "midstudy/api/scene-object.schema.json" | "midstudy/api/scene-put.schema.json" | "midstudy/api/scene-thumb-saved.schema.json" | "midstudy/trash.schema.json#/$defs/scene" | "midstudy/api/common.schema.json#/$defs/slug" | "midstudy/library.schema.json#/$defs/slug" | "midstudy/api/spend.schema.json" | "midstudy/api/spend-refused.schema.json" | "midstudy/api/thumb-put.schema.json" | "midstudy/lighting.schema.json#/$defs/unit" | "midstudy/scene.schema.json#/$defs/upload" | "midstudy/api/common.schema.json#/$defs/usd"
 export interface Validators {
+  readonly "midstudy/add-summary.schema.json": Validator<T.AddSummary>
   readonly "midstudy/api/error.schema.json": Validator<T.ApiError>
   readonly "midstudy/library.schema.json#/$defs/axisErr": Validator<T.AxisError>
   readonly "midstudy/calib.schema.json": Validator<T.Calib>
@@ -167,6 +174,7 @@ export interface Validators {
   readonly "midstudy/api/library-meta.schema.json": Validator<T.LibraryMeta>
   readonly "midstudy/api/library-patch.schema.json": Validator<T.LibraryPatch>
   readonly "midstudy/api/library-rescale-accepted.schema.json": Validator<T.LibraryRescaleAccepted>
+  readonly "midstudy/trash.schema.json#/$defs/item": Validator<T.LibraryTrash>
   readonly "midstudy/api/light-accepted.schema.json": Validator<T.LightAccepted>
   readonly "midstudy/api/light-done.schema.json": Validator<T.LightDone>
   readonly "midstudy/lighting.schema.json": Validator<T.Lighting>
@@ -194,6 +202,7 @@ export interface Validators {
   readonly "midstudy/api/scene-object.schema.json": Validator<T.SceneObject>
   readonly "midstudy/api/scene-put.schema.json": Validator<T.ScenePut>
   readonly "midstudy/api/scene-thumb-saved.schema.json": Validator<T.SceneThumbSaved>
+  readonly "midstudy/trash.schema.json#/$defs/scene": Validator<T.SceneTrash>
   readonly "midstudy/api/common.schema.json#/$defs/slug": Validator<T.Slug>
   readonly "midstudy/library.schema.json#/$defs/slug": Validator<T.Slug>
   readonly "midstudy/api/spend.schema.json": Validator<T.Spend>

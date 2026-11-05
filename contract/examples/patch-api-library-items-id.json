@@ -41,7 +41,7 @@
           "prompt": null,
           "cost_usd": 0,
           "mock": true,
-          "created": "2026-11-05T18:07:05Z"
+          "created": "2026-11-05T18:20:40Z"
         },
         "fit": {
           "glb_error_pct": {
@@ -76,7 +76,7 @@
       "note": "new dims: a rescale job ($0)",
       "body": {
         "job": {
-          "id": "l-20261105-180708-a64c",
+          "id": "l-20261105-182043-6774",
           "kind": "rescale",
           "item_id": "arrow-sign",
           "status": "queued",
@@ -84,7 +84,7 @@
           "cost_usd_estimate": 0,
           "cost_usd": null,
           "mock": true,
-          "created": "2026-11-05T18:07:08Z",
+          "created": "2026-11-05T18:20:43Z",
           "started": null,
           "finished": null,
           "message": "waiting for the queue",

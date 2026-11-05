@@ -8,7 +8,7 @@
       "type": "LibraryFromUrl",
       "note": "an image link, SAM 3D",
       "body": {
-        "image_url": "http://127.0.0.1:64081/media/cane-chair.jpg",
+        "image_url": "http://127.0.0.1:53658/media/cane-chair.jpg",
         "name": "Cane chair",
         "dims_cm": {
           "w": 75,
@@ -27,7 +27,7 @@
       "note": "an image link, SAM 3D",
       "body": {
         "job": {
-          "id": "l-20261105-180706-fbfd",
+          "id": "l-20261105-182041-12bf",
           "kind": "add",
           "item_id": "cane-chair",
           "status": "queued",
@@ -35,7 +35,7 @@
           "cost_usd_estimate": 0.02,
           "cost_usd": null,
           "mock": true,
-          "created": "2026-11-05T18:07:06Z",
+          "created": "2026-11-05T18:20:41Z",
           "started": null,
           "finished": null,
           "message": "waiting for the queue",

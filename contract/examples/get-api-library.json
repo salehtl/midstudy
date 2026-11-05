@@ -96,7 +96,7 @@
               "prompt": null,
               "cost_usd": 0,
               "mock": true,
-              "created": "2026-11-05T18:07:07Z"
+              "created": "2026-11-05T18:20:42Z"
             },
             "fit": {
               "glb_error_pct": {
@@ -130,11 +130,11 @@
             "default_render": "splat",
             "source": {
               "engine": "sam3d",
-              "input": "http://127.0.0.1:64081/media/cane-chair.jpg",
+              "input": "http://127.0.0.1:53658/media/cane-chair.jpg",
               "prompt": "chair",
               "cost_usd": 0,
               "mock": true,
-              "created": "2026-11-05T18:07:08Z"
+              "created": "2026-11-05T18:20:43Z"
             },
             "fit": {
               "glb_error_pct": {
@@ -155,7 +155,7 @@
           {
             "id": "arrow-sign",
             "name": "Arrow",
-            "deleted": "2026-11-05T18:07:08Z"
+            "deleted": "2026-11-05T18:20:43Z"
           }
         ]
       }

@@ -12,9 +12,9 @@
         "version": 1,
         "name": "front",
         "title": "Front",
-        "scene_name": "scene-20261105-180704",
+        "scene_name": "scene-20261105-182038",
         "library": "/library/library.json",
-        "updated": "2026-11-05T18:07:05Z",
+        "updated": "2026-11-05T18:20:40Z",
         "items": [
           {
             "uid": "probe-box-1",
@@ -58,7 +58,7 @@
       "type": "ApiError",
       "note": "no such layout",
       "body": {
-        "error": "scene 'scene-20261105-180704' has no layout named 'nope'"
+        "error": "scene 'scene-20261105-182038' has no layout named 'nope'"
       }
     }
   ],

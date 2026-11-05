@@ -49,7 +49,9 @@ for (const file of files) {
     else validate(schema, rec.response.body, 'the answer', rec)
     if (rec.status >= 200 && rec.status < 300) {
       const body = m.route.request?.body
-      if (body && body !== 'raw' && rec.request?.body && !('bytes' in rec.request.body && Object.keys(rec.request.body).length === 1)) validate(body, rec.request.body, 'the request', rec)
+      const sent = rec.request?.body
+      const rawUpload = sent && typeof sent === 'object' && !Array.isArray(sent) && Object.keys(sent).length === 1 && 'bytes' in sent
+      if (body && body !== 'raw' && sent !== undefined && !rawUpload) validate(body, sent, 'the request', rec)
       const meta = m.route.request?.headers?.['X-Midstudy-Meta']
       if (meta && rec.request?.meta !== undefined) validate(meta, rec.request.meta, 'X-Midstudy-Meta', rec)
     }

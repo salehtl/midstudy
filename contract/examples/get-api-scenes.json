@@ -22,13 +22,13 @@
       "body": {
         "scenes": [
           {
-            "name": "scene-20261105-180704",
+            "name": "scene-20261105-182038",
             "title": "Living room, morning",
-            "created": "2026-11-05T18:07:04Z",
-            "saved": "2026-11-05T18:07:04Z",
-            "photo_url": "/scenes/scene-20261105-180704/photo.jpg?v=1793902024",
-            "thumb_url": "/scenes/scene-20261105-180704/thumb.jpg?v=1793902024",
-            "depth_url": "/scenes/scene-20261105-180704/depth.png?v=1793902024",
+            "created": "2026-11-05T18:20:38Z",
+            "saved": "2026-11-05T18:20:39Z",
+            "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
+            "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839",
+            "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902839",
             "w": 1600,
             "h": 1200,
             "camera_source": "manual",
@@ -40,10 +40,10 @@
         ],
         "trash": [
           {
-            "name": "scene-20261105-180705",
+            "name": "scene-20261105-182039",
             "title": null,
-            "created": "2026-11-05T18:07:05Z",
-            "deleted": "2026-11-05T18:07:05Z"
+            "created": "2026-11-05T18:20:39Z",
+            "deleted": "2026-11-05T18:20:40Z"
           }
         ]
       }
@@ -57,13 +57,13 @@
       "body": {
         "scenes": [
           {
-            "name": "scene-20261105-180705",
+            "name": "scene-20261105-182039",
             "title": null,
-            "created": "2026-11-05T18:07:05Z",
+            "created": "2026-11-05T18:20:39Z",
             "saved": null,
-            "photo_url": "/scenes/scene-20261105-180705/photo.jpg?v=1793902025",
+            "photo_url": "/scenes/scene-20261105-182039/photo.jpg?v=1793902839",
             "thumb_url": null,
-            "depth_url": "/scenes/scene-20261105-180705/depth.png?v=1793902025",
+            "depth_url": "/scenes/scene-20261105-182039/depth.png?v=1793902839",
             "w": 1200,
             "h": 1600,
             "camera_source": "auto",
@@ -73,13 +73,13 @@
             "calib_error": null
           },
           {
-            "name": "scene-20261105-180704",
+            "name": "scene-20261105-182038",
             "title": "Living room, morning",
-            "created": "2026-11-05T18:07:04Z",
-            "saved": "2026-11-05T18:07:04Z",
-            "photo_url": "/scenes/scene-20261105-180704/photo.jpg?v=1793902024",
-            "thumb_url": "/scenes/scene-20261105-180704/thumb.jpg?v=1793902024",
-            "depth_url": "/scenes/scene-20261105-180704/depth.png?v=1793902024",
+            "created": "2026-11-05T18:20:38Z",
+            "saved": "2026-11-05T18:20:39Z",
+            "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
+            "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839",
+            "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902839",
             "w": 1600,
             "h": 1200,
             "camera_source": "manual",

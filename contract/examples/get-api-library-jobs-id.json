@@ -9,7 +9,7 @@
       "type": "LibraryJob",
       "note": "a GLB add, done",
       "body": {
-        "id": "l-20261105-180705-ea10",
+        "id": "l-20261105-182040-3e17",
         "kind": "add",
         "item_id": "arrow-sign",
         "status": "done",
@@ -17,9 +17,9 @@
         "cost_usd_estimate": 0,
         "cost_usd": 0,
         "mock": true,
-        "created": "2026-11-05T18:07:05Z",
-        "started": "2026-11-05T18:07:05Z",
-        "finished": "2026-11-05T18:07:05Z",
+        "created": "2026-11-05T18:20:40Z",
+        "started": "2026-11-05T18:20:40Z",
+        "finished": "2026-11-05T18:20:40Z",
         "message": "added arrow-sign",
         "item": {
           "id": "arrow-sign",
@@ -43,7 +43,7 @@
             "prompt": null,
             "cost_usd": 0,
             "mock": true,
-            "created": "2026-11-05T18:07:05Z"
+            "created": "2026-11-05T18:20:40Z"
           },
           "fit": {
             "glb_error_pct": {
@@ -64,7 +64,7 @@
       "type": "LibraryJob",
       "note": "an Idol add, done: splat, spz, stand-in box",
       "body": {
-        "id": "l-20261105-180706-cadf",
+        "id": "l-20261105-182041-c933",
         "kind": "add",
         "item_id": "morris-chair",
         "status": "done",
@@ -72,9 +72,9 @@
         "cost_usd_estimate": 0.1,
         "cost_usd": 0,
         "mock": true,
-        "created": "2026-11-05T18:07:06Z",
-        "started": "2026-11-05T18:07:06Z",
-        "finished": "2026-11-05T18:07:07Z",
+        "created": "2026-11-05T18:20:41Z",
+        "started": "2026-11-05T18:20:41Z",
+        "finished": "2026-11-05T18:20:42Z",
         "message": "added morris-chair",
         "item": {
           "id": "morris-chair",
@@ -98,7 +98,7 @@
             "prompt": null,
             "cost_usd": 0,
             "mock": true,
-            "created": "2026-11-05T18:07:07Z"
+            "created": "2026-11-05T18:20:42Z"
           },
           "fit": {
             "glb_error_pct": {
@@ -123,7 +123,7 @@
       "type": "LibraryJob",
       "note": "a SAM 3D add from a link, done",
       "body": {
-        "id": "l-20261105-180706-fbfd",
+        "id": "l-20261105-182041-12bf",
         "kind": "add",
         "item_id": "cane-chair",
         "status": "done",
@@ -131,9 +131,9 @@
         "cost_usd_estimate": 0.02,
         "cost_usd": 0,
         "mock": true,
-        "created": "2026-11-05T18:07:06Z",
-        "started": "2026-11-05T18:07:07Z",
-        "finished": "2026-11-05T18:07:08Z",
+        "created": "2026-11-05T18:20:41Z",
+        "started": "2026-11-05T18:20:42Z",
+        "finished": "2026-11-05T18:20:43Z",
         "message": "added cane-chair",
         "item": {
           "id": "cane-chair",
@@ -153,11 +153,11 @@
           "default_render": "splat",
           "source": {
             "engine": "sam3d",
-            "input": "http://127.0.0.1:64081/media/cane-chair.jpg",
+            "input": "http://127.0.0.1:53658/media/cane-chair.jpg",
             "prompt": "chair",
             "cost_usd": 0,
             "mock": true,
-            "created": "2026-11-05T18:07:08Z"
+            "created": "2026-11-05T18:20:43Z"
           },
           "fit": {
             "glb_error_pct": {
@@ -192,7 +192,7 @@
       "type": "LibraryJob",
       "note": "a rescale, done",
       "body": {
-        "id": "l-20261105-180708-a64c",
+        "id": "l-20261105-182043-6774",
         "kind": "rescale",
         "item_id": "arrow-sign",
         "status": "done",
@@ -200,9 +200,9 @@
         "cost_usd_estimate": 0,
         "cost_usd": 0,
         "mock": true,
-        "created": "2026-11-05T18:07:08Z",
-        "started": "2026-11-05T18:07:08Z",
-        "finished": "2026-11-05T18:07:08Z",
+        "created": "2026-11-05T18:20:43Z",
+        "started": "2026-11-05T18:20:43Z",
+        "finished": "2026-11-05T18:20:43Z",
         "message": "refit arrow-sign ($0)",
         "item": {
           "id": "arrow-sign",
@@ -226,7 +226,7 @@
             "prompt": null,
             "cost_usd": 0,
             "mock": true,
-            "created": "2026-11-05T18:07:05Z"
+            "created": "2026-11-05T18:20:40Z"
           },
           "fit": {
             "glb_error_pct": {

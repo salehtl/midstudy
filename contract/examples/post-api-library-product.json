@@ -8,7 +8,7 @@
       "type": "ProductRequest",
       "note": "JSON-LD in cm",
       "body": {
-        "url": "http://127.0.0.1:64081/products/oak-writing-desk"
+        "url": "http://127.0.0.1:53658/products/oak-writing-desk"
       }
     },
     {
@@ -18,7 +18,7 @@
       "type": "ProductResult",
       "note": "JSON-LD in cm",
       "body": {
-        "url": "http://127.0.0.1:64081/products/oak-writing-desk",
+        "url": "http://127.0.0.1:53658/products/oak-writing-desk",
         "name": "Oak Writing Desk",
         "category": "desk",
         "is_rug": false,
@@ -71,7 +71,7 @@
       "type": "ProductRequest",
       "note": "a Shopify rug with size variants",
       "body": {
-        "url": "http://127.0.0.1:64081/products/moss-wool-rug",
+        "url": "http://127.0.0.1:53658/products/moss-wool-rug",
         "llm": false
       }
     },
@@ -82,7 +82,7 @@
       "type": "ProductResult",
       "note": "a Shopify rug with size variants",
       "body": {
-        "url": "http://127.0.0.1:64081/products/moss-wool-rug",
+        "url": "http://127.0.0.1:53658/products/moss-wool-rug",
         "name": "Moss Wool Rug",
         "category": "rug",
         "is_rug": true,
@@ -166,7 +166,7 @@
       "type": "ProductRequest",
       "note": "only the (mocked) language model finds the size",
       "body": {
-        "url": "http://127.0.0.1:64081/products/teak-cabinet-prose"
+        "url": "http://127.0.0.1:53658/products/teak-cabinet-prose"
       }
     },
     {
@@ -176,7 +176,7 @@
       "type": "ProductResult",
       "note": "only the (mocked) language model finds the size",
       "body": {
-        "url": "http://127.0.0.1:64081/products/teak-cabinet-prose",
+        "url": "http://127.0.0.1:53658/products/teak-cabinet-prose",
         "name": "Teak Cabinet",
         "category": "cabinet",
         "is_rug": false,

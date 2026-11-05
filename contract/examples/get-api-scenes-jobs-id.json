@@ -9,13 +9,13 @@
       "type": "SceneJob",
       "note": "a finished calibration",
       "body": {
-        "id": "c-20261105-180704-5a2f",
+        "id": "c-20261105-182038-4057",
         "kind": "calibrate",
-        "scene": "scene-20261105-180704",
+        "scene": "scene-20261105-182038",
         "status": "done",
-        "created": "2026-11-05T18:07:04Z",
-        "started": "2026-11-05T18:07:04Z",
-        "finished": "2026-11-05T18:07:04Z",
+        "created": "2026-11-05T18:20:38Z",
+        "started": "2026-11-05T18:20:38Z",
+        "finished": "2026-11-05T18:20:38Z",
         "message": "calibrated (truth)",
         "calib": {
           "version": 1,
@@ -48,7 +48,7 @@
           },
           "exif": null,
           "device": null,
-          "elapsed_s": 0.001
+          "elapsed_s": 0.002
         }
       }
     },
@@ -69,13 +69,13 @@
       "type": "SceneJob",
       "note": "a finished light job",
       "body": {
-        "id": "l-20261105-180704-12b1",
+        "id": "l-20261105-182039-4a48",
         "kind": "light",
-        "scene": "scene-20261105-180704",
+        "scene": "scene-20261105-182038",
         "status": "done",
-        "created": "2026-11-05T18:07:04Z",
-        "started": "2026-11-05T18:07:04Z",
-        "finished": "2026-11-05T18:07:04Z",
+        "created": "2026-11-05T18:20:39Z",
+        "started": "2026-11-05T18:20:39Z",
+        "finished": "2026-11-05T18:20:39Z",
         "message": "lighting inferred (5493 K)",
         "calib": null,
         "lighting": true

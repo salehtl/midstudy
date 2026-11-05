@@ -11,7 +11,7 @@
       "body": {
         "version": 1,
         "title": "Living room",
-        "created": "2026-11-05T18:07:04Z",
+        "created": "2026-11-05T18:20:38Z",
         "saved": null,
         "camera": {
           "fov_y_deg": 55,
@@ -25,10 +25,10 @@
           "ext": "jpg",
           "bytes": 346771
         },
-        "name": "scene-20261105-180704",
-        "photo_url": "/scenes/scene-20261105-180704/photo.jpg?v=1793902024",
+        "name": "scene-20261105-182038",
+        "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
         "thumb_url": null,
-        "depth_url": "/scenes/scene-20261105-180704/depth.png?v=1793902024",
+        "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902838",
         "w": 1600,
         "h": 1200,
         "floor_found": true,
@@ -66,7 +66,7 @@
           },
           "exif": null,
           "device": null,
-          "elapsed_s": 0.001
+          "elapsed_s": 0.002
         },
         "lighting": {
           "version": 1,

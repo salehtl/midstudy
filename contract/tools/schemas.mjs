@@ -35,9 +35,11 @@ export function makeAjv(opts = {}) {
   return ajv
 }
 
-// The route of a request: {route, params} or null. `p` may carry a query string.
+// The route of a request: {route, params} or null. `p` may carry a query string. contract/gen/routes.js has the same
+// rules, generated for the server (the contract test checks they agree).
 export function matchRoute(routes, method, p) {
-  const pathname = decodeURIComponent(String(p).split('?')[0].split('#')[0])
+  let pathname
+  try { pathname = decodeURIComponent(String(p).split('?')[0].split('#')[0]) } catch { return null }
   const segs = pathname.split('/')
   for (const route of routes.routes) {
     if (route.method !== method) continue

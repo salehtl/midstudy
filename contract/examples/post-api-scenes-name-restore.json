@@ -9,13 +9,13 @@
       "type": "SceneObject",
       "note": "back from the trash",
       "body": {
-        "name": "scene-20261105-180705",
+        "name": "scene-20261105-182039",
         "title": null,
-        "created": "2026-11-05T18:07:05Z",
+        "created": "2026-11-05T18:20:39Z",
         "saved": null,
-        "photo_url": "/scenes/scene-20261105-180705/photo.jpg?v=1793902025",
+        "photo_url": "/scenes/scene-20261105-182039/photo.jpg?v=1793902839",
         "thumb_url": null,
-        "depth_url": "/scenes/scene-20261105-180705/depth.png?v=1793902025",
+        "depth_url": "/scenes/scene-20261105-182039/depth.png?v=1793902839",
         "w": 1200,
         "h": 1600,
         "camera_source": "auto",
@@ -32,7 +32,7 @@
       "type": "ApiError",
       "note": "none left in the trash",
       "body": {
-        "error": "'scene-20261105-180705' isn't in the scenes' trash"
+        "error": "'scene-20261105-182039' isn't in the scenes' trash"
       }
     }
   ],
