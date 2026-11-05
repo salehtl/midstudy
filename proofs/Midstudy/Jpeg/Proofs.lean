@@ -11,7 +11,9 @@ For every input the stripper accepts (`strip data = .ok out`):
   (`isClean`) accepts it;
 * `strip_imageData`: **the image data is preserved**: every segment that isn't metadata (tables, frame and scan
   headers), every scan's entropy-coded data with its stuffed bytes and restart markers, and every length-less marker,
-  in order, byte for byte (`imageData` of the output's items = `imageData` of the input's items).
+  in order, byte for byte (`imageData` of the output's items = `imageData` of the input's items);
+* `strip_eq_self_iff`: the stripper leaves a file unchanged exactly when `isClean` accepts it and it has no fill
+  bytes, so §4.3's pass-through (copy byte for byte) and §2.6's stripping agree.
 
 The heart is `walk_serialize`: `walk` reads back the bytes of any well-formed item list (`ItemsOk`), up to restart
 markers after a scan, which it reads as part of the scan's data (`normalize`), as the decoder does.
@@ -765,5 +767,71 @@ theorem strip_imageData {data out : Bytes} (h : strip data = .ok out) :
   rw [imageData_normalize]
   unfold imageData
   rw [filter_isImage_filterMap_keep]
+
+/-! ### Pass-through: the stripper changes nothing exactly when ingest may copy the file -/
+
+theorem plainJfif_of_isPlainJfif {body : Bytes} (h : isPlainJfif body = true) : plainJfif body = some body := by
+  unfold isPlainJfif at h
+  rw [decide_eq_true_iff] at h
+  obtain ⟨h16, h2, hj, h14⟩ := h
+  unfold plainJfif
+  rw [if_pos ⟨by omega, hj⟩]
+  congr 1
+  -- body = take 2 ++ (drop 2 → take 12) ++ drop 14
+  have e1 : body = body.take 2 ++ ((body.drop 2).take 12 ++ (body.drop 2).drop 12) := by
+    rw [List.take_append_drop, List.take_append_drop]
+  rw [List.drop_drop] at e1
+  conv_rhs => rw [e1, h2, h14]
+  simp
+
+/-- The items of a JPEG that `isClean` accepts: every one is kept as it is. -/
+theorem isClean_items {x : Bytes} (h : isClean x = true) :
+    4 ≤ x.length ∧ x.take 2 = soi ∧ ∃ items, walk (x.drop 2) = .ok (items, []) ∧
+      ∀ it ∈ items, keepItem it = some it := by
+  unfold isClean at h
+  split_ifs at h with hc
+  split at h
+  · simp at h
+  rename_i items tr hw
+  simp only [Bool.and_eq_true, List.isEmpty_iff, List.all_eq_true] at h
+  obtain ⟨rfl, hall⟩ := h
+  refine ⟨hc.1, hc.2, items, hw, fun it hit => ?_⟩
+  have := hall it hit
+  cases it with
+  | seg m body =>
+    simp only [Bool.and_eq_true, Bool.not_eq_true', Bool.or_eq_true, bne_iff_ne, ne_eq] at this
+    obtain ⟨hm, hE0⟩ := this
+    simp only [keepItem]
+    by_cases h0 : m = 0xE0
+    · subst h0
+      rw [if_pos rfl, plainJfif_of_isPlainJfif (hE0.resolve_left (not_not.2 rfl))]
+      rfl
+    · rw [if_neg h0, if_neg (by simp [hm])]
+  | _ => rfl
+
+/-- **The stripper leaves a file unchanged exactly when ingest's pass-through test accepts it and it has no fill
+bytes** (it reads back to the same bytes): §4.3's "copied byte for byte" and §2.6's stripping agree. -/
+theorem strip_eq_self_iff (x : Bytes) :
+    strip x = .ok x ↔ isClean x = true ∧ ∃ items, walk (x.drop 2) = .ok (items, []) ∧ serialize items = x.drop 2 := by
+  constructor
+  · intro h
+    refine ⟨strip_isClean h, ?_⟩
+    obtain ⟨items, tr, hw, hout⟩ := strip_eq h
+    refine ⟨normalize (items.filterMap keepItem), ?_, ?_⟩
+    · have := walk_kept hw
+      rw [← hout] at this
+      exact this
+    · rw [serialize_normalize]
+      conv_rhs => rw [hout]
+      rfl
+  · rintro ⟨hc, items, hw, hser⟩
+    obtain ⟨hlen, htake, items', hw', hkeep⟩ := isClean_items hc
+    rw [hw] at hw'
+    simp only [Except.ok.injEq, Prod.mk.injEq] at hw'
+    obtain ⟨rfl, -⟩ := hw'
+    unfold strip
+    rw [if_pos ⟨hlen, htake⟩, hw]
+    simp only [Except.ok.injEq]
+    rw [filterMap_eq_self hkeep, hser, ← htake, List.take_append_drop]
 
 end Midstudy.Jpeg
