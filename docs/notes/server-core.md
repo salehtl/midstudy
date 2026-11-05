@@ -184,10 +184,12 @@ nix develop -c node scripts/check-ownership.mjs server-core --base 979677c
   spellings (decimal `2130706433`, `[::ffff:127.0.0.1]`, `0.0.0.0`, metadata, tailnet, fe80) refused with the canary never
   connected, the exemption exactly one host:port, gzip/deflate (zlib and raw), the cut, too-large, non-200 without body,
   5 redirects then too-many, cross-origin, a trickle stopped by the budget.
-- **Performance, A/B interleaved** (`evals/out/probe/perf.mjs`, scratch; 7 rounds, load 21–22, so ±20 %): start to the
-  first answer v1 121 ms, v2 117 ms (strict 141 ms with the 558 KB validators); `GET /api/spend` p50 v1 0.53 ms, v2
-  0.50 ms; `GET /planner/dist/app.js` (349 kB) p50 v1 0.88 ms, v2 0.74 ms. The first v2 static path (a read stream per
-  file) measured 0.77 vs v1's 0.55 ms; files up to 4 MiB are now read in one call and sent in one write.
+- **Performance, A/B interleaved** (`evals/out/probe/perf.mjs`, scratch: each round starts v1, v2 and v2 with strict
+  mode in turn; one connection per request, as a fresh client makes them): at load 8, 9 rounds, medians: start to the
+  first answer v1 94 ms, v2 88 ms, v2 strict 93 ms (it loads the 558 KB validators); `GET /api/spend` p50 v1 0.31 ms,
+  v2 0.30 ms; `GET /planner/dist/app.js` (349 kB) p50 v1 0.46 ms, v2 0.45 ms. Before the change below, at load 21:
+  static 0.77 ms against v1's 0.55 ms with a read stream per file; files up to 4 MiB are now read in one call and sent in
+  one write (0.74 vs 0.88 ms at that load). Keep-alive, which v1 didn't have, comes on top for browsers.
 - **Evals** (`MIDSTUDY_SERVER=next` → `MIDSTUDY_STRICT=1`, through the eval lock): see "Evals with stubs" below.
 - **TScert**: see "TScert" below.
 
