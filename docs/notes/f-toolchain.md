@@ -113,7 +113,7 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 | TScert | **go** | Built in the Nix sandbox at `1c8abcf2` in 5 min 21 s (8 min after the patch). 103 of 126 experiment functions certify (14 s). The ratchet passes, rewrites the baseline, and fails on a planted regression. One documented patch makes the sandboxed runs work (tscert/README.md). Running it directly as the user was refused by this session's permission classifier, so `check:tscert` always uses the sandbox. |
 | Miri | **go** | `nix develop .#nightly -c cargo miri --version` → `miri 0.1.0 (8925ea358a 2026-08-20)`. A probe crate's tests ran under Miri: 1 passed. |
 | cargo-fuzz | **go** | 0.13.1 on nightly-2026-08-21 with ASan on aarch64-darwin: a probe `be16` target ran 10 s without a crash. |
-| Kani | **go** (aarch64-darwin) | Release bundle 0.68.0 (109 MB, fixed-output) with its `toolchain` link pointed at rust-overlay's nightly-2026-08-21. kani-compiler loads `librustc_driver` through `@loader_path/../toolchain/lib`. `cargo kani --version` → "Kani Rust Verifier 0.68.0 (cargo plugin)". A probe harness gave `VERIFICATION:- SUCCESSFUL`, 1 of 1 verified. Packaging took under 30 minutes. cbmc-viewer (`--visualize`) is not included, and Linux is not packaged. |
+| Kani | **go** (aarch64-darwin) | Release bundle 0.68.0 (109 MB, fixed-output) with its `toolchain` link pointed at rust-overlay's nightly-2026-08-21. kani-compiler loads `librustc_driver` through `@loader_path/../toolchain/lib`. `cargo kani --version` → "Kani Rust Verifier 0.68.0 (cargo plugin)". A probe harness gave `VERIFICATION:- SUCCESSFUL`, 1 of 1 verified. Packaging took about 30 minutes, most of it downloading the nightly. cbmc-viewer (`--visualize`) is not included, and Linux is not packaged. |
 | Aeneas + Charon | **no-go within the time box** | `nix build github:AeneasVerif/aeneas/4acbb6d7#aeneas …#charon` ran 62 min (21:42–22:44), fetched 436 store paths and was still building Charon's vendored crates (crane, nightly-2026-09-17 with rustc-dev) when it stopped ("interrupted"). No binary was produced, so there is no `.#proofs` shell. A later run resumes from the cached paths. Aeneas's CI pulls prebuilt paths from `hacl.cachix.org`, but trusting that substituter is a machine-wide Nix setting (`determinateNix.customSettings` in the rabbit flake), which only the user can change. Aeneas's Lean library pins **Lean v4.35.0** (`backends/lean/lean-toolchain`) with Mathlib `56a00585` (tag v4.35.0); Charon pins `6cc2b5f8` and nightly-2026-09-17. |
 
 ## Decisions
@@ -138,13 +138,13 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 - **check:py fails today on purpose.** It is strict on all of `calib/` (src, tests, scripts) unless calib sets its own
   `[tool.pyright]`.
 - **Lean 4.29.1 in the default shell is large**: a 608 MiB download and 2.4 GiB unpacked. The first
-  `nix develop -c true` on this Mac took 41 minutes because of it. It is cached now (about 2 s).
+  `nix develop -c true` on this Mac took 41 minutes because of it. It is cached now (0.7 s).
 
 ## Measurements
 
 | What | Value |
 |---|---|
-| First `nix develop -c true` (cold, shared network) | 41 min, mostly lean4 4.29.1; afterwards about 2 s |
+| First `nix develop -c true` (cold, shared network) | 41 min, mostly lean4 4.29.1; afterwards 0.7 s |
 | `nix develop .#nightly` (cold) | 14 s once Kani's build had fetched the nightly |
 | Planner bundle: cold build / no-op | 161 ms / 4–9 ms |
 | Probe wasm build: cold / no-op | 18 s / 6 ms |
@@ -193,8 +193,8 @@ step in their harness yet (f-contract adds it), so the bundle was built first. E
   for the rest, so two exclusive waiters deadlock. Observed from 22:49 to 23:14: f-perf held slots 0 and 2, k-media
   held slot 1, both were `--exclusive` and waiting, and every non-exclusive eval queued behind them until k-media's
   `--wait-min 20` ran out. After that, f-perf kept slots 0 and 2 while still waiting, so every other eval in the
-  repository shared the single remaining slot for as long as f-perf waited. Between 22:49 and 23:15 this branch's
-  first eval never got a slot. An exclusive waiter should release whatever it holds after each failed round, or take
+  repository shared the single remaining slot for as long as f-perf waited. This branch's first eval queued from
+  22:48 and got a slot at about 23:40. An exclusive waiter should release whatever it holds after each failed round, or take
   all slots or none.
 - **main session / ownership**: `core/miri.txt` (the crates Miri checks, one per line) and `proofs/axioms.txt` (allowed
   axioms) are owned by no Phase 1 track. They could go to kernels-hardening or k-media, and to proofs.
@@ -202,8 +202,7 @@ step in their harness yet (f-contract adds it), so the bundle was built first. E
 - **k-media, k-geom (kernels)**: the wasm crates need `[lib] crate-type = ["cdylib", "rlib"]` and `wasm-bindgen =
   "=0.2.121"` (or `{ workspace = true }`). The workspace lints, `unsafe_code = "forbid"` included, accept
   `#[wasm_bindgen]`: a probe glue crate passed clippy -D warnings natively and for wasm32. Mark Kani harnesses
-  `#[cfg(kani)]`; the workspace already declares
-  `cfg(kani)` and `cfg(fuzzing)`. A cargo-fuzz directory (`core/fuzz/` or `core/crates/<c>/fuzz/`) needs an empty
+  `#[cfg(kani)]`; the workspace already declares `cfg(kani)` and `cfg(fuzzing)`. A cargo-fuzz directory (`core/fuzz/` or `core/crates/<c>/fuzz/`) needs an empty
   `[workspace]` table in its `Cargo.toml`.
 - **calib**: put `[tool.pyright]` (`typeCheckingMode = "strict"` and its includes) and any `[tool.ruff]` rules in
   `calib/pyproject.toml`. check:py uses them in place of `scripts/pyright/pyrightconfig.json`.
