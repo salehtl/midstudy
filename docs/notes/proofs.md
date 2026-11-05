@@ -45,7 +45,7 @@ Don't run `lake update` for this: it re-resolves the dependencies.
 ## What is proved
 
 No `sorry`, `admit` or new axioms: `CheckAxioms.lean` collects the axioms of every declaration under `Midstudy`
-(1,074 at the last run; 350 theorems in 19 files) and allows only Lean's three standard ones, which Mathlib uses
+(1,083 at the last run; 354 theorems in 20 files) and allows only Lean's three standard ones, which Mathlib uses
 throughout. The table lists the main results by group; the next section maps k-geom's LEAN.md to them one by one.
 
 | Theorem | File | What it guarantees for the app | Mirrored by (floats are tested, not proved) |
@@ -98,6 +98,7 @@ throughout. The table lists the main results by group; the next section maps k-g
 | `Png.walk_serialize`, `Png.walk_chunksOk`, `Png.walk_spec` | Png | the PNG chunk walk reads back well-formed chunks; it consumes exactly the chunks' bytes then what follows IEND | k-media props |
 | `frameWalk_ok`, `frameInfo_ok` | Jpeg.Frame | the JPEG size qwen is priced by is never guessed: an answer is the fields of a start-of-frame segment in the data, where the walk reached it, with a non-zero width and height (AENEAS.md #3) | proofs/diff frame: 30,476 files identical |
 | `isSlug_iff`, `isSlug_ascii`, `isSlug_safe`, `isSlug_length` | Slug | `is_slug` is exactly `^[a-z0-9][a-z0-9-]{0,63}$` (no trailing newline); a slug is ASCII, has no `/`, `\`, `.`, NUL, newline or space and isn't `.`/`..`: one path component inside the folder it is joined to (AENEAS.md #6) | k-media props (regex oracle); proofs/diff slug: 20,000 strings identical |
+| `split_freed_spec`, `pad4_spec`, `shift_mod16` | Glb | the compact GLB layout removes whole 16-byte blocks (padding < 16, nothing lost), `pad4` pads to a multiple of 4 on a 64-bit `usize`, and every later bufferView keeps its offset mod 16 (AENEAS.md #1) | k-media GLB properties |
 | `megabytes_eq_roundHalfEven`, `megabytes_lt` | Arith | zip.rs `megabytes` is exactly `total/10⁶` rounded half to even (Python's), for every u64; no overflow (AENEAS.md #2) | k-media test `megabytes_round_half_even` |
 | `foldDigits_eq`, `foldDigits_lt`, `foldDigits_prefix_lt` | Arith | Content-Length's digit fold over ≤ 15 digits stays below 10¹⁵ at every step (no overflow) and is the digits' number (AENEAS.md #7) | k-media http tests |
 | `Png.strip_idem`, `Png.strip_no_metadata`, `Png.strip_chunks`, `Png.strip_eq_self_iff` | Png | idempotent; no eXIf/tEXt/iTXt/zTXt/tIME and nothing after IEND; the other chunks byte for byte in order; unchanged exactly when there is nothing to drop (§2.8) | GLB texture stripping |
@@ -228,8 +229,9 @@ plus 400 frame-header cases (zero width or height, short SOF segments, TEM/RST/s
 
 All eight groups are proved: camera, horizon, depth, item rotation, clamps, units, lighting, and the JPEG stripper;
 also the PNG stripper, the light's turn, drags and Set scale, and 25 of k-geom's 28 LEAN.md properties (13
-corrected). Of k-media's AENEAS.md targets, #2 (`megabytes`), #3 (`frame_info`), #4 (`png::strip`), #6 (`is_slug`),
-#7 (the Content-Length fold) and #9 (`jpeg::strip`, `is_clean`) have Lean models with proofs; #3, #4, #6 and #9 are
+corrected). Of k-media's AENEAS.md targets, #1 (`split_freed`, `pad4`), #2 (`megabytes`), #3 (`frame_info`), #4
+(`png::strip`), #6 (`is_slug`), #7 (the Content-Length fold) and #9 (`jpeg::strip`, `is_clean`) have Lean models with
+proofs (#5 base64 and #8 sniff not done); #3, #4, #6 and #9 are
 also compared with the Rust by `proofs/diff/` (all identical). Left:
 - re-run `nix develop -c proofs/diff/run.sh` in place once `core/crates/media` is on `v2` (merge `v2` first): the
   measurements above are against `v2-k-media` cb444c5, extracted to `evals/out/proofs-scratch/` because it isn't on
