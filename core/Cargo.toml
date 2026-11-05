@@ -1,0 +1,35 @@
+# midstudy's Rust kernels (docs/REFACTOR.md): compiled to wasm32 for the planner (wasm-web) and for Node (wasm-node),
+# and tested natively. Each crate lives in crates/<name>; f-toolchain owns this file.
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"
+module_name_repetitions = "allow"
+# Byte parsers (media, splat, product, the PNG decoder in raster) also deny, at crate level:
+#   #![deny(clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
+# so that malformed input can never panic or wrap; float geometry code keeps the workspace defaults.
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.release.package."*"]
+opt-level = 3

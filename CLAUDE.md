@@ -11,20 +11,15 @@ See furniture in your own room before you buy it: the room is **one phone photo*
 - Item frame: origin at the **center of the footprint, on the floor**; width along X, height along Y, depth along Z; the **front faces +Z**. Positive `rotation_y_deg` is counterclockwise seen from above.
 - Ids, layout and scene names are slugs: `^[a-z0-9][a-z0-9-]{0,63}$`. Asset paths in `library.json` are relative to it.
 
-## Ownership
+## v2 refactor (branch `v2`, in progress)
 
-| Path | Owner |
-|---|---|
-| `planner/` (browser app and `planner/serve.py`) | app track |
-| `calib/` (uv project, `midstudy-calib`) | calib track |
-| `pipeline/` (`midstudy-add`) | foundation (renames only); no feature work in v1 |
-| `contract/`, `CLAUDE.md`, `PLAN.md`, `fixtures/scenes/`, `fixtures/calib/` | foundation; read-only afterwards except for the integration agent |
-| `evals/` | evals track (new evals); foundation (carried evals) |
-| `nix/`, `flake.nix` packages, `docs/HANDOFF.md` | packaging |
-| `docs/notes/<track>.md` | each track its own |
-| `scenes/`, `library/`, `layouts/`, `renders/` | user data written by the tools (git-ignored, except `library/library.json` and `library/costs.csv`) |
+[docs/REFACTOR.md](docs/REFACTOR.md) is the plan: TypeScript (strict, TScert) for the planner, server and `midstudy-add`; Rust → WebAssembly kernels in `core/`; Lean proofs in `proofs/`; calib stays Python, typed. It runs as workflows of parallel tracks, each in its own worktree (`.claude/worktrees/rf-<track>/`, branch `v2-<track>`).
 
-Only phase-boundary agents commit; nothing is pushed.
+- **Ownership** is `scripts/ownership.json`; `node scripts/check-ownership.mjs <track>` must pass before a track finishes. Only gate and integration agents write `v2`. Nothing is pushed.
+- **Evals go through the lock**: `node scripts/eval-lock.mjs -- npm run eval:…` (`--exclusive` for performance runs).
+- The evals don't change except where the harness starts things (browser, `MIDSTUDY_SERVER=legacy|next`, `MIDSTUDY_ADD=legacy|next`, strict mode, the planner build). They are the independent check that v2 behaves as v1.
+
+User data (`scenes/`, `library/`, `layouts/`, `renders/`) is written by the tools and git-ignored, except `library/library.json` and `library/costs.csv`.
 
 ## Secrets, privacy and cost
 
@@ -38,7 +33,7 @@ Only phase-boundary agents commit; nothing is pushed.
 - Tools come from the flake's dev shell: run `nix develop -c <cmd>` from the repo root (python 3.12, uv, node 22, git). Never install anything globally (`brew`, `npm -g`, `pipx`, `nix profile`). Nix only sees files git tracks: `git add` a new file before relying on it through nix.
 - Python: uv projects in `pipeline/` (and `calib/`). `evals/py <script>` runs eval helpers with pinned deps (numpy, pillow, jsonschema, trimesh, pygltflib).
 - Node is for evals and fixtures only (`playwright-core`, `ajv`, `three`); the planner has no build step. `nix develop -c npm install` once.
-- Browser: **Helium**, headless: `/Applications/Helium.app/Contents/MacOS/Helium` (or `MIDSTUDY_BROWSER`) with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`.
+- Browser: **headless Chrome** from the user's flake, `$PUPPETEER_EXECUTABLE_PATH` (or `MIDSTUDY_BROWSER`), with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`, plus `--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader` for WebGPU (a secure-context page: the evals' `http://127.0.0.1`). **Never launch Helium** or any browser the user browses with.
 - Calibration while `calib/` is being built, and in fast evals: `serve.py --calib "python3 fixtures/stub_calib.py"`, or the real CLI with `MIDSTUDY_CALIB_MOCK=fixtures/calib`.
 - Servers you start pick a free port and are stopped when you're done. Scratch output goes to `evals/out/` (git-ignored).
 - No ssh, nothing on homeserver, no `git push`, no changes to git config or remotes.

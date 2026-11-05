@@ -1,4 +1,4 @@
-// Golden scenes (PLAN.md §6.1, contract §5.1): a textured room rendered with three.js 0.180.0 in headless Helium from a
+// Golden scenes (PLAN.md §6.1, contract §5.1): a textured room rendered with three.js 0.180.0 in headless Chrome from a
 // known camera (contract §4.1), so calibration, projection and occlusion can be checked against exact geometry.
 // Adapted from nook's fixtures/make_capture.mjs.
 //
@@ -15,7 +15,7 @@
 //
 // Usage: node fixtures/make_scene.mjs [--only <id>] [--lights-only]     (then: evals/py fixtures/check_scenes.py)
 //   --lights-only rewrites truth.json's `lights` and lighting.json without rendering (photos unchanged).
-// Browser: MIDSTUDY_BROWSER, default /Applications/Helium.app/Contents/MacOS/Helium (software GL, swiftshader).
+// Browser: MIDSTUDY_BROWSER, default $PUPPETEER_EXECUTABLE_PATH (headless Chrome; software GL, swiftshader).
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -26,7 +26,8 @@ const REPO = path.resolve(import.meta.dirname, '..')
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
 const ONLY = arg('only', null)
 const LIGHTS_ONLY = process.argv.includes('--lights-only')
-const BROWSER = process.env.MIDSTUDY_BROWSER || '/Applications/Helium.app/Contents/MacOS/Helium'
+const BROWSER = process.env.MIDSTUDY_BROWSER || process.env.PUPPETEER_EXECUTABLE_PATH || ''
+if (!BROWSER) throw new Error('make_scene: no headless browser: set PUPPETEER_EXECUTABLE_PATH (or MIDSTUDY_BROWSER)')
 
 // The lights (world frame, three.js 0.180 units; colours are sRGB hex, which three.js turns linear). `sun` is a
 // DirectionalLight from `position` towards `target`; `hemi` a HemisphereLight (sky from +Y); `lamp` a PointLight.

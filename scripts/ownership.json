@@ -1,0 +1,27 @@
+{
+  "doc": "Which paths each v2 track may change (docs/REFACTOR.md §6). Globs: ** any depth, * one segment, {a,b}; a leading ! excludes. shared_append files may gain entries from any track. docs/notes/<track>.md is always allowed.",
+  "shared_append": ["package.json", "package-lock.json", "core/Cargo.lock"],
+  "tracks": {
+    "f-toolchain": ["flake.nix", "flake.lock", "nix/**", "!nix/lean.nix", "tsconfig*.json", "eslint.config.*", "knip.*", ".npmrc", "scripts/**", "!scripts/ownership.json", "!scripts/check-ownership.mjs", "!scripts/eval-lock.mjs", "!scripts/gen-contract.mjs", "planner/index.html", ".gitignore", "tscert/**", "core/Cargo.toml", "core/.cargo/**", "core/rust-toolchain*", "core/deny.toml", "core/clippy.toml", "core/rustfmt.toml"],
+    "f-contract": ["contract/**", "core/crates/contract/**", "scripts/gen-contract.mjs", "evals/lib/harness.mjs", "evals/library_api.sh", "evals/pipeline_offline.sh", "evals/README.md", "evals/all.mjs"],
+    "f-perf": ["evals/perf.mjs", "evals/perf/**"],
+    "k-media": ["core/crates/media/**", "core/crates/wasm-node/**", "core/js/node.ts"],
+    "k-geom": ["core/crates/geom/**", "core/crates/raster/**", "core/crates/wasm-web/**", "core/js/web.ts"],
+    "proofs": ["proofs/**", "nix/lean.nix"],
+    "calib": ["calib/**", "contract/CONTRACT.md"],
+    "webgpu-spike": ["planner/gpu/**"],
+    "server-core": ["server/**", "!server/src/product/**"],
+    "server-routes": ["server/**", "!server/src/product/**"],
+    "product": ["server/src/product/**", "core/crates/product/**"],
+    "engine": ["planner/main.*", "planner/engine.*", "planner/lighting.*", "planner/input.*", "planner/data.*", "planner/logic/**"],
+    "ui": ["planner/ui/**", "planner/styles/**"],
+    "pipeline": ["pipeline/**", "core/crates/splat/**"],
+    "kernels-hardening": ["core/crates/media/**", "core/crates/geom/**", "core/crates/raster/**", "core/crates/wasm-web/**", "core/crates/wasm-node/**", "core/js/**", "core/fuzz/**"],
+    "packaging": ["nix/**", "flake.nix", "flake.lock", "docs/HANDOFF.md"],
+    "gate-1": ["**"],
+    "integration": ["**"],
+    "webgpu-swap": ["**"],
+    "fixer": ["**"],
+    "finish": ["**"]
+  }
+}

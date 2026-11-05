@@ -9,7 +9,7 @@
 //   --daily-spend-usd 0 unless an eval tests the cap with mock costs) and the calib stub with MIDSTUDY_CALIB_MOCK.
 // - a guard that the repo's own scenes/, layouts/, renders/ and library/ are left untouched.
 // - the §4.1 projection (and its inverse) in plain JS, to compute expectations independently of the planner.
-// - Helium + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
+// - headless Chrome + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
 //   missing ("hook missing: getScreenRect"), find the photo on screen, touch drags, 44 px target checks.
 // - a probe library: a magenta, unlit 0.8 × 0.5 × 1.2 m box GLB (easy to find in a composite, exact bounds).
 import { spawn, execFileSync } from 'node:child_process'
@@ -20,8 +20,15 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 
 export const REPO = path.resolve(import.meta.dirname, '../..')
-export const BROWSER = process.env.MIDSTUDY_BROWSER || '/Applications/Helium.app/Contents/MacOS/Helium'
-export const BROWSER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
+// Headless Chrome from the user's flake (PUPPETEER_EXECUTABLE_PATH, chrome-headless-shell); MIDSTUDY_BROWSER overrides.
+// Never a browser the user browses with (Helium included): automation takes it over.
+export const BROWSER = process.env.MIDSTUDY_BROWSER || process.env.PUPPETEER_EXECUTABLE_PATH || ''
+if (!BROWSER) console.error('harness: no headless browser: set PUPPETEER_EXECUTABLE_PATH (or MIDSTUDY_BROWSER)')
+// WebGL through ANGLE on SwiftShader (deterministic software GL), and WebGPU on Dawn's SwiftShader adapter: the
+// headless shell has no real GPU. WebGPU needs a secure context (the evals' http://127.0.0.1 pages are one).
+// MIDSTUDY_WEBGPU=0 hides WebGPU, to exercise the WebGL2 fallback.
+export const BROWSER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+  ...(process.env.MIDSTUDY_WEBGPU === '0' ? [] : ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'])]
 export const STUB_CALIB = 'python3 fixtures/stub_calib.py'
 export const REAL_CALIB = 'uv run --project calib midstudy-calib'
 export const GOLDEN = ['living-wide', 'steep-roll', 'portrait']
