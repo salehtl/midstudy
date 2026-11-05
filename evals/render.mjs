@@ -143,7 +143,7 @@ const keepOn = keep.loc ? await keep.loc.evaluate((el) => {
   const i = el.matches('input') ? el : el.querySelector('input')
   return i ? i.checked : ['true'].includes(el.getAttribute('aria-checked') || el.getAttribute('aria-pressed') || '')
 }).catch(() => null) : null
-ev.check('Render opens the dialog with Keep room exact, off by default', !!btn.loc && !!keep.loc && keepOn === false, `${btn.how}; ${keep.how}; on ${keepOn}`)
+ev.check('Render opens the dialog with Keep room exact, on by default (PLAN.md §8 live check)', !!btn.loc && !!keep.loc && keepOn === true, `${btn.how}; ${keep.how}; on ${keepOn}`)
 await P.page.screenshot({ path: path.join(ev.out, 'render-dialog.png') }).catch(() => {})
 const go = await control(P.page, 'render-go', [/^render$/i])
 if (go.loc) await go.loc.click().catch(() => {})

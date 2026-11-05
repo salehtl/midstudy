@@ -204,6 +204,9 @@ def fal_call(endpoint: str, args: dict, key: str) -> dict:
             return json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read()[:400].decode("utf-8", "replace")
+        if e.code == 422 and "did not generate the expected output" in detail:
+            # Seen live 2026-11-05: nano-banana/edit sometimes returns no image; the same request worked on a retry.
+            raise FalError(f"{endpoint} returned no image this time. Try the render again.") from None
         raise FalError(f"fal {endpoint} returned HTTP {e.code}: {detail}") from None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise FalError(f"could not reach fal ({endpoint}): {getattr(e, 'reason', e)}") from None

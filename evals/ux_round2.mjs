@@ -118,7 +118,9 @@ await hook(page, 'setAdjustFloor', [true])
 await sleep(300)
 const rulerBtn = page.getByRole('button', { name: /^ruler$/i }).first()
 await rulerBtn.click()
-await sleep(300)
+// Ruler on adds its row and the photo resizes once (an animated layout change, done well within 1.5 s under swiftshader);
+// measure after it settles: the check is that the taps don't move it (main session, 2026-11-05: a fixed 300 ms flaked).
+{ let prev = null; for (let i = 0; i < 20; i++) { await sleep(150); const r = await photoRect(page); if (prev && sameRect(prev, r) && i >= 3) break; prev = r } }
 const fp = LW.truth.floor_points
 const far = fp.reduce((best, q) => (Math.hypot(q.world[0] - fp[0].world[0], q.world[2] - fp[0].world[2]) > Math.hypot(best.world[0] - fp[0].world[0], best.world[2] - fp[0].world[2]) ? q : best), fp[1])
 const trueM = Math.hypot(fp[0].world[0] - far.world[0], fp[0].world[2] - far.world[2])

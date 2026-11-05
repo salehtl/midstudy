@@ -20,7 +20,7 @@ stand is in [docs/STATUS.md](docs/STATUS.md).
    (the **Occlusion** toggle, on when the scene has depth).
 5. **Layouts.** Save several per scene and switch between them.
 6. **Render.** One button sends the photo with the pieces to nano-banana on fal (about $0.04), with the original photo
-   as a reference. **Keep room exact** (off by default) pastes only the furniture back into your untouched photo.
+   as a reference. **Keep room exact** (on by default) pastes only the furniture back into your untouched photo.
 7. **Compare** two renders side by side or with a split slider.
 
 The camera never moves: the photo is the only viewpoint. Pinch or wheel zoom is a 2D zoom into the photo (up to 4×),

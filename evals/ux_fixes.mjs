@@ -253,6 +253,10 @@ if (hasSUndo) await sUndo.first().click()
 const back1 = await waitFor(async () => ((await api.get(srv.base, '/api/scenes')).json?.scenes || []).find((s) => s.name === S2.name), { timeoutMs: 5000 })
 ev.check('deleting a scene offers Undo, and Undo brings it back (calibrated, its photo served)', !!gone1 && hasSUndo && back1?.calib_status === 'done' && (await api.get(srv.base, back1.photo_url.split('?')[0])).status === 200,
   fmt({ gone1: !!gone1, hasSUndo, back: back1?.calib_status, toasts: toastNow }))
+// Wait for the UI to finish the Undo (its "… is back" toast) before deleting again: the API lists the scene a moment
+// before the page has redrawn, and a delete started in between was lost (main session, 2026-11-05).
+await page.locator('#toasts .toast-text', { hasText: /is back$/ }).first().waitFor({ timeout: 5000 }).catch(() => {})
+await sleep(300)
 const gone2 = await deleteCard(S2.name)
 await page.evaluate(() => window.midstudyCtx.engine.listScenesInternal())
 await sleep(400)

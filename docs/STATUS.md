@@ -1,11 +1,11 @@
 # midstudy status
 
 As of 2026-11-05, branch `v1` (local commits, nothing pushed). Every eval below was run on 2026-11-05 on this Mac (M3
-Max, MPS), with fal mocked: no paid call was made.
+Max, MPS), with fal mocked. The only paid calls are the main session's live check (below, $0.10).
 
 **In short:** v1 is built and works end to end on the Mac: photo in, floor found, furniture placed, layouts saved,
-renders and Compare (mock). Three things are left: the live fal check (about $0.20), your confirmation of one plan
-change (EXIF focal length, below), and hosting on homeserver, which is packaged but has never been built on Linux.
+renders and Compare, now also checked against live fal. What's left is hosting on homeserver, which is packaged but has
+never been built on Linux.
 
 ## What works now
 
@@ -18,8 +18,8 @@ change (EXIF focal length, below), and hosting on homeserver, which is packaged 
   Pieces are placed, dragged, turned, lifted, removed and restored with undo. Real furniture in the photo hides them
   (occlusion from MoGe's depth).
 - **Layouts** per scene. A scene reopens with its layout on any device.
-- **Render** (nano-banana with your photo as a reference), the optional **Keep room exact** alignment, the Renders
-  panel and **Compare** (side by side or split, Swap). All of this was tested in mock mode only.
+- **Render** (nano-banana with your photo as a reference), **Keep room exact** (on by default since the live check),
+  the Renders panel and **Compare** (side by side or split, Swap). Tested in mock mode, plus the live check below.
 - **Phone** layout at 390 × 844, touch only. Every target is at least 44 px and there's no sideways scroll.
 - **Privacy and money.** Photos and furniture images lose their EXIF/GPS before they're served or sent to fal. The
   server serves an allowlist only, and there's a daily spend cap ($2 by default).
@@ -31,24 +31,41 @@ change (EXIF focal length, below), and hosting on homeserver, which is packaged 
 | Eval | Result | Measured |
 |---|---|---|
 | E1 scenes API (`eval:scenes-api`) | **pass** 172/172 | uploads, jobs, trash/restore, allowlist (30 spellings), metadata stripping, Host/Origin rules, spend cap |
-| E2 calibration, real MoGe-2 (`eval:calib`) | **fail** 84/91 | the same 7 golden misses as before (below). Lounge: FOV 69.63° (EXIF 69.6°), height 1.432 m, floor found, 9.6 s |
-| E2 golden scenes only (`--no-real-photos`) | **fail** 59/66 | same 7 misses; golden + EXIF: height within 0.6–3.3 %, furniture ×0.99–1.04, floor 5–16 px off |
+| E2 calibration, real MoGe-2 (`eval:calib`) | **pass** 91/91 | golden + EXIF: FOV from EXIF, height within 0.6–3.3 %, depth ≤ 10 %; golden without EXIF: pitch/roll ≤ 0.7°, depth shape 0.7–1.1 %, MoGe's own FOV/scale bias (+3.6…+7.5°, −7.8…−15.4 %) inside the regression bands (known gaps, item 1). Lounge: FOV 69.63° (EXIF), height 1.432 m, floor found |
+| E2 self-test (`calib_eval.py --self-test`) | **pass** 42/42 | |
 | E2 ingest (`eval:calib -- --mock`) | **pass** 51/51 | HEIC, P3, PNG, WebP, rotation, 25 MB limit, metadata stripped |
 | E3 planner (`eval:planner`) | **pass** 55/55 | `floorToPhoto` max 0.00 px off; 2 m → 4 m shrink ratio 0.495 (projected 0.495) |
 | E4 occlusion (`eval:occlusion`) | **pass** 20/20 | hidden pixels 100 % photo; off: 100 % box; manual height ×1.25 still 100 % |
 | E5 floor (`eval:floor`) | **pass** 34/34 | horizon drag pitch −5.75° (expected −5.74°); manual/auto save and reset |
-| E6 render (`eval:render`) | **pass** 36/36 | align 0.01 px on the synthetic pair; an unrelated image refused (5 inliers) |
+| E6 render (`eval:render`) | **pass** 36/36 | align 0.01 px on the synthetic pair; an unrelated image refused; the dialog opens with Keep room exact on |
 | E7 library (`eval:library`) | **pass** 69/69 | carried nook library API |
 | E8 pipeline (`eval:pipeline`) | **pass** 43/43 | `midstudy-add` against the fal mock |
 | E9 phone (`eval:phone`) | **pass** 48/48 | all targets ≥ 44 px, scroll width 390 at every stage |
-| E11 UX round 1 (`eval:ux`) | **pass** 28/28 | drag keeps the grabbed point under the pointer, Set scale, undo |
-| E12 UX round 2 (`eval:ux2`) | **pass** 26/26 | layouts across devices, ruler, thumbnails, Swap |
+| E11 UX round 1 (`eval:ux`) | **pass** 28/28 | drag keeps the grabbed point under the pointer, Set scale, undo (E11.18 now waits for the Undo to finish in the UI) |
+| E12 UX round 2 (`eval:ux2`) | **pass** 26/26 | layouts across devices, ruler, thumbnails, Swap (E12.12 now waits for the photo to settle after Ruler on) |
 | Real path (`eval:real`) | **pass** 31/31 | your lounge photo, real MoGe, GLB chair, two renders, Compare, phone |
 | Harness self-test (`eval:selftest`) | **pass** 22/22 | |
 | `calib/` unit tests (pytest) | **pass** 42/42 | |
 | `nix flake check --no-build --all-systems` | **pass** | evaluation only, nothing built |
 
-`eval:all` (E1, E3–E9, E11, E12) took about 5 min. Logs are in `evals/out/finish/` (git-ignored).
+`eval:all` (E1, E3–E9, E11, E12) takes about 5 min. Logs are in `evals/out/main/` (git-ignored). The main session
+found E11.18 and E12.12 flaky (fixed timing in the evals, not the app; each then passed 3 runs out of 3).
+
+## Live check (PLAN.md §8, main session, 2026-11-05, $0.10)
+
+On your lounge photo (`evals/out/live/`, git-ignored; `live-check.jpg` puts the three side by side):
+
+- **SAM 3D add** of the Morris chair photo (`fixtures/fal/sam-3-3d-objects/input.jpg`) through the planner's library
+  API: live, 62 s, $0.02, GLB + splat + thumbnail. Two of them placed on the rug read at a believable size.
+- **Render, Keep room exact off:** live nano-banana, 16 s, $0.04, 1344 × 768. Chairs kept their position, size and
+  colour; the room is redrawn by the model and slightly softer.
+- **Render, Keep room exact on:** live, 17 s, $0.04. Aligned with 679 inliers, 0.6 px residual; the result is the
+  photo at 2048 × 1152 with only the chairs from the model, and no visible seam. So **Keep room exact is now on by
+  default** in the Render dialog (the hook's `renderView()` still defaults it to off).
+- **One failure:** the first keep-room attempt got fal HTTP 422 "did not generate the expected output" (no charge,
+  nothing in costs.csv); the retry worked. serve.py now words it as "returned no image this time. Try the render
+  again." instead of fal's raw JSON.
+- Neither render adds much contact shadow under the chairs.
 
 ## Verified by looking at screenshots
 
@@ -62,9 +79,6 @@ change (EXIF focal length, below), and hosting on homeserver, which is packaged 
 
 ## Not verified
 
-- **Live fal.** No build agent made a paid call. Not tried: a real nano-banana render through the app, keep-room
-  alignment on a real (non-identical) model output, and a SAM 3D add under the new names. (The key and
-  nano-banana's output size were checked once on 2026-11-04, PLAN.md §4.7.)
 - **Linux packaging.** Nothing x86_64-linux was built: CUDA torch, the module on a real system, the VM test and the
   weights download were never run. The Mac's Nix build of `midstudy-calib` predates verify round 2's calibration
   change and was not rebuilt after it.
@@ -80,34 +94,32 @@ change (EXIF focal length, below), and hosting on homeserver, which is packaged 
    carry no EXIF, which is why E2 keeps its 7 misses (living-wide FOV, height and depth; portrait FOV, height and
    depth; steep-roll depth 10.3 % against 10 %). With the true focal length in EXIF the same photos read within
    1–4 %. Photos without EXIF (screenshots, chat copies, edited exports) need Adjust floor › Ruler › Set scale.
-2. **[medium, partial] Lounge seat height.** The seat reads about 39 cm (39.4 / 38.8) against your estimate of about
-   45. The coffee table (35.0 cm) and the doorway (2.131 m) fall inside your estimates. A tape measure would settle
-   it, and Set scale corrects the rest.
-3. **Plan change to confirm.** PLAN.md §4.3 used to say "MoGe's FOV wins". Verify round 2 changed it: the EXIF FOV
-   is used when it is within 8° of MoGe's, and MoGe's scale is corrected by the focal ratio. The contract and
-   calib.schema.json follow. Please confirm or revert.
+2. **[medium, partial] Lounge seat height.** The seat reads about 39 cm (39.4 / 38.8) against a typical 45 cm (a
+   guess in `fixtures/photos/notes.md`, not a measurement). The coffee table (35.0 cm) and the doorway (2.131 m) look
+   plausible. A tape measure would settle it, and Set scale corrects the rest.
+3. **Plan change, confirmed by the main session.** PLAN.md §4.3 used to say "MoGe's FOV wins". Verify round 2
+   changed it: the EXIF FOV is used when it is within 8° of MoGe's, and MoGe's scale is corrected by the focal ratio.
+   Kept: on the golden scenes with EXIF it brings height within 0.6–3.3 % (from up to 15 % off). E2 now judges the
+   no-EXIF golden runs on pitch, roll and depth shape, with FOV, height and absolute depth as regression bands
+   (PLAN.md §6.2).
 4. Smaller, accepted for v1: depth edges are stair-stepped (occlusion can halo around thin parts; the toggle is the
    answer); a new piece can land inside real furniture (the §4.5 landing rule); MoGe reloads for every photo (about
-   4 s of the 10); Keep room exact stays off by default until the live check.
+   4 s of the 10); nano-banana occasionally returns no image (retry); a scene deleted again within a fraction of a
+   second of its Undo is not deleted (only a script can hit it).
 5. Packaging asks for small code changes, none blocking (`docs/HANDOFF.md` §13, R1–R5). The main one is R3: calib's
    `requires-python` says <3.13, but the Nix package runs it on 3.13.
-6. Housekeeping: `~/.cache/huggingface/hub` holds 3.0 GB of MoGe checkpoints and only
-   `models--Ruicheng--moge-2-vitl-normal` is used. You can delete the other MoGe checkpoints by hand.
 
 Your photo `AD9729E1-…_1_201_a` (location data) is no longer at the repo root and was never opened. Extensionless
 files and image files at the root are git-ignored, and nothing from `fixtures/photos/` is tracked.
 
 ## Next steps (PLAN.md §8)
 
-1. **Confirm the §4.3 change** above, or say to revert it.
-2. **Live check, about $0.20, in the main session** (key in `.env`): on the lounge photo, with a furnished layout, do
-   two renders, one with Keep room exact on and one with it off. Use them to decide keep-room's default. Then do one
-   SAM 3D add from a furniture photo to confirm the renamed pipeline against live fal.
-3. **Your own photos:** put a few rooms through Adjust floor to see how often the automatic fit needs fixing. Measure
+1. **Your own photos:** put a few rooms through Adjust floor to see how often the automatic fit needs fixing. Measure
    the lounge seat height and compare it with the ~39 cm the app reads.
-4. **Hosting on homeserver:** hand the repo and [docs/HANDOFF.md](HANDOFF.md) to a Claude agent there. It builds the CUDA
+2. **Hosting on homeserver:** hand the repo and [docs/HANDOFF.md](HANDOFF.md) to a Claude agent there. It builds the CUDA
    calib (nook's torch-bin should be reused), runs the VM test, picks the host name with you, and deploys
    `services.midstudy` behind the same access control as nook.
-5. After hosting: try it on your phone in Safari.
+3. After hosting: try it on your phone in Safari.
+4. Rotate the fal key (it was shared in chat).
 
 To run it now: `nix develop -c npm run serve` and open http://127.0.0.1:8765/ (see [README.md](../README.md)).

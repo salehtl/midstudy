@@ -147,8 +147,9 @@ export function mount(ctx) {
     let shot = retry?.shot || null
     let model = retry?.model || (from && RENDER_MODELS[from.model] ? from.model : Object.keys(RENDER_MODELS)[0])
     let prompt = retry ? retry.prompt || '' : real(from?.prompt)
-    let keepRoom = retry ? !!retry.keepRoom : false
     const current = !from && !retry?.fromPast
+    // On by default since the live check (PLAN.md §8, 2026-11-05): the room stays the photo at full size, sharp.
+    let keepRoom = retry ? !!retry.keepRoom : current
     const items = engine.getItems().length
     let loadError = null
     if (!shot && !from) {

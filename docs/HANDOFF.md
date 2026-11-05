@@ -104,7 +104,8 @@ Built and run on the Mac (aarch64-darwin: the same Nix files, with torch-bin's m
   each). Golden only (`--no-real-photos`): **29/36**. E2 `--mock` (ingest: HEIC, Display P3, PNG, WebP, EXIF
   rotation, downsizing, metadata stripping, the 25 MB limit): **47/47**. Cameras agree with the uv build's within
   0.02°. **These Nix runs predate verify round 2**, which changed `calib/` (the EXIF FOV and scale correction,
-  contract §4.3) and added checks. The uv build after it gives E2 real 84/91 (golden only 59/66, the same 7 misses)
+  contract §4.3) and added checks. The uv build after it gave E2 real 84/91 (golden only 59/66, the same 7 misses;
+  after the main session moved those 7 to regression bands, PLAN.md §6.2: 91/91, golden only 66/66)
   and `--mock` 51/51; the Nix build was not rebuilt or re-run after that change, and the Mac's store copy has since
   been garbage-collected.
 - E6 `eval:render` with `MIDSTUDY_EVAL_ALIGN_CMD` set to the Nix-built `midstudy-calib`: **36/36** (keep-room align on
@@ -206,11 +207,12 @@ Run everything from the repo root. `nix develop -c <cmd>` gives python 3.12, uv,
 7. **E2 with the packaged CLI.**
    `nix develop -c npm install` once, then
    `nix develop -c npm run eval:calib -- --cli "$out/bin/midstudy-calib" --no-real-photos`.
-   On the Mac (uv build, after verify round 2, 2026-11-05) this gives **59/66**, failing E2.06, E2.07, E2.11, E2.33,
-   E2.50, E2.51 and E2.55: MoGe's known FOV and scale bias on the CG golden scenes, which carry no EXIF
-   (docs/notes/integrate.md, verify-fix-2.md); pitch, roll, the depth shape and every "+ EXIF" variant pass. Expect
-   the same set on CUDA, within a few tenths of a degree. (The 29/36 in §5 is from before verify round 2 added the
-   "+ EXIF" checks.) The user's real photos are not on homeserver, so `--no-real-photos` is required; `--mock` makes a HEIC
+   On the Mac (uv build, 2026-11-05) this gives **66/66**. The golden photos without EXIF check pitch, roll and the
+   depth shape strictly; MoGe's FOV and scale on them only within regression bands (10°, 20 %, 25 %), since it reads
+   these CG renders 3.6–7.5° wide and 8–15 % small (PLAN.md §6.2, docs/notes/integrate.md). The "+ EXIF" runs hold
+   the strict limits (height within 5 %). Expect the same on CUDA, within a few tenths of a degree. (The 29/36 and
+   59/66 elsewhere in this file predate those changes.) The user's real photos are not on homeserver, so
+   `--no-real-photos` is required; `--mock` makes a HEIC
    with macOS `sips` and fails that case on Linux (request R5).
 8. **The VM test.** `nix build .#checks.x86_64-linux.service -L` (needs `/dev/kvm`). Boots a VM with the module,
    checks the planner, the Host rule (403 for a foreign Host), a photo upload calibrating (calib mocked), and a GLB
@@ -270,10 +272,13 @@ nix develop -c npm run eval:calib -- --cli "$out/bin/midstudy-calib" --no-real-p
 
 These spend real money and need the user's go-ahead in chat each time:
 
-1. About $0.20: two renders of a furnished layout on a real photo, keep-room on and off, to decide keep-room's
-   default; then one SAM 3D add (a furniture photo) to confirm the pipeline against live fal. On the Mac these were
-   planned for the main session; if the user asks you to run them on the deployed site instead, check
-   `GET /api/spend` before and after.
+1. **Done on the Mac, 2026-11-05 ($0.10):** a live SAM 3D add (the Morris chair photo, 62 s, $0.02) and two
+   nano-banana renders of a two-chair layout on the user's lounge photo ($0.04 each, 16–17 s). Keep room exact
+   applied (679 inliers, 0.6 px residual) and kept the room sharp at the photo's 2048 × 1152, so it is now **on by
+   default** in the Render dialog. One render attempt got fal HTTP 422 ("did not generate the expected output"), was
+   not charged, and worked on retry; serve.py now words that error as "returned no image this time". After
+   deploying, one render on the site is a fair smoke test, with the user's go-ahead; check `GET /api/spend` before
+   and after.
 2. The user's own photos through Adjust floor, to see how often the automatic fit needs fixing.
 3. Hosting (this file).
 
