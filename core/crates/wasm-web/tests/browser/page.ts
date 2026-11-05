@@ -10,6 +10,14 @@ interface Result { name: string; ok: boolean; detail: string }
 const results: Result[] = []
 const check = (name: string, ok: boolean, detail = ''): void => { results.push({ name, ok, detail }) }
 const ms = (t0: number): string => `${(performance.now() - t0).toFixed(1)} ms`
+/** Median of 5 timed runs after one warm-up run. */
+async function warm(fn: () => unknown): Promise<string> {
+  await fn()
+  const t: number[] = []
+  for (let i = 0; i < 5; i++) { const t0 = performance.now(); await fn(); t.push(performance.now() - t0) }
+  t.sort((a, b) => a - b)
+  return `${(t[2] ?? 0).toFixed(1)} ms`
+}
 const sameBytes = (a: ArrayBufferView, b: ArrayBufferView): boolean => {
   const x = new Uint8Array(a.buffer, a.byteOffset, a.byteLength), y = new Uint8Array(b.buffer, b.byteOffset, b.byteLength)
   return x.length === y.length && x.every((v, i) => v === y[i])
@@ -33,7 +41,7 @@ async function main(): Promise<void> {
   const v1 = V.makeV1({ camera: truth.camera, w: truth.image.w, h: truth.image.h })
   t0 = performance.now(); const a = await v1.loadDepth(depthBytes); const tv1 = ms(t0)
   t0 = performance.now(); const b = k.decodeDepth(depthBytes); const tk = ms(t0)
-  check('decodeDepth equals v1 loadDepth bit for bit (1024x768)', a.w === b.width && sameBytes(a.data, b.data), `v1 ${tv1}, wasm ${tk}`)
+  check('decodeDepth equals v1 loadDepth bit for bit (1024x768)', a.w === b.width && sameBytes(a.data, b.data), `first call: v1 ${tv1}, wasm ${tk}; warm median: v1 ${await warm(() => v1.loadDepth(depthBytes))}, wasm ${await warm(() => k.decodeDepth(depthBytes))}`)
 
   const worker = new k.KernelWorker(new Worker(new URL('./worker.js', import.meta.url), { type: 'module' }))
   const copy = depthBytes.slice().buffer
@@ -47,6 +55,19 @@ async function main(): Promise<void> {
   t0 = performance.now()
   const e1 = await worker.envMapFromImage(blob, { rotation, fov_y_deg: truth.camera.fov_y_deg }, { maxSide: 4096 })
   const tEnv = ms(t0)
+  // The same decode path on this thread (createImageBitmap + OffscreenCanvas), then the same kernel: equal results.
+  const bmp = await createImageBitmap(blob)
+  const oc = new OffscreenCanvas(bmp.width, bmp.height).getContext('2d')
+  if (!oc) throw new Error('no OffscreenCanvas 2D context')
+  oc.drawImage(bmp, 0, 0)
+  const bpx = oc.getImageData(0, 0, bmp.width, bmp.height)
+  t0 = performance.now()
+  const e2 = k.envMap({ width: bpx.width, height: bpx.height, data: bpx.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg })
+  const tMain = ms(t0)
+  let diff = 0
+  for (let i = 0; i < e1.data.length; i++) if (e1.data[i] !== e2.data[i]) diff++
+  check('envMapFromImage in the worker equals envMap of the same decode on this thread (512x256 half floats)', e1.half && diff === 0, `${diff} values differ; worker (decode + map) ${tEnv}, this thread's map ${tMain}, warm median ${await warm(() => k.envMap({ width: bpx.width, height: bpx.height, data: bpx.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg }))}`)
+  // v1 sampled the photo as an <img> uploaded to WebGL: how far is that decode from createImageBitmap's?
   const img = new Image()
   img.src = URL.createObjectURL(blob)
   await img.decode()
@@ -56,14 +77,9 @@ async function main(): Promise<void> {
   if (!ctx) throw new Error('no 2D context')
   ctx.drawImage(img, 0, 0)
   const px = ctx.getImageData(0, 0, cv.width, cv.height)
-  t0 = performance.now()
-  const e2 = k.envMap({ width: px.width, height: px.height, data: px.data }, { rotation, fov_y_deg: truth.camera.fov_y_deg })
-  const tMain = ms(t0)
-  let diff = 0
-  const u1 = e1.data, u2 = e2.data
-  for (let i = 0; i < u1.length; i++) if (u1[i] !== u2[i]) diff++
-  check('envMapFromImage in the worker equals envMap of the canvas pixels (512x256 half floats)', e1.half && diff === 0, `${diff} values differ; worker (decode + map) ${tEnv}, main thread map ${tMain}`)
-
+  let pd = 0, pmax = 0
+  for (let i = 0; i < px.data.length; i++) { const d = Math.abs((px.data[i] ?? 0) - (bpx.data[i] ?? 0)); if (d) { pd++; pmax = Math.max(pmax, d) } }
+  check('the <img> decode and the createImageBitmap decode of photo.jpg (info)', true, `${pd} of ${px.data.length} bytes differ, by at most ${pmax}`)
   // v1's own bake on the GPU (SwiftShader here): engine.js's photo texture (mipmapped, anisotropy 4) through
   // lighting.js's makeEnvBakeMat into a 512 x 256 target (float here, half in v1, to read it back), against the CPU
   // kernel's mipmapped (v1-like) and bilinear lookups.
@@ -122,7 +138,7 @@ async function main(): Promise<void> {
   for (let y = 300; y < 800; y++) for (let x = 600; x < 1300; x++) rb[(y * MW + x) * 4] = 255
   t0 = performance.now(); const m1 = V.maskFromPixels(rb, MW, MH); const tm1 = ms(t0)
   t0 = performance.now(); const m2 = k.keepRoomMask(rb, MW, MH, { png: true }); const tm2 = ms(t0)
-  check('keepRoomMask equals v1 (2048x1152) and makes a PNG', m1.coverage === m2.coverage && sameBytes(m1.on, m2.mask) && m2.png !== null, `v1 ${tm1}, wasm with PNG ${tm2}`)
+  check('keepRoomMask equals v1 (2048x1152) and makes a PNG', m1.coverage === m2.coverage && sameBytes(m1.on, m2.mask) && m2.png !== null, `first call: v1 ${tm1}, wasm with PNG ${tm2}; warm median: v1 ${await warm(() => V.maskFromPixels(rb, MW, MH))}, wasm ${await warm(() => k.keepRoomMask(rb, MW, MH))}, wasm with PNG ${await warm(() => k.keepRoomMask(rb, MW, MH, { png: true }))}`)
   cam.dispose()
 }
 

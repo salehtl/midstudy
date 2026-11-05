@@ -50,17 +50,24 @@ nix shell $NP#typescript -c tsc --noEmit --strict --noUncheckedIndexedAccess --e
   reach, 7e-6 m); horizon, roll and pitch signs pinned; truth.json's corners rebuilt from the item frame (to its 6
   decimals); lighting.json's `world.key_direction` = R · key (2e-6, its rounding). depth.png: the decoder equals Pillow
   on all five golden files (SHA-256 of the samples) and open floor reads 0.
-- Differential (`diff.mjs`, seed 20261105 N 3000 and seed 777 N 10 000): 49/49 groups pass. Worst relative errors:
+- Differential (`diff.mjs`; seeds 20261105 N 3000, 777 N 10 000, 4242 N 6000; the last two runs after the final
+  changes): 49/49 groups pass. Worst relative errors:
   projectPhoto 1.3e-13, photoToFloor 6.4e-14, ray 5e-16, horizonAt 5.5e-16, setPitchFromHorizon 4.5e-16, screen rect
   9.2e-12, planePointAt 2.6e-14, rotateSH 2.0e-15, maxBandScale 3.5e-13, splatGain 2.8e-15; exact: clampCamera, Look
   clamps, wrapDeg, wrapAz, round, clampElev, depthScale, rotateSelected, convexHull, pointInHull, distToHull, hitItemAt,
   landingSpot, dragHeight, drags (move/lift/rotate), ruler, depth.png (golden, 300 random PNGs over all filters and
   both depths: f32 bit for bit), keep-room mask and dilate (303 sizes incl. 2048×1152: every pixel and the coverage),
   irradianceAt, scaleBands, turnBetween, warmthTint, the env map (bilinear) against the transcribed shader.
-- Worker test 8/8; v1-sync 27/27 blocks exact.
+- Worker test 8/8 (MessageChannel, transfers, errors); v1-sync 28/28 blocks exact.
+- Headless Chrome (`tests/browser/run.sh`): 10/10. `loadKernels` over fetch, a module Worker, `envMapFromImage` (worker
+  decode) equal to the same decode on the main thread; an `<img>` decode differs from `createImageBitmap`'s by at most
+  1 level in 11 % of bytes (JPEG decoder paths), so a worker-made map is within that of what v1 sampled. Against v1's
+  own GPU bake (its shader, lifted; the photo texture made as engine.js makes it): the mipmapped CPU map differs by
+  2.1 % of the mean (median 0.45 %, p95 12 %), plain bilinear by 2.2 % (median 0.01 %, p95 16 %): most of the sphere
+  is the clamped frame edge (identical), and inside the frame the mipmapped lookup is the closer one.
 - Fuzz (no ASan runtime in nixpkgs' rustc, so `-s none`; the code is safe Rust, panics are what's hunted):
-  `decode_png` 73 M runs in 3 min (CRCs skipped by the `fuzzing` feature), 373 edges, no crash; `mask_and_env` 14.7 M
-  runs, no crash.
+  `decode_png` 73 M runs in 3 min, then 28 M in 90 s after the last changes (CRCs skipped by the `fuzzing` feature),
+  373 edges, no crash; `mask_and_env` 14.7 M + 30.8 M runs, no crash.
 - Benchmarks: see below.
 
 ## Decisions (and where v1 and the contract differ)
@@ -77,9 +84,11 @@ nix shell $NP#typescript -c tsc --noEmit --strict --noUncheckedIndexedAccess --e
    probe's irradiance is exactly the original's in turned directions (prop test) and v1's within 2e-15.
 4. **Environment map**: the CPU emulates v1's mipmapped, anisotropy-4 lookup (the default); `anisotropy 0` is plain
    bilinear and equals the JS transcription of v1's shader exactly when both use π (v1's GLSL wrote 3.14159265 and
-   6.28318531; with those, steep pixels move ~1e-4 relative). The GPU's exact mip filtering isn't reproducible (driver);
-   not compared against SwiftShader's render yet (open). Output rows: row 0 looks down (v ≈ 0), as a `DataTexture`
-   with `flipY` false reads it; default half floats for a `HalfFloatType` texture like v1's target.
+   6.28318531; with those, steep pixels move ~1e-4 relative). A GPU's exact mip filtering isn't reproducible (driver);
+   against SwiftShader's run of v1's shader the mipmapped CPU map is within 2.1 % on average (see Results). Output rows:
+   row 0 looks down (v ≈ 0), as a `DataTexture` with `flipY` false reads it; default half floats for a `HalfFloatType`
+   texture like v1's target. Measured: v1's GPU bake is 20× faster than the CPU kernel (Benchmarks), so the engine
+   should keep the bake.
 5. **world bounds of an empty box**: three.js returns a box with min > max untransformed; replicated (found by the diff).
 6. **wrapAz** is v1's bit for bit, which makes the azimuth clamp idempotent only to 2 ulps of 360 (prop test allows it).
 7. **The 0.12°/CSS px cap lives in geom** (`horizon_drag_gain`, `horizon_drag_row`, with the property
@@ -96,7 +105,29 @@ M3 Max (14 cores), Node 22.23, median of 7 (9 native) after a warm-up, wasm timi
 memory. The machine was shared and loaded (load average 10–11) and the exclusive eval lock was unavailable (see the
 request about the lock), so these are back-to-back comparisons on a busy machine, not quiet-machine numbers.
 
-BENCH_TABLE
+Node 22.23 (`tests/bench.mjs`, final run, load average 14.7) and native (`examples/bench.rs`, same run), ms:
+
+| task | v1 JS | wasm, SIMD128 | wasm, no SIMD | native |
+|---|---|---|---|---|
+| depth.png 1024×768 decode, filter 0 (golden file) | 12.95 | **1.93** (6.7×) | 1.95 | 1.23 |
+| depth.png 1024×768 decode, every row Paeth | 13.61 | **5.93** (2.3×) | 4.38 (3.1×) | 4.69 |
+| keep-room mask 2048×1152 (threshold, dilate, coverage) | 20.41 | **2.63** (7.8×) | 5.18 | 1.63 |
+| its PNG, zlib level 6 / 1 (v1: canvas `toDataURL`, not in Node) | – | 4.24 / 0.82 | – | 2.68 / – |
+| 10⁵ on-screen hit tests (`hitItemAt` vs `hitBox`, one call each) | 156.8 | **21.8** (7.2×) | – | – |
+| 10⁶ projections, one batch (`projectMany`, incl. 48 MB of copies) | 22.58 | 7.68 (2.9×) | 6.78 | 0.83 |
+| 10⁶ projections, one call each through the face | 22.58 | 20.36 (1.1×) | – | – |
+| env map 512×256 from 2048×1536, mipmapped aniso 4 / bilinear | GPU (see below); JS transcription 100.3 | 35.5 / 17.2 | 33.8 / 16.1 | 17.1 / 6.9 |
+
+Headless Chrome 147 (`tests/browser/run.sh`, warm medians): depth.png decode v1 5.8 → wasm 2.8 ms (2.1×; the worker
+round trip 3.2 ms, off the main thread); keep-room mask v1 17.7 → 2.8 ms (6.3×), 6.7 ms with its PNG; the CPU
+environment map 35.4 ms on the main thread (115 ms in the worker including the 1600×1200 JPEG decode), against **v1's
+own GPU bake at 1.6 ms** (SwiftShader, readback included).
+
+Against REFACTOR §4.1's targets: keep-room mask and hit tests ≥ 3× (6–8×). Depth decode 2.1–6.7× by filter mix and
+runtime, and in v2 it leaves the main thread. **The environment map should stay a GPU pass** for WebGL (the CPU kernel
+is 20× slower than even SwiftShader's bake); the kernel is the reference and a fallback for a renderer without that
+pass (WebGPU before its TSL port). Single small calls (one projection, one clamp) cost about what v1's JS costs: batch
+them (`projectMany`) or keep them in TS where that is simpler.
 
 SIMD128: the kernels are written as straight loops that LLVM vectorises when `+simd128` is on (the wasm carries
 v128/i8x16/i32x4/f64x2 code). Measured with and without: filter-0 depth decode 2× faster, the mask 1.4×, projections
@@ -133,5 +164,9 @@ is sequential by nature (the PNG filters' left-to-right chains, the row scan of 
 
 ## Left / open
 
-- The mipmapped env map isn't compared with v1's GPU bake in a browser (only the bilinear path with the shader's maths).
-- Miri not run; eslint not run (no config on this branch); TScert n/a (no `logic/` module here).
+- Miri and Kani not run (kernels-hardening's); eslint not run (no config on this branch yet); TScert n/a (no `logic/`).
+- Benchmarks ran on a loaded machine (load 10–15) in one eval-lock slot: the exclusive lock was contended (see the
+  request). Re-measure on a quiet machine for E17.
+- Paeth-heavy depth.png decodes 1.4 ms slower with SIMD128 than without (LLVM pairs the two byte chains); per-chain
+  loops were slower still in wasm, so the chunked form stays. A hand-written Paeth needs unsafe v128 loads.
+- The env map's GPU-like filtering is an approximation of a driver's (2 % mean difference from SwiftShader).

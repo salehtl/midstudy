@@ -104,6 +104,21 @@ if (run('project')) {
   sc.dispose()
 }
 
+// --- the on-screen hit test (v1's hitItemAt: 8 corners projected, hull, inside or within 16 px) -----------------------------
+if (run('hit')) {
+  const vw = { s: 0.6, ox: 40, oy: 30 }
+  const hv1 = V.makeV1({ camera: { fov_y_deg: 65, height_m: 1.6, pitch_deg: -25, roll_deg: 2 }, w: 1600, h: 1200, view: vw })
+  const item = { position: [0.4, 0, -3.2], rotation_y_deg: 30, min: [-0.9, 0, -0.45], max: [0.9, 0.82, 0.45] }
+  hv1.addItem('sofa', item.position, item.rotation_y_deg, item.min, item.max)
+  const sc = new k.SceneCamera({ fov_y_deg: 65, height_m: 1.6, pitch_deg: -25, roll_deg: 2 }, 1600, 1200)
+  const M = 100_000
+  const xs = Float64Array.from({ length: M }, (_, i) => 300 + (i * 7919) % 700), ys = Float64Array.from({ length: M }, (_, i) => 300 + (i * 104729) % 500)
+  let hitsA = 0, hitsB = 0
+  row('10^5 hit tests (hitItemAt on screen)', 'v1 JS', await median(() => { hitsA = 0; for (let i = 0; i < M; i++) if (hv1.hitItemAt('sofa', xs[i], ys[i], 16)) hitsA++ }))
+  row('10^5 hit tests (hitItemAt on screen)', 'wasm simd, one call each (face)', await median(() => { hitsB = 0; for (let i = 0; i < M; i++) if (sc.hitBox(item, vw, xs[i], ys[i], 16) === 'hit') hitsB++ }), `(${hitsA} hits in v1, ${hitsB} in wasm)`)
+  sc.dispose()
+}
+
 // --- the environment map -------------------------------------------------------------------------------------------------
 const [PW, PH] = [2048, 1536]
 const photo = new Uint8Array(PW * PH * 4)
@@ -119,4 +134,4 @@ const out = path.join(REPO, 'evals/out/k-geom')
 fs.mkdirSync(out, { recursive: true })
 const meta = { node: process.version, load: os.loadavg(), cpus: os.cpus().length, wasm_bytes: Object.fromEntries(Object.entries(builds).map(([n, b]) => [n, b.size])), date: new Date().toISOString() }
 if (!ONLY) fs.writeFileSync(path.join(out, 'bench.json'), JSON.stringify({ meta, results }, null, 1))
-console.log(`load ${meta.load.map((v) => v.toFixed(1)).join(' ')}; wasm ${JSON.stringify(meta.wasm_bytes)}; written to evals/out/k-geom/bench.json`)
+console.log(`load ${meta.load.map((v) => v.toFixed(1)).join(' ')}; wasm ${JSON.stringify(meta.wasm_bytes)}; ${ONLY ? `ONLY=${ONLY}: nothing written` : 'written to evals/out/k-geom/bench.json'}`)
