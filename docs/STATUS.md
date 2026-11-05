@@ -1,7 +1,8 @@
 # midstudy status
 
-As of 2026-11-05, branch `v1` (local commits, nothing pushed). Every eval below was run on 2026-11-05 on this Mac (M3
-Max, MPS), with fal mocked. The only paid calls are the main session's live check (below, $0.10).
+As of 2026-11-05, branch `main` (`v1` fast-forwarded into it and pushed to GitHub). Every eval below was run on
+2026-11-05 on this Mac (M3 Max, MPS), with fal mocked. The only paid calls are the main session's live check (below,
+$0.10).
 
 **In short:** v1 is built and works end to end on the Mac: photo in, floor found, furniture placed, layouts saved,
 renders and Compare, now also checked against live fal. What's left is hosting on homeserver, which is packaged but has

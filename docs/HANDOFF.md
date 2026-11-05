@@ -25,6 +25,9 @@ It is a fork of nook without the room scan, for the user's personal use.
 
 ## 3. Repo layout
 
+The code is at `git@github.com:salehtl/midstudy.git`, branch `main`. `v1` was fast-forwarded into `main` on 2026-11-05,
+so the two are the same history.
+
 | Path | What |
 |---|---|
 | `planner/` | the browser app (no build step; three.js from jsDelivr) and `planner/serve.py`, its stdlib-only server |
