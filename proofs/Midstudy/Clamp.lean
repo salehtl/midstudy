@@ -440,6 +440,56 @@ theorem Ry_rad_wrapDeg (d : ℝ) : Ry (rad (wrapDeg d)) = Ry (rad d) := by
   obtain ⟨k, hk⟩ := wrapDeg_modEq d
   rw [hk, Ry_rad_add_360_mul]
 
+/-- Whole turns don't change the wrapped angle. -/
+theorem wrapDeg_add_int_mul (x : ℝ) (k : ℤ) : wrapDeg (x + 360 * k) = wrapDeg x := by
+  rw [wrapDeg_eq_toIocMod, wrapDeg_eq_toIocMod, show x + 360 * (k : ℝ) = x + k • (360 : ℝ) by
+    rw [zsmul_eq_mul]; ring, toIocMod_add_zsmul]
+
+theorem wrapDeg_wrapDeg_add (a b : ℝ) : wrapDeg (wrapDeg a + b) = wrapDeg (a + b) := by
+  obtain ⟨k, hk⟩ := wrapDeg_modEq a
+  rw [hk, show a + 360 * (k : ℝ) + b = a + b + 360 * k by ring, wrapDeg_add_int_mul]
+
+/-- engine.js `rotateSelected(deg)` (geom `rotate_by`): the stored angle, `round(wrapDeg(rot + deg), 6)`. -/
+def rotateBy (rot deg : ℝ) : ℝ := round6 (wrapDeg (rot + deg))
+
+/-- A whole number of millionths of a degree (the grid `round6` keeps). -/
+def OnGrid (x : ℝ) : Prop := ∃ k : ℤ, x * 10 ^ 6 = k
+
+theorem OnGrid.add {x y : ℝ} (hx : OnGrid x) (hy : OnGrid y) : OnGrid (x + y) := by
+  obtain ⟨a, ha⟩ := hx
+  obtain ⟨b, hb⟩ := hy
+  exact ⟨a + b, by push_cast; linarith⟩
+
+theorem wrapDeg_onGrid {x : ℝ} (hx : OnGrid x) : OnGrid (wrapDeg x) := by
+  obtain ⟨k, hk⟩ := wrapDeg_modEq x
+  obtain ⟨a, ha⟩ := hx
+  exact ⟨a + 360000000 * k, by rw [hk]; push_cast; linarith⟩
+
+theorem rotateBy_onGrid {x d : ℝ} (hx : OnGrid x) (hd : OnGrid d) : rotateBy x d = wrapDeg (x + d) := by
+  obtain ⟨k, hk⟩ := wrapDeg_onGrid (hx.add hd)
+  exact round6_of_mul_eq_int hk
+
+/-- **Four quarter turns give back the stored angle exactly** (geom props `four_quarter_turns`): for an angle on
+v1's 10⁻⁶ grid in (−180, 180], `R` four times (or the +90° rotation four times) returns it, bit for bit over ℝ. -/
+theorem rotateBy_four_quarters {x : ℝ} (hx : OnGrid x) (hr : x ∈ Ioc (-180) 180) :
+    rotateBy (rotateBy (rotateBy (rotateBy x 90) 90) 90) 90 = x := by
+  have h90 : OnGrid 90 := ⟨90000000, by norm_num⟩
+  have e1 : wrapDeg (wrapDeg (x + 90) + 90) = wrapDeg (x + 180) := by
+    rw [wrapDeg_wrapDeg_add]
+    congr 1
+    ring
+  have e2 : wrapDeg (wrapDeg (x + 180) + 90) = wrapDeg (x + 270) := by
+    rw [wrapDeg_wrapDeg_add]
+    congr 1
+    ring
+  have e3 : wrapDeg (wrapDeg (x + 270) + 90) = x := by
+    rw [wrapDeg_wrapDeg_add, show x + 270 + 90 = x + 360 * ((1 : ℤ) : ℝ) by push_cast; ring,
+      wrapDeg_add_int_mul, wrapDeg_of_mem hr]
+  have g1 := wrapDeg_onGrid (hx.add h90)
+  have g2 : OnGrid (wrapDeg (x + 180)) := by rw [← e1]; exact wrapDeg_onGrid (g1.add h90)
+  have g3 : OnGrid (wrapDeg (x + 270)) := by rw [← e2]; exact wrapDeg_onGrid (g2.add h90)
+  rw [rotateBy_onGrid hx h90, rotateBy_onGrid g1 h90, e1, rotateBy_onGrid g2 h90, e2, rotateBy_onGrid g3 h90, e3]
+
 /-- engine.js `wrapAz` (in `lookFrom`): `((a + 180) % 360 + 360) % 360 − 180`, with −180 written as 180 only when
 the input was positive. -/
 def wrapAz (a : ℝ) : ℝ :=

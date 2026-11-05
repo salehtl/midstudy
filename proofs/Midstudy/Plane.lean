@@ -38,6 +38,30 @@ variable (c ph) in
 plane `y = y₀`. -/
 def photoToPlane (y0 px py : ℝ) : Option Vec3 := planeHit c.center (c.photoRay ph px py) y0
 
+/-- On the floor plane (`y₀ = 0`) the drag's plane hit is `photoToFloor` exactly (geom props
+`floor_plane_hit_is_photo_to_floor`). -/
+theorem photoToPlane_zero (hh : 0 < c.height_m) (px py : ℝ) :
+    c.photoToPlane ph 0 px py = c.photoToFloor ph px py := by
+  unfold photoToPlane photoToFloor planeHit floorHit
+  set d := c.photoRay ph px py
+  rw [center_one]
+  by_cases h0 : d 1 = 0
+  · rw [if_pos h0, if_neg hh.ne', if_pos (le_of_eq h0.symm)]
+  · rw [if_neg h0]
+    by_cases hneg : d 1 < 0
+    · have ht : 0 ≤ -(c.height_m - 0) / d 1 := div_nonneg_of_nonpos (by linarith) hneg.le
+      rw [if_pos ht, if_neg (not_le.2 hneg)]
+      congr 1
+      ext i
+      fin_cases i <;> simp
+      field_simp
+      ring
+    · have hpos : 0 < d 1 := lt_of_le_of_ne (not_lt.1 hneg) (Ne.symm h0)
+      have ht : ¬ 0 ≤ -(c.height_m - 0) / d 1 := by
+        rw [not_le]
+        exact div_neg_of_neg_of_pos (by linarith) hpos
+      rw [if_neg ht, if_pos hpos.le]
+
 /-- **A point grabbed on its plane comes back from its own pixel** (any horizontal plane the camera isn't in). -/
 theorem photoToPlane_floorToPhoto (hf : c.focalPx ph ≠ 0) {p : Vec3} {y0 : ℝ} (hp : p 1 = y0)
     (hy0 : y0 ≠ c.height_m) (hd : 0 < c.depth p) :

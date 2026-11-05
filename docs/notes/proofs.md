@@ -46,28 +46,29 @@ throughout.
 
 | Theorem | File | What it guarantees for the app | Mirrored by (floats are tested, not proved) |
 |---|---|---|---|
-| `camR_mem_SO3`, `camR_transpose_mul`, `camR_det`, `camR_eq` | Camera | R = Ry(0)·Rx(pitch)·Rz(roll) is a rotation (orthogonal, det 1) for every pitch and roll; its entries | geom `camera.rs` (`rotation`), props tests |
-| `photoToFloor_floorToPhoto` | Camera | every floor point in front of the camera comes back from its own pixel | geom props `photo_to_floor ∘ floor_to_photo`, golden `floor_points` |
-| `floorToPhoto_photoToFloor` | Camera | every pixel strictly below the horizon has a floor point, in front of the camera, whose pixel is that pixel | geom props, E5 floor eval |
-| `photoToFloor_eq_none_iff`, `no_floor_point_of_horizon_le` | Camera | at or above the horizon there is no floor point (`null`), and no floor point in front projects there | geom `photo_to_floor` returns `None` |
+| `camR_mem_SO3`, `camR_transpose_mul`, `camR_det`, `camR_eq` | Camera | R = Ry(0)·Rx(pitch)·Rz(roll) is a rotation (orthogonal, det 1) for every pitch and roll; its entries | geom props `rotation_is_rx_rz` |
+| `photoToFloor_floorToPhoto` | Camera | every floor point in front of the camera comes back from its own pixel | geom props `floor_photo_floor_round_trip`, golden `floor_points` |
+| `floorToPhoto_photoToFloor` | Camera | every pixel strictly below the horizon has a floor point, in front of the camera, whose pixel is that pixel | geom props `photo_floor_photo_round_trip`, E5 floor eval |
+| `photoToFloor_eq_none_iff`, `no_floor_point_of_horizon_le` | Camera | at or above the horizon there is no floor point (`null`), and no floor point in front projects there | geom props `nothing_above_the_horizon` |
 | `InRange.roundTrips`, `InRange.focalPx_pos`, `cos_pitch_pos`, `cos_roll_pos` | Camera | both round trips hold for every camera block within §4.1's ranges | clamps keep blocks in range |
 | `floorHit_smul` | Camera | normalizing the ray (engine.js `photoRay`) changes no floor point | — |
 | `photoRay_one_eq`, `photoRay_one_neg_iff`, `photoRay_one_eq_zero_iff` | Horizon | "below the horizon" (ray points down) is exactly "below the `horizonAt` line" in the image | geom `horizon_at` |
 | `horizonAt_of_roll_zero`, `horizonAt_lt_half` | Horizon | roll 0: horizon row `H/2 − f·tan(−pitch)`; negative pitch puts it above the centre | golden scenes pin the signs (`check_scenes.py`) |
 | `horizonAt_eq_line`, `horizonAt_strictMono`, `horizonAt_strictAnti`, `camR_right_up` | Horizon | the horizon is a line of slope tan(roll); positive roll lowers its right end; positive roll is counterclockwise seen from behind | steep-roll golden scene (roll 2) |
-| `horizonAt_withPitch_pitchFromHorizon`, `pitchFromHorizon_horizonAt` | Horizon | dragging the horizon line sets the pitch exactly (the line lands where it is dropped; reading it back gives the pitch) | geom `pitch_from_horizon` |
+| `horizonAt_withPitch_pitchFromHorizon`, `pitchFromHorizon_horizonAt` | Horizon | dragging the horizon line sets the pitch exactly (the line lands where it is dropped; reading it back gives the pitch) | geom props `horizon_pitch_inverse` |
 | `forward_eq`, `forward_dot_self`, `depth_eq_dot_forward` | Depth | depth is the distance along the view axis `(p − C)·forward`, forward a unit vector independent of roll | golden `depth.png` (not Euclidean) |
 | `photoToFloor_withHeight`, `depth_withHeight_smul`, `floorToPhoto_withHeight_smul`, `occlusion_rescale`, `depth_withHeight_smul_lt_iff` | Depth | changing only `height_m` scales every floor point and depth by k and keeps every pixel, so §4.5's `depth × height_m / calib height_m` is exact (for a height change only) | geom `depth_scale`, E4 occlusion eval |
 | `Ry_mulVec_x`, `Ry_x_toward_neg_z`, `Ry_quarter_x`, `Ry_ccw_from_above`, `Ry_mulVec_y` | Item | positive `rotation_y_deg` turns +X towards −Z, counterclockwise from above, never moves y (`--yaw 90` gives −Z) | geom `item.rs` (`Pose::apply`) |
-| `Ry_add`, `Ry_pow`, `Ry_quarter_pow_four`, `Ry_rad_90_pow_four`, `Ry_rad_add_360_mul` | Item | angles add; four quarter turns are the identity; whole turns change nothing | — |
-| `Ry_quarter_image_box`, `Ry_neg_quarter_image_box`, `worldBounds_x(_least)`, `worldBounds_z(_least)`, `worldBounds_quarter` | Item | a ±90° turn swaps a box's X and Z extents (§2.5); for any θ the world bounds are `w|cos θ| + d|sin θ|` × `w|sin θ| + d|cos θ|`, attained | geom `world_bounds`, E3 planner eval |
+| `Ry_add`, `Ry_pow`, `Ry_quarter_pow_four`, `Ry_rad_90_pow_four`, `Ry_rad_add_360_mul` | Item | angles add; four quarter turns are the identity; whole turns change nothing | geom props `four_quarter_turns` (points) |
+| `rotateBy_four_quarters`, `wrapDeg_wrapDeg_add`, `wrapDeg_add_int_mul` | Clamp | `R` (or +90°) four times gives back the stored angle exactly, for angles on v1's 10⁻⁶ grid in (−180, 180] | geom props `four_quarter_turns` (stored angle) |
+| `Ry_quarter_image_box`, `Ry_neg_quarter_image_box`, `worldBounds_x(_least)`, `worldBounds_z(_least)`, `worldBounds_quarter` | Item | a ±90° turn swaps a box's X and Z extents (§2.5); for any θ the world bounds are `w|cos θ| + d|sin θ|` × `w|sin θ| + d|cos θ|`, attained | geom props `quarter_turn_swaps_extents`, E3 planner eval |
 | `clamp_mem`, `clamp_idem`, `clamp_mono`, `GridRound.*` | Clamp | `min(hi, max(lo, v))` lands in range, is idempotent and monotone, also after rounding to 6 decimals | geom `jsmath` |
 | `round6_gridRound`, `round6Py_gridRound`, `roundHalfEven_mono` | Clamp | the planner's `Math.round(v·1e6)/1e6` and Python's `round(v, 6)` (ties to even) both keep the ranges' ends and order | — |
-| `clampCamera_inRange`, `clampCamera_idem`, `clampCamera_mono`, `clampCameraPy_*`, `DEFAULT_CAMERA_inRange` | Clamp | a clamped camera block (planner or server) lands in §4.1's ranges, clamping twice changes nothing, clamping is monotone per field | geom `CameraBlock::clamped` (its doc states idempotence) |
-| `lookNum_mem`, `lookNum_idem`, `lookNum_mono`, `lookNum_azimuth(_congr)`, `lookNumPy_*` | Clamp | every Look number lands in its §4.8 range; `lookFrom` is idempotent; monotone except the azimuth, which is wrapped first (same direction mod 360) | geom `look.rs` (`LookNumber::clamp`) |
+| `clampCamera_inRange`, `clampCamera_idem`, `clampCamera_mono`, `clampCameraPy_*`, `DEFAULT_CAMERA_inRange` | Clamp | a clamped camera block (planner or server) lands in §4.1's ranges, clamping twice changes nothing, clamping is monotone per field | geom props `camera_clamp_idempotent_in_range` |
+| `lookNum_mem`, `lookNum_idem`, `lookNum_mono`, `lookNum_azimuth(_congr)`, `lookNumPy_*` | Clamp | every Look number lands in its §4.8 range; `lookFrom` is idempotent; monotone except the azimuth, which is wrapped first (same direction mod 360) | geom props `look_clamp_idempotent_in_range` |
 | `wrapAz_not_monotone` | Clamp | the azimuth wrap is not monotone (179 → 179, 181 → −179) | — |
 | `azimuth_planner_server_differ` | Clamp | an azimuth of 270 is kept as −90 by the planner (wrap) and stored as 180 by the server (clamp only): see Observations | — |
-| `wrapDeg_eq_toIocMod`, `wrapDeg_mem`, `wrapDeg_modEq`, `wrapDeg_idem`, `Ry_rad_wrapDeg` | Clamp | `wrapDeg` is exactly the representative in (−180, 180] mod 360; wrapping never turns an item | geom `rotate_by` |
+| `wrapDeg_eq_toIocMod`, `wrapDeg_mem`, `wrapDeg_modEq`, `wrapDeg_idem`, `Ry_rad_wrapDeg` | Clamp | `wrapDeg` is exactly the representative in (−180, 180] mod 360; wrapping never turns an item | geom props `wraps_in_range` |
 | `jsRem_jsRem_add`, `wrapAz_mem`, `wrapAz_modEq`, `wrapAz_idem` | Clamp | JS `%` is modelled exactly (truncated quotient); `((a % 360) + 360) % 360` is `toIcoMod`; `wrapAz` lands in [−180, 180] | — |
 | `cmPer_inch`, `cmPer_ft`, `ft_eq_twelve_inches`, `toCm_add`, `toCm_mono` | Units | 1 in = 2.54 cm and 1 ft = 30.48 cm exactly; a foot is 12 inches | product reader tests |
 | `feetInches_toCm`, `feetInches_7_6`, `fracChar`, `fracChar_mem`, `mixed_31_half`, `mixed_41_threeQuarters` | Units | `7' 6"` is 228.6 cm; `31 1/2` and `41 ¾` mean 31.5 and 41.75; every fraction character is exact | E-product eval |
@@ -81,6 +82,7 @@ throughout.
 | `quatMat_mem_SO3`, `turnBetween_mem_SO3` | Turn | three.js's matrix of a unit quaternion, and so lighting.js `turnBetween`, is a rotation | geom `turn_between`, `mat_from_quat` |
 | `turnBetween_apply`, `turnBetween_axis`, `turnBetween_self` | Turn | the turn takes the inferred key direction exactly to the new one, about the axis a × b; at the inferred direction it is the identity (the light is exactly lighting.json's) | geom `turn_between` |
 | `turned_light` | Turn | the whole light turns together: the key lands on the new direction and the ambient probe, turned with it, is seen from turned directions as before | E-lighting evals |
+| `photoToPlane_zero` | Plane | on the floor plane the drag's plane hit is exactly `photoToFloor` | geom props `floor_plane_hit_is_photo_to_floor` |
 | `photoToPlane_floorToPhoto`, `floorToPhoto_photoToPlane`, `drag_keeps_point_under_pointer` | Plane | on any horizontal plane the camera isn't in, both round trips hold, so a drag keeps the grabbed point exactly under the pointer (§4.5) | geom `intersect_plane`, `plane_point_at_photo` |
 | `rulerLength_smul`, `setScale_reads_true` | Plane | after Set scale (height × true/measured) the ruler between the same two pixels reads the true length exactly (before the height clamp) | geom `ruler_rescale` |
 | `walk_serialize`, `walk_itemsOk` | Jpeg | the JPEG walk reads back any well-formed item list (restart markers after a scan as part of its data), and everything it reads is well formed | k-media props, fuzz |
@@ -90,6 +92,8 @@ throughout.
 | `strip_eq_self_iff` | Jpeg | strip leaves a file unchanged exactly when `isClean` accepts it and it has no fill bytes (§4.3 pass-through ⟺ §2.6 stripping is the identity) | — |
 | `ecsSplit_eq_fast` (`@[csimp]`) | Jpeg.Model | the program's constant-stack scan splitter is proved equal to the specification's | — |
 | `Png.walk_serialize`, `Png.walk_chunksOk`, `Png.walk_spec` | Png | the PNG chunk walk reads back well-formed chunks; it consumes exactly the chunks' bytes then what follows IEND | k-media props |
+| `megabytes_eq_roundHalfEven`, `megabytes_lt` | Arith | zip.rs `megabytes` is exactly `total/10⁶` rounded half to even (Python's), for every u64; no overflow (AENEAS.md #2) | k-media test `megabytes_round_half_even` |
+| `foldDigits_eq`, `foldDigits_lt`, `foldDigits_prefix_lt` | Arith | Content-Length's digit fold over ≤ 15 digits stays below 10¹⁵ at every step (no overflow) and is the digits' number (AENEAS.md #7) | k-media http tests |
 | `Png.strip_idem`, `Png.strip_no_metadata`, `Png.strip_chunks`, `Png.strip_eq_self_iff` | Png | idempotent; no eXIf/tEXt/iTXt/zTXt/tIME and nothing after IEND; the other chunks byte for byte in order; unchanged exactly when there is nothing to drop (§2.8) | GLB texture stripping |
 
 ## Decisions
@@ -119,9 +123,11 @@ throughout.
 
 `Midstudy/Jpeg/Model.lean` and `Midstudy/Png.lean` are executable Lean transcriptions of `core/crates/media/src/
 jpeg.rs` (`step`, `scan_end`, `plain_jfif`, `strip`, `is_clean`) and `png.rs` (`strip`), byte for byte in behaviour,
-errors by kind. The theorems above are about these models. **Aeneas was not used**: `nix/` had no Aeneas/Charon
-build when this ran (f-toolchain's `nightly` shell has Miri and Kani; Aeneas/Charon were still building), and
-AENEAS.md's JPEG target needs k-media rewrites first (`position` as loops, `array::from_fn`). So the proofs cover the
+errors by kind. The theorems above are about these models. **Aeneas was not used**: f-toolchain's Aeneas + Charon build was a
+no-go (docs/notes/f-toolchain.md: 62 minutes, no binary, so no `.#proofs` shell; prebuilt paths would need the
+`hacl.cachix.org` substituter, a machine-wide setting only the user can change), Aeneas's Lean library pins Lean
+4.35.0 with its own Mathlib (this project is on 4.29.1), and AENEAS.md's JPEG target needs k-media rewrites first
+(`position` as loops, `array::from_fn`). So the proofs cover the
 Rust **by differential testing**: `lake exe mediastrip jpeg|png` (the models as a program; `@[csimp]` swaps in a
 constant-stack scan splitter proved equal to the specification) and a 50-line Rust harness (`proofs/diff/`) run on the
 same generated corpus, and every file's outcome (ok or the error kind), JPEG `is_clean`, and the stripped bytes must
