@@ -1,0 +1,8 @@
+{
+  // What TScert reads server/src/scenes/logic/ with, until tscert/config.json has this area (docs/notes/server-scenes.md
+  // Requests): tscert/tsconfig.server.json's settings (the server's strict options, no Node types), these modules and
+  // the pure modules they import. Named tscert.json, not tsconfig*.json, so no editor, tsc -b or eslint picks it up.
+  "extends": "../../../../tsconfig.server.json",
+  "compilerOptions": { "lib": ["ES2024"], "types": [], "composite": false },
+  "include": ["./*.ts", "../../../../common/logic/*.ts", "../../../../server/src/logic/*.ts"]
+}
