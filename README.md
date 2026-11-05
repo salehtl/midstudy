@@ -57,7 +57,7 @@ In the planner: **Library › Add furniture**, then one of:
 
 | Source | Engine | Cost |
 |---|---|---|
-| **A product page** (paste the shop's link, then **Read**) | the picture you pick goes to the engine below | free to read; about $0.001 more when only a language model can find the size |
+| **A product page** (paste the shop's link, then **Read**) | the picture you pick goes to the engine below | free to read; under $0.001 more when only a language model can find the size |
 | A photo of the piece | SAM 3D (default) or TRELLIS 2 | $0.02 (SAM 3D), $0.25–0.35 (TRELLIS 2) |
 | An image link (the image's own URL, not the shop page) | same | same |
 | A 3D file: `.glb` or a zipped OBJ (the CLI also takes `.gltf`) | none | free |
@@ -79,7 +79,7 @@ picked through the image-link add. Nothing is added before that.
 It reads, cheapest and most exact first: the page's structured data (schema.org JSON-LD and microdata, OpenGraph), the
 shop's own product data (Shopify's `.js` feed, the WooCommerce Store API), then the page's text, sizes in tables and
 in the shop's embedded JSON. Only when none of that holds a size does a small language model on fal (Claude Haiku 5.5
-through `openrouter/router`, about $0.001 a page, within the daily cap and logged in `costs.csv`) look for it in the
+through `openrouter/router`, $0.0001–0.0003 a page measured live, within the daily cap and logged in `costs.csv`) look for it in the
 page's words. Every size it gives must quote text that's really on the page, or it's ignored, and the server converts
 the units itself. Shops that refuse automatic reading (on 2026-11-05: West Elm, Wayfair, Crate & Barrel, Pottery Barn, Amazon) get "This shop blocks
 automatic reading: paste the image link and size instead." with a button to switch to **Image link**. The reader

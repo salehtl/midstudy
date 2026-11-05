@@ -23,12 +23,12 @@ never been built on Linux.
 - **Layouts** per scene. A scene reopens with its layout on any device.
 - **Render** (nano-banana with your photo as a reference), **Keep room exact** (on by default since the live check),
   the Renders panel and **Compare** (side by side or split, Swap). Tested in mock mode, plus the live check below.
-- **Product page** (added 2026-11-05, branch `claude/product-import-6b48ab`): paste a shop's product link in Add
+- **Product page** (added 2026-11-05): paste a shop's product link in Add
   furniture and **Read** fills in the name, W × D × H (a size picker for rugs sold in several sizes), the category,
   Flat rug for a rug, and a strip of the page's pictures. Nothing is added before **Make**, which goes through the
   image-link add. Structured data, the Shopify and WooCommerce feeds and the page text come first, all free; only
-  when none holds a size does Claude Haiku 5.5 on fal (`openrouter/router`, about $0.001) read the page's words, and
-  its sizes count only when they quote the page. Shops that refuse automatic reading get a clear message and a button
+  when none holds a size does Claude Haiku 5.5 on fal (`openrouter/router`, $0.0001–0.0003 a page measured live)
+  read the page's words, and its sizes count only when they quote the page. Shops that refuse automatic reading get a clear message and a button
   to Image link. Contract §2.11, notes in `docs/notes/product*.md`.
 - **Phone** layout at 390 × 844, touch only. Every target is at least 44 px and there's no sideways scroll.
 - **Privacy and money.** Photos and furniture images lose their EXIF/GPS before they're served or sent to fal. The
@@ -55,7 +55,7 @@ never been built on Linux.
 | E12 UX round 2 (`eval:ux2`) | **pass** 26/26 | layouts across devices, ruler, thumbnails, Swap (E12.12 now waits for the photo to settle after Ruler on) |
 | E14 product page reader (`eval:product`) | **pass** 395/395 | 57 made-up shop pages (JSON-LD, microdata, OpenGraph, Shopify and WooCommerce feeds, tables, script JSON, prose for the model, a planted injection, order keys, foreign labels), blocked and broken pages, private links and redirects, 20 s and 10 MB limits, gzip bombs, a CPU-heavy page that once froze the server, the prompt, cost rows and the cap |
 | E15 product page form (`eval:product-ui`) | **pass** 117/117 | desktop and phone: Read, sizes, pictures, notes, Make through to a done job, a blocked shop, re-reads |
-| Golden shop pages (`eval:product-live`) | **pass** 82/82 saved copies; live 48/48 + 4 WARN | ten real pages (IKEA AE and US, the Zennova carpet, Albany Park, Annie Selke, Boutique Rugs, Floyd, Industry West, Target, West Elm). Live, the four Shopify shops answered 429 from this Mac's IP (see Not verified) |
+| Golden shop pages (`eval:product-live`) | **pass** 82/82 saved copies; live with the model 73/73 | ten real pages (IKEA AE and US, the Zennova carpet, Albany Park, Annie Selke, Boutique Rugs, Floyd, Industry West, Target, West Elm). Live with Haiku on 2026-11-05 (after landing): every shop answered, the model ran only on Industry West (no size on the page; it found none, $0.000253) |
 | Real path (`eval:real`) | **pass** 31/31 | your lounge photo, real MoGe, GLB chair, two renders, Compare, phone |
 | Harness self-test (`eval:selftest`) | **pass** 22/22 | |
 | `calib/` unit tests (pytest) | **pass** 42/42 | |
@@ -99,12 +99,10 @@ On your lounge photo (`evals/out/live/`, git-ignored; `live-check.jpg` puts the 
 - **Not automated:** pinch zoom and two-finger pan, swiping between renders on the phone, the grid fading with
   distance, contact shadows, Look on furniture only.
 - **True sizes in your room.** Nothing has been checked against a tape measure.
-- **The product page reader's language model against live fal.** Mocked only so far; the live check (a few golden
-  pages through Haiku, their real cost) runs from the main checkout after the merge.
-- **Shopify shops, live.** On 2026-11-05 Albany Park, Annie Selke, Boutique Rugs and Floyd answered 429
-  (Cloudflare `local_rate_limited`) to this Mac after a day of probing; their saved pages read correctly. Whether a
-  first read from a fresh IP works is untested. The reader says what it is (`midstudy/1.0 (product page reader)`)
-  and doesn't try to get around a shop's refusal.
+- **Shopify shops under load.** Shopify rate-limits bursts from one IP (429, Cloudflare `local_rate_limited`): after a
+  day of probing on 2026-11-05 Albany Park, Annie Selke, Boutique Rugs and Floyd answered 429 for a few hours, then
+  read fine again. The reader says what it is (`midstudy/1.0 (product page reader)`) and doesn't try to get around a
+  shop's refusal.
 - **SAM 3D's no-mask retries against live fal.** Only mocked: whether the lower threshold or the mask gets the
   bookshelf and the carpet through on the real service (and that refused calls stay free) is untested.
 

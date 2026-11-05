@@ -75,7 +75,7 @@ export function productSource({ lib, form, onChange, onUseLink }) {
   const notesEl = h('ul.ms-prod-notes', { dataset: { midstudy: 'product-notes' }, 'aria-label': 'How the page was read', hidden: true })
   const el = h('div.ms-src.ms-prod',
     h('div.ms-row', h('span.ms-label', 'Product page link'), h('div.ms-prod-field', url, readBtn),
-      h('span.ms-hint', 'Free to read. When the size is only in the page’s words, a small language model reads it (about $0.001).')),
+      h('span.ms-hint', 'Free to read. When the size is only in the page’s words, a small language model reads it (under $0.001).')),
     status, errBox, picWarn, picRow)
 
   const dimInputs = () => [...form.dims.querySelectorAll('input')]

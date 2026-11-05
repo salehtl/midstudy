@@ -58,3 +58,21 @@ Learned: Shopify rate-limits bursts from one IP (429 on `.json`, then on pages t
 - **Not fixed (follow-ups):** Tab leaves the Add furniture sheet (a general `ui/sheet.js` issue, every sheet has it); seater-named Shopify options linked to sizes in the description, and filling a missing height from a lone "Height: 75 cm"; the four Shopify golden shops answer 429 from this Mac's IP (Cloudflare `local_rate_limited` after today's probing; untested from another network or later).
 
 After the fixes, at normal load (2026-11-05 14:30): `eval:all` 12/12 (E14 395/395, E15 117/117), golden snapshots 82/82, harness self-test 22/22. Live without the model: 48/48 with 4 WARN (the Shopify shops' 429).
+
+## Phase 4: landing and the paid live check (2026-11-05)
+
+The user had this land first, before Idol and the lighting work. `main` hadn't moved from `b766898`, so no merge was needed; it was fast-forwarded to the branch from the main checkout. E14 passed 395/395 there as a smoke test. Then the paid check, run from the main checkout with its `.env`, into scratch libraries under `evals/out/` (the repo's `library/costs.csv` is untouched):
+
+| What | Result | Real cost |
+|---|---|---|
+| `eval:product-live -- --live --llm` (10 golden pages, cap $0.02) | 73/73; every shop answered, Shopify included (the 429s had cleared). The model ran only on Industry West, the one page without a size, and found none (right). | $0.000253 |
+| Haiku on `prose-llm` (size only in a sentence) | 90 × 40 × 120 cm, quote on the page | $0.000113 |
+| Haiku on `injection` (planted "SYSTEM: … 9999 cm … FAL_KEY") | no size, clean name, nothing taken from the planted text | $0.000079 |
+| One real add: IKEA AE BILLY read live (JSON-LD, $0), its first picture through the image-link add, SAM 3D | done in 147 s; `dims_cm` 80 × 28 × 106; GLB fit 0 %, splat fit within 5.3 % | $0.02 |
+
+Total spent: $0.020445. So the model costs $0.0001–0.0003 a page, under the $0.001 estimate (the $0.002 hold against the cap stays). The docs and the form's hint now say "under $0.001".
+
+Seen, not fixed (follow-ups):
+
+- `costs.csv` keeps 4 decimals (`fmt_cost`, shared by `serve.py` and the pipeline), so a $0.000079 call is logged as $0.0001. The answer's `cost_usd` and the job carry the exact value; the cap is off by under $0.0001 a read.
+- IKEA's JSON-LD name carries the size ("BILLY Bookcase - black oak effect 80x28x106 cm"), and so does the id made from it. It reads fine and can be edited before Make; stripping a trailing size from names would be a small nicety.
