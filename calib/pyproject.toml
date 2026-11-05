@@ -10,6 +10,8 @@ dependencies = [
     "opencv-python-headless>=4.10",
     "torch>=2.5",
     "huggingface-hub>=0.25",
+    # Every calib.json, lighting.json and stdout result is validated against its schema before it is written.
+    "jsonschema>=4.23",
     # MoGe-2 (v2.0.0), the last code commit before the MoGe-3 rewrite (74fbce0), which needs CUDA-only flex-gemm.
     "moge @ git+https://github.com/microsoft/MoGe@07444410f1e33f402353b99d6ccd26bd31e469e8",
 ]
@@ -18,7 +20,7 @@ dependencies = [
 midstudy-calib = "midstudy_calib.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "jsonschema>=4"]
+dev = ["pytest>=8"]
 
 [tool.uv]
 # MoGe lists its demo and training extras as hard dependencies. The inference path needs none of them, and
@@ -27,6 +29,30 @@ exclude-dependencies = ["gradio", "opencv-python", "pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
+
+# pyright --strict over src, tests and scripts (`calib/scripts/check.sh`, docs/REFACTOR.md §3 check:py). The one
+# untyped boundary is MoGe/torch, wrapped once in moge_runner.py.
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+extraPaths = ["tests"]
+reportUnnecessaryTypeIgnoreComment = "error"
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "PIE", "RUF", "PTH", "PL", "NPY", "PERF"]
+ignore = [
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",  # numeric code: many branches, arguments and constants
+    "RUF001", "RUF002", "RUF003",                          # the docs and messages use real typography (×, –, °)
+    "PLC0415",                                             # imports inside functions on purpose: torch, cv2 and MoGe load lazily
+]
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14.0"]

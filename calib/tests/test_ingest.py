@@ -11,11 +11,18 @@ import numpy as np
 import pytest
 from PIL import Image, ImageCms
 
+from midstudy_calib.contract_types import CalibExif
 from midstudy_calib.ingest import exif_block, fov_from_35mm, ingest, is_clean_jpeg, jpeg_markers, sniff
 from midstudy_calib.util import Fail
 
 REPO = Path(__file__).resolve().parents[2]
 P3 = Path("/System/Library/ColorSync/Profiles/Display P3.icc")
+
+
+def exif_of(scene: Path, w: int, h: int) -> CalibExif:
+    ex = exif_block(scene, w, h)
+    assert ex is not None
+    return ex
 
 
 def no_metadata(path: Path) -> bool:
@@ -24,14 +31,14 @@ def no_metadata(path: Path) -> bool:
     return markers is not None and not any(0xE1 <= m <= 0xEF or m == 0xFE for m in markers)
 
 
-def gradient(w, h):
+def gradient(w: int, h: int) -> Image.Image:
     x = np.linspace(0, 255, w)[None, :, None]
     y = np.linspace(0, 255, h)[:, None, None]
     return Image.fromarray(np.concatenate([np.broadcast_to(x, (h, w, 1)), np.broadcast_to(y, (h, w, 1)),
                                            np.full((h, w, 1), 90.0)], -1).astype(np.uint8))
 
 
-def exif_with(orientation=None, f35=None, make=None, model=None):
+def exif_with(orientation: int | None = None, f35: int | None = None, make: str | None = None, model: str | None = None) -> Image.Exif:
     ex = Image.Exif()
     if orientation:
         ex[0x0112] = orientation
@@ -44,7 +51,7 @@ def exif_with(orientation=None, f35=None, make=None, model=None):
     return ex
 
 
-def test_golden_jpeg_passes_through_byte_for_byte(tmp_path):
+def test_golden_jpeg_passes_through_byte_for_byte(tmp_path: Path) -> None:
     src = REPO / "fixtures/scenes/living-wide/photo.jpg"
     res = ingest(src, tmp_path)
     assert res == {"ok": True, "photo": "photo.jpg", "source": "source.jpg", "image": {"w": 1600, "h": 1200}}
@@ -52,17 +59,17 @@ def test_golden_jpeg_passes_through_byte_for_byte(tmp_path):
     assert (tmp_path / "source.jpg").read_bytes() == src.read_bytes()
 
 
-def gps_jpeg(w=64, h=48, **kw) -> bytes:
+def gps_jpeg(w: int = 64, h: int = 48, *, progressive: bool = False) -> bytes:
     ex = exif_with(make="TestCam", model="TestCam GPS")
     ex[0x8825] = {1: "N", 2: (0.0, 30.0, 0.0), 3: "E", 4: (0.0, 30.0, 0.0)}  # GPSInfo
     buf = io.BytesIO()
-    gradient(w, h).save(buf, "JPEG", exif=ex.tobytes(), quality=90, **kw)
+    gradient(w, h).save(buf, "JPEG", exif=ex.tobytes(), quality=90, progressive=progressive)
     return buf.getvalue()
 
 
-def plain_jpeg(w=64, h=48, **kw) -> bytes:
+def plain_jpeg(w: int = 64, h: int = 48, *, progressive: bool = False) -> bytes:
     buf = io.BytesIO()
-    gradient(w, h).save(buf, "JPEG", quality=90, **kw)
+    gradient(w, h).save(buf, "JPEG", quality=90, progressive=progressive)
     return buf.getvalue()
 
 
@@ -81,7 +88,7 @@ def with_app0(clean: bytes, payload: bytes) -> bytes:
 
 
 @pytest.mark.parametrize("case", ["jfxx_gps_thumbnail", "jfif_thumbnail"])
-def test_no_pass_through_with_an_app0_thumbnail(tmp_path, case):
+def test_no_pass_through_with_an_app0_thumbnail(tmp_path: Path, case: str) -> None:
     """Verify round 2: an APP0 that isn't a plain 16-byte JFIF header (a JFXX extension holding a whole JPEG with EXIF
     and GPS, or a JFIF thumbnail) is an embedded image: no pass-through, and photo.jpg has none of it."""
     clean = plain_jpeg()
@@ -103,7 +110,7 @@ def test_no_pass_through_with_an_app0_thumbnail(tmp_path, case):
 
 
 @pytest.mark.parametrize("case", ["trailing_jpeg", "zero_padding", "html_trailer", "app1_between_scans", "com_between_scans"])
-def test_no_pass_through_with_hidden_metadata(tmp_path, case):
+def test_no_pass_through_with_hidden_metadata(tmp_path: Path, case: str) -> None:
     """Contract §4.3: pass-through only when nothing follows EOI and no APP1-APP15 or COM appears anywhere."""
     clean = plain_jpeg()
     assert is_clean_jpeg(clean)
@@ -117,8 +124,9 @@ def test_no_pass_through_with_hidden_metadata(tmp_path, case):
         prog = plain_jpeg(progressive=True)
         assert prog.count(b"\xff\xda") >= 2 and is_clean_jpeg(prog)
         exif = Image.open(io.BytesIO(gps_jpeg())).info["exif"]
-        data = app1_after_first_scan(prog, exif) if case == "app1_between_scans" else \
-            prog[:prog.index(b"\xff\xda", prog.index(b"\xff\xda") + 2)] + b"\xff\xfe\x00\x0bTestCam GPS" + prog[prog.index(b"\xff\xda", prog.index(b"\xff\xda") + 2):]
+        assert isinstance(exif, bytes)
+        second = prog.index(b"\xff\xda", prog.index(b"\xff\xda") + 2)
+        data = app1_after_first_scan(prog, exif) if case == "app1_between_scans" else prog[:second] + b"\xff\xfe\x00\x0bTestCam GPS" + prog[second:]
     assert not is_clean_jpeg(data)
     up = tmp_path / "up.jpg"
     up.write_bytes(data)
@@ -128,7 +136,7 @@ def test_no_pass_through_with_hidden_metadata(tmp_path, case):
     assert b"TestCam" not in photo and b"Exif" not in photo
 
 
-def test_exif_rotated_portrait(tmp_path):
+def test_exif_rotated_portrait(tmp_path: Path) -> None:
     up = tmp_path / "up.jpg"
     gradient(400, 300).save(up, exif=exif_with(orientation=6, f35=26, make="Apple", model="iPhone"), quality=95)
     res = ingest(up, tmp_path / "s")
@@ -137,12 +145,12 @@ def test_exif_rotated_portrait(tmp_path):
     assert no_metadata(out)
     assert Image.open(out).getexif().get(0x0112) is None
     assert (tmp_path / "s/source.jpg").read_bytes() == up.read_bytes()
-    ex = exif_block(tmp_path / "s", 300, 400)
-    assert ex["focal_35mm"] == 26 and ex["make"] == "Apple" and ex["model"] == "iPhone"
-    assert abs(ex["fov_y_deg"] - fov_from_35mm(26, 300, 400)) < 0.01
+    ex = exif_of(tmp_path / "s", 300, 400)
+    assert ex.get("focal_35mm") == 26 and ex.get("make") == "Apple" and ex.get("model") == "iPhone"
+    assert abs((ex.get("fov_y_deg") or 0) - fov_from_35mm(26, 300, 400)) < 0.01
 
 
-def test_display_p3_is_converted(tmp_path):
+def test_display_p3_is_converted(tmp_path: Path) -> None:
     if not P3.is_file():
         pytest.skip("no Display P3 profile on this machine")
     up = tmp_path / "p3.jpg"
@@ -150,21 +158,23 @@ def test_display_p3_is_converted(tmp_path):
     im.save(up, icc_profile=P3.read_bytes(), quality=100)
     ingest(up, tmp_path / "s")
     got = np.asarray(Image.open(tmp_path / "s/photo.jpg")).reshape(-1, 3).mean(0)
-    want = np.asarray(ImageCms.profileToProfile(Image.open(up), ImageCms.ImageCmsProfile(str(P3)),
-                                                ImageCms.createProfile("sRGB"), outputMode="RGB")).reshape(-1, 3).mean(0)
+    srgb = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType] - untyped in Pillow's stub
+    converted = ImageCms.profileToProfile(Image.open(up), ImageCms.ImageCmsProfile(str(P3)), srgb, outputMode="RGB")
+    assert converted is not None
+    want = np.asarray(converted).reshape(-1, 3).mean(0)
     assert np.abs(got - want).max() < 3
     assert got[0] > 210  # P3 red 200 is a more saturated red in sRGB
     assert no_metadata(tmp_path / "s/photo.jpg")
 
 
-def test_large_photo_is_downsized(tmp_path):
+def test_large_photo_is_downsized(tmp_path: Path) -> None:
     up = tmp_path / "big.jpg"
     gradient(4032, 3024).save(up, quality=90)
     res = ingest(up, tmp_path / "s")
     assert res["image"] == {"w": 2048, "h": 1536}
 
 
-def test_png_with_alpha_webp_and_heic(tmp_path):
+def test_png_with_alpha_webp_and_heic(tmp_path: Path) -> None:
     rgba = gradient(320, 200).convert("RGBA")
     a = np.asarray(rgba).copy()
     a[:, :100, 3] = 0
@@ -175,16 +185,16 @@ def test_png_with_alpha_webp_and_heic(tmp_path):
     assert ingest(tmp_path / "w.webp", tmp_path / "webp")["image"] == {"w": 320, "h": 200}
     import pillow_heif
 
-    pillow_heif.register_heif_opener()
+    pillow_heif.register_heif_opener()  # pyright: ignore[reportUnknownMemberType] - its **kwargs are untyped
     gradient(320, 200).save(tmp_path / "h.heic", quality=90, exif=exif_with(f35=24, make="Apple", model="iPhone"))
     res = ingest(tmp_path / "h.heic", tmp_path / "heic")
     assert res["source"] == "source.heic" and res["image"] == {"w": 320, "h": 200}
-    assert exif_block(tmp_path / "heic", 320, 200)["focal_35mm"] == 24
+    assert exif_of(tmp_path / "heic", 320, 200).get("focal_35mm") == 24
     for d in ("png", "webp", "heic"):
         assert no_metadata(tmp_path / d / "photo.jpg")
 
 
-def test_16bit_grey_png(tmp_path):
+def test_16bit_grey_png(tmp_path: Path) -> None:
     a = np.tile(np.linspace(0, 65535, 200), (100, 1)).astype(np.uint16)
     Image.fromarray(a).save(tmp_path / "g.png")
     ingest(tmp_path / "g.png", tmp_path / "s")
@@ -192,7 +202,7 @@ def test_16bit_grey_png(tmp_path):
     assert out[50, 0] < 10 and out[50, -1] > 245
 
 
-def test_jpeg_with_exif_or_comment_is_reencoded_clean(tmp_path):
+def test_jpeg_with_exif_or_comment_is_reencoded_clean(tmp_path: Path) -> None:
     up = tmp_path / "c.jpg"
     gradient(200, 100).save(up, comment=b"hello", exif=exif_with(make="Apple"), quality=95)
     ingest(up, tmp_path / "s")
@@ -201,7 +211,7 @@ def test_jpeg_with_exif_or_comment_is_reencoded_clean(tmp_path):
     assert b"hello" not in (tmp_path / "s/photo.jpg").read_bytes()
 
 
-def test_guards(tmp_path):
+def test_guards(tmp_path: Path) -> None:
     (tmp_path / "t.txt").write_text("not an image at all")
     with pytest.raises(Fail, match="isn't a JPEG, PNG, HEIC or WebP image"):
         ingest(tmp_path / "t.txt", tmp_path / "s")
@@ -215,7 +225,7 @@ def test_guards(tmp_path):
     with pytest.raises(Fail, match=r"25\.1 MB, over the 25 MB limit"):
         ingest(big, tmp_path / "s")
     # decompression bomb: a tiny PNG that claims 30000 x 30000 pixels
-    def chunk(t, d):
+    def chunk(t: bytes, d: bytes) -> bytes:
         return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
     bomb = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 30000, 30000, 8, 2, 0, 0, 0)) + \
         chunk(b"IDAT", zlib.compress(b"\0" * 1000)) + chunk(b"IEND", b"")
@@ -232,7 +242,7 @@ def test_guards(tmp_path):
     assert not (tmp_path / "s").exists() or not any((tmp_path / "s").iterdir())
 
 
-def test_sniff():
+def test_sniff() -> None:
     assert sniff(b"\xff\xd8\xff\xe0") == "jpg"
     assert sniff(b"\x89PNG\r\n\x1a\n") == "png"
     assert sniff(b"RIFF\0\0\0\0WEBPVP8 ") == "webp"
@@ -242,14 +252,14 @@ def test_sniff():
     assert sniff(b"GIF89a") is None
 
 
-def test_exif_fov_matches_the_contract():
+def test_exif_fov_matches_the_contract() -> None:
     # contract §4.3: 14 mm on 16:9 landscape -> 102.1 horizontal, 69.6 vertical
     assert round(fov_from_35mm(14, 5712, 3213), 1) == 69.6
     assert round(fov_from_35mm(14, 3213, 5712), 1) == 102.1  # the same photo held upright
     assert abs(fov_from_35mm(26, 4032, 3024) - 2 * np.degrees(np.arctan(25.96 / 2 / 26))) < 0.05
 
 
-def test_real_camera_original_if_present(tmp_path):
+def test_real_camera_original_if_present(tmp_path: Path) -> None:
     """fixtures/photos/upper-lounge-camera.jpeg (git-ignored; skipped elsewhere): P3 -> sRGB, 2048 x 1152, no metadata,
     EXIF FOV about 69.6 vertical."""
     src = REPO / "fixtures/photos/upper-lounge-camera.jpeg"
@@ -258,6 +268,6 @@ def test_real_camera_original_if_present(tmp_path):
     res = ingest(src, tmp_path)
     assert res["image"] == {"w": 2048, "h": 1152}
     assert no_metadata(tmp_path / "photo.jpg")
-    ex = exif_block(tmp_path, 2048, 1152)
-    assert ex["focal_35mm"] == 14 and abs(ex["fov_y_deg"] - 69.6) < 0.1
+    ex = exif_of(tmp_path, 2048, 1152)
+    assert ex.get("focal_35mm") == 14 and abs((ex.get("fov_y_deg") or 0) - 69.6) < 0.1
     assert hashlib.sha256((tmp_path / "source.jpg").read_bytes()).digest() == hashlib.sha256(src.read_bytes()).digest()
