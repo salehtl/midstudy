@@ -90,6 +90,24 @@ export function irradianceAt(sh, [x, y, z]) {
   const b = irrBasis(x, y, z)
   return [0, 1, 2].map((ch) => b.reduce((s, v, i) => s + v * sh[i][ch], 0))
 }
+// The SH with its directional part (bands 1–2) scaled by k; band 0 (the same light from everywhere) kept.
+export const scaleBands = (sh, k) => sh.map((c, i) => (i === 0 ? [...c] : c.map((v) => v * k)))
+// The largest k for scaleBands that keeps the irradiance in every direction at ≥ 5 % of band 0's (luminance), so a
+// strong Strength never makes the side away from the light go black or negative.
+export function maxBandScale(sh) {
+  const dc = lum(irradianceAt(scaleBands(sh, 0), [0, 1, 0]))
+  let k = Infinity
+  for (const d of FIB) {
+    const e1 = lum(irradianceAt(sh, d)) - dc
+    if (e1 < -1e-9) k = Math.min(k, (0.95 * dc) / -e1)
+  }
+  return k
+}
+// The rotation (Matrix3) that takes unit direction a to unit direction b, the shortest way.
+export function turnBetween(a, b) {
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...a).normalize(), new THREE.Vector3(...b).normalize())
+  return new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(q))
+}
 
 // The radiance the SH describes, as a small equirectangular image (three.js's equirect convention), for the
 // reflections' environment map. Negative lobes are clipped at 0.
@@ -131,6 +149,43 @@ const casterMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: f
 const colMat = (c0, c1, c2) => new THREE.Matrix3().set(c0[0], c1[0], c2[0], c0[1], c1[1], c2[1], c0[2], c1[2], c2[2])
 const ACES_IN = colMat([0.59719, 0.07600, 0.02840], [0.35458, 0.90834, 0.13383], [0.04823, 0.01566, 0.83777])
 const ACES_OUT = colMat([1.60475, -0.10208, -0.00327], [-0.53108, 1.10813, -0.07276], [-0.07367, -0.00605, 1.07602])
+// The photo as an environment map for reflections (§4.8): every direction around the room, turned into the camera's
+// frame and projected into the photo (directions behind the camera see the front mirrored, directions past the
+// frame's edge its nearest edge), its pixel taken back to radiance the way lighting.json's fit did (sRGB → linear,
+// ACES undone). Metals then reflect the room itself; PMREM blurs it for rough materials.
+function makeEnvBakeMat() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tPhoto: { value: null }, uWorldToCam: { value: new THREE.Matrix3() }, uTanY: { value: 0.5 }, uAspect: { value: 1.5 },
+      uIn: { value: ACES_IN }, uOut: { value: ACES_OUT }, uInInv: { value: ACES_IN.clone().invert() }, uOutInv: { value: ACES_OUT.clone().invert() },
+    },
+    vertexShader: 'varying vec2 vUv;\nvoid main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+varying vec2 vUv;
+uniform sampler2D tPhoto;
+uniform mat3 uWorldToCam;
+uniform float uTanY, uAspect;
+uniform mat3 uIn, uOut, uInInv, uOutInv;
+vec3 toLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 acesInv(vec3 d) {
+  vec3 y = uOutInv * clamp(d, 0.0, 0.985);
+  vec3 qa = 1.0 - 0.983729 * y, qb = 0.0245786 - 0.4329510 * y, qc = -(0.000090537 + 0.238081 * y);
+  vec3 v = (-qb + sqrt(max(qb * qb - 4.0 * qa * qc, 0.0))) / (2.0 * qa);
+  return max(uInInv * v * 0.6, 0.0);
+}
+void main() {
+  // three.js's equirect convention: u = atan(z, x) / 2π + 0.5, v = asin(y) / π + 0.5
+  float phi = (vUv.x - 0.5) * 6.28318531, th = (vUv.y - 0.5) * 3.14159265;
+  vec3 c = uWorldToCam * vec3(cos(th) * cos(phi), sin(th), cos(th) * sin(phi));
+  c.z = -max(abs(c.z), 1e-3);
+  vec2 ndc = clamp(vec2(c.x / (-c.z) / (uTanY * uAspect), c.y / (-c.z) / uTanY), -1.0, 1.0);
+  vec3 p = texture2D(tPhoto, vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5)).rgb; // the photo texture has flipY false
+  gl_FragColor = vec4(acesInv(toLinear(p)), 1.0);
+}`,
+    depthTest: false, depthWrite: false, toneMapped: false,
+  })
+}
+
 function makeCatcherMat({ photoUv, photoUniforms }) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -233,7 +288,42 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
 
   let data = null          // lighting.json
   let R = new THREE.Matrix3()
-  let worldSH = null
+  let fovY = 55
+  let worldSH = null       // lighting.json's ambient in the world frame
+  let turned = null        // { key, sh }: worldSH turned with the light when its direction is changed
+  let effSH = null         // the ambient in use: turned, its directional part scaled by Strength
+  let camVersion = 0
+
+  const envRT = new THREE.WebGLRenderTarget(512, 256, { type: THREE.HalfFloatType, depthBuffer: false })
+  envRT.texture.mapping = THREE.EquirectangularReflectionMapping
+  envRT.texture.colorSpace = THREE.LinearSRGBColorSpace
+  const envMat = makeEnvBakeMat()
+  const envScene = new THREE.Scene()
+  envScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), envMat))
+  const envCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  let photoEnv = null
+  let photoEnvKey = ''
+  // The reflections from the photo, baked again when the photo or the camera changes (null until the photo is in).
+  function ensurePhotoEnv() {
+    const tex = photoUniforms?.tPhoto?.value
+    const img = tex?.image
+    const w = img?.naturalWidth || img?.width, h = img?.naturalHeight || img?.height
+    if (!data || !tex || !w || !h) return null
+    const k = `${tex.uuid}|${camVersion}|${w}x${h}`
+    if (k === photoEnvKey) return photoEnv
+    envMat.uniforms.tPhoto.value = tex
+    envMat.uniforms.uWorldToCam.value.copy(R).transpose()
+    envMat.uniforms.uTanY.value = Math.tan((fovY * DEG) / 2)
+    envMat.uniforms.uAspect.value = w / h
+    const prev = renderer.getRenderTarget()
+    renderer.setRenderTarget(envRT)
+    renderer.render(envScene, envCam)
+    renderer.setRenderTarget(prev)
+    photoEnv?.dispose?.()
+    photoEnv = pmrem.fromEquirectangular(envRT.texture).texture
+    photoEnvKey = k
+    return photoEnv
+  }
   let look = { light_strength: 1, ambient: 1, cast_shadows: false, light_softness: V1.softness, dir: [...V1_KEY_DIR] }
   const prepared = new Set() // the items' roots, to switch their materials' define when the mode changes
   const mode = () => (data ? 'photo' : 'default')
@@ -280,15 +370,27 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
     if (data) {
       probe.visible = true
       worldSH = worldSH || rotateSH(data.ambient.sh, R)
-      worldSH.forEach((c, i) => probe.sh.coefficients[i].set(c[0], c[1], c[2]))
+      // The controls act on the whole directional light, not only the key: a new direction turns the ambient's
+      // directional part with the key (so the room's light really moves), and Strength scales that part with the key
+      // (so a soft, mostly-ambient room still responds). At the inferred direction and Strength 1 it is lighting.json.
+      const inf = new THREE.Vector3(...data.key.direction).applyMatrix3(R).normalize().toArray()
+      let sh = worldSH
+      if (new THREE.Vector3(...inf).angleTo(new THREE.Vector3(...look.dir)) > 0.002) {
+        const tk = look.dir.map((v) => v.toFixed(5)).join()
+        if (turned?.key !== tk) turned = { key: tk, sh: rotateSH(worldSH, turnBetween(inf, look.dir)) }
+        sh = turned.sh
+      }
+      effSH = scaleBands(sh, Math.min(s, maxBandScale(sh)))
+      effSH.forEach((c, i) => probe.sh.coefficients[i].set(c[0], c[1], c[2]))
       probe.intensity = a
       hemi.visible = false
       key.color.setRGB(...data.key.color, THREE.LinearSRGBColorSpace)
       key.intensity = data.key.intensity * s
       if (!shEnv) shEnv = pmrem.fromEquirectangular(shEquirect(worldSH)).texture
-      scene.environment = shEnv
+      scene.environment = ensurePhotoEnv() || shEnv // reflections: the photo itself once it is in, else the SH
       scene.environmentIntensity = a
     } else {
+      effSH = null
       probe.visible = false
       hemi.visible = true
       hemi.intensity = V1.hemi * a
@@ -306,10 +408,13 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
     const ly = Math.max(0, look.dir[1])
     const keep = catcherMat.uniforms.uKeep.value
     if (data) {
-      const amb = irradianceAt(worldSH, [0, 1, 0])
-      keep.set(...[0, 1, 2].map((c) => { const A = Math.max(1e-4, amb[c] * a), K = data.key.color[c] * data.key.intensity * s * ly; return clamp(A / (A + K), 0.08, 1) }))
+      // A piece blocks the key and the ambient's directional part (bands 1–2: the room's light from above, the windows,
+      // the ceiling lights), not its even part (band 0), so a soft room still shows a shadow under a piece.
+      const amb = irradianceAt(effSH, [0, 1, 0])
+      const even = irradianceAt(scaleBands(effSH, 0), [0, 1, 0])
+      keep.set(...[0, 1, 2].map((c) => { const T = Math.max(1e-4, amb[c] * a + data.key.color[c] * data.key.intensity * s * ly); return clamp(Math.min(even[c] * a, amb[c] * a) / T, 0.08, 1) }))
     } else { const k = clamp((0.45 * a) / (0.45 * a + 0.55 * s * ly + 1e-6), 0.08, 1); keep.set(k, k, k) }
-    catcherMat.uniforms.uTan.value = 0.006 + 0.42 * look.light_softness * look.light_softness
+    catcherMat.uniforms.uTan.value = 0.006 + 0.6 * look.light_softness * look.light_softness
   }
 
   // The key's shadow camera around the pieces (box3 in the world frame, or null): an orthographic box looking along
@@ -317,6 +422,7 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
   const sc = key.shadow.camera
   const tmp = new THREE.Vector3()
   function fitShadow(box) {
+    if (data) { const pe = ensurePhotoEnv(); if (pe && scene.environment !== pe) scene.environment = pe } // every frame: cheap unless changed
     catcher.visible = key.castShadow && !!box && !box.isEmpty() // no pieces: no shadow map to read
     if (!catcher.visible) return
     const c = box.getCenter(new THREE.Vector3())
@@ -347,12 +453,14 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
     setData(lj) {
       data = lj && Array.isArray(lj.ambient?.sh) && lj.ambient.sh.length === 9 && Array.isArray(lj.key?.direction) ? lj : null
       worldSH = null
+      turned = null
       shEnv?.dispose?.()
       shEnv = null
+      photoEnvKey = ''
       for (const r of prepared) setMaterials(r)
       apply()
     },
-    setCamera(m) { R = m.clone(); worldSH = null; shEnv?.dispose?.(); shEnv = null; apply() },
+    setCamera(m, fovYDeg) { R = m.clone(); if (fovYDeg) fovY = fovYDeg; camVersion++; worldSH = null; turned = null; shEnv?.dispose?.(); shEnv = null; apply() },
     setLook(l) { look = { ...look, ...l, dir: l.dir ? [...l.dir] : look.dir }; apply() },
     // Splats carry their source photo's light, so they are colour-matched, not lit (§4.8): the room light's colour
     // (white_balance, luminance 1) times how much of the room's light the controls keep (1 at the defaults: ambient
@@ -361,7 +469,7 @@ export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
       const a = look.ambient, s = look.light_strength
       if (!data) return [1, 1, 1].map(() => (V1.hemi + V1.env) * a / (V1.hemi + V1.env + 0.5 * V1.key) + 0.5 * V1.key * s / (V1.hemi + V1.env + 0.5 * V1.key))
       const wb = data.white_balance?.rgb || [1, 1, 1]
-      const A = Math.max(1e-4, lum(irradianceAt(worldSH || rotateSH(data.ambient.sh, R), [0, 1, 0])))
+      const A = Math.max(1e-4, lum(irradianceAt(worldSH || rotateSH(data.ambient.sh, R), [0, 1, 0]))) // at the defaults
       const K = 0.5 * lum(data.key.color) * data.key.intensity
       const level = (A * a + K * s) / (A + K)
       return wb.map((v) => v * level)

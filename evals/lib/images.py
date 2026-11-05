@@ -68,15 +68,54 @@ def cam_R(cam: dict) -> np.ndarray:
         np.array([[math.cos(r), -math.sin(r), 0], [math.sin(r), math.cos(r), 0], [0, 0, 1]])
 
 
-def lighting_E(lj: dict, cam: dict, n: np.ndarray, strength=1.0, ambient=1.0) -> tuple[np.ndarray, np.ndarray]:
-    """(ambient, key) irradiance (RGB, three.js units) at world normal n from a lighting.json (§4.8), turned to the world
-    with `cam`."""
-    R = cam_R(cam)
-    x, y, z = R.T @ n
-    sh = np.array(lj["ambient"]["sh"], float)
-    amb = sh[0] * 0.886227 + 2 * 0.511664 * (sh[1] * y + sh[2] * z + sh[3] * x) + sh[4] * 2 * 0.429043 * x * y + \
+def _sh_irr(sh: np.ndarray, x: float, y: float, z: float) -> np.ndarray:
+    """three.js's shGetIrradianceAt (0.180) for SH coefficients sh (9 × RGB) at unit direction (x, y, z)."""
+    return sh[0] * 0.886227 + 2 * 0.511664 * (sh[1] * y + sh[2] * z + sh[3] * x) + sh[4] * 2 * 0.429043 * x * y + \
         sh[5] * 2 * 0.429043 * y * z + sh[6] * (0.743125 * z * z - 0.247708) + sh[7] * 2 * 0.429043 * x * z + sh[8] * 0.429043 * (x * x - y * y)
-    l = R @ np.array(lj["key"]["direction"], float)
+
+
+def _fib(n: int = 96) -> np.ndarray:
+    i = np.arange(n) + 0.5
+    y = 1 - 2 * i / n
+    r = np.sqrt(1 - y * y)
+    a = (i - 0.5) * math.pi * (3 - math.sqrt(5))
+    return np.stack([np.cos(a) * r, y, np.sin(a) * r], 1)
+
+
+def _turn(a, b) -> np.ndarray:
+    """The rotation taking unit direction a to unit direction b, the shortest way (Rodrigues)."""
+    a, b = np.asarray(a, float) / np.linalg.norm(a), np.asarray(b, float) / np.linalg.norm(b)
+    v, c = np.cross(a, b), float(a @ b)
+    if c < -0.999999:  # opposite: any perpendicular axis, a half turn
+        ax = np.cross(a, [1, 0, 0] if abs(a[0]) < 0.9 else [0, 1, 0])
+        ax /= np.linalg.norm(ax)
+        return 2 * np.outer(ax, ax) - np.eye(3)
+    K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    return np.eye(3) + K + K @ K / (1 + c)
+
+
+def lighting_E(lj: dict, cam: dict, n: np.ndarray, strength=1.0, ambient=1.0, light=None) -> tuple[np.ndarray, np.ndarray]:
+    """(ambient, key) irradiance (RGB, three.js units) at world normal n from a lighting.json (§4.8), turned to the world
+    with `cam`, with the Look's controls as §4.8 defines them: `light` (a world direction, the key's new direction)
+    turns the whole light (the ambient SH with the key, from lighting.json's own key direction); `strength` scales the
+    key and the ambient's directional part (bands 1–2, capped so no direction drops below 5 % of band 0); `ambient`
+    scales the ambient."""
+    R = cam_R(cam)
+    sh = np.array(lj["ambient"]["sh"], float)
+    inferred = R @ np.array(lj["key"]["direction"], float)
+    Q = np.eye(3) if light is None else _turn(inferred, light)
+    to_cam = R.T @ Q.T  # the turned SH at world normal n is the camera-frame SH at Rᵀ Qᵀ n
+    lumv = np.array([0.2126, 0.7152, 0.0722])
+    dc = sh[0] * 0.886227
+    k = math.inf
+    for d in _fib():
+        e1 = float(_sh_irr(sh, *(to_cam @ d)) @ lumv - dc @ lumv)
+        if e1 < -1e-9:
+            k = min(k, 0.95 * float(dc @ lumv) / -e1)
+    kb = min(strength, k)
+    x, y, z = to_cam @ n
+    amb = dc + kb * (_sh_irr(sh, x, y, z) - dc)
+    l = inferred if light is None else np.asarray(light, float) / np.linalg.norm(light)
     key = lj["key"]["intensity"] * np.array(lj["key"]["color"], float) * max(0.0, float(n @ l))
     return amb * ambient, key * strength
 
@@ -141,11 +180,12 @@ def cmd_lighting(a):
             continue
         rgb = comp[m].mean(0)
         f = {"n_px": int(m.sum()), "rgb": [round(float(v), 1) for v in rgb]}
+        f["std"] = round(float((comp[m] @ np.array([0.2126, 0.7152, 0.0722])).std()), 2)  # texture on the face (a mirror shows the room)
         if lj:
             ax, sg = FACES[name]
             n = np.zeros(3)
             n[ax] = sg
-            amb, key = lighting_E(lj, cam, n, a.strength, a.ambient)
+            amb, key = lighting_E(lj, cam, n, a.strength, a.ambient, json.loads(a.light) if a.light else None)
             exp = to_srgb8(aces(a.albedo / math.pi * (amb + key)))
             f["expected_rgb"] = [round(float(v), 1) for v in exp]
             f["expected_ambient_only_rgb"] = [round(float(v), 1) for v in to_srgb8(aces(a.albedo / math.pi * amb))]
