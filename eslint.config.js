@@ -17,6 +17,9 @@ export default defineConfig(
     'proofs/.lake/',
     '.upstream/',
     '.claude/',
+    // The kernels' own test harnesses (core/crates/*/js-test, tests/): they import v1's untyped JS and belong to no
+    // tsconfig area; their tests are their judge (gate-1). The faces they test, core/js/*.ts, are linted.
+    'core/crates/',
     // TScert's experiments vary their forms on purpose (tscert/README.md); TScert, not lint, is their judge.
     'tscert/',
     '**/*.js',

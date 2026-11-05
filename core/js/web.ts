@@ -100,7 +100,7 @@ const f64s = (v: Iterable<number>): Float64Array => Float64Array.from(v)
 const vec3 = (a: ArrayLike<number>, at = 0): Vec3 => [num(a, at), num(a, at + 1), num(a, at + 2)]
 function num(a: ArrayLike<number>, i: number): number {
   const v = a[i]
-  return v === undefined ? Number.NaN : v
+  return v ?? Number.NaN
 }
 function triples(a: ArrayLike<number>): Vec3[] {
   const out: Vec3[] = []
@@ -156,7 +156,7 @@ export class SceneCamera {
   /** The scratch view, re-made when wasm memory has grown (growth detaches the old buffer: its views read length 0). */
   #s(): Float64Array {
     const v = this.#view
-    if (v && v.length === 32) return v
+    if (v?.length === 32) return v
     const fresh = new Float64Array(memory().buffer, this.#c().outPtr(), 32)
     this.#view = fresh
     return fresh

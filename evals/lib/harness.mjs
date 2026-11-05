@@ -253,7 +253,11 @@ export function ensureBuilt(ev) {
   } catch (e) {
     built = { ok: false, why: clip(`${e.stderr || ''}${e.stdout || ''}${e.message || e}`.trim().split('\n').slice(-6).join(' | '), 500) }
   }
-  ev?.check('node scripts/build.mjs builds the planner (once per eval)', built.ok, built.ok ? `${built.secs} s` : built.why)
+  // An eval reports it as a check; a caller with a plain eval object (E17 passes {out, onCleanup}) gets a failure on
+  // stderr instead of a TypeError (gate-1).
+  const what = 'node scripts/build.mjs builds the planner (once per eval)'
+  if (typeof ev?.check === 'function') ev.check(what, built.ok, built.ok ? `${built.secs} s` : built.why)
+  else if (!built.ok) console.error(`harness: ${what}: FAILED: ${built.why}`)
   return built
 }
 // Starts the server (MIDSTUDY_SERVER: planner/serve.py, or node server/src/main.ts) with scratch dirs. Returns {base,

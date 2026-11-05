@@ -65,10 +65,12 @@ const checks = {
     if (!exists('scripts/gen-contract.mjs')) return { ok: true, line: 'nothing to check (no scripts/gen-contract.mjs yet)' }
     const g = sh('node', ['scripts/gen-contract.mjs'])
     if (g.code !== 0) return { ok: false, line: `scripts/gen-contract.mjs exited ${g.code}`, out: g.out }
-    const diff = sh('git', ['diff', '--stat', '--exit-code', '--', 'contract/gen'])
-    const untracked = sh('git', ['status', '--porcelain', '--untracked-files=all', '--', 'contract/gen']).out.trim()
-    if (diff.code !== 0 || untracked) return { ok: false, line: 'contract/gen differs from what the schemas generate (commit the regenerated files)', out: `${diff.out}\n${untracked}` }
-    return { ok: true, line: 'contract/gen is what the schemas generate' }
+    // Everything the generator writes: contract/gen/ and the bundle the Rust contract crate reads (gate-1).
+    const outs = ['contract/gen', 'core/crates/contract/schema.json']
+    const diff = sh('git', ['diff', '--stat', '--exit-code', '--', ...outs])
+    const untracked = sh('git', ['status', '--porcelain', '--untracked-files=all', '--', ...outs]).out.trim()
+    if (diff.code !== 0 || untracked) return { ok: false, line: 'contract/gen or core/crates/contract/schema.json differs from what the schemas generate (commit the regenerated files)', out: `${diff.out}\n${untracked}` }
+    return { ok: true, line: 'contract/gen and core/crates/contract/schema.json are what the schemas generate' }
   },
 
   types() {

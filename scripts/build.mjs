@@ -136,13 +136,15 @@ async function buildWasm() {
     if (stampCurrent('wasm', { key })) return `wasm: up to date (${WASM_CRATES.map((c) => rel(c.out)).join(', ')})`
     // --locked once core/Cargo.lock exists (it is shared-append: the kernel tracks commit it with their crates).
     const locked = fs.existsSync(path.join(CORE, 'Cargo.lock')) ? ['--locked'] : []
-    run('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown', ...locked,
-      ...WASM_CRATES.flatMap((c) => ['-p', c.crate])], { cwd: CORE })
     const meta = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', ...locked], { cwd: CORE, encoding: 'utf8', maxBuffer: 64 << 20 }))
     const targetDir = meta.target_directory
+    // The package of core/crates/<dir>, by manifest path: its name is the crate's own (midstudy-wasm-web), not the dir.
+    const pkgOf = (c) => meta.packages.find((p) => path.resolve(p.manifest_path) === path.join(CORE, 'crates', c.crate, 'Cargo.toml'))
+    run('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown', ...locked,
+      ...WASM_CRATES.flatMap((c) => ['-p', pkgOf(c)?.name ?? c.crate])], { cwd: CORE })
     const written = []
     for (const c of WASM_CRATES) {
-      const pkg = meta.packages.find((p) => p.name === c.crate)
+      const pkg = pkgOf(c)
       const lib = pkg?.targets.find((t) => t.kind.includes('cdylib'))
       if (!lib) throw new Error(`wasm: ${c.crate} has no cdylib target ([lib] crate-type = ["cdylib"])`)
       const wasm = path.join(targetDir, 'wasm32-unknown-unknown/release', `${lib.name.replace(/-/g, '_')}.wasm`)

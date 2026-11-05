@@ -24,7 +24,8 @@
   ],
   "ignore": [
     "planner/dist/**",
-    "planner/**/*.js"
+    "planner/**/*.js",
+    "contract/gen/**"
   ],
   "ignoreDependencies": [
     "@gltf-transform/core",
