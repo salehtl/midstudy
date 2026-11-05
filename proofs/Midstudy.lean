@@ -12,3 +12,4 @@ import Midstudy.Jpeg.Proofs
 import Midstudy.Turn
 import Midstudy.Plane
 import Midstudy.Png
+import Midstudy.Arith
