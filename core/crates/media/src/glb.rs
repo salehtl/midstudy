@@ -263,7 +263,9 @@ impl core::fmt::Display for GlbError {
                     FieldProblem::OutOfRange => "is out of range",
                     FieldProblem::NotString => "isn't a string",
                 };
-                if field.is_empty() {
+                if *problem == FieldProblem::NotArray {
+                    write!(f, "the GLB's {array} {what}")
+                } else if field.is_empty() {
                     write!(f, "the GLB's {array}[{index}] {what}")
                 } else {
                     write!(f, "the GLB's {array}[{index}].{field} {what}")
