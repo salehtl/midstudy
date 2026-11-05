@@ -108,8 +108,13 @@ export function createServer(options: ServerOptions): http.Server {
     const hostValues = req.headersDistinct['host'] ?? []
     const length = contentLength(req.headersDistinct['content-length'] ?? [])
     const ctx = new RequestContext(req, res, target, length.ok ? length.value : null, settings, expectsContinue)
-    res.on('finish', () => {
+    const logLine = (): void => {
       log(logTime() + ' ' + requestLogLine(ctx.method, req.url ?? '', req.httpVersion, ctx.status))
+    }
+    res.on('finish', logLine)
+    // An early answer is written to the socket, so its response object never finishes: log it when the socket closes.
+    res.on('close', () => {
+      if (!res.writableFinished && ctx.status !== 0) logLine()
     })
     try {
       if (checkHost(hostValues, options.allowedHostNames) !== 'allowed') {

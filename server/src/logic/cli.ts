@@ -125,22 +125,28 @@ function typeProblem(flag: Flag, value: string): string | null {
   return null
 }
 
+/** argparse's ambiguity error for a word (it is raised before anything else is read), or ''. */
+function ambiguityOf(word: string): string {
+  const k = classify(word)
+  return k.kind === 'ambiguous' ? k.message : ''
+}
+
 /** Left to right, as argparse reads: each flag with its value (the first error stops it), the words it didn't
  *  take, `-h` at once. */
 function pairUp(argv: readonly string[]): Pairing {
   const dash = argv.indexOf('--')
   const words = dash < 0 ? argv : argv.slice(0, dash)
-  const kinds = words.map((w) => classify(w))
-  const ambiguous = kinds.find((k) => k.kind === 'ambiguous')
-  if (ambiguous?.kind === 'ambiguous') return { kind: 'error', message: ambiguous.message }
+  const problems = words.map((w) => ambiguityOf(w)).filter((m) => m !== '')
+  const firstProblem = problems[0]
+  if (firstProblem !== undefined) return { kind: 'error', message: firstProblem }
   const pairs: FlagValue[] = []
   const extra: string[] = []
   let i = 0
   while (i < words.length) {
     const word = words[i] ?? ''
-    const k = kinds[i]
+    const k = classify(word)
     i += 1
-    if (k?.kind !== 'flag') {
+    if (k.kind !== 'flag') {
       extra.push(word)
       continue
     }
@@ -153,8 +159,7 @@ function pairUp(argv: readonly string[]): Pairing {
       value = k.explicit
     } else {
       const next = words[i]
-      const nextKind = kinds[i]
-      if (next === undefined || nextKind?.kind !== 'value') {
+      if (next === undefined || classify(next).kind !== 'value') {
         return { kind: 'error', message: 'argument ' + k.flag + ': expected one argument' }
       }
       value = next
