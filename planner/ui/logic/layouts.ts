@@ -12,7 +12,7 @@ export interface LayoutFacts {
 
 /** "Evening, lamp by the window" → "evening-lamp-by-the-window": lower case, accents dropped, runs of anything else to
  *  one '-', at most 64 characters, no '-' at either end. */
-export function slugify(s: string | null | undefined): string {
+function slugify(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '')
 }

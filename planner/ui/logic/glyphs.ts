@@ -4,7 +4,7 @@
 const PI = 3.141592653589793 // Math.PI
 
 /** Three decimals (an SVG attribute's number). */
-export function round3(v: number): number {
+function round3(v: number): number {
   return Math.round(v * 1000) / 1000
 }
 

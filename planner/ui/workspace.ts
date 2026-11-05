@@ -65,6 +65,7 @@ function cameraPatch(key: CameraKey, v: number): CameraPatch {
   }
 }
 
+/** @public planner/main.js mounts every area: mod.mount(ctx). */
 export function mount(ctx: UiContext): void {
   const { engine, scenes, shell, kit } = ctx
   const { h, kbd } = kit

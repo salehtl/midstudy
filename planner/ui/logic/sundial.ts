@@ -6,8 +6,8 @@
 const PI = 3.141592653589793 // Math.PI
 export const DIAL_R = 100 // the disk's radius in viewBox units
 export const DIAL_HALF = 112 // the viewBox is ±112, so the handle and the camera fit
-export const MIN_EL = 5
-export const MAX_EL = 90
+const MIN_EL = 5
+const MAX_EL = 90
 
 /** sin, cos and atan2: the shell passes Math. */
 export interface Trig {
@@ -35,7 +35,7 @@ export function r1(v: number): number {
 }
 
 /** "the left", "ahead on the right", … */
-export function lightSide(az: number): string {
+function lightSide(az: number): string {
   return SIDES[Math.round(((wrapAz(az) + 360) % 360) / 45) % 8] ?? ''
 }
 

@@ -27,7 +27,7 @@ export function dimsOf(w: string, d: string, h: string): Dims | null {
 }
 
 /** A piece's id from its name: lower case, runs of anything but a–z and 0–9 to one '-', none at either end, ≤ 64. */
-export function idFromName(s: string): string {
+function idFromName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
 }
 

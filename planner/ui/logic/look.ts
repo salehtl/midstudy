@@ -10,12 +10,12 @@ export function warmthWord(w: number): string {
 }
 
 /** Softness in a word. */
-export function softWord(v: number): string {
+function softWord(v: number): string {
   return v < 0.25 ? 'Crisp' : v < 0.6 ? 'Soft' : 'Diffuse'
 }
 
 /** The light's softness as the source line says it. */
-export function softDetail(v: number): string {
+function softDetail(v: number): string {
   const w = softWord(v)
   return w === 'Crisp' ? 'Crisp shadows' : w === 'Soft' ? 'Soft shadows' : 'Diffuse light, faint shadows'
 }
@@ -25,7 +25,7 @@ export function softnessText(v: number): string {
   return `${softWord(v)} · ${v.toFixed(2)}`
 }
 
-export function near(a: number, b: number): boolean {
+function near(a: number, b: number): boolean {
   return Math.abs(a - b) < 1e-3
 }
 
@@ -107,7 +107,7 @@ export function lookIsDefault(l: LookFacts): boolean {
 }
 
 /** A slider's value snapped to its step, within its range. */
-export function snapToStep(v: number, min: number, max: number, step: number): number {
+function snapToStep(v: number, min: number, max: number, step: number): number {
   return Math.min(max, Math.max(min, Math.round((v - min) / step) * step + min))
 }
 

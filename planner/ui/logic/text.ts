@@ -4,7 +4,7 @@
 // included.
 
 /** toFixed output with its sign as the typographic minus U+2212 (v1: `.replace('-', '−')`). */
-export function minusSign(s: string): string {
+function minusSign(s: string): string {
   return s.replace('-', '−')
 }
 
@@ -95,11 +95,6 @@ export function readDecimal(text: string): number {
 /** The height field and the Add form's sizes: a decimal comma and a typographic minus, then parseFloat. */
 export function readSigned(text: string): number {
   return parseFloat(text.replace(',', '.').replace('−', '-'))
-}
-
-/** The Scene panel's number fields: a typographic minus and a decimal comma, then Number ("" is 0). */
-export function readNumber(text: string): number {
-  return Number(text.replace('−', '-').replace(',', '.'))
 }
 
 /** The Add form's number reading: readSigned, or null when that is not a finite number. */

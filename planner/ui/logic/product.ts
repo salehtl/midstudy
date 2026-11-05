@@ -5,7 +5,7 @@
 
 import { andList, cap, clipText, cmText, sentence } from './text.js'
 
-export const LINK = /^https?:\/\/\S+$/i
+const LINK = /^https?:\/\/\S+$/i
 const IMAGE_LINK = /\.(jpe?g|png|webp|heic|heif|avif|gif)(\?.*)?$/i
 const STRUCTURED = 'the page’s structured data'
 const WHERE: ReadonlyMap<string, string> = new Map([
@@ -70,7 +70,7 @@ export function linkError(typed: string): string {
 }
 
 /** The layers that gave something (the model only when one of the sizes is its own), then where each size came from. */
-export function layersOf(p: Product): string[] {
+function layersOf(p: Product): string[] {
   const llmSize = p.dims_candidates.some((c) => c.source === 'llm')
   const out = p.source_layers_used.filter((k) => k !== 'llm' || llmSize)
   for (const c of p.dims_candidates) if (c.source) out.push(c.source)
@@ -78,7 +78,7 @@ export function layersOf(p: Product): string[] {
 }
 
 /** "the page’s structured data and the page text". */
-export function whereText(layers: readonly string[]): string {
+function whereText(layers: readonly string[]): string {
   const out: string[] = []
   for (const k of layers) {
     const w = WHERE.get(k) ?? 'the page'
@@ -106,7 +106,7 @@ export function foundText(p: Product, size: number): string {
 }
 
 /** A size reading with a height above 0. */
-export function hasHeight(c: Candidate | undefined): boolean {
+function hasHeight(c: Candidate | undefined): boolean {
   return c !== undefined && c.h !== null && c.h > 0
 }
 

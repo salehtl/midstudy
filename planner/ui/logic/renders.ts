@@ -14,7 +14,7 @@ export interface RenderFacts {
   readonly keep_room?: boolean | null
   readonly aligned?: AlignFacts | null
 }
-export interface AlignFacts {
+interface AlignFacts {
   readonly applied?: boolean | null
   readonly inliers?: number | null
   readonly residual_px?: number | null

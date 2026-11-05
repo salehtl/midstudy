@@ -17,6 +17,7 @@ import {
   searchPlaceholder, searchQuery, shownItems, shownJobs, type LibraryFilter,
 } from '../logic/library.js'
 
+/** @public planner/main.js mounts every area: mod.mount(ctx). */
 export function mount(ctx: UiContext): void {
   const { engine, shell, kit, lib } = ctx
   const { h, chip } = kit

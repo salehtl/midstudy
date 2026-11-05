@@ -19,7 +19,7 @@ function svg(tag: string, attrs: Readonly<Record<string, string | number>> = {})
   return el
 }
 
-export interface DialState {
+interface DialState {
   readonly az?: number
   readonly el?: number
   readonly inferred?: AzEl | null

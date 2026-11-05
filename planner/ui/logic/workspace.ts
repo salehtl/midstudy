@@ -7,7 +7,7 @@ import type { Mode } from './chrome.js'
 
 const PI = 3.141592653589793 // Math.PI
 const HORIZON_FINE = 0.12 // ° of tilt per CSS px, at most, when dragging the horizon
-export const RENDER_ABOUT_S = 25 // seconds a render usually takes
+const RENDER_ABOUT_S = 25 // seconds a render usually takes
 
 export interface Pt {
   readonly x: number
@@ -40,7 +40,7 @@ export function renderChip(elapsedS: number): RenderChip {
 }
 
 /** The scene switcher: opening or calibrating, no scene, unsaved changes, a floor to check, or ready. */
-export type SwitcherState = 'loading' | 'none' | 'unsaved' | 'check' | 'ready'
+type SwitcherState = 'loading' | 'none' | 'unsaved' | 'check' | 'ready'
 export interface SwitcherFacts {
   readonly loading: boolean
   readonly calibrating: boolean

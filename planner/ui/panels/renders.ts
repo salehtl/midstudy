@@ -50,6 +50,7 @@ interface ModalContent {
 }
 type CompareMode = 'side' | 'split' | 'swipe'
 
+/** @public planner/main.js mounts every area: mod.mount(ctx). */
 export function mount(ctx: UiContext): void {
   const { engine, shell, kit } = ctx
   const { h, button, segmented, toggle } = kit

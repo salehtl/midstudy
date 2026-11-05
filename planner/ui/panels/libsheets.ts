@@ -22,7 +22,7 @@ export type DimsFields = HTMLDivElement & {
 }
 function dimsFields(dims: Dims | null | undefined, onInput: () => void): DimsFields {
   const f = (k: 'w' | 'd' | 'h', label: string): { readonly row: HTMLLabelElement; readonly input: HTMLInputElement } => {
-    const input = textInput({ value: String(dims?.[k] ?? ''), inputmode: 'decimal', label: `${label} in cm`, onInput })
+    const input = textInput({ value: dims?.[k] ?? '', inputmode: 'decimal', label: `${label} in cm`, onInput })
     return { row: h('label.ms-dim', h('span.ms-dim-k', label), input, h('span.ms-dim-u', 'cm')), input }
   }
   const w = f('w', 'Width')

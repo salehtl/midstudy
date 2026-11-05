@@ -15,16 +15,16 @@ import type * as Kit from './kit.js'
 import type { Shell } from './shell.js'
 import type { AddMeta, EditPatch } from './logic/libforms.js'
 
-export type Vec3 = readonly [number, number, number]
-export type Vec2 = readonly [number, number]
+type Vec3 = readonly [number, number, number]
+type Vec2 = readonly [number, number]
 
-export interface Rect {
+interface Rect {
   readonly x: number
   readonly y: number
   readonly w: number
   readonly h: number
 }
-export interface Insets {
+interface Insets {
   readonly left: number
   readonly top: number
   readonly right: number
@@ -36,7 +36,7 @@ export interface Dims {
   readonly h: number
 }
 /** The scene camera block (contract §4.1). */
-export interface Camera {
+interface Camera {
   readonly fov_y_deg: number
   readonly height_m: number
   readonly pitch_deg: number
@@ -47,7 +47,7 @@ export type CameraPatch = Partial<Camera>
 
 // --- data the UI reads ----------------------------------------------------------------------------------------------------
 
-export interface LibAssets {
+interface LibAssets {
   readonly glb?: string | null
   readonly splat?: string | null
   readonly spz?: string | null
@@ -82,40 +82,40 @@ export interface RemovedItem {
   readonly id: string
   readonly name: string
 }
-export interface Footprint {
+interface Footprint {
   readonly corners: readonly Vec3[]
   readonly center: Vec3
   readonly box: readonly Vec3[]
   readonly height: number
 }
-export interface ScreenPoint {
+interface ScreenPoint {
   readonly x: number
   readonly y: number
   readonly visible: boolean
 }
-export interface Ruler {
+interface Ruler {
   readonly active: boolean
   readonly points: readonly Vec3[]
   readonly meters: number | null
 }
-export interface PhotoSize {
+interface PhotoSize {
   readonly w: number
   readonly h: number
   readonly has: boolean
 }
-export interface View {
+interface View {
   readonly zoom: number
   readonly cx: number
   readonly cy: number
   readonly fit: boolean
 }
-export interface DragState {
+interface DragState {
   readonly mode: string
   readonly uid: string
 }
 
 /** calib.json's public part (§4.4), as far as the Scene panel reads it. */
-export interface CalibInfo {
+interface CalibInfo {
   readonly source?: string | null
   readonly device?: string | null
   readonly elapsed_s?: number | null
@@ -137,13 +137,13 @@ export interface SceneSummary {
   readonly camera_source?: string | null
 }
 /** The open scene (engine.getScene()): the scene object with the photo's size, the camera source and depth. */
-export interface SceneInfo extends SceneSummary {
+interface SceneInfo extends SceneSummary {
   readonly w: number
   readonly h: number
   readonly hasDepth: boolean
   readonly calib?: CalibInfo | null
 }
-export interface SceneLoad {
+interface SceneLoad {
   readonly loading: boolean
   readonly phase: string | null
   readonly name: string | null
@@ -167,7 +167,7 @@ export interface LayoutDetail {
 export interface DeletedLayout {
   readonly name: string
 }
-export interface AlignResult {
+interface AlignResult {
   readonly applied?: boolean | null
   readonly inliers?: number | null
   readonly residual_px?: number | null
@@ -199,7 +199,7 @@ export interface Shot {
   readonly width: number
   readonly height: number
 }
-export interface InferredLight {
+interface InferredLight {
   readonly azimuth_deg: number
   readonly elevation_deg: number
   readonly softness?: number | null
@@ -223,7 +223,7 @@ export interface Lighting {
   readonly status: string
   readonly error: string | null
 }
-export interface LightingPatch {
+interface LightingPatch {
   readonly auto_light?: boolean
   readonly light_azimuth_deg?: number
   readonly light_elevation_deg?: number
@@ -239,7 +239,7 @@ export interface LightingPatch {
 // --- the engine ------------------------------------------------------------------------------------------------------------
 
 /** The engine's events the UI listens to, with the details it reads (engine.js header). */
-export interface EngineEvents {
+interface EngineEvents {
   scene: { readonly phase: string; readonly name?: string | null }
   scenes: unknown
   camera: unknown
@@ -261,7 +261,7 @@ export interface EngineEvents {
 }
 
 /** engine.input (input.js): the shell swallows keys while a dialog, a menu or a page is open. */
-export interface KeyInput {
+interface KeyInput {
   setKeyFilter(fn: (e: KeyboardEvent) => boolean): void
 }
 
@@ -357,12 +357,12 @@ export interface Engine {
 
 // --- the stores (data.js) ---------------------------------------------------------------------------------------------------
 
-export interface ScenesEvents {
+interface ScenesEvents {
   scenes: unknown
   ready: { readonly scene: SceneSummary }
   failed: { readonly scene: SceneSummary }
 }
-export interface ScenesStore {
+interface ScenesStore {
   readonly events: Events<ScenesEvents>
   readonly refresh: () => Promise<unknown>
   readonly upload: (file: File, opts: { readonly onProgress: (loaded: number, total: number) => void }) => Promise<{ readonly scene: string }>
@@ -394,13 +394,13 @@ export interface Spend {
   readonly reserved_usd?: number | null
   readonly cap_usd?: number | null
 }
-export interface LibState {
+interface LibState {
   readonly api: boolean | null
   readonly jobs: readonly LibJob[]
   readonly trash: readonly TrashedItem[]
   readonly spend: Spend | null
 }
-export interface LibEvents {
+interface LibEvents {
   jobs: unknown
   'job-done': { readonly job: LibJob }
   'job-failed': { readonly job: LibJob }
@@ -422,16 +422,16 @@ export interface LibraryStore {
 
 // --- what each area adds to the context, and the context --------------------------------------------------------------------
 
-export interface WorkspaceApi {
+interface WorkspaceApi {
   readonly requestRender: () => void
   readonly setAdjust: (on: boolean) => void
 }
-export interface ScenesPageApi {
+interface ScenesPageApi {
   readonly open: () => void
   readonly pick: () => void
   readonly upload: (file: File) => Promise<void>
 }
-export interface LibraryPanelApi {
+interface LibraryPanelApi {
   readonly openAdd: () => void
 }
 export interface PendingRender {
@@ -441,7 +441,7 @@ export interface PendingRender {
   readonly state: 'rendering' | 'failed'
   readonly error: string | undefined
 }
-export interface RendersApi {
+interface RendersApi {
   readonly openConfirm: (opts?: { readonly from?: RenderMeta | null }) => Promise<void>
   readonly openViewer: (which: string | RenderMeta | null | undefined) => void
   readonly openCompare: (a: string, b: string) => Promise<void>

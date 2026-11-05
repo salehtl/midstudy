@@ -18,6 +18,7 @@ interface Uploading {
   readonly total: number
 }
 
+/** @public planner/main.js mounts every area: mod.mount(ctx). */
 export function mount(ctx: UiContext): void {
   const { engine, scenes, shell, kit } = ctx
   const { h, button } = kit

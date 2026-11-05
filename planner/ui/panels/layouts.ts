@@ -14,6 +14,7 @@ interface Failure {
   readonly retry: () => void
 }
 
+/** @public planner/main.js mounts every area: mod.mount(ctx). */
 export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
   const { h, button } = kit
   const panel = shell.registerPanel({ id: 'layouts', label: 'Layouts', icon: 'layouts', phoneDetent: 'half', mount: () => { /* filled below */ } })

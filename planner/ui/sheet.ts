@@ -110,7 +110,8 @@ export function formRow(label: string, control: Node, hint?: string): HTMLLabelE
   return h('label.ms-row', h('span.ms-label', label), control, hint ? h('span.ms-hint', hint) : null)
 }
 export interface TextInputOptions {
-  readonly value?: string
+  /** A number is set as the property, a string as the attribute (as h() does, and v1 did). */
+  readonly value?: string | number
   readonly placeholder?: string
   readonly type?: string
   readonly inputmode?: string

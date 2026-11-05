@@ -36,15 +36,13 @@ import {
 } from './logic/chrome.js'
 import type { Engine, RenderMeta } from './seam.js'
 
-export type { Detent, Mode, ToastKind }
-
-export interface Safe {
+interface Safe {
   readonly top: number
   readonly bottom: number
   readonly left: number
   readonly right: number
 }
-export interface Metrics {
+interface Metrics {
   readonly mode: Mode
   readonly width: number
   readonly height: number
@@ -54,7 +52,7 @@ export interface Metrics {
   readonly chromeBottom: number
   readonly chromeLeft: number
 }
-export interface ShellEvents {
+interface ShellEvents {
   mode: { readonly mode: Mode }
   panel: { readonly id: string; readonly open: boolean; readonly detent: Detent | null }
   page: { readonly id: string | undefined; readonly open: boolean }
@@ -62,7 +60,7 @@ export interface ShellEvents {
   'render-request': Record<string, never>
   'open-render': { readonly meta: RenderMeta | undefined }
 }
-export interface Mounts {
+interface Mounts {
   readonly view: HTMLElement
   readonly overlays: HTMLElement
   readonly topbar: HTMLElement
@@ -77,7 +75,7 @@ export interface Mounts {
 }
 
 /** A panel's or a page's head and body, as its module fills them. */
-export interface AreaApi {
+interface AreaApi {
   readonly id: string
   readonly body: HTMLDivElement
   readonly head: HTMLDivElement
@@ -86,18 +84,18 @@ export interface AreaApi {
   readonly setCount: (t: string | number | null | undefined) => void
   readonly setStatus: (n: Node | string | null | undefined) => void
 }
-export interface PanelApi extends AreaApi {
+interface PanelApi extends AreaApi {
   readonly open: (opts?: { readonly detent?: Detent }) => void
   readonly close: () => void
   readonly isOpen: () => boolean
   readonly detent: () => Detent | null
 }
-export interface PageApi extends AreaApi {
+interface PageApi extends AreaApi {
   readonly open: () => void
   readonly close: () => void
   readonly isOpen: () => boolean
 }
-export interface PanelSpec {
+interface PanelSpec {
   readonly id: string
   readonly label: string
   readonly short?: string
@@ -108,7 +106,7 @@ export interface PanelSpec {
   readonly onOpen?: (info: { readonly mode: Mode; readonly detent: Detent | null }) => void
   readonly onClose?: () => void
 }
-export interface PageSpec {
+interface PageSpec {
   readonly id: string
   readonly label: string
   readonly width?: number
@@ -116,7 +114,7 @@ export interface PageSpec {
   readonly onOpen?: (info: { readonly mode: Mode }) => void
   readonly onClose?: () => void
 }
-export interface ToastOptions {
+interface ToastOptions {
   readonly kind?: ToastKind
   readonly icon?: string
   readonly action?: { readonly label: string; readonly onClick?: () => void } | undefined
@@ -128,7 +126,7 @@ export interface ToastHandle {
   readonly close: () => void
   readonly update: (text: string) => void
 }
-export interface ConfirmBase {
+interface ConfirmBase {
   readonly title?: string
   readonly body?: string
   readonly icon?: string
@@ -141,15 +139,15 @@ export interface ConfirmAction<V> {
   readonly default?: boolean
   readonly cancel?: boolean
 }
-export interface ConfirmOptions extends ConfirmBase {
+interface ConfirmOptions extends ConfirmBase {
   readonly actions?: undefined
   readonly confirm?: string
   readonly cancel?: string
 }
-export interface ConfirmChoice<V> extends ConfirmBase {
+interface ConfirmChoice<V> extends ConfirmBase {
   readonly actions: readonly ConfirmAction<V>[]
 }
-export interface MenuItem {
+interface MenuItem {
   readonly label: string
   readonly icon?: string
   readonly kbd?: string
