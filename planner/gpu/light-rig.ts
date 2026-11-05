@@ -16,7 +16,7 @@ import {
   Quaternion, RenderTarget, Vector3, Box3, Sphere, NearestFilter, EnvironmentNode, Node as NodeClass, FrontSide, BackSide, DoubleSide,
 } from 'three/webgpu'
 import type { Material, NodeBuilder, Object3D, Scene, Texture, TextureNode, WebGPURenderer } from 'three/webgpu'
-import { Discard, Fn, If, abs, clamp, dot, float, max, mix, positionWorld, sqrt, step, texture, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
+import { Discard, Fn, If, abs, clamp, dot, float, max, positionWorld, select, sqrt, step, texture, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import type { ShaderNodeObject } from 'three/tsl'
 import { aces, clearTarget, linearToSrgb, srgbToLinear } from './passes.ts'
@@ -162,6 +162,8 @@ export interface LightRig {
   setPhoto(t: Texture | null, aspect: number): void
   /** per frame, before the furniture pass: fits the key's shadow cameras to the casters and renders the catcher's map */
   fitShadow(box: Box3 | null, casters: Scene): void
+  /** while the keep-room mask is drawn: the visible shadow in white (v1 lights.maskMode) */
+  maskMode(on: boolean): void
   splatGain(): V3
   inferredKeyWorld(): V3 | null
 }
@@ -203,7 +205,7 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
   Reflect.set(depthOnly, 'isShadowPassMaterial', true)
   const u = {
     keep: uniform(new Vector3(1, 1, 1)), tan: uniform(0.05), range: uniform(10), width: uniform(4), search: uniform(0.02), bias: uniform(0.002),
-    view: uniform(new Matrix4()), proj: uniform(new Matrix4()),
+    view: uniform(new Matrix4()), proj: uniform(new Matrix4()), mask: uniform(0),
   }
   const shadowDepth = texture(shadowRT.depthTexture)
   const catcherMat = new NodeMaterial()
@@ -231,6 +233,8 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
     }
     const occ = float(1).sub(lit.div(32)).toVar()
     If(occ.lessThan(0.004), () => { Discard() })
+    // the keep-room mask (§4.7) takes the visible shadow in: white where it is more than faint
+    If(u.mask.greaterThan(0.5).and(occ.lessThan(0.1)), () => { Discard() })
     // the photo's pixel back to radiance (ACES undone), the key's share taken away where it is blocked, the tone
     // curve again: the alpha of black over the photo's bytes that gives that pixel
     const photo = opts.photo.node.sample(frame.photoUv()).rgb
@@ -238,7 +242,7 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
     const Y = vec3(0.2126, 0.7152, 0.0722)
     const a = clamp(float(1).sub(dot(shaded, Y).div(max(dot(photo, Y), float(1e-3)))), 0, 1).toVar()
     If(a.lessThan(0.003), () => { Discard() })
-    return vec4(0, 0, 0, a)
+    return select(u.mask.greaterThan(0.5), vec4(1), vec4(0, 0, 0, a))
   })()
   catcherMat.transparent = true
   catcherMat.depthWrite = false
@@ -380,6 +384,7 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
     setData(lj, m, fov) { data = lj; R = m.clone(); fovY = fov; envReady = false; apply() },
     setPhoto(t, aspect) { photo = t ? { t, aspect } : null; if (data && photo && !envReady) bakeEnv() },
     fitShadow,
+    maskMode(on) { u.mask.value = on ? 1 : 0 },
     splatGain() {
       if (!data) { const V1 = { key: 1.1, hemi: 0.35, env: 0.8 }; const k = (V1.hemi + V1.env) / (V1.hemi + V1.env + 0.5 * V1.key) + (0.5 * V1.key) / (V1.hemi + V1.env + 0.5 * V1.key); return [k, k, k] }
       const wb = asV3(data.white_balance?.rgb ?? [1, 1, 1])

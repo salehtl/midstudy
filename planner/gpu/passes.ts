@@ -10,9 +10,9 @@
 //   furnitureComposite  the furniture target over the photo: un-premultiply, warmth tint, exposure and ACES Filmic,
 //                 sRGB, alpha as drawn; only inside the photo.
 //   splatComposite  the splat target over that: un-premultiply, the colour multiplier (§4.8), sRGB, no ACES.
-import { AlwaysDepth, Color, DataTexture, FloatType, LinearFilter, NearestFilter, NodeMaterial, NormalBlending, RedFormat, Texture, Vector2, Vector3, Vector4 } from 'three/webgpu'
+import { AlwaysDepth, Color, CustomBlending, DataTexture, FloatType, LinearFilter, NearestFilter, NodeMaterial, NormalBlending, OneFactor, OneMinusSrcAlphaFactor, RedFormat, Texture, Vector2, Vector3, Vector4 } from 'three/webgpu'
 import type { RenderTarget, UniformNode, WebGPURenderer } from 'three/webgpu'
-import { Discard, Fn, If, clamp, dot, float, max, min, mix, positionGeometry, pow, screenCoordinate, screenUV, select, texture, uniform, vec3, vec4, cameraNear, cameraFar, viewZToPerspectiveDepth } from 'three/tsl'
+import { Discard, Fn, If, clamp, dot, float, fract, fwidth, length, max, min, mix, positionGeometry, positionWorld, pow, screenCoordinate, screenUV, select, smoothstep, texture, uniform, vec2, vec3, vec4, cameraNear, cameraFar, viewZToPerspectiveDepth } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import type { ShaderNodeObject } from 'three/tsl'
 
@@ -164,6 +164,38 @@ export function createSplatComposite(frame: Frame, source: RenderTarget, gain: {
   m.transparent = true
   m.blending = NormalBlending
   return m
+}
+
+/** The floor grid of Adjust floor (engine.js gridMat): 50 cm lines on y = 0 out to 8 m, fading with distance, 1 m lines
+ * a little stronger, premultiplied. Ported, not yet compared with v1 (v1 hides it in captures). */
+export function createGridMaterial(): { material: NodeMaterial, opacity: { value: number } } {
+  const color = uniform(new Color(0xf3d27a))
+  const opacity = uniform(1)
+  const lines = (p: N): N => {
+    const w = max(fwidth(p), vec2(1e-5))
+    const a = fract(p.sub(0.5)).sub(0.5).abs().div(w)
+    return float(1).sub(min(min(a.x, a.y), float(1)))
+  }
+  const m = new NodeMaterial()
+  m.name = 'floor-grid'
+  m.fragmentNode = Fn(() => {
+    const xz = positionWorld.xz
+    const minor = lines(xz.div(0.5)), major = lines(xz)
+    const fade = float(1).sub(smoothstep(5, 8, length(xz)))
+    const a = max(minor.mul(0.5), major.mul(0.85)).mul(fade).mul(opacity).toVar()
+    If(a.lessThan(0.01), () => { Discard() })
+    return vec4(color.mul(a), a)
+  })()
+  m.transparent = true
+  m.depthWrite = false
+  m.depthTest = true
+  m.blending = CustomBlending
+  m.blendSrc = OneFactor
+  m.blendDst = OneMinusSrcAlphaFactor
+  m.blendSrcAlpha = OneFactor
+  m.blendDstAlpha = OneMinusSrcAlphaFactor
+  m.toneMapped = false
+  return { material: m, opacity }
 }
 
 /** renderer.clear() that clears on both backends. three.js 0.180's WebGL2 backend forces the depth mask on before a

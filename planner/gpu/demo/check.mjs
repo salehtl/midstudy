@@ -210,6 +210,9 @@ if (want('v1') || want('webgpu') || want('webgl') || want('perf')) {
     for (const [name, c] of Object.entries(CASES)) {
       const t0 = Date.now()
       ref[name] = await v1Case(P1.page, name, c)
+      // v1 under load once returned an all-black composite (its readback, not this spike): render that case again
+      const blank = (f) => { const d = f ? pyHelper(['region-diff', '--a', f, '--b', LW.photo, '--rects', JSON.stringify([[0, 0, 300, 300]])]) : null; return !d || d.mean == null || d.mean > 50 }
+      if (blank(ref[name].file)) { ev.note(`v1 ${name}: blank composite, rendered again`); ref[name] = await v1Case(P1.page, name, c); ref[name].retried = true }
       ref[name].secs = (Date.now() - t0) / 1000
       if (ref[name].file) fs.copyFileSync(ref[name].file, path.join(ev.out, `v1-${name}.jpg`))
     }
