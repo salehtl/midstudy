@@ -4,6 +4,7 @@
     stub_calib.py run <upload> --out <scene-dir> [--model vitl|vitb|vits] [--device auto|cuda|mps|cpu] [--no-depth]
     stub_calib.py ingest <upload> --out <scene-dir>
     stub_calib.py fit <scene-dir> [--model ...] [--device ...] [--no-depth]
+    stub_calib.py light <scene-dir> [--model ...] [--device ...]
     stub_calib.py align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>
 
 - ingest: JPEG only (PNG, HEIC and WebP are refused with a clear message: the stub can't decode them). Copies the
@@ -13,10 +14,14 @@
 - fit: with MIDSTUDY_CALIB_MOCK=<dir> (e.g. fixtures/calib), copies <dir>/<sha256 of photo.jpg>/calib.json,
   depth.png and lighting.json (falling back to the SHA-256 of source.<ext>); otherwise writes the "default" fallback (FOV 55,
   height 1.40, pitch -10, no depth, floor not found). EXIF facts are read from source.<ext>.
+- light (contract §4.8, lighting.json alone for a scene calibrated before it existed): with MIDSTUDY_CALIB_MOCK, copies
+  <dir>/<sha256 of photo.jpg, then of source.<ext>>/lighting.json (lighting: true); otherwise, or with no match, writes
+  nothing, leaves an existing lighting.json alone and answers lighting: false. Never touches calib.json, depth.png,
+  source.*, photo.jpg or scene.json.
 - align: the stub can't register images: it writes nothing and answers applied: false (exit 0).
 
-stdout: one JSON line (run/fit: calib.json plus "ok": true; ingest: {ok, photo, source, image}; align: {ok, applied,
-inliers, residual_px, reason}). Progress goes to stderr. A failure exits 1 with `{"ok": false, "error": ...}` on stdout
+stdout: one JSON line (run/fit: calib.json plus "ok": true; ingest: {ok, photo, source, image}; light: {ok, lighting:
+true, cct_k, confidence, elapsed_s} or {ok, lighting: false, reason}; align: {ok, applied, inliers, residual_px, reason}). Progress goes to stderr. A failure exits 1 with `{"ok": false, "error": ...}` on stdout
 and `midstudy-calib: <one sentence>` as the last stderr line.
 """
 from __future__ import annotations
@@ -301,6 +306,34 @@ def fit(scene: Path, no_depth: bool) -> dict:
     return {**calib, "ok": True}
 
 
+def light(scene: Path) -> dict:
+    t0 = time.monotonic()
+    photo = scene / "photo.jpg"
+    if not photo.is_file():
+        raise Fail(f"{photo} doesn't exist: calibrate the scene first")
+    mock = os.environ.get("MIDSTUDY_CALIB_MOCK")
+    if not mock:
+        return {"ok": True, "lighting": False, "reason": "the stub can't infer the light without MIDSTUDY_CALIB_MOCK"}
+    src = source_file(scene)
+    keys = [hashlib.sha256(photo.read_bytes()).hexdigest()] + ([hashlib.sha256(src.read_bytes()).hexdigest()] if src else [])
+    for key in keys:
+        f = Path(mock) / key / "lighting.json"
+        if f.is_file():
+            log(f"light: MIDSTUDY_CALIB_MOCK hit {f.parent}")
+            data = f.read_bytes()
+            write_atomic(scene / "lighting.json", data)
+            try:
+                lj = json.loads(data)
+            except ValueError:
+                lj = {}
+            wb = lj.get("white_balance") if isinstance(lj, dict) and isinstance(lj.get("white_balance"), dict) else {}
+            key_l = lj.get("key") if isinstance(lj, dict) and isinstance(lj.get("key"), dict) else {}
+            return {"ok": True, "lighting": True, "cct_k": wb.get("cct_k"), "confidence": key_l.get("confidence"),
+                    "elapsed_s": round(time.monotonic() - t0, 3)}
+    log(f"light: no mock lighting for photo.jpg in {mock}")
+    return {"ok": True, "lighting": False, "reason": "MIDSTUDY_CALIB_MOCK has no lighting for this photo"}
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="midstudy-calib", description="stand-in for midstudy-calib (fixtures/stub_calib.py)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -311,6 +344,8 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("ingest"); p.add_argument("upload", type=Path); p.add_argument("--out", type=Path, required=True)
     p = sub.add_parser("fit"); p.add_argument("scene", type=Path)
     p.add_argument("--model", **model); p.add_argument("--device", **device); p.add_argument("--no-depth", action="store_true")
+    p = sub.add_parser("light"); p.add_argument("scene", type=Path)
+    p.add_argument("--model", **model); p.add_argument("--device", **device)
     p = sub.add_parser("align"); p.add_argument("photo", type=Path); p.add_argument("raw", type=Path); p.add_argument("mask", type=Path)
     p.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
@@ -322,6 +357,10 @@ def main(argv: list[str]) -> int:
             result = ingest(args.upload, args.out)
         elif args.cmd == "fit":
             result = fit(args.scene, args.no_depth)
+        elif args.cmd == "light":
+            if not args.scene.is_dir():
+                raise Fail(f"{args.scene} isn't a scene folder")
+            result = light(args.scene)
         else:
             for f in (args.photo, args.raw, args.mask):
                 if not f.is_file():

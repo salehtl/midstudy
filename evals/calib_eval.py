@@ -5,7 +5,7 @@ Written from the spec only (it never reads calib/ source). Run through evals/py 
     evals/py evals/calib_eval.py                 real MoGe on this Mac: golden scenes vs truth.json, the real photos
     evals/py evals/calib_eval.py --mock          ingest only (no MoGe): HEIC, EXIF-rotated portrait, PNG, WebP,
                                                  Display P3, the 25 MB limit, a non-image, EXIF FOV, metadata, the
-                                                 MIDSTUDY_CALIB_MOCK lookup and the file rules
+                                                 MIDSTUDY_CALIB_MOCK lookup (fit and light) and the file rules
     evals/py evals/calib_eval.py --self-test     the comparator and checks themselves, against fixtures (no CLI)
     options: --cli "CMD" (default "uv run --project calib midstudy-calib"; e.g. "python3 fixtures/stub_calib.py"),
              --calib-mock DIR (real mode: set MIDSTUDY_CALIB_MOCK, to exercise the harness without MoGe),
@@ -820,6 +820,29 @@ def run_mock(cli: Cli, args) -> None:
     c = r.get("json") or {}
     check("fit --no-depth: depth null and the stale depth.png removed", r.get("code") == 0 and c.get("depth") is None and not (out / "depth.png").exists(),
           f"{brief(r)}; depth {c.get('depth')}; depth.png {'still there' if (out / 'depth.png').exists() else 'gone'}")
+
+    # light (contract §4.8): lighting.json alone for a scene calibrated before it existed; the mock copies it
+    sdir = REPO / "fixtures/scenes/living-wide"
+    (out / "lighting.json").unlink(missing_ok=True)
+    keep = {p.name: p.read_bytes() for p in out.iterdir() if p.is_file()}
+    r = cli(["light", out], mock=mock)
+    c = r.get("json") or {}
+    same = (out / "lighting.json").is_file() and (out / "lighting.json").read_bytes() == (sdir / "lighting.json").read_bytes()
+    untouched = all((out / n).is_file() and (out / n).read_bytes() == b for n, b in keep.items())
+    names = sorted(p.name for p in out.iterdir())
+    check("light with MIDSTUDY_CALIB_MOCK: {ok, lighting: true, cct_k, confidence, elapsed_s}, the golden lighting.json byte for byte, every other file unchanged, nothing else written",
+          r.get("code") == 0 and c.get("ok") is True and c.get("lighting") is True and isinstance(c.get("cct_k"), (int, float)) and isinstance(c.get("confidence"), (int, float))
+          and same and untouched and names == sorted([*keep, "lighting.json"]), f"{brief(r)}; result {c}; lighting.json {'identical' if same else 'missing or different'}; files {names}")
+    out = OUT / "mock" / "unknown"
+    keep = {p.name: p.read_bytes() for p in out.iterdir() if p.is_file()} if out.is_dir() else {}
+    r = cli(["light", out], mock=mock)
+    c = r.get("json") or {}
+    check("light on the unknown photo with the mock: exit 0, {ok, lighting: false, reason}, nothing written",
+          r.get("code") == 0 and c.get("ok") is True and c.get("lighting") is False and isinstance(c.get("reason"), str) and bool(keep)
+          and {p.name: p.read_bytes() for p in out.iterdir() if p.is_file()} == keep, f"{brief(r)}; result {c}")
+    r = cli(["light", OUT / "mock" / "no-such-scene"], mock=mock)
+    check("light on a folder that doesn't exist: exit 1 with the one-sentence contract", r.get("code") == 1 and (r.get("json") or {}).get("ok") is False
+          and r.get("stderr_last") == f"midstudy-calib: {(r.get('json') or {}).get('error')}", f"{brief(r)}; {r.get('stderr_last')}")
 
     # the real camera original (EXIF, Display P3, 5712 × 3213) with the mock: no MoGe, ingest for real
     src = REPO / "fixtures/photos/upper-lounge-camera.jpeg"

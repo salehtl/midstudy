@@ -89,11 +89,12 @@ def _png16(mm) -> bytes:
     return buf.getvalue()
 
 
-def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: str, no_depth: bool) -> dict:
+def _infer(scene: Path, w: int, h: int, model: str, device: str):
+    """photo.jpg at depth size through MoGe-2 (shared by fit and light): (rgb uint8 (dh, dw, 3), MoGe's output, the
+    device it ran on). A failure to load the model (no weights, offline) raises."""
     import numpy as np
     from PIL import Image
 
-    from . import floor as fl
     from . import moge_runner
 
     dw, dh = depth_size(w, h)
@@ -101,7 +102,7 @@ def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: st
         rgb = np.asarray(im.convert("RGB").resize((dw, dh), Image.Resampling.LANCZOS) if (dw, dh) != (w, h)
                          else im.convert("RGB"))
     dev = moge_runner.pick_device(device)
-    net = moge_runner.load(model)  # a failure here (no weights, offline) means the fallback
+    net = moge_runner.load(model)
     try:
         out = moge_runner.infer(net, rgb, dev)
     except Exception as e:
@@ -111,6 +112,41 @@ def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: st
             out = moge_runner.infer(net, rgb, dev)
         else:
             raise
+    return rgb, out, dev
+
+
+def _fov_choice(fov_y: float, exif: dict | None) -> tuple[bool, float, float]:
+    """(use the EXIF FOV, the camera's FOV, k = tan(fov_moge / 2) / tan(fov_camera / 2)): contract §4.3 Fit."""
+    exif_fov = exif.get("fov_y_deg") if exif else None
+    use_exif = bool(exif_fov) and abs(fov_y - exif_fov) <= FOV_DISAGREE_DEG
+    fov_cam = float(exif_fov) if use_exif else fov_y
+    return use_exif, fov_cam, math.tan(math.radians(fov_y) / 2) / math.tan(math.radians(fov_cam) / 2)
+
+
+def _fit_light(rgb, out: dict, camera: dict, floor: dict | None, w: int, h: int) -> dict | None:
+    """lighting.json's content from MoGe's output (contract §4.8), or None when the photo gives too little."""
+    import numpy as np
+
+    from . import lighting as lt
+
+    pts, nrm, valid = out["points"], out.get("normal"), out["mask"].astype(bool)
+    return lt.fit(rgb, pts, nrm if nrm is not None else np.full_like(pts, np.nan), valid, camera,
+                  floor["inliers"] if floor is not None else None, {"w": w, "h": h})
+
+
+def _log_light(light: dict) -> None:
+    f, k = light["fit"], light["key"]
+    log(f"light: key from azimuth {f['world_key']['azimuth_deg']:.0f}, elevation {f['world_key']['elevation_deg']:.0f} "
+        f"(confidence {k['confidence']:.2f}, {f['pairs']} creases), {light['white_balance']['cct_k']} K, in {f['elapsed_s']:.2f} s")
+
+
+def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: str, no_depth: bool) -> dict:
+    import numpy as np
+
+    from . import floor as fl
+
+    dw, dh = depth_size(w, h)
+    rgb, out, dev = _infer(scene, w, h, model, device)  # a failure here (no weights, offline) means the fallback
     K = out["intrinsics"]
     fov_y = fl.fov_y_from_intrinsics(float(K[1, 1]))
     fov_x = math.degrees(2 * math.atan(0.5 / float(K[0, 0])))
@@ -128,10 +164,7 @@ def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: st
     # right (contract §4.3 Fit). So: FOV from EXIF, pitch and roll from MoGe's floor, height times
     # k = f_exif / f_moge, and depth.png scaled to agree with the floor that camera draws. Measured on the golden scenes
     # with their true FOV given: height within 2 %, depth within 5 %, the floor grid within 2-13 px (was 32-73 px).
-    exif_fov = exif.get("fov_y_deg") if exif else None
-    use_exif = bool(exif_fov) and abs(fov_y - exif_fov) <= FOV_DISAGREE_DEG
-    fov_cam = float(exif_fov) if use_exif else fov_y
-    k = math.tan(math.radians(fov_y) / 2) / math.tan(math.radians(fov_cam) / 2)
+    use_exif, fov_cam, k = _fov_choice(fov_y, exif)
     depth_scale = 1.0
     if floor is not None and floor["inlier_ratio"] >= MIN_INLIER_RATIO:
         height, pitch, roll = fl.camera_from_plane(floor["n"], floor["d"])
@@ -170,19 +203,14 @@ def _moge(scene: Path, w: int, h: int, exif: dict | None, model: str, device: st
         write_atomic(scene / "depth.png", _png16(mm))
         calib["depth"] = {"file": "depth.png", "w": dw, "h": dh, "floor_masked": masked}
     # the room's light (contract §4.8): ~1 s on MoGe's output, nothing else to load
-    from . import lighting as lt
-
     try:
-        light = lt.fit(rgb, pts, nrm if nrm is not None else np.full_like(pts, np.nan), valid, calib["camera"],
-                       floor["inliers"] if floor is not None else None, {"w": w, "h": h})
+        light = _fit_light(rgb, out, calib["camera"], floor, w, h)
     except Exception as e:  # noqa: BLE001 - the light is a bonus: a failure here never fails the calibration
         log(f"lighting fit failed ({type(e).__name__}: {e}); the planner keeps its default lights")
         light = None
     if light is not None:
         write_atomic(scene / "lighting.json", (json.dumps(light, indent=2) + "\n").encode())
-        f, k = light["fit"], light["key"]
-        log(f"light: key from azimuth {f['world_key']['azimuth_deg']:.0f}, elevation {f['world_key']['elevation_deg']:.0f} "
-            f"(confidence {k['confidence']:.2f}, {f['pairs']} creases), {light['white_balance']['cct_k']} K, in {f['elapsed_s']:.2f} s")
+        _log_light(light)
     else:
         (scene / "lighting.json").unlink(missing_ok=True)
         log("light: too little to go on; no lighting.json")
@@ -213,3 +241,95 @@ def fit(scene: Path, model: str = "vitl", device: str = "auto", no_depth: bool =
     calib["elapsed_s"] = round(time.monotonic() - t0, 2)
     write_atomic(scene / "calib.json", (json.dumps(calib, indent=2) + "\n").encode())
     return calib
+
+
+# --- `midstudy-calib light` (contract §4.8): lighting.json alone, for scenes calibrated before it existed --------------
+NO_LIGHT = "too little of the photo is usable (over-exposed, too dark or without depth) to infer its light"
+
+
+def _scene_camera(scene: Path) -> tuple[dict | None, bool]:
+    """calib.json's camera block (None without a readable one) and whether it was fitted to a floor."""
+    try:
+        calib = json.loads((scene / "calib.json").read_text())
+    except (OSError, ValueError):
+        return None, False
+    cam = calib.get("camera") if isinstance(calib, dict) else None
+    keys = ("fov_y_deg", "height_m", "pitch_deg", "roll_deg")
+    if not isinstance(cam, dict) or not all(isinstance(cam.get(k), (int, float)) and not isinstance(cam.get(k), bool) for k in keys):
+        return None, False
+    floor = calib.get("floor") if isinstance(calib.get("floor"), dict) else {}
+    return camera_block(*(cam[k] for k in keys)), floor.get("found") is True
+
+
+def _light_mock(scene: Path, mock_dir: Path) -> bytes | None:
+    """MIDSTUDY_CALIB_MOCK: <dir>/<sha256 of photo.jpg, then of source.<ext>>/lighting.json, or None."""
+    keys = [hashlib.sha256((scene / "photo.jpg").read_bytes()).hexdigest()]
+    src = source_file(scene)
+    if src:
+        keys.append(hashlib.sha256(src.read_bytes()).hexdigest())
+    for key in keys:
+        f = mock_dir / key / "lighting.json"
+        if f.is_file():
+            log(f"MIDSTUDY_CALIB_MOCK hit {f.parent}")
+            return f.read_bytes()
+    log(f"no mock lighting for photo.jpg in {mock_dir}")
+    return None
+
+
+def light(scene: Path, model: str = "vitl", device: str = "auto") -> dict:
+    """Run MoGe-2 on photo.jpg exactly as fit does and write lighting.json only (calib.json, depth.png, source.*,
+    photo.jpg and scene.json are never touched). The camera is calib.json's when it was fitted to a floor, else the one
+    this floor fit gives, else calib.json's (a fallback), else the default. When the photo gives too little, nothing is
+    written (an existing lighting.json stays) and the result says why. MoGe failing to run is a failure."""
+    t0 = time.monotonic()
+    photo = scene / "photo.jpg"
+    if not photo.is_file():
+        raise Fail(f"{photo} doesn't exist: calibrate the scene first")
+    w, h = _photo_size(photo)
+    mock = os.environ.get("MIDSTUDY_CALIB_MOCK")
+    if mock:
+        data = _light_mock(scene, Path(mock))
+        if data is None:
+            return {"ok": True, "lighting": False, "reason": "MIDSTUDY_CALIB_MOCK has no lighting for this photo"}
+        write_atomic(scene / "lighting.json", data)
+        try:
+            lj = json.loads(data)
+        except ValueError:
+            lj = {}
+    else:
+        from . import floor as fl
+
+        try:
+            rgb, out, dev = _infer(scene, w, h, model, device)
+        except Exception as e:
+            first = str(e).splitlines()[0][:200] if str(e) else ""
+            raise Fail(f"MoGe-2 couldn't run ({type(e).__name__}: {first}), so the light can't be inferred")
+        pts, nrm, valid = out["points"], out.get("normal"), out["mask"].astype(bool)
+        floor = fl.fit_floor(pts, nrm, valid)
+        if floor is not None and floor["inlier_ratio"] < MIN_INLIER_RATIO:
+            floor = None
+        camera, fitted = _scene_camera(scene)
+        if camera is not None and (fitted or floor is None):
+            log(f"camera from calib.json: pitch {camera['pitch_deg']}, roll {camera['roll_deg']}")
+        elif floor is not None:
+            fov_y = fl.fov_y_from_intrinsics(float(out["intrinsics"][1, 1]))
+            _, fov_cam, k = _fov_choice(fov_y, exif_block(scene, w, h))
+            height, pitch, roll = fl.camera_from_plane(floor["n"], floor["d"])
+            camera = camera_block(fov_cam, height * k, pitch, roll)
+            log(f"camera from the floor fit: pitch {camera['pitch_deg']}, roll {camera['roll_deg']}")
+        else:
+            camera = dict(DEFAULT_CAMERA)
+            log("no calib.json camera and no floor: the default camera")
+        try:
+            lj = _fit_light(rgb, out, camera, floor, w, h)
+        except Exception as e:
+            raise Fail(f"the lighting fit failed ({type(e).__name__}: {' '.join(str(e).split())[:200]})")
+        if lj is None:
+            log(f"light: {NO_LIGHT}; lighting.json left as it was")
+            return {"ok": True, "lighting": False, "reason": NO_LIGHT}
+        write_atomic(scene / "lighting.json", (json.dumps(lj, indent=2) + "\n").encode())
+        _log_light(lj)
+    wb = lj.get("white_balance") if isinstance(lj, dict) and isinstance(lj.get("white_balance"), dict) else {}
+    key = lj.get("key") if isinstance(lj, dict) and isinstance(lj.get("key"), dict) else {}
+    return {"ok": True, "lighting": True, "cct_k": wb.get("cct_k"), "confidence": key.get("confidence"),
+            "elapsed_s": round(time.monotonic() - t0, 2)}

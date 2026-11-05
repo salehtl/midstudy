@@ -65,6 +65,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { createLighting, azElOf, dirOf, V1_KEY_DIR, V1_SOFTNESS } from './lighting.js'
 
 export const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const DEG = Math.PI / 180
@@ -100,6 +101,20 @@ export function clampCamera(c, base = DEFAULT_CAMERA) {
 }
 const sameCamera = (a, b) => !!a && !!b && Object.keys(CAMERA_RANGE).every((k) => Math.abs(a[k] - b[k]) < 1e-6)
 export const LOOK_DEFAULT = { exposure: 1, warmth: 0 }
+// The Look (contract §4.8): exposure and warmth (furniture only), and the lighting controls. A null value means the
+// scene's default: the inferred direction and softness (from lighting.json, or the v1 key light without one) and
+// cast_shadows on exactly when the scene has lighting.json.
+const LOOK_NUM = { exposure: [0.25, 4, 1], warmth: [-1, 1, 0], light_azimuth_deg: [-180, 180, null], light_elevation_deg: [5, 90, null], light_softness: [0, 1, null], light_strength: [0, 3, 1], ambient: [0, 3, 1] }
+const LOOK_BOOL = { contact_shadows: true, auto_light: true, cast_shadows: null }
+const LOOK_KEYS = [...Object.keys(LOOK_NUM), ...Object.keys(LOOK_BOOL)]
+const wrapAz = (a) => { const w = ((((a + 180) % 360) + 360) % 360) - 180; return w === -180 && a > 0 ? 180 : w }
+function lookFrom(l) {
+  const src = l && typeof l === 'object' ? l : {}
+  const out = {}
+  for (const [k, [lo, hi, d]] of Object.entries(LOOK_NUM)) out[k] = isNum(src[k]) ? Math.min(hi, Math.max(lo, k === 'light_azimuth_deg' ? wrapAz(src[k]) : src[k])) : d
+  for (const [k, d] of Object.entries(LOOK_BOOL)) out[k] = typeof src[k] === 'boolean' ? src[k] : d
+  return out
+}
 const OCCLUSION_TOLERANCE = 0.03 // m (§4.5)
 const MAX_ZOOM = 4
 const BAR = new THREE.Color(0x0e0f11) // letterbox bars
@@ -224,13 +239,8 @@ compScene.add(fsMesh(compMat))
 
 // The furniture scene: lights, the depth pre-pass, the grid, the pieces.
 const scene = new THREE.Scene()
-const pmrem = new THREE.PMREMGenerator(renderer)
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-scene.environmentIntensity = 0.8
-const key = new THREE.DirectionalLight(0xffffff, 1.1)
-key.position.set(-1.5, 4, 2.5)
-const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7a66, 0.35)
-scene.add(key, hemi)
+// The lights (planner/lighting.js, contract §4.8): lighting.json's probe, key and floor shadow, or the v1 lights.
+const lights = createLighting({ renderer, scene })
 
 // The depth pre-pass (§4.5): the photo's depth (+ tolerance) into the depth buffer, colour writes off. Depth 0 never occludes.
 const depthMat = new THREE.ShaderMaterial({
@@ -298,6 +308,8 @@ function applyCamera() {
   camera.rotation.set(cam.pitch_deg * DEG, 0, cam.roll_deg * DEG, 'YXZ')
   camera.updateMatrixWorld(true)
   R.setFromMatrix4(camera.matrixWorld)
+  lights.setCamera(R)
+  lights.setLook(resolvedLook()) // the inferred key turns with the camera (§4.8: lighting.json is in its frame)
   updateView()
 }
 
@@ -527,7 +539,6 @@ const shadowTex = (() => {
 const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, map: shadowTex, transparent: true, depthWrite: false, opacity: 0.75 })
 const SHADOW_Y = 0.004
-let contactShadows = true
 function makeContactShadow(rec) {
   const box = rec.localBox
   const size = box.getSize(new THREE.Vector3())
@@ -541,15 +552,13 @@ function makeContactShadow(rec) {
   return shadow
 }
 function setContactShadows(on) {
-  contactShadows = !!on
-  for (const r of items.values()) syncShadow(r)
-  emitLook()
+  setLighting({ contact_shadows: !!on })
 }
 // The blob stays on the floor (a child of the item, shifted down by the elevation); a raised item (its bottom more
 // than 2 cm up, §2.10) has none.
 function syncShadow(rec) {
   const y = rec.group.position.y
-  if (rec.shadow) { rec.shadow.visible = contactShadows && y <= 0.02; rec.shadow.position.y = SHADOW_Y - y }
+  if (rec.shadow) { rec.shadow.visible = look.contact_shadows && y <= 0.02; rec.shadow.position.y = SHADOW_Y - y }
 }
 
 // --- library + items --------------------------------------------------------------------------------------------------
@@ -759,6 +768,7 @@ async function addItemInternal(id, opts = {}) {
     rec.child = obj
     rec.localBox = box
     group.add(obj)
+    lights.prepare(obj)
     rec.shadow = makeContactShadow(rec)
     group.add(rec.shadow)
     syncShadow(rec)
@@ -814,6 +824,7 @@ function removeItemInternal(uid) {
   if (!rec) return
   if (selected === uid) select(null)
   scene.remove(rec.group)
+  lights.forget(rec.child)
   disposeChild(rec.child)
   items.delete(uid)
   emit('items', { change: 'remove', uid })
@@ -1077,7 +1088,10 @@ let sceneName = null
 let sceneData = null       // GET /api/scenes/<name> as opened
 let savedScene = null      // { title, camera, camera_source, look } as last read or saved
 let cameraSource = 'default'
-let look = { ...LOOK_DEFAULT }
+let look = lookFrom({})
+let lightingData = null    // lighting.json (GET /api/scenes/<name> `lighting`), or null: the v1 lights
+let lightingStatus = { status: 'missing', error: null } // §4.8 backfill: done | missing | pending | running | none | failed
+let lightingToken = 0
 let adjustFloor = false
 let occlusion = true
 let floorNote = null
@@ -1092,7 +1106,7 @@ function setDirty(next) {
   Object.assign(dirty, next)
   emit('dirty', { ...dirty })
 }
-const sceneSig = () => JSON.stringify([cam, look.exposure, look.warmth])
+const sceneSig = () => JSON.stringify([cam, LOOK_KEYS.map((k) => look[k])])
 let sceneBaseline = ''
 const touchScene = () => setDirty({ ...dirty, scene: !!sceneName && sceneSig() !== sceneBaseline })
 // The layout is dirty when the placed pieces differ from the ones last saved or loaded (not merely when something
@@ -1287,8 +1301,9 @@ async function openScene(name) {
     sceneData = data
     cam = clampCamera(data.camera)
     cameraSource = data.camera_source || 'default'
-    const l = data.look && typeof data.look === 'object' ? data.look : {}
-    look = { exposure: clampNum(l.exposure, 0.25, 4, 1), warmth: clampNum(l.warmth, -1, 1, 0) }
+    look = lookFrom(data.look)
+    lightingToken++
+    setLightingData(data)
     savedScene = { title: data.title ?? null, camera: { ...cam }, camera_source: cameraSource, look: { ...look } }
     sceneBaseline = sceneSig()
     occlusion = !!depth
@@ -1316,6 +1331,7 @@ async function openScene(name) {
     emit('grid', { visible: true })
     emitView()
     emit('scene', { phase: 'opened', name })
+    if (lightingStatus.status === 'missing' && data.calib_status === 'done') quiet(inferLighting())
     // The scene comes back with its layout (layoutToOpen: what this device had open, or the one saved last on any
     // device), so the furniture isn't lost on a reload or on the other device; then the renders list. The library
     // must be read first, or the pieces would load as missing.
@@ -1355,6 +1371,10 @@ function closeScene() {
   sceneName = null
   sceneData = null
   savedScene = null
+  lightingToken++
+  look = lookFrom({})
+  setLightingData(null)
+  applyLook()
   adjustFloor = false
   floorNote = null
   ruler.active = false
@@ -1406,13 +1426,13 @@ async function renameScene(name, title) {
 // PUT /api/scenes/<name>: the camera (with its source), the Look and the title.
 async function saveScene() {
   if (!sceneName) throw reportError('No scene is open')
-  const body = { title: sceneData?.title ?? null, camera: { ...cam }, camera_source: cameraSource, look: { ...look } }
+  const body = { title: sceneData?.title ?? null, camera: { ...cam }, camera_source: cameraSource, look: lookToSave() }
   let res
   try { res = await apiJson(sceneUrl(sceneName), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) } catch (e) {
     throw reportError(e.status ? 'Could not save the scene' : "Not saved: the server isn't answering", e)
   }
   if (res && typeof res === 'object') {
-    sceneData = { ...sceneData, ...res }
+    sceneData = { ...sceneData, ...res, lighting: sceneData?.lighting ?? null, lighting_status: sceneData?.lighting_status, lighting_error: sceneData?.lighting_error }
     cam = clampCamera(res.camera || cam)
     cameraSource = res.camera_source || cameraSource
   }
@@ -1456,6 +1476,9 @@ async function recalibrate() {
   if (name !== sceneName) return data
   setPhoto(photo.image, depth)
   sceneData = data
+  lightingToken++
+  setLightingData(data)
+  applyLook()
   floorNote = floorNoteFor(data)
   if (!dirty.scene && cameraSource !== 'manual') {
     cam = clampCamera(data.camera)
@@ -1652,28 +1675,143 @@ async function refreshLayouts() {
   emit('layouts', { names: names.slice(), details: layoutDetails.slice() })
 }
 
-// --- look (furniture only) --------------------------------------------------------------------------------------------
+// --- look and lighting (contract §4.8) --------------------------------------------------------------------------------
 function warmthTint(w) {
   const t = new THREE.Vector3(1 + 0.14 * w, 1 + 0.015 * w, 1 - 0.14 * w)
   return t.multiplyScalar(1 / (0.2126 * t.x + 0.7152 * t.y + 0.0722 * t.z))
 }
-function getLook() { return { exposure: look.exposure, warmth: look.warmth, contactShadows } }
+function getLook() { return { exposure: look.exposure, warmth: look.warmth, contactShadows: look.contact_shadows } }
 function emitLook() { emit('look', getLook()) }
+// The values in use: with Auto lighting on, the inferred direction and softness (lighting.json's key turned to the
+// world, or the v1 key light); off, the stored ones (each falling back to the inferred one).
+function resolvedLook() {
+  const inf = lights.inferred()
+  const autoDir = inf ? inf.direction : [...V1_KEY_DIR]
+  const autoSoft = inf ? inf.softness : V1_SOFTNESS
+  const manual = !look.auto_light
+  const ae = azElOf(autoDir)
+  const az = manual && look.light_azimuth_deg != null ? look.light_azimuth_deg : ae.azimuth_deg
+  const el = manual && look.light_elevation_deg != null ? look.light_elevation_deg : ae.elevation_deg
+  return {
+    light_azimuth_deg: az, light_elevation_deg: el,
+    dir: manual && (look.light_azimuth_deg != null || look.light_elevation_deg != null) ? dirOf(az, el) : autoDir,
+    light_softness: manual && look.light_softness != null ? look.light_softness : autoSoft,
+    light_strength: look.light_strength, ambient: look.ambient,
+    cast_shadows: look.cast_shadows ?? !!lightingData,
+  }
+}
 function applyLook() {
   compMat.uniforms.uExposure.value = look.exposure
   compMat.uniforms.uTint.value.copy(warmthTint(look.warmth))
+  lights.setLook(resolvedLook())
+  for (const r of items.values()) syncShadow(r)
   emitLook()
 }
-function setLook(s = {}) {
-  if (isNum(s.exposure)) look.exposure = clampNum(s.exposure, 0.25, 4, 1)
-  if (isNum(s.warmth)) look.warmth = clampNum(s.warmth, -1, 1, 0)
+// getLighting() (hook, §4.8): the Look's values in use, where the light comes from, and the key in the world frame.
+function getLighting() {
+  const r = resolvedLook()
+  const inf = lights.inferred()
+  const k = lights.inUse()
+  const r3 = (v) => v.map((x) => round(x, 6))
+  return {
+    exposure: look.exposure, warmth: look.warmth, contact_shadows: look.contact_shadows, auto_light: look.auto_light,
+    light_azimuth_deg: round(r.light_azimuth_deg, 3), light_elevation_deg: round(r.light_elevation_deg, 3), light_softness: round(r.light_softness, 4),
+    light_strength: look.light_strength, ambient: look.ambient, cast_shadows: r.cast_shadows,
+    source: lightingData ? (lightingData.source === 'truth' ? 'truth' : 'photo') : 'default',
+    inferred: inf && { azimuth_deg: round(inf.azimuth_deg, 3), elevation_deg: round(inf.elevation_deg, 3), softness: inf.softness, direction: r3(inf.direction), color: inf.color, intensity: inf.intensity, cct_k: inf.cct_k },
+    key: { azimuth_deg: round(k.azimuth_deg, 3), elevation_deg: round(k.elevation_deg, 3), direction: r3(k.direction), color: k.color, intensity: round(k.intensity, 6), softness: round(k.softness, 4) },
+    status: lightingStatus.status, error: lightingStatus.error,
+  }
+}
+// Keeps what is in use when Auto lighting goes off, so nothing jumps.
+function freezeAuto() {
+  const r = resolvedLook()
+  look.light_azimuth_deg = round(wrapAz(r.light_azimuth_deg), 3)
+  look.light_elevation_deg = round(Math.min(90, Math.max(5, r.light_elevation_deg)), 3)
+  look.light_softness = round(r.light_softness, 4)
+}
+// setLighting(partial) (hook, §4.8): live. A direction or softness turns Auto lighting off unless auto_light is given.
+function setLighting(p = {}) {
+  if (!p || typeof p !== 'object') { reportError('setLighting needs an object like { light_strength: 1.2 }'); return }
+  const before = JSON.stringify(look)
+  const manualKeys = ['light_azimuth_deg', 'light_elevation_deg', 'light_softness']
+  const goesManual = (manualKeys.some((k) => isNum(p[k])) && typeof p.auto_light !== 'boolean') || p.auto_light === false
+  if (goesManual && look.auto_light) freezeAuto()
+  if (goesManual) look.auto_light = false
+  for (const [k, [lo, hi]] of Object.entries(LOOK_NUM)) if (isNum(p[k])) look[k] = Math.min(hi, Math.max(lo, k === 'light_azimuth_deg' ? wrapAz(p[k]) : p[k]))
+  for (const k of Object.keys(LOOK_BOOL)) if (typeof p[k] === 'boolean' && !(k === 'auto_light' && p[k] === false)) look[k] = p[k]
+  applyLook()
+  if (JSON.stringify(look) !== before) touchScene()
+}
+// resetLighting() (hook, Reset): Auto lighting, strength, ambient, exposure and warmth back; the shadows to their
+// defaults; the stored direction and softness gone.
+function resetLighting() {
+  Object.assign(look, { auto_light: true, light_strength: 1, ambient: 1, exposure: 1, warmth: 0, cast_shadows: null, contact_shadows: true, light_azimuth_deg: null, light_elevation_deg: null, light_softness: null })
   applyLook()
   touchScene()
 }
+function setLook(s = {}) {
+  setLighting({ ...(isNum(s.exposure) ? { exposure: s.exposure } : {}), ...(isNum(s.warmth) ? { warmth: s.warmth } : {}) })
+}
+// PUT body: every key; null removes it on the server (the direction and softness while Auto lighting is on, and
+// cast_shadows while it follows the scene's default).
+function lookToSave() {
+  const out = Object.fromEntries(LOOK_KEYS.map((k) => [k, look[k]]))
+  if (look.auto_light) out.light_azimuth_deg = out.light_elevation_deg = out.light_softness = null
+  return out
+}
+function setLightingData(data) {
+  lightingData = data?.lighting && typeof data.lighting === 'object' ? data.lighting : null
+  lightingStatus = { status: data?.lighting_status || (lightingData ? 'done' : 'missing'), error: data?.lighting_error || null }
+  lights.setData(lightingData)
+}
+function emitLighting() { emit('lighting', { status: lightingStatus.status, error: lightingStatus.error }); emitLook() }
+// A scene calibrated before lighting.json existed (§4.8 backfill): POST …/light runs only the lighting step on the
+// server; this polls the scene until it is there (or the server found none), then lights the furniture with it.
+// Opening such a scene starts it; the Look panel's "Infer lighting" starts it again after a failure.
+async function inferLighting() {
+  const name = sceneName
+  if (!name) throw reportError('No scene is open')
+  const token = ++lightingToken
+  try {
+    await apiJson(`${sceneUrl(name)}/light`, { method: 'POST' })
+  } catch (e) {
+    const why = e.status === 409 ? 'the scene is calibrating; its light comes with it' : e.status ? "the server couldn't start it" : "the server isn't answering"
+    if (name === sceneName) { lightingStatus = { status: 'failed', error: why }; emitLighting() }
+    throw reportError(e.status === 409 ? 'This scene is calibrating; its lighting comes with it' : 'Could not start inferring the light', e)
+  }
+  lightingStatus = { status: 'pending', error: null }
+  emitLighting()
+  for (let i = 0; i < 600; i++) {
+    await sleep(i < 4 ? 600 : 1500)
+    if (name !== sceneName || token !== lightingToken) return null
+    let data
+    try { data = await getSceneInternal(name) } catch { continue }
+    if (name !== sceneName || token !== lightingToken) return null
+    const st = data.lighting_status || (data.lighting ? 'done' : 'missing')
+    if (st === 'pending' || st === 'running') { if (st !== lightingStatus.status) { lightingStatus = { status: st, error: null }; emitLighting() } continue }
+    sceneData = { ...sceneData, lighting: data.lighting ?? null, lighting_status: st, lighting_error: data.lighting_error ?? null }
+    setLightingData(sceneData)
+    applyLook()
+    emitLighting()
+    if (st === 'done') toast('Lighting inferred from the photo', 'ok', 3500)
+    else if (st === 'failed') toast(`Couldn't infer the light: ${lightingStatus.error || 'see the server log'}`, 'error')
+    return getLighting()
+  }
+  return null
+}
 
 // --- drawing ------------------------------------------------------------------------------------------------------------
+// The pieces that cast the key's shadow, as one world box (null without any): the shadow camera is fitted to it.
+function shadowBox() {
+  if (!lights.key.castShadow || !items.size) return null
+  const b = new THREE.Box3()
+  for (const r of items.values()) if (r.child && !r.missing) b.union(worldBounds(r))
+  return b.isEmpty() ? null : b
+}
 function drawTo(target, { furniture = true } = {}) {
   depthMat.uniforms.uScale.value = depthScale() // every frame: the camera or calib.json (Calibrate again) may have changed
+  if (furniture) lights.fitShadow(shadowBox())
   renderer.setRenderTarget(furnRT)
   renderer.setClearColor(0x000000, 0)
   renderer.clear(true, true, true)
@@ -1736,8 +1874,10 @@ function captureMask() {
   const swapped = []
   for (const rec of items.values()) rec.group.traverse((o) => { if (o.isMesh || o.isLine) { swapped.push([o, o.material, o.visible]); o.material = maskMat; if (o.isLine) o.visible = false } })
   let pixels
+  lights.maskMode(true) // the pieces' cast shadow on the floor is part of what the render may change
   try {
     pixels = withFullFrame(w, h, () => {
+      lights.fitShadow(shadowBox())
       renderer.setRenderTarget(rt)
       renderer.setClearColor(0x000000, 1)
       renderer.clear(true, true, true)
@@ -1747,6 +1887,7 @@ function captureMask() {
       return buf
     })
   } finally {
+    lights.maskMode(false)
     for (const [o, m, v] of swapped) { o.material = m; o.visible = v }
     rt.dispose()
   }
@@ -1899,7 +2040,7 @@ function getState() {
 }
 function getRenderSettings() {
   return {
-    toneMapping: 'aces', exposure: look.exposure, warmth: look.warmth, contactShadows,
+    toneMapping: 'aces', exposure: look.exposure, warmth: look.warmth, contactShadows: look.contact_shadows,
     shadowCount: [...items.values()].filter((r) => r.shadow && r.shadow.visible).length,
   }
 }
@@ -1969,8 +2110,9 @@ export const engine = {
   beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem,
   setElevation, nudgeElevation, dropToFloor, reloadLibrary: () => loadLibrary(),
   tap, setRulerActive, clearRuler, setRulerPointAt, setRulerTrueLength,
-  // look
-  setLook, setContactShadows,
+  // look and lighting (§4.8)
+  setLook, setContactShadows, getLighting, setLighting, resetLighting, inferLighting,
+  getLightingStatus: () => ({ ...lightingStatus }),
   // layouts
   saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal, refreshLayouts, setLayoutName,
   // renders

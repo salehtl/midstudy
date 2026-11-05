@@ -63,3 +63,29 @@ the committed photo by 1.1 grey levels on average, JPEG noise).
 - `evals/lib/images.py lighting`: the measurement behind E16. Checked on the golden photos themselves: the sofa's top
   and front, one fabric, give the same albedo under all three lights (top/front 0.97–1.02), which pins the frame, the
   SH units and ACES.
+
+## Planner side (`planner/lighting.js`, engine "look and lighting")
+
+Built on main `b766898` (before Idol), mesh furniture and Flat rug only; splat colour-matching is a follow-up once Idol's
+splat drawing is on main (`lights.splatGrade()` is the hook for it: a per-channel gain from `white_balance` and the
+ambient setting).
+
+- **With `lighting.json`:** a `LightProbe` with the SH turned to the world frame (refit over 96 directions, exact for
+  bands 0–2), one `DirectionalLight` (colour × intensity × `light_strength`), and an environment map made from the same
+  SH for reflections only. Lit materials get the `MIDSTUDY_PROBE_DIFFUSE` define, which drops three.js's image-based
+  diffuse term (a one-line `ShaderChunk` patch), so the probe alone gives the diffuse ambient and nothing counts twice.
+  Materials without the define compile exactly as before, so a scene without `lighting.json` is the v1 look.
+- **Floor shadow:** the key's shadow map (PCF, 2048², an orthographic camera fitted to the pieces every frame) read by
+  an invisible floor at y = 0 with a PCSS shader (blocker search, then a 32-tap filter whose width grows with the
+  distance to the blocker, so it's sharp where a leg meets the floor and softer away from it). It is black with an
+  alpha, drawn in the furniture pass, so the occlusion pre-pass hides it behind real things and the photo is only ever
+  darkened. Its darkness is the key's share of the floor's light, `key·l_y / (ambient(up) + key·l_y)`, a little lighter
+  for soft light; the alpha is converted for the composite's sRGB blending (blending a linear alpha over sRGB bytes
+  made shadows ~2× too dark). The keep-room mask takes the visible shadow in, so a render doesn't cut it off.
+- Measured with `evals/lib/images.py lighting` (E16) on the three living-* golden scenes, the grey probe box's faces
+  come out 2–4 % brighter than lighting.json predicts (the reflections' share), and its shadow's direction is within
+  1.5–14° of straight away from the light.
+- E16 fixes found on the way: the probe's left face in living-cool was half hidden behind the real coffee table (the
+  measurement now leaves out pixels the scene's depth.png puts in front of the box); living-wide's light comes from
+  behind the camera, so the probe's shadow fell under the real table: living-wide uses its own probe spot right of
+  the sofa; single-pixel JPEG noise on the rug no longer counts as shadow (a 1 px opening).

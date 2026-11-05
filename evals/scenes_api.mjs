@@ -2,6 +2,9 @@
 // Upload → 202, listed pending, calibrates (calib stub + MIDSTUDY_CALIB_MOCK), photo.jpg ≤ 2048, the scene has the
 // camera; PUT camera round-trips; calibrate; delete moves to the trash; layouts per scene don't leak; static rules;
 // W1 (forged), W2 (Host), W4 (paths) on every new route; the spend cap covers /api/render. fal mocked, $0.
+// Lighting (§4.8): the look keys (clamps, booleans, null removes, merge, 400s), GET's lighting / lighting_status /
+// lighting_error, and the backfill (POST …/light: a light job that writes lighting.json only, idempotent, never touching
+// calib.json, depth.png, scene.json or calib_status; a mock miss gives "none", a failure "failed", 409 while calibrating).
 // Calibration runs through evals/lib/gated_calib.py (→ fixtures/stub_calib.py), which holds a job in "running"
 // while its gate file is missing, so "pending" and the one-at-a-time queue can be observed.
 // Usage: node evals/scenes_api.mjs   (or npm run eval:scenes-api). Output: evals/out/scenes-api/.
@@ -30,6 +33,9 @@ const calls = () => (fs.existsSync(CALLOG) ? fs.readFileSync(CALLOG, 'utf8').tri
 const LIVING = golden('living-wide'), PORTRAIT = golden('portrait')
 const livingBytes = fs.readFileSync(LIVING.photo), portraitBytes = fs.readFileSync(PORTRAIT.photo)
 const st = (r) => `${r.status || r.error}${r.json ? ` ${clip(fmt(r.json), 220)}` : r.text ? ` ${clip(r.text, 120)}` : ''}`
+// deep equality that ignores key order
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v)
+const same = (a, b) => a !== undefined && JSON.stringify(canon(a)) === JSON.stringify(canon(b))
 
 // --- server ---------------------------------------------------------------------------------------------------------------
 closeGate()
@@ -153,6 +159,44 @@ r = await api.get(B, `/api/scenes/${A}`)
 ev.check('refused PUTs changed nothing', camEq(r.json?.camera, manual, 1e-9) && r.json?.camera_source === 'manual', fmt(r.json?.camera))
 ev.check('PUT an unknown scene → 404', (r = await api.send(B, 'PUT', '/api/scenes/scene-19990101-000000', { title: 'x' })).status === 404, st(r))
 
+ev.section('PUT look (§4.8): numbers clamped, booleans, null removes a key, a look merges')
+const diskScene = () => { try { return JSON.parse(fs.readFileSync(sjA, 'utf8')) } catch { return {} } }
+const fullLook = { exposure: 1.2, warmth: 0.3, contact_shadows: false, auto_light: false, light_azimuth_deg: 45, light_elevation_deg: 30,
+  light_softness: 0.4, light_strength: 1.5, ambient: 0.8, cast_shadows: true }
+r = await api.send(B, 'PUT', `/api/scenes/${A}`, { look: fullLook })
+let gotLook = (await api.get(B, `/api/scenes/${A}`)).json?.look
+ev.check('PUT every look key → 200; the PUT answer, GET and scene.json have them as sent; scene.json validates',
+  r.status === 200 && same(r.json?.look, fullLook) && same(gotLook, fullLook) && same(diskScene().look, fullLook) && vScene(diskScene()), `${st(r)} ${errs(vScene)}`)
+r = await api.send(B, 'PUT', `/api/scenes/${A}`, { look: { ambient: 2 } })
+ev.check('a look with one key replaces only that key (merge)', r.status === 200 && same(r.json?.look, { ...fullLook, ambient: 2 }), fmt(r.json?.look))
+r = await api.send(B, 'PUT', `/api/scenes/${A}`, { look: { light_azimuth_deg: null, light_elevation_deg: null, light_softness: null, auto_light: true } })
+const lookNoDir = { ...fullLook, ambient: 2, auto_light: true }
+delete lookNoDir.light_azimuth_deg; delete lookNoDir.light_elevation_deg; delete lookNoDir.light_softness
+gotLook = (await api.get(B, `/api/scenes/${A}`)).json?.look
+ev.check('null removes a key (GET and scene.json); booleans round-trip as booleans', r.status === 200 && same(gotLook, lookNoDir) && same(diskScene().look, lookNoDir)
+  && !('light_azimuth_deg' in (diskScene().look || {})) && diskScene().look?.auto_light === true && diskScene().look?.contact_shadows === false && vScene(diskScene()), fmt(gotLook))
+r = await api.send(B, 'PUT', `/api/scenes/${A}`, { look: { light_azimuth_deg: 400, light_elevation_deg: 0, light_softness: 2, light_strength: -1, ambient: 9, exposure: 10, warmth: -5 } })
+const clamped = { light_azimuth_deg: 180, light_elevation_deg: 5, light_softness: 1, light_strength: 0, ambient: 3, exposure: 4, warmth: -1 }
+ev.check('look numbers are clamped (azimuth −180…180, elevation 5…90, softness 0…1, strength 0…3, ambient 0…3, exposure 0.25…4, warmth −1…1); scene.json validates',
+  r.status === 200 && Object.entries(clamped).every(([k, v]) => r.json?.look?.[k] === v) && vScene(diskScene()), `${fmt(r.json?.look)} ${errs(vScene)}`)
+r = await api.send(B, 'PUT', `/api/scenes/${A}`, { look: { light_azimuth_deg: -400, light_elevation_deg: 95, light_softness: -1, light_strength: 7, ambient: -2, exposure: 0, warmth: 5 } })
+ev.check('…and at the other ends', r.status === 200 && same(Object.fromEntries(Object.keys(clamped).map((k) => [k, r.json?.look?.[k]])),
+  { light_azimuth_deg: -180, light_elevation_deg: 90, light_softness: 0, light_strength: 3, ambient: 0, exposure: 0.25, warmth: 1 }), fmt(r.json?.look))
+const lookBefore = (await api.get(B, `/api/scenes/${A}`)).json?.look
+const savedBefore = (await api.get(B, `/api/scenes/${A}`)).json?.saved
+for (const [label, look] of [['an unknown key', { bogus: 1 }], ['a known key next to an unknown one', { exposure: 1, sparkle: true }],
+  ['a boolean as a number (exposure: true)', { exposure: true }], ['a number as a boolean (auto_light: 1)', { auto_light: 1 }],
+  ['0 as a boolean (cast_shadows: 0)', { cast_shadows: 0 }], ['a numeric string', { ambient: '1' }], ['a string boolean', { contact_shadows: 'true' }],
+  ['an object value', { light_strength: {} }], ['a list for look', [1]], ['look null', null]]) {
+  r = await api.send(B, 'PUT', `/api/scenes/${A}`, { look })
+  ev.check(`PUT look with ${label} → 400 with one sentence naming the accepted keys`, r.status === 400 && /light_azimuth_deg/.test(r.json?.error || '') && /cast_shadows/.test(r.json?.error || '')
+    && /ambient/.test(r.json?.error || ''), st(r))
+}
+r = await api.send(B, 'PUT', `/api/scenes/${A}`, '{"look": {"exposure": NaN}}')
+ev.check('PUT look with NaN (Python\'s json reads it) → 400', r.status === 400, st(r))
+gotLook = (await api.get(B, `/api/scenes/${A}`)).json
+ev.check('refused looks changed nothing (look and saved)', same(gotLook?.look, lookBefore) && gotLook?.saved === savedBefore && same(diskScene().look, lookBefore), fmt(gotLook?.look))
+
 ev.section('thumbnail')
 r = await api.send(B, 'PUT', `/api/scenes/${A}/thumb`, { image: dataUri('image/jpeg', portraitBytes) })
 ev.check('PUT /thumb with a JPEG data URI → 200 {ok, thumb_url}', r.status === 200 && r.json?.ok === true && /thumb\.jpg/.test(r.json?.thumb_url || ''), st(r))
@@ -195,6 +239,119 @@ const jF = r.json?.job?.id ? (await api.get(B, `/api/scenes/jobs/${r.json.job.id
 ev.check('its job fails; the scene shows calib_status failed with the tool\'s sentence as calib_error and the job message', gF?.calib_status === 'failed' && typeof gF?.calib_error === 'string'
   && gF.calib_error.length > 5 && jF?.status === 'failed' && (jF?.message || '').includes(gF.calib_error), fmt({ status: gF?.calib_status, calib_error: gF?.calib_error, job: jF?.status, message: jF?.message }))
 ev.check('a failed scene keeps the default camera (camera_source default)', camEq(gF?.camera, DEFAULT_CAMERA) && gF?.camera_source === 'default', fmt({ cam: gF?.camera, src: gF?.camera_source }))
+
+ev.section('lighting.json in GET, and the backfill for scenes calibrated before it (POST …/light, §4.8)')
+const COOL = golden('living-cool')
+const lightOf = (g) => JSON.parse(fs.readFileSync(path.join(g.dir, 'lighting.json'), 'utf8'))
+const coolLight = lightOf(COOL), portraitLight = lightOf(PORTRAIT)
+const upL = await uploadScene(B, fs.readFileSync(COOL.photo), { filename: 'cool.jpg' })
+const L = upL.json?.scene
+let gL = L ? await waitScene(B, L) : null
+ev.check('a calibrated scene: GET has lighting (lighting.json as it is), lighting_status done, lighting_error null',
+  gL?.calib_status === 'done' && same(gL?.lighting, coolLight) && gL?.lighting_status === 'done' && gL?.lighting_error === null,
+  fmt({ calib: gL?.calib_status, status: gL?.lighting_status, error: gL?.lighting_error, lighting: gL?.lighting ? 'object' : gL?.lighting }))
+ev.check('/scenes/<L>/lighting.json is not served (404: the API carries it)', (r = await raw(B, 'GET', `/scenes/${L}/lighting.json`)).status === 404, `${r.status}`)
+const Ldir = path.join(scenesDir, L || '_'), Bdir = path.join(scenesDir, Bn || '_')
+const filesOf = (d) => Object.fromEntries(['calib.json', 'depth.png', 'scene.json', 'photo.jpg'].map((f) => [f, fs.existsSync(path.join(d, f)) ? fs.readFileSync(path.join(d, f)).toString('base64') : null]))
+// a scene calibrated before lighting.json existed
+for (const d of [Ldir, Bdir]) fs.rmSync(path.join(d, 'lighting.json'), { force: true })
+const filesL0 = filesOf(Ldir), sceneL0 = JSON.parse(fs.readFileSync(path.join(Ldir, 'scene.json'), 'utf8'))
+gL = (await api.get(B, `/api/scenes/${L}`)).json
+ev.check('lighting.json deleted: GET has lighting null, lighting_status missing, lighting_error null; calib_status still done',
+  gL?.lighting === null && gL?.lighting_status === 'missing' && gL?.lighting_error === null && gL?.calib_status === 'done', fmt({ l: gL?.lighting, s: gL?.lighting_status, e: gL?.lighting_error, c: gL?.calib_status }))
+closeGate()
+const nCallsL = calls().length
+r = await api.send(B, 'POST', `/api/scenes/${L}/light`)
+const ljob = r.json?.job
+ev.check('POST /api/scenes/<L>/light → 202 {job: {id, kind light, scene, status queued}}', r.status === 202 && typeof ljob?.id === 'string' && ljob?.kind === 'light' && ljob?.scene === L
+  && ['queued', 'running'].includes(ljob?.status), st(r))
+gL = await waitFor(async () => { const g = (await api.get(B, `/api/scenes/${L}`)).json; return g?.lighting_status === 'running' ? g : null }, { timeoutMs: 5000 })
+ev.check('while the light job runs: lighting_status running, and calib_status stays done (the planner never waits for "calibrating")', gL?.lighting_status === 'running' && gL?.calib_status === 'done',
+  fmt({ s: gL?.lighting_status, c: gL?.calib_status }))
+r = await api.send(B, 'POST', `/api/scenes/${L}/light`)
+ev.check('a second POST …/light while it runs → 202 with the same job (two devices may open the scene)', r.status === 202 && r.json?.job?.id === ljob?.id, st(r))
+r = await api.send(B, 'POST', `/api/scenes/${Bn}/light`)
+const bjob = r.json?.job
+const gBn = (await api.get(B, `/api/scenes/${Bn}`)).json
+ev.check('a light job queued behind it: 202 status queued; the scene shows lighting_status pending, calib_status done', r.status === 202 && bjob?.status === 'queued' && bjob?.id !== ljob?.id
+  && gBn?.lighting_status === 'pending' && gBn?.calib_status === 'done', `${st(r)} | ${gBn?.lighting_status} ${gBn?.calib_status}`)
+r = await api.send(B, 'POST', `/api/scenes/${Bn}/light`)
+ev.check('…and a second POST for it while queued → 202 with that same job', r.status === 202 && r.json?.job?.id === bjob?.id, st(r))
+// a photo the mock doesn't know (its JFIF density changed): a default calibration without lighting.json
+const missBytes = Buffer.from(livingBytes)
+missBytes.writeUInt16BE(97, 14); missBytes.writeUInt16BE(97, 16)
+const upM = await uploadScene(B, missBytes, { filename: 'miss.jpg' })
+const M = upM.json?.scene, Mdir = path.join(scenesDir, M || '_')
+let gM = (await api.get(B, `/api/scenes/${M}`)).json
+ev.check('a scene whose calibration is queued: calib_status pending and lighting_status pending (the calibration brings the light)', gM?.calib_status === 'pending' && gM?.lighting_status === 'pending', fmt({ c: gM?.calib_status, s: gM?.lighting_status }))
+r = await api.send(B, 'POST', `/api/scenes/${M}/light`)
+ev.check('POST …/light while the scene calibrates → 409 with one sentence', r.status === 409 && /calibrating/.test(r.json?.error || ''), st(r))
+r = await api.get(B, '/api/scenes/jobs')
+ev.check('GET /api/scenes/jobs lists the light jobs (kind light) with the calibration', (r.json?.jobs || []).filter((j) => j.kind === 'light').length >= 2 && (r.json?.jobs || []).some((j) => j.scene === M && j.kind === 'calibrate'),
+  (r.json?.jobs || []).slice(0, 4).map((j) => `${j.kind}:${j.scene === L ? 'L' : j.scene === Bn ? 'B' : j.scene === M ? 'M' : '?'}:${j.status}`))
+openGate()
+const lDone = await waitFor(async () => { const j = (await api.get(B, `/api/scenes/jobs/${ljob?.id}`)).json; return j?.status === 'done' || j?.status === 'failed' ? j : null }, { timeoutMs: 30000 })
+await waitFor(async () => ['done', 'failed'].includes((await api.get(B, `/api/scenes/jobs/${bjob?.id}`)).json?.status), { timeoutMs: 30000 })
+gM = await waitScene(B, M || '_')
+ev.check('the light job finishes: status done, kind light, message "lighting inferred (… K)", lighting true', lDone?.status === 'done' && lDone?.kind === 'light' && /^lighting inferred \(\d+ K\)$/.test(lDone?.message || '')
+  && lDone?.lighting === true, fmt(lDone))
+const lightCall = calls().slice(nCallsL).find((c) => c.argv[0] === 'light' && path.resolve(c.cwd, c.argv[1] || '') === Ldir)
+ev.check('it ran `<calib> light <scene dir>`', !!lightCall && lightCall.argv.length === 2, fmt(calls().slice(nCallsL).map((c) => c.argv[0])))
+gL = (await api.get(B, `/api/scenes/${L}`)).json
+ev.check('GET then has lighting = the mock\'s lighting.json, lighting_status done, lighting_error null', same(gL?.lighting, coolLight) && gL?.lighting_status === 'done' && gL?.lighting_error === null,
+  fmt({ s: gL?.lighting_status, e: gL?.lighting_error, l: gL?.lighting ? 'object' : gL?.lighting }))
+const filesL1 = filesOf(Ldir)
+ev.check('calib.json, depth.png, photo.jpg and scene.json are byte for byte unchanged; camera, camera_source and calib_status too',
+  same(filesL1, filesL0) && camEq(gL?.camera, sceneL0.camera, 1e-9) && gL?.camera_source === sceneL0.camera_source && gL?.calib_status === 'done',
+  Object.keys(filesL0).filter((f) => filesL0[f] !== filesL1[f]).join(', ') || 'unchanged')
+ev.check('the queued one ran too: B has its lighting back (lighting_status done)', same((await api.get(B, `/api/scenes/${Bn}`)).json?.lighting, portraitLight), (await api.get(B, `/api/scenes/${Bn}`)).json?.lighting_status)
+r = await api.send(B, 'POST', `/api/scenes/${L}/light`)
+ev.check('POST …/light again → 200 {lighting_status: done} without a job', r.status === 200 && r.json?.lighting_status === 'done' && !('job' in (r.json || {})), st(r))
+// the mock miss: the calibration wrote no lighting.json; the light job finds none either
+ev.check('the mock-miss scene calibrated (default) without lighting.json: lighting_status missing', gM?.calib_status === 'done' && gM?.lighting === null && gM?.lighting_status === 'missing'
+  && !fs.existsSync(path.join(Mdir, 'lighting.json')), fmt({ c: gM?.calib_status, s: gM?.lighting_status }))
+r = await api.send(B, 'POST', `/api/scenes/${M}/light`)
+const mjob = r.json?.job
+const mDone = await waitFor(async () => { const j = (await api.get(B, `/api/scenes/jobs/${mjob?.id}`)).json; return ['done', 'failed'].includes(j?.status) ? j : null }, { timeoutMs: 30000 })
+gM = (await api.get(B, `/api/scenes/${M}`)).json
+ev.check('an unknown photo (mock miss): the light job is done with lighting false, "no clear light in the photo"; GET lighting null, lighting_status none',
+  r.status === 202 && mDone?.status === 'done' && mDone?.lighting === false && /no clear light/.test(mDone?.message || '') && gM?.lighting === null && gM?.lighting_status === 'none' && gM?.lighting_error === null
+  && !fs.existsSync(path.join(Mdir, 'lighting.json')), fmt({ job: mDone, s: gM?.lighting_status }))
+// a light job that fails: its sentence becomes lighting_error; calib_status is untouched
+closeGate()
+r = await api.send(B, 'POST', `/api/scenes/${M}/light`)
+const fjob = r.json?.job
+await waitFor(async () => (await api.get(B, `/api/scenes/jobs/${fjob?.id}`)).json?.status === 'running', { timeoutMs: 5000 })
+const missPhoto = fs.readFileSync(path.join(Mdir, 'photo.jpg'))
+fs.rmSync(path.join(Mdir, 'photo.jpg'))
+openGate()
+const fDone = await waitFor(async () => { const j = (await api.get(B, `/api/scenes/jobs/${fjob?.id}`)).json; return ['done', 'failed'].includes(j?.status) ? j : null }, { timeoutMs: 30000 })
+gM = (await api.get(B, `/api/scenes/${M}`)).json
+ev.check('a light job that fails (photo.jpg gone): lighting_status failed, lighting_error = the tool\'s sentence, calib_status still done', fjob && fDone?.status === 'failed' && gM?.lighting_status === 'failed'
+  && typeof gM?.lighting_error === 'string' && gM.lighting_error.length > 5 && (fDone?.message || '') === gM.lighting_error && gM?.calib_status === 'done', fmt({ job: fDone, s: gM?.lighting_status, e: gM?.lighting_error }))
+fs.writeFileSync(path.join(Mdir, 'photo.jpg'), missPhoto)
+// while the scene calibrates, …/light is refused; a light job whose scene is deleted while it waits is dropped
+closeGate()
+r = await api.send(B, 'POST', `/api/scenes/${L}/calibrate`)
+const recal = r.json?.job
+r = await api.send(B, 'POST', `/api/scenes/${L}/light`)
+ev.check('POST …/light while the scene recalibrates → 409 ("its lighting comes with it")', recal && r.status === 409 && /lighting comes with it/.test(r.json?.error || ''), st(r))
+const nCallsD = calls().length
+r = await api.send(B, 'POST', `/api/scenes/${M}/light`)
+const djob = r.json?.job
+const dDel = await api.send(B, 'DELETE', `/api/scenes/${M}`)
+const djob1 = (await api.get(B, `/api/scenes/jobs/${djob?.id}`)).json
+openGate()
+await waitFor(async () => (await api.get(B, `/api/scenes/jobs/${recal?.id}`)).json?.status === 'done', { timeoutMs: 30000 })
+await sleep(800)
+ev.check('a queued light job whose scene is deleted is dropped (failed, "the scene was deleted"), never runs, and leaves no folder behind',
+  djob?.status === 'queued' && dDel.status === 200 && djob1?.status === 'failed' && /deleted/.test(djob1?.message || '') && !calls().slice(nCallsD).some((c) => c.argv[0] === 'light')
+  && !fs.existsSync(Mdir), fmt({ queued: djob?.status, del: dDel.status, job: djob1?.status, msg: djob1?.message, calls: calls().slice(nCallsD).map((c) => c.argv[0]), dir: fs.existsSync(Mdir) }))
+gL = (await api.get(B, `/api/scenes/${L}`)).json
+ev.check('the recalibration rewrote lighting.json (lighting_status done)', gL?.lighting_status === 'done' && same(gL?.lighting, coolLight), gL?.lighting_status)
+ev.check('POST …/light for an unknown scene → 404', (r = await api.send(B, 'POST', '/api/scenes/scene-19990101-000000/light')).status === 404, st(r))
+ev.check('POST …/light for a scene without photo.jpg (its calibration failed) → 409', (r = await api.send(B, 'POST', `/api/scenes/${F}/light`)).status === 409, st(r))
+ev.check('POST …/light with a non-slug name → 404', (r = await api.send(B, 'POST', '/api/scenes/..%2Fx/light')).status === 404, st(r))
 
 ev.section('bad uploads')
 const before = sceneFolders()
@@ -254,7 +411,7 @@ ev.check('DELETE it again → 404', (r = await api.send(B, 'DELETE', `/api/layou
 ev.section('what /scenes/ serves (§4.4 Static, §2.9 Paths = W4)')
 ev.check('/scenes/<A>/photo.jpg?v=1 (cache buster) → 200', (r = await raw(B, 'GET', `/scenes/${A}/photo.jpg?v=1`)).status === 200, `${r.status}`)
 ev.check('/scenes/<A>/thumb.jpg → 200', (r = await raw(B, 'GET', `/scenes/${A}/thumb.jpg`)).status === 200, `${r.status}`)
-for (const p of [`/scenes/${A}/source.jpg`, `/scenes/${A}/calib.json`, `/scenes/${A}/scene.json`, `/scenes/${A}/`, `/scenes/${A}`, '/scenes/', '/scenes/.trash/',
+for (const p of [`/scenes/${A}/source.jpg`, `/scenes/${A}/calib.json`, `/scenes/${A}/lighting.json`, `/scenes/${A}/%6Cighting.json`, `/./scenes/${A}/lighting.json`, `/scenes/${A}/scene.json`, `/scenes/${A}/`, `/scenes/${A}`, '/scenes/', '/scenes/.trash/',
   `/scenes/${A}/nothing.jpg`, `/./scenes/${A}/source.jpg`, `/planner/../scenes/${A}/calib.json`, `/%2e/scenes/${A}/source.jpg`, `/scenes/${A}/./source.jpg`,
   `/scenes/${A}/%73ource.jpg`, `/scenes/${A}/photo.jpg/../scene.json`, `/scenes/%2e%2e/scenes/${A}/source.jpg`, `/scenes/${A}/%2e%2e/${A}/calib.json`]) {
   r = await raw(B, 'GET', p)
@@ -299,6 +456,7 @@ const forgedRoutes = [
   ['PUT', `/api/scenes/${Bn}`, JSON.stringify({ title: 'forged' }), { 'Content-Type': 'application/json' }],
   ['PUT', `/api/scenes/${Bn}/thumb`, JSON.stringify({ image: dataUri('image/jpeg', livingBytes) }), { 'Content-Type': 'application/json' }],
   ['POST', `/api/scenes/${Bn}/calibrate`, null, {}],
+  ['POST', `/api/scenes/${Bn}/light`, null, {}],
   ['DELETE', `/api/scenes/${Bn}`, null, {}],
   ['PUT', `/api/layouts/forged?scene=${Bn}`, JSON.stringify({ version: 1, name: 'forged', items: [] }), { 'Content-Type': 'application/json' }],
   ['DELETE', `/api/layouts/one?scene=${Bn}`, null, {}],

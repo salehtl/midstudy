@@ -6,7 +6,7 @@
     images.py align-synth --scene-dir fixtures/scenes/living-wide --out DIR [--shift-frac 0.02]
     images.py align-measure --photo P --final F --rect x0,y0,x1,y1
     images.py align-selftest --out DIR
-    images.py lighting --composite C.jpg --photo P.jpg --camera J --box '[[min],[max]]' [--lighting L.json --albedo 0.5
+    images.py lighting --composite C.jpg --photo P.jpg --camera J --box '[[min],[max]]' [--depth D.png] [--lighting L.json --albedo 0.5
                        --strength 1 --ambient 1] [--light '[x,y,z]'] [--exclude '[[[min],[max]], ...]'] [--debug out.png]
                        a lit box's faces (measured vs what lighting.json predicts) and its shadow on the floor (§4.8)
 
@@ -122,9 +122,17 @@ def cmd_lighting(a):
     for omin, omax in json.loads(a.exclude or "[]"):
         others |= np.isfinite(box_faces(cam, W, H, omin, omax)[0])
     out = {"composite_size": list(csize), "photo_size": [W, H], "faces": {}}
+    # with --depth (the scene's depth.png): leave out face pixels that a real thing in the photo may hide (anything in
+    # the pixel's 3 × 3 depth neighbourhood nearer than the box + 2 cm), so a table in front isn't measured as the box
+    hidden = np.zeros((H, W), bool)
+    dmin = None
+    if a.depth:
+        _, dmin, _ = depth_at_pixels(Path(a.depth), W, H)
+        hidden = np.isfinite(depth) & (dmin > 0) & (dmin < depth + 0.02)
+        out["hidden_px"] = int(hidden.sum())
     lj = json.loads(Path(a.lighting).read_text()) if a.lighting else None
     for i, name in enumerate(names):
-        m = erode(face == i, 3) & ~others
+        m = erode(face == i, 3) & ~others & ~dilate(hidden, 3)
         if m.sum() < 80:
             continue
         rgb = comp[m].mean(0)
@@ -149,6 +157,8 @@ def cmd_lighting(a):
     with np.errstate(divide="ignore", invalid="ignore"):
         t = -C[1] / d[..., 1]
     floor = (d[..., 1] < 0) & ~silhouette
+    if dmin is not None:  # floor a real thing in the photo stands in front of (the shadow is hidden there, rightly)
+        floor &= ~((dmin > 0) & (dmin < np.where(np.isfinite(t), t, np.inf) - 0.05))
     P = C + t[..., None] * d
     centre = (np.array(bmin) + np.array(bmax)) / 2
     near = floor & (np.hypot(P[..., 0] - centre[0], P[..., 2] - centre[2]) < 3.0)
@@ -156,8 +166,11 @@ def cmd_lighting(a):
     lp, lc = from_srgb8(photo) @ Y, from_srgb8(comp) @ Y
     ratio = np.where(lp > 0.01, lc / np.maximum(lp, 1e-6), 1.0)
     dark = near & (ratio < a.dark)
+    dark &= dilate(erode(dark, 1), 1)  # an opening: drops single-pixel JPEG noise on textured floors, keeps shadows
     wts = np.clip(1 - ratio, 0, 1) * dark
-    sh = {"n_near": int(near.sum()), "n_dark": int(dark.sum()), "n_dark_2pct": int((near & (ratio < 0.98)).sum()),
+    d2 = near & (ratio < 0.98)
+    d2 &= dilate(erode(d2, 1), 1)  # same opening: a soft shadow's wide edge counts, scattered JPEG noise doesn't
+    sh = {"n_near": int(near.sum()), "n_dark": int(dark.sum()), "n_dark_2pct": int(d2.sum()),
           "mean_ratio_dark": round(float(ratio[dark].mean()), 4) if dark.any() else None}
     if dark.any():
         cx, cz = (P[..., 0] * wts).sum() / wts.sum(), (P[..., 2] * wts).sum() / wts.sum()
@@ -435,6 +448,7 @@ def main(argv):
     p.add_argument("--ambient", type=float, default=1.0)
     p.add_argument("--light")
     p.add_argument("--exclude")
+    p.add_argument("--depth")
     p.add_argument("--dark", type=float, default=0.93)
     p.add_argument("--debug")
     p = sub.add_parser("align-selftest")

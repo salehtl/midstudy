@@ -69,6 +69,10 @@ window.midstudy = {
     if (s.exposure !== undefined || s.warmth !== undefined) engine.setLook(s)
     if (typeof s.contactShadows === 'boolean') engine.setContactShadows(s.contactShadows)
   },
+  // lighting inferred from the photo (§4.8)
+  getLighting: () => engine.getLighting(),
+  setLighting: (partial) => engine.setLighting(partial),
+  resetLighting: () => engine.resetLighting(),
   renderView: (opts) => engine.renderViewInternal(opts),
   listRenders: () => engine.listRendersInternal(),
   compare: (a, b) => engine.compare(a, b),

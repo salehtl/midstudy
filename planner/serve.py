@@ -847,7 +847,14 @@ ALIGN_TIMEOUT = 180   # s, one keep-room align (§4.7)
 DEFAULT_CALIB = "uv run --project calib midstudy-calib"
 DEFAULT_CAMERA = {"fov_y_deg": 55.0, "height_m": 1.40, "pitch_deg": -10.0, "roll_deg": 0.0}
 CAMERA_RANGE = {"fov_y_deg": (20.0, 110.0), "height_m": (0.2, 3.0), "pitch_deg": (-80.0, 30.0), "roll_deg": (-20.0, 20.0)}
-LOOK_RANGE = {"exposure": (0.25, 4.0), "warmth": (-1.0, 1.0)}
+# scene.json `look` (contract §4.8): numbers (clamped) and booleans; null removes a key
+LOOK_RANGE = {"exposure": (0.25, 4.0), "warmth": (-1.0, 1.0), "light_azimuth_deg": (-180.0, 180.0),
+              "light_elevation_deg": (5.0, 90.0), "light_softness": (0.0, 1.0), "light_strength": (0.0, 3.0),
+              "ambient": (0.0, 3.0)}
+LOOK_BOOL = ("contact_shadows", "auto_light", "cast_shadows")
+LOOK_HELP = ("look takes exposure (0.25 to 4), warmth (-1 to 1), light_azimuth_deg (-180 to 180), light_elevation_deg "
+             "(5 to 90), light_softness (0 to 1), light_strength (0 to 3) and ambient (0 to 3) as numbers, contact_shadows, "
+             "auto_light and cast_shadows as true or false, and null for any of them to remove it")
 SCENE_ASSET = re.compile(r"^([a-z0-9][a-z0-9-]{0,63})/(photo\.jpg|depth\.png|thumb\.jpg)\Z")
 UPLOAD_EXT = {"jpeg": "jpg", "png": "png", "heic": "heic", "webp": "webp"}
 LAYOUT_KEYS = ("version", "name", "title", "scene_name", "library", "updated", "items", "notes")
@@ -1000,7 +1007,8 @@ def name_order(name: str) -> tuple[str, int]:
 
 class SceneService:
     """Scenes on disk (contract §4.2) and their calibration jobs: one queue, one job at a time, in memory, separate
-    from the library's queue. Scene folder writes (scene.json, create, delete) happen under one lock."""
+    from the library's queue. Scene folder writes (scene.json, create, delete) happen under one lock. The queue also
+    runs light jobs (§4.8 backfill: lighting.json alone), which never touch scene.json, the camera or calib_status."""
 
     def __init__(self, scenes_dir: Path, layouts_dir: Path, calib: list[str]):
         self.dir = scenes_dir
@@ -1010,7 +1018,8 @@ class SceneService:
         self.jobs: dict[str, dict] = {}
         self.order: list[str] = []
         self.private: dict[str, dict] = {}   # job id -> {cmd, cleanup}
-        self.last: dict[str, str] = {}       # scene -> its newest job id
+        self.last: dict[str, str] = {}       # scene -> its newest calibration job id
+        self.light_last: dict[str, str] = {}  # scene -> its newest light job id (§4.8 backfill; never in self.last)
         self.queue: queue.Queue = queue.Queue()
         threading.Thread(target=self.worker, name="midstudy-calib-jobs", daemon=True).start()
 
@@ -1076,13 +1085,45 @@ class SceneService:
             "layouts": self.layout_count(name), "calib_status": status, "calib_error": error,
         }
 
+    def lighting_json(self, name: str) -> dict | None:
+        data = read_json_file(self.dir / name / "lighting.json")
+        return data if isinstance(data, dict) else None
+
+    def lighting_status(self, name: str, has_lighting: bool) -> tuple[str, str | None]:
+        """(lighting_status, lighting_error) for GET /api/scenes/<name> (contract §4.8): done with a lighting.json;
+        else what the scene's newest light job says (pending, running, failed with its message, none: it found no
+        light), unless a calibration came after it: pending or running while that is queued or running (it writes
+        lighting.json itself); else missing (nothing has tried in this server run)."""
+        if has_lighting:
+            return "done", None
+        with self.lock:
+            lj, cj = self.jobs.get(self.light_last.get(name, "")), self.jobs.get(self.last.get(name, ""))
+            if lj is not None and lj.get("dropped"):
+                lj = None
+            if lj is not None and cj is not None and self.order.index(cj["id"]) > self.order.index(lj["id"]):
+                lj = None  # a calibration after the light job: it decides
+            lj, cj = (dict(lj) if lj else None), (dict(cj) if cj else None)
+        if lj is not None:
+            if lj["status"] in ("queued", "running"):
+                return ("pending" if lj["status"] == "queued" else "running"), None
+            if lj["status"] == "failed":
+                return "failed", lj.get("message") or "inferring the light failed"
+            return ("none" if lj.get("lighting") is False else "missing"), None
+        if cj is not None and cj["status"] in ("queued", "running"):
+            return ("pending" if cj["status"] == "queued" else "running"), None
+        return "missing", None
+
     def full(self, name: str) -> dict | None:
-        """GET /api/scenes/<name>: scene.json, the scene object's fields and `calib` (calib.json or null)."""
+        """GET /api/scenes/<name>: scene.json, the scene object's fields, `calib` (calib.json or null), `lighting`
+        (lighting.json as it is, or null), `lighting_status` and `lighting_error` (contract §4.8)."""
         data = self.read(name)
         if data is None:
             return None
+        lighting = self.lighting_json(name)
+        status, error = self.lighting_status(name, lighting is not None)
         return {**data, **self.scene_object(name, data), "camera": clamp_camera(data.get("camera") or {}),
-                "calib": public_calib(self.calib_json(name))}
+                "calib": public_calib(self.calib_json(name)), "lighting": lighting, "lighting_status": status,
+                "lighting_error": error}
 
     def all(self) -> list[dict]:
         """Newest first by `created`; ties (uploads in the same second) by the name's collision suffix as a number, so
@@ -1109,16 +1150,20 @@ class SceneService:
             job = self.queue_job(name, [*self.calib, "run", str(upload), "--out", str((self.dir / name).resolve())], tmp)
         return name, job
 
-    def queue_job(self, name: str, cmd: list[str], cleanup: Path | None) -> dict:
+    def queue_job(self, name: str, cmd: list[str], cleanup: Path | None, kind: str = "calibrate") -> dict:
+        """Queue a calibration (kind calibrate) or a light job (kind light, §4.8: `<calib> light <scene-dir>`, which
+        writes lighting.json only). Both share the one queue; each kind has its own "newest job" per scene."""
         now = datetime.now(timezone.utc)
-        job_id = f"c-{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-        job = {"id": job_id, "kind": "calibrate", "scene": name, "status": "queued", "created": iso_utc(),
+        job_id = f"{'l' if kind == 'light' else 'c'}-{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+        job = {"id": job_id, "kind": kind, "scene": name, "status": "queued", "created": iso_utc(),
                "started": None, "finished": None, "message": "waiting for the calibration queue", "calib": None}
+        if kind == "light":
+            job["lighting"] = None  # true: lighting.json written; false: no clear light in the photo
         with self.lock:
             self.jobs[job_id] = job
             self.order.append(job_id)
             self.private[job_id] = {"cmd": cmd, "cleanup": cleanup}
-            self.last[name] = job_id
+            (self.light_last if kind == "light" else self.last)[name] = job_id
             snapshot = dict(job)
         self.queue.put(job_id)
         return snapshot
@@ -1147,6 +1192,26 @@ class SceneService:
             shutil.copyfile(sources[0], copy)
             return self.queue_job(name, [*self.calib, "run", str(copy), "--out", str(d.resolve())], tmp), None
 
+    def light(self, name: str) -> tuple[int, dict]:
+        """POST …/light (§4.8 backfill): queue `<calib> light <scene-dir>` for a scene without lighting.json.
+        (202, {job}) queued, or the light job already queued or running for it (two devices may open the scene at
+        once); (200, {lighting_status: done}) when lighting.json is there; 409 while the scene calibrates or without
+        photo.jpg; 404 unknown."""
+        with self.lock:
+            if not self.exists(name):
+                return HTTPStatus.NOT_FOUND, {"error": f"no scene named {name!r}: GET /api/scenes lists them"}
+            if self.busy(name):
+                return HTTPStatus.CONFLICT, {"error": "this scene is calibrating; its lighting comes with it"}
+            d = self.dir / name
+            if not (d / "photo.jpg").is_file():
+                return HTTPStatus.CONFLICT, {"error": "this scene has no photo to infer the light from: calibrate it first"}
+            if self.lighting_json(name) is not None:
+                return HTTPStatus.OK, {"lighting_status": "done"}
+            job = self.jobs.get(self.light_last.get(name, ""))
+            if job and job["status"] in ("queued", "running") and not job.get("dropped"):
+                return HTTPStatus.ACCEPTED, {"job": {k: v for k, v in job.items() if k != "dropped"}}
+            return HTTPStatus.ACCEPTED, {"job": self.queue_job(name, [*self.calib, "light", str(d.resolve())], None, kind="light")}
+
     def update(self, name: str, patch: dict) -> dict:
         """PUT /api/scenes/<name> (validated by the handler): merge, clamp, stamp `saved` unless only the title came."""
         with self.lock:
@@ -1160,10 +1225,16 @@ class SceneService:
             if "camera_source" in patch:
                 data["camera_source"] = patch["camera_source"]
             if "look" in patch:
+                # only the keys it carries; null removes one (§4.8)
                 look = dict(data.get("look") or {}) if isinstance(data.get("look"), dict) else {}
-                for k, (lo, hi) in LOOK_RANGE.items():
-                    if k in patch["look"]:
-                        look[k] = round(min(hi, max(lo, float(patch["look"][k]))), 6)
+                for k, v in patch["look"].items():
+                    if v is None:
+                        look.pop(k, None)
+                    elif k in LOOK_RANGE:
+                        lo, hi = LOOK_RANGE[k]
+                        look[k] = round(min(hi, max(lo, float(v))), 6)
+                    else:
+                        look[k] = bool(v)
                 data["look"] = look
             if set(patch) - {"title"}:
                 data["saved"] = iso_utc()
@@ -1271,19 +1342,23 @@ class SceneService:
                 return
             cmd = self.private[job_id]["cmd"]
             name = job["scene"]
-            job.update(status="running", started=iso_utc(), message="calibrating the photo")
+            light = job["kind"] == "light"
+            job.update(status="running", started=iso_utc(), message="inferring the light" if light else "calibrating the photo")
         try:
             proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=CALIB_TIMEOUT,
                                   stdin=subprocess.DEVNULL)
         except FileNotFoundError:
             return self.finish(job_id, False, f"the calibration tool isn't installed here ({cmd[0]} not found): set --calib")
         except subprocess.TimeoutExpired:
-            return self.finish(job_id, False, f"the calibration ran for more than {CALIB_TIMEOUT // 60} minutes and was stopped")
+            what = "inferring the light" if light else "the calibration"
+            return self.finish(job_id, False, f"{what} ran for more than {CALIB_TIMEOUT // 60} minutes and was stopped")
         out = last_json_line(proc.stdout)
         if proc.returncode != 0 or not isinstance(out, dict) or out.get("ok") is not True:
             if proc.returncode == 0 and not isinstance(out, dict):
                 return self.finish(job_id, False, "midstudy-calib finished without its JSON result line")
             return self.finish(job_id, False, tool_error(proc, out, "midstudy-calib"))
+        if light:
+            return self.light_done(job_id, out)
         with self.lock:
             dropped = job.get("dropped")
             if dropped:
@@ -1303,6 +1378,21 @@ class SceneService:
             floor = calib.get("floor") if isinstance(calib.get("floor"), dict) else {}
             note = "" if src in ("moge-2", "truth") and floor.get("found") else " · check the floor"
             job.update(status="done", finished=iso_utc(), calib=public_calib(calib), message=f"calibrated ({src or 'unknown'}){note}")
+
+    def light_done(self, job_id: str, out: dict) -> None:
+        """A light job that ran: never touches scene.json, the camera or calib_status (§4.8)."""
+        with self.lock:
+            job = self.jobs[job_id]
+            if job.get("dropped"):
+                left = self.dir / job["scene"]
+                if left.is_dir() and not (left / "scene.json").exists():
+                    shutil.rmtree(left, ignore_errors=True)
+                job.update(status="failed", finished=iso_utc(), message="the scene was deleted")
+                return
+            found = out.get("lighting") is True
+            cct = out.get("cct_k")
+            message = (f"lighting inferred ({round(cct)} K)" if is_num(cct) else "lighting inferred") if found else "no clear light in the photo"
+            job.update(status="done", finished=iso_utc(), lighting=found, message=message)
 
     def finish(self, job_id: str, ok: bool, message: str) -> None:
         with self.lock:
@@ -1347,7 +1437,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return str(self.renders_dir / ".missing")
             return str(self.renders_dir / name)
         if p == "/scenes" or p.startswith("/scenes/"):
-            # photo.jpg, depth.png and thumb.jpg only: never source.*, calib.json, scene.json, .trash or a listing (§4.4).
+            # photo.jpg, depth.png and thumb.jpg only: never source.*, calib.json, lighting.json, scene.json, .trash or a
+            # listing (§4.4).
             m = SCENE_ASSET.match(p[len("/scenes/"):])
             return str(self.scenes.dir / m.group(1) / m.group(2)) if m else str(self.scenes.dir / ".missing")
         if p.startswith("/library/"):
@@ -1590,6 +1681,9 @@ class Handler(SimpleHTTPRequestHandler):
             m = re.fullmatch(r"/api/scenes/([^/]*)/calibrate", api or "")
             if m:
                 return self.calibrate_scene(m.group(1))
+            m = re.fullmatch(r"/api/scenes/([^/]*)/light", api or "")
+            if m:
+                return self.light_scene(m.group(1))
             m = re.fullmatch(r"/api/scenes/([^/]*)/restore", api or "")
             if m:
                 return self.restore_scene(m.group(1))
@@ -1788,10 +1882,14 @@ class Handler(SimpleHTTPRequestHandler):
         if "look" in body:
             look = body["look"]
             if not isinstance(look, dict):
-                return self.error_json(HTTPStatus.BAD_REQUEST, 'look must be an object like {"exposure": 1, "warmth": 0}')
-            bad = sorted(set(look) - set(LOOK_RANGE))
-            if bad or any(not is_num(v) for v in look.values()):
-                return self.error_json(HTTPStatus.BAD_REQUEST, "look takes exposure (0.25 to 4) and warmth (-1 to 1), as numbers")
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"look must be an object: {LOOK_HELP}")
+            bad = sorted(set(look) - set(LOOK_RANGE) - set(LOOK_BOOL))
+            if bad:
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"look has unknown keys ({', '.join(bad)}): {LOOK_HELP}")
+            # bool is an int in Python: a boolean never passes as a number, nor 0/1 as a boolean
+            wrong = sorted(k for k, v in look.items() if v is not None and not (is_num(v) if k in LOOK_RANGE else isinstance(v, bool)))
+            if wrong:
+                return self.error_json(HTTPStatus.BAD_REQUEST, f"look {', '.join(wrong)} has the wrong type: {LOOK_HELP}")
             patch["look"] = look
         try:
             self.scenes.update(name, patch)
@@ -1825,6 +1923,12 @@ class Handler(SimpleHTTPRequestHandler):
         if refused:
             return self.error_json(*refused)
         return self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
+    def light_scene(self, name: str):
+        if not SLUG.match(name):
+            return self.no_scene(name)
+        status, body = self.scenes.light(name)
+        return self.send_json(status, body)
 
     def delete_scene(self, name: str):
         if not self.scenes.exists(name):

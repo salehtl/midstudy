@@ -6,7 +6,8 @@
 // (ACES undone) within 12 % of what lighting.json predicts, so the frame, the SH units and the tone mapping are all
 // right. Its floor shadow must fall on the side away from the light and where the box's hard shadow would be, and move
 // when the light is moved. The Look controls change the lighting live and are saved per scene; Reset goes back to
-// the inferred light. A scene without lighting.json keeps the v1 lights (the box looks as it did in v1). Unlit pieces
+// the inferred light. A scene without lighting.json keeps the v1 lights (the box looks as it did in v1); one calibrated
+// before lighting.json existed gets it on first open (the backfill) and is then lit by it. Unlit pieces
 // (the magenta probe, a flat unlit "rug") keep their colours whatever the lighting. Splat pieces are colour-matched
 // to the room and cast a shadow (checked when the library has a splat item to place). Desktop and phone controls.
 //
@@ -26,6 +27,9 @@ const LIT = { id: 'probe-lit', name: 'Lit probe', dims_cm: { w: 45, d: 45, h: 45
 const UNLIT = { id: 'probe-unlit', name: 'Unlit probe', dims_cm: { w: 40, d: 40, h: 40 }, rgba: [1, 0, 1, 1] }
 const RUG = { id: 'probe-rug', name: 'Unlit rug', dims_cm: { w: 70, d: 50, h: 1 }, rgba: [0.1, 0.55, 0.25, 1] }
 const LIT_POS = [1.2, 0, -2.6]     // open floor right of the table, clear of the sofa; its shadow has room all round
+// living-wide's light comes from behind the camera, so the shadow runs away from it: at LIT_POS it would fall under the
+// real coffee table (rightly hidden). Right of the sofa it lands on open floor beside the box.
+const LIT_AT = { 'living-wide': [1.3, 0, -3.1] }
 const UNLIT_POS = [-1.45, 0, -2.2] // left, in front of the sofa
 const RUG_POS = [-0.65, 0, -2.25]  // flat on the floor left of the table
 // The lit box under the v1 lights (no lighting.json), measured on the v1 planner with --baseline on 2026-11-05.
@@ -124,6 +128,7 @@ async function measure(tag, scene, lightingArgs = {}, box = boxOf(LIT_POS, LIT.d
   const input = name ? path.join(srv.dirs.renders, `${name}-input.jpg`) : ''
   if (!name || !fs.existsSync(input)) return { error: `no composite (${m.error || fmt(m.value)})` }
   const args = ['lighting', '--composite', input, '--photo', scene.g.photo, '--camera', JSON.stringify(scene.cam), '--box', JSON.stringify(box), '--debug', path.join(ev.out, `${tag}.png`)]
+  if (fs.existsSync(path.join(scene.g.dir, 'depth.png'))) args.push('--depth', path.join(scene.g.dir, 'depth.png')) // real things in front of the probe aren't measured
   if (lightingArgs.lighting !== false) args.push('--lighting', lightingArgs.lighting || path.join(scene.g.dir, 'lighting.json'))
   for (const k of ['strength', 'ambient']) if (lightingArgs[k] != null) args.push(`--${k}`, String(lightingArgs[k]))
   if (lightingArgs.light) args.push('--light', JSON.stringify(lightingArgs.light))
@@ -155,9 +160,10 @@ for (const id of ['living-cool', 'living-warm', 'living-wide']) {
     !why && lg?.source === 'truth' && lg.auto_light === true && inf && angle(inf.direction, truthDir) <= 0.5 && angle(lg.key.direction, truthDir) <= 0.5
       && lg.cast_shadows === true && lg.light_strength === 1 && lg.ambient === 1,
     why || fmt({ source: lg?.source, auto: lg?.auto_light, inferred: inf && azEl(inf.direction), truth: azEl(truthDir), key: lg?.key && azEl(lg.key.direction), cast: lg?.cast_shadows }))
-  const uid = await place(LIT.id, LIT_POS)
+  const at = LIT_AT[id] || LIT_POS
+  const uid = await place(LIT.id, at)
   await hook(P.page, 'setLighting', [{ contact_shadows: false }])
-  const r = await measure(`${id}-auto`, sc, { light: truthDir })
+  const r = await measure(`${id}-auto`, sc, { light: truthDir }, boxOf(at, LIT.dims_cm))
   perScene[id] = r
   ev.check(`${id}: every visible face of the lit box within ${FACE_TOL * 100} % of lighting.json's prediction (mesh lit by the inferred light)`, facesOk(r), r.error || fmt(faceSummary(r)))
   const sh = r.shadow || {}
@@ -278,6 +284,58 @@ if (N) {
   const brighter = Object.keys(r.faces || {}).some((k) => r2.faces?.[k] && lum(r2.faces[k].rgb) > lum(r.faces[k].rgb) + 6)
   ev.check('…the controls still work on the v1 lights (strength 2 brightens the lit side)', brighter, fmt({ before: faceSummary(r), after: faceSummary(r2) }))
 } else ev.check('scene without lighting.json uploaded', false, fmt(up.json || up.status))
+
+// --- old scenes: the backfill ----------------------------------------------------------------------------------------------------
+ev.section('an old scene gets its light on first open (§4.8 backfill)')
+const O = await seedScene(srv, 'living-cool', 'old scene')
+const oDir = path.join(srv.dirs.scenes, O.name || 'none')
+const oOk = !!O.name && fs.existsSync(path.join(oDir, 'lighting.json'))
+if (oOk) fs.rmSync(path.join(oDir, 'lighting.json')) // as if it was calibrated before lighting.json existed
+const calibBytes = oOk ? fs.readFileSync(path.join(oDir, 'calib.json')) : null
+const g0 = O.name ? (await api.get(srv.base, `/api/scenes/${O.name}`)).json : null
+ev.check('a scene calibrated before lighting.json existed: GET says lighting null, lighting_status "missing"', oOk && g0?.lighting === null && g0?.lighting_status === 'missing',
+  fmt({ why: O.why, lighting: g0?.lighting, status: g0?.lighting_status }))
+async function settle(timeoutS = 30) {
+  const seen = new Set(), t0 = Date.now()
+  let lo = null
+  while ((Date.now() - t0) / 1000 < timeoutS) {
+    lo = await L()
+    if (lo?.status) seen.add(lo.status)
+    if (lo?.source !== 'default' || ['none', 'failed'].includes(lo?.status)) break
+    await sleep(250)
+  }
+  return { lo, seen: [...seen], secs: (Date.now() - t0) / 1000 }
+}
+if (oOk) {
+  const why = await open(O.name)
+  const { lo, seen, secs } = await settle()
+  const truthDir = norm(camToWorld(C.cam, C.lj.key.direction))
+  ev.check('opening it infers the light with no other step: within 30 s getLighting() has source truth (the mock\'s lighting.json), Auto lighting on, the key is the scene\'s light, cast shadows on',
+    !why && lo?.source === 'truth' && lo.status === 'done' && lo.auto_light === true && angle(lo.key.direction, truthDir) <= 0.5 && lo.cast_shadows === true,
+    fmt({ why, statuses: seen, source: lo?.source, status: lo?.status, secs, key: lo?.key && azEl(lo.key.direction), truth: azEl(truthDir) }))
+  const lp = path.join(oDir, 'lighting.json')
+  const g1 = (await api.get(srv.base, `/api/scenes/${O.name}`)).json
+  ev.check('…lighting.json is now in the scene folder (the mock\'s, byte for byte); calib.json, the camera and calib_status are unchanged',
+    fs.existsSync(lp) && fs.readFileSync(lp, 'utf8') === fs.readFileSync(path.join(C.g.dir, 'lighting.json'), 'utf8') && fs.readFileSync(path.join(oDir, 'calib.json')).equals(calibBytes)
+      && g1?.calib_status === 'done' && g1?.lighting_status === 'done' && fmt(g1?.camera) === fmt(g0?.camera),
+    fmt({ file: fs.existsSync(lp), status: g1?.lighting_status, calib_status: g1?.calib_status, camera: g1?.camera, before: g0?.camera }))
+  await place(LIT.id, LIT_POS)
+  await hook(P.page, 'setLighting', [{ contact_shadows: false }])
+  r = await measure('old-scene', C, { light: truthDir })
+  ev.check('…and the furniture is lit by it (the lit box\'s faces within 12 % of the prediction, its shadow away from the light)', facesOk(r) && r.shadow?.offset_vs_light_deg <= SHADOW_TOL_DEG,
+    r.error || fmt({ faces: faceSummary(r), vs_light: r.shadow?.offset_vs_light_deg }))
+  await hook(P.page, 'setLighting', [{ light_strength: 1.4 }])
+  lg = await L()
+  ev.check('…its controls work on the inferred light (strength 1.4 → key intensity 1.4 × lighting.json\'s)', Math.abs((lg?.key?.intensity ?? 0) - 1.4 * C.lj.key.intensity) <= 1e-3,
+    fmt({ intensity: lg?.key?.intensity, want: 1.4 * C.lj.key.intensity }))
+}
+if (N) {
+  await open(N.name)
+  const { lo, seen } = await settle(30)
+  const gN = (await api.get(srv.base, `/api/scenes/${N.name}`)).json
+  ev.check('a photo with no light to find (calib mock miss): the backfill ends "none", the v1 lights stay, nothing is written', lo?.status === 'none' && lo.source === 'default' && gN?.lighting === null
+    && gN?.lighting_status === 'none' && !fs.existsSync(path.join(srv.dirs.scenes, N.name, 'lighting.json')), fmt({ statuses: seen, status: lo?.status, source: lo?.source, server: gN?.lighting_status }))
+}
 
 // --- splats ------------------------------------------------------------------------------------------------------------------------
 ev.section('splats are colour-matched and cast a shadow')

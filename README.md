@@ -18,10 +18,14 @@ stand is in [docs/STATUS.md](docs/STATUS.md).
 4. **Place it.** Tap a library item and it lands on the floor in front of the camera. Drag it to move it. The grip
    turns it, and Up / Down lifts it onto a table or shelf. Pieces behind real furniture in the photo are hidden by it
    (the **Occlusion** toggle, on when the scene has depth).
-5. **Layouts.** Save several per scene and switch between them.
-6. **Render.** One button sends the photo with the pieces to nano-banana on fal (about $0.04), with the original photo
+5. **Light.** The furniture is lit by the room's light, inferred from the photo: its direction, colour and
+   brightness, with a soft shadow on the floor that real furniture in the photo hides. **Scene › Light & look** has
+   Auto lighting (on) and Reset, a dial to drag the light's direction, strength, softness, ambient, exposure, warmth
+   and the shadow toggles, saved per scene. Scenes made before this get their light the first time they open.
+6. **Layouts.** Save several per scene and switch between them.
+7. **Render.** One button sends the photo with the pieces to nano-banana on fal (about $0.04), with the original photo
    as a reference. **Keep room exact** (on by default) pastes only the furniture back into your untouched photo.
-7. **Compare** two renders side by side or with a split slider.
+8. **Compare** two renders side by side or with a split slider.
 
 The camera never moves: the photo is the only viewpoint. Pinch or wheel zoom is a 2D zoom into the photo (up to 4×),
 and **Fit** resets it. It works on the desktop and on a phone (touch, 390 px wide).
@@ -95,6 +99,10 @@ footprint on the floor, and the front faces +Z. `--yaw 90|180|270` turns a model
    edited exports) keep MoGe's estimate; check those with the ruler and **Set scale**.
 4. **Depth.** `depth.png` (metric, 1024 px) drives occlusion. The floor and everything below it are zeroed, so the
    floor never hides a piece standing on it.
+5. **Light.** `lighting.json`: an ambient light (spherical harmonics) and one key light with its direction, colour,
+   strength and softness, fitted from MoGe's normals and the photo's pixels in about a second (pairs of pixels across
+   a crease of the same material compare the light on two sides). `midstudy-calib light <scene>` runs this step alone,
+   which the server does for scenes calibrated before it existed. Details: [docs/notes/lighting.md](docs/notes/lighting.md).
 
 If no floor is found, or MoGe can't run, the scene still opens with a fallback camera (EXIF field of view, else 55°,
 height 1.40 m, pitch −10°) and asks you to check the floor. `--device auto|cuda|mps|cpu` picks the hardware (auto:
@@ -108,7 +116,7 @@ All evals are free: fal is mocked, and they set the mock variables, a $0 cap and
 
 ```sh
 nix develop -c npm install                  # once
-nix develop -c npm run eval:all             # E1, E3–E9, E11, E12 (about 5 min)
+nix develop -c npm run eval:all             # E1, E3–E9, E11, E12, E16 (about 8 min)
 nix develop -c npm run eval:calib           # E2: real MoGe-2 on the golden scenes and fixtures/photos/
 nix develop -c npm run eval:calib -- --mock # E2 ingest only, no model (seconds)
 nix develop -c npm run eval:real            # the real path end to end on a photo from fixtures/photos/

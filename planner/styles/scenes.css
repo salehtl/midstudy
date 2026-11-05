@@ -173,9 +173,54 @@
 .sp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sp-actions .btn { flex: 1 1 auto; }
 .sp-toggles, .sp-look { display: flex; flex-direction: column; gap: 6px; }
-.sp-look-head { display: flex; justify-content: space-between; align-items: baseline; }
-.sp-look-note { color: var(--color-muted); font-size: 12px; }
+
+/* Light & look (§4.8): head, where the light comes from, Auto lighting, the dial, sliders, shadows, Save and Reset */
+.sp-look { gap: 8px; }
+.sp-look-head { display: flex; flex-direction: column; gap: 2px; }
+.sp-look-note { color: var(--color-muted); font-size: 12px; line-height: 16px; }
+.sp-lsrc { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; padding: 8px 10px; border-radius: 8px; background: var(--color-ground); border: 1px solid var(--color-line); }
+.sp-lsrc.is-failed { border-color: color-mix(in srgb, var(--color-danger) 45%, transparent); }
+.sp-lsrc-glyph { width: 18px; height: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--color-muted); }
+.sp-lsrc-glyph .is-photo { color: var(--color-accent); }
+.sp-lsrc.is-failed .sp-lsrc-glyph { color: var(--color-danger); }
+.sp-lsrc-words { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.sp-lsrc-text { font-weight: 500; }
+.sp-lsrc-detail { color: var(--color-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.sp-lsrc-detail:first-letter { text-transform: uppercase; }
+.sp-lsrc > .btn { flex: 1 0 100%; margin-top: 4px; }
+.sp-sliders { display: flex; flex-direction: column; }
+.sp-sliders .slider-row { gap: 2px; padding: 4px 0; }
+.sp-shadows { display: flex; flex-direction: column; gap: 4px; }
+.sp-shadows .toggle-row { padding: 2px 0; }
 .sp-look-actions { display: flex; gap: 8px; margin-top: 4px; }
+.sp-look-actions .btn { flex: 1 1 0; min-width: 0; }
+[data-mode="phone"] .sp-look { gap: 10px; }
+[data-mode="phone"] .sp-lsrc-glyph { height: 20px; }
+[data-mode="phone"] .sp .slider { height: 44px; }
+[data-mode="phone"] .sp-sliders .slider-row { gap: 0; padding: 2px 0; }
+
+/* the light direction dial (ui/sun-dial.js): seen from above, the camera at the bottom looking up into the room */
+.sd-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 2px 0 4px; }
+.sd { position: relative; width: 168px; height: 168px; border-radius: var(--radius-pill); touch-action: none; cursor: grab; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+.sd.is-dragging { cursor: grabbing; }
+.sd > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+[data-mode="phone"] .sd { width: 216px; height: 216px; }
+.sd-disk { fill: var(--color-ground); stroke: color-mix(in srgb, var(--color-text) 22%, transparent); stroke-width: 1.25; }
+.sd-sky-0 { stop-color: var(--color-accent); stop-opacity: .14; }
+.sd-sky-1 { stop-color: var(--color-accent); stop-opacity: 0; }
+.sd-cone { fill: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.sd-ring { fill: none; stroke: color-mix(in srgb, var(--color-text) 14%, transparent); stroke-width: 1; stroke-dasharray: 2 4; }
+.sd-axis { fill: none; stroke: color-mix(in srgb, var(--color-text) 8%, transparent); stroke-width: 1; }
+.sd-zenith { fill: color-mix(in srgb, var(--color-text) 30%, transparent); }
+.sd-cam path, .sd-cam rect { fill: var(--color-muted); stroke: var(--color-surface); stroke-width: 2.5; paint-order: stroke; stroke-linejoin: round; }
+.sd-inf { fill: none; stroke: color-mix(in srgb, var(--color-text) 55%, transparent); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.sd-ray { stroke: color-mix(in srgb, var(--color-accent) 50%, transparent); stroke-width: 1.5; stroke-linecap: round; }
+.sd-sun-halo { fill: color-mix(in srgb, var(--color-accent) 16%, transparent); }
+.sd-sun-rays { fill: none; stroke: var(--color-accent); stroke-width: 2.25; stroke-linecap: round; }
+.sd-sun-core { fill: var(--color-accent); stroke: var(--color-ground); stroke-width: 2; }
+.sd.is-dragging .sd-sun-halo, .sd:focus-visible .sd-sun-halo { fill: color-mix(in srgb, var(--color-accent) 28%, transparent); }
+.sd:focus-visible { box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-accent); }
+.sd-readout { margin: 0; font-weight: 500; text-align: center; }
 .sp-info { margin: 0; color: var(--color-muted); font-size: 12px; line-height: 16px; }
 .sp-dirty { color: var(--color-accent); font-size: 12px; font-weight: 600; }
 

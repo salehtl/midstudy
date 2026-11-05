@@ -3,12 +3,22 @@
     midstudy-calib run <upload> --out <scene-dir> [--model vitl|vitb|vits] [--device auto|cuda|mps|cpu] [--no-depth]
     midstudy-calib ingest <upload> --out <scene-dir>
     midstudy-calib fit <scene-dir> [--model ...] [--device ...] [--no-depth]
+    midstudy-calib light <scene-dir> [--model ...] [--device ...]
     midstudy-calib align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>
 
 Progress goes to stderr. The last stdout line is one JSON object: run/fit the calib.json contents plus "ok": true;
-ingest {ok, photo, source, image}; align {ok, applied, inliers, residual_px, reason?}. A failure exits 1 with
-{"ok": false, "error": "<one sentence>"} on stdout and "midstudy-calib: <the same sentence>" as the last stderr line.
-MIDSTUDY_CALIB_MOCK=<dir> makes fit copy <dir>/<sha256>/calib.json and depth.png instead of running MoGe.
+ingest {ok, photo, source, image}; align {ok, applied, inliers, residual_px, reason?}; light {ok, lighting: true,
+cct_k, confidence, elapsed_s} or {ok, lighting: false, reason}. A failure exits 1 with {"ok": false, "error": "<one
+sentence>"} on stdout and "midstudy-calib: <the same sentence>" as the last stderr line.
+
+light (contract §4.8) is the lighting step of fit alone, for scenes calibrated before lighting.json existed: MoGe-2 on
+photo.jpg at depth size, the floor fit, the camera from calib.json (when it was fitted to a floor; else this floor
+fit's), and writes lighting.json only. It never touches calib.json, depth.png, source.*, photo.jpg or scene.json. When
+the photo gives too little it writes nothing (an existing lighting.json stays) and answers lighting: false.
+
+MIDSTUDY_CALIB_MOCK=<dir> makes fit copy <dir>/<sha256>/calib.json, depth.png and lighting.json, and light copy
+<dir>/<sha256>/lighting.json (lighting: false without one), instead of running MoGe (<sha256>: of photo.jpg, then of
+source.<ext>).
 """
 from __future__ import annotations
 
@@ -40,6 +50,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--model", **model)
     p.add_argument("--device", **device)
     p.add_argument("--no-depth", action="store_true")
+    p = sub.add_parser("light", help="lighting.json alone from <scene-dir>/photo.jpg (contract §4.8)")
+    p.add_argument("scene", type=Path)
+    p.add_argument("--model", **model)
+    p.add_argument("--device", **device)
     p = sub.add_parser("align", help="keep-room composite (contract §4.7)")
     p.add_argument("photo", type=Path)
     p.add_argument("raw", type=Path)
@@ -48,9 +62,10 @@ def _parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _sentence(e: BaseException) -> str:
+def _sentence(e: BaseException, cmd: str = "") -> str:
     msg = " ".join(str(e).split()) or type(e).__name__
-    return msg if isinstance(e, Fail) else f"calibration failed unexpectedly ({type(e).__name__}: {msg[:200]})"
+    what = "inferring the light" if cmd == "light" else "calibration"
+    return msg if isinstance(e, Fail) else f"{what} failed unexpectedly ({type(e).__name__}: {msg[:200]})"
 
 
 def _dispatch(args) -> dict:
@@ -70,6 +85,12 @@ def _dispatch(args) -> dict:
         if not args.scene.is_dir():
             raise Fail(f"{args.scene} isn't a scene folder")
         return {**fit(args.scene, args.model, args.device, args.no_depth), "ok": True}
+    if args.cmd == "light":
+        from .fit import light
+
+        if not args.scene.is_dir():
+            raise Fail(f"{args.scene} isn't a scene folder")
+        return light(args.scene, args.model, args.device)
     from .align import align
 
     return align(args.photo, args.raw, args.mask, args.out)
@@ -90,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     except BaseException as e:  # noqa: BLE001 - every failure becomes the one-sentence contract
         if isinstance(e, SystemExit):
             raise
-        result, code = {"ok": False, "error": _sentence(e)}, 1
+        result, code = {"ok": False, "error": _sentence(e, args.cmd)}, 1
     finally:
         sys.stdout.flush()
         os.dup2(real_stdout, 1)

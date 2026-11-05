@@ -1,14 +1,24 @@
 // Panel (area C): Scene, the open photo's camera and how the furniture sits in it. A camera card (where the camera
 // came from: the automatic calibration, your own Adjust floor, or a default guess; its height, field of view, tilt and
-// roll; Adjust floor… and Calibrate again), then the view toggles (occlusion from the photo's depth, the floor grid,
-// contact shadows) and the Look (exposure and warmth, applied to the furniture only, never the photo: contract §4.5),
-// with Save when the Look changed. Styles: styles/scenes.css (.sp-*).
+// roll; Adjust floor… and Calibrate again), then the view toggles (occlusion from the photo's depth, the floor grid) and
+// Light & look (contract §4.8): where the light comes from (the photo's lighting.json, the backfill while it runs, or
+// the default lights), Auto lighting, the light direction dial (ui/sun-dial.js), strength, softness, ambient, exposure
+// and warmth, the floor and contact shadows, Save scene when anything changed and Reset. All of it applies to the
+// furniture only, never the photo (§4.5). Styles: styles/scenes.css (.sp-*, .sd-*).
 import { quiet } from '../../engine.js'
 import { pic, withIcon } from './common.js'
+import { ring } from '../icons.js'
+import { sunDial } from '../sun-dial.js'
 import { sceneTitle, friendlyDate } from '../../data.js'
 
 const warmthWord = (w) => (Math.abs(w) < 0.005 ? 'Neutral' : `${w > 0 ? 'Warm' : 'Cool'} ${Math.abs(w).toFixed(2)}`)
+const softWord = (v) => (v < 0.25 ? 'Crisp' : v < 0.6 ? 'Soft' : 'Diffuse')
+const SOFT_DETAIL = { Crisp: 'Crisp shadows', Soft: 'Soft shadows', Diffuse: 'Diffuse light, faint shadows' }
+const times = (v) => `${v.toFixed(2)}×`
 const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1).replace('-', '−')
+const near = (a, b) => Math.abs(a - b) < 1e-3
+// the key light's linear colour (largest component 1) as a CSS colour, for the readout's sun
+const cssColor = (rgb) => (Array.isArray(rgb) && rgb.length === 3 ? `rgb(${rgb.map((c) => Math.round(255 * Math.min(1, Math.max(0, c)) ** (1 / 2.2))).join(' ')})` : null)
 
 export function mount(ctx) {
   const { engine, scenes, shell, kit } = ctx
@@ -22,19 +32,40 @@ export function mount(ctx) {
   const toggles = h('section.sp-toggles')
   const occl = toggle({ label: 'Occlusion', hint: 'Things in the photo hide furniture behind them', checked: true, onChange: (v) => engine.setOcclusion(v) })
   const gridT = toggle({ label: 'Floor grid', hint: '50 cm squares on the floor', checked: true, onChange: (v) => engine.setGridVisible(v) })
-  const shadows = toggle({ label: 'Contact shadows', hint: 'A soft shadow under each piece on the floor', checked: true, onChange: (v) => engine.setContactShadows(v) })
-  toggles.append(h('span.caps', 'View'), occl, gridT, shadows)
-  const exposure = slider({ label: 'Exposure', min: 0.25, max: 2.5, step: 0.05, value: 1, format: (v) => `${v.toFixed(2)}×`, onInput: (v) => engine.setLook({ exposure: v }) })
-  const warmth = slider({ label: 'Warmth', min: -1, max: 1, step: 0.05, value: 0, format: warmthWord, onInput: (v) => engine.setLook({ warmth: v }) })
-  const lookSave = h('div.sp-look-actions')
-  const look = h('section.sp-look', h('div.sp-look-head', h('span.caps', 'Look · furniture only'), h('span.sp-look-note', 'The photo is never changed')), exposure, warmth, lookSave)
+  toggles.append(h('span.caps', 'View'), occl, gridT)
+
+  // --- Light & look (§4.8): every control keeps its element; renderLook() only sets values, so a drag isn't broken
+  const mark = (el, handle) => { el.dataset.midstudy = handle; return el }
+  const srcGlyph = h('span.sp-lsrc-glyph')
+  const srcText = h('span.sp-lsrc-text')
+  const srcDetail = h('span.sp-lsrc-detail')
+  const inferB = withIcon(button({ label: 'Infer lighting', kind: 'secondary', onClick: () => quiet(engine.inferLighting()) }), 'retry')
+  const src = h('div.sp-lsrc', { role: 'status' }, srcGlyph, h('span.sp-lsrc-words', srcText, srcDetail), inferB)
+  const auto = mark(toggle({ label: 'Auto lighting', hint: 'Follows the light in the photo', checked: true, onChange: (v) => engine.setLighting({ auto_light: v }) }), 'light-auto')
+  const dial = sunDial({ onChange: ({ az, el }) => engine.setLighting({ light_azimuth_deg: az, light_elevation_deg: el }) })
+  const range = (handle, opts) => { const r = slider(opts); mark(r.input, handle); return r }
+  const strength = range('light-strength', { label: 'Strength', min: 0, max: 3, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ light_strength: v }) })
+  const softness = range('light-softness', { label: 'Softness', min: 0, max: 1, step: 0.01, value: 0.35, format: (v) => `${softWord(v)} · ${v.toFixed(2)}`, onInput: (v) => engine.setLighting({ light_softness: v }) })
+  const ambient = range('light-ambient', { label: 'Ambient', min: 0, max: 3, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ ambient: v }) })
+  const exposure = range('look-exposure', { label: 'Exposure', min: 0.25, max: 2.5, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ exposure: v }) })
+  const warmth = range('look-warmth', { label: 'Warmth', min: -1, max: 1, step: 0.05, value: 0, format: warmthWord, onInput: (v) => engine.setLighting({ warmth: v }) })
+  const floorShadow = mark(toggle({ label: 'Floor shadow', hint: "The light's shadow on the floor", checked: true, onChange: (v) => engine.setLighting({ cast_shadows: v }) }), 'light-shadows')
+  const contact = mark(toggle({ label: 'Contact shadows', hint: 'A soft shadow under each piece', checked: true, onChange: (v) => engine.setLighting({ contact_shadows: v }) }), 'contact-shadows')
+  const saveB = button({ label: 'Save scene', kind: 'primary', onClick: () => quiet(save()) })
+  const resetB = mark(withIcon(button({ label: 'Reset', kind: 'secondary', title: 'Back to the light from the photo, and a neutral look', onClick: () => engine.resetLighting() }), 'revert'), 'light-reset')
+  const look = h('section.sp-look',
+    h('div.sp-look-head', h('span.caps', 'Light & look · furniture only'), h('span.sp-look-note', 'The photo is never changed')),
+    src, auto, dial,
+    h('div.sp-sliders', strength, softness, ambient, exposure, warmth),
+    h('div.sp-shadows', floorShadow, contact),
+    h('div.sp-look-actions', saveB, resetB))
   const info = h('p.p-note.sp-info')
   const none = h('p.p-note.sp-none', 'Open a scene to see its camera and look.')
   panel.body.append(camCard, toggles, look, info, none)
 
   async function save() {
     saving = true
-    render()
+    renderLook()
     try { await engine.saveScene(); shell.toast('Scene saved', { kind: 'ok', id: 'scene-saved', ms: 2500 }) } catch { /* reported */ } finally { saving = false; render() }
   }
   async function recalibrate() {
@@ -70,6 +101,72 @@ export function mount(ctx) {
     ]
   }
 
+  // Where the light comes from (§4.8): lighting.json's source, else the backfill's status. Rebuilt only when it changes.
+  let srcKey = ''
+  function renderSource(l) {
+    const inf = l.inferred
+    const sun = (tone, color) => { const g = pic('sun', { size: 18 }); g.classList.add(`is-${tone}`); if (color) g.style.color = color; return g }
+    let glyph, text, detail = '', failed = false
+    if (l.source === 'photo') {
+      glyph = sun('photo', cssColor(inf?.color))
+      text = `From the photo${Number.isFinite(inf?.cct_k) ? ` · ${Math.round(inf.cct_k / 100) * 100} K` : ''}`
+      detail = Number.isFinite(inf?.softness) ? SOFT_DETAIL[softWord(inf.softness)] : ''
+    } else if (l.source === 'truth') {
+      glyph = sun('photo', cssColor(inf?.color))
+      text = 'Exact light (a test scene)'
+    } else if (['missing', 'pending', 'running'].includes(l.status)) {
+      glyph = ring(null, { size: 16 })
+      text = 'Inferring the light from the photo…'
+    } else if (l.status === 'none') {
+      glyph = sun('default')
+      text = 'No clear light in this photo · default lights'
+    } else if (l.status === 'failed') {
+      glyph = pic('warning', { size: 18 })
+      text = "Couldn't infer the light"
+      detail = l.error || ''
+      failed = true
+    } else {
+      glyph = sun('default')
+      text = 'Default lights'
+    }
+    const key = [text, detail, failed, glyph.style.color].join('|')
+    if (key === srcKey) return
+    srcKey = key
+    srcGlyph.replaceChildren(glyph)
+    srcText.textContent = text
+    srcDetail.textContent = detail
+    srcDetail.hidden = !detail
+    src.classList.toggle('is-failed', failed)
+    inferB.hidden = !failed
+  }
+
+  // The Look's values (every 'look' and 'lighting' event, so many times a second while the dial is dragged).
+  function renderLook() {
+    if (!engine.getScene()) return
+    let l
+    try { l = engine.getLighting() } catch { return }
+    renderSource(l)
+    auto.input.checked = !!l.auto_light
+    auto.querySelector('.toggle-hint').textContent = !l.auto_light ? 'Off: your own direction'
+      : l.source === 'default' ? 'The default light direction' : 'Follows the light in the photo'
+    const inf = l.inferred
+    dial.set({ az: l.light_azimuth_deg, el: l.light_elevation_deg, inferred: !l.auto_light && inf ? { az: inf.azimuth_deg, el: inf.elevation_deg } : null })
+    strength.set(l.light_strength)
+    softness.set(l.light_softness)
+    ambient.set(l.ambient)
+    exposure.set(l.exposure)
+    warmth.set(l.warmth)
+    floorShadow.input.checked = !!l.cast_shadows
+    contact.input.checked = !!l.contact_shadows
+    const dirty = engine.isSceneDirty()
+    saveB.hidden = !dirty && !saving
+    saveB.disabled = saving
+    saveB.querySelector('span').textContent = saving ? 'Saving…' : 'Save scene'
+    resetB.disabled = l.auto_light && near(l.light_strength, 1) && near(l.ambient, 1) && near(l.exposure, 1) && near(l.warmth, 0) &&
+      l.contact_shadows === true && l.cast_shadows === (l.source !== 'default')
+    panel.setStatus(dirty ? h('span.sp-dirty', 'Unsaved') : null)
+  }
+
   function render() {
     const s = engine.getScene()
     none.hidden = !!s
@@ -81,15 +178,7 @@ export function mount(ctx) {
     occl.input.disabled = !s.hasDepth
     occl.querySelector('.toggle-hint').textContent = s.hasDepth ? 'Things in the photo hide furniture behind them' : 'This photo has no depth map'
     gridT.input.checked = engine.getGridVisible()
-    const l = engine.getLook()
-    shadows.input.checked = l.contactShadows
-    exposure.set(l.exposure)
-    warmth.set(l.warmth)
-    const dirty = engine.isSceneDirty()
-    lookSave.replaceChildren(...(dirty ? [
-      button({ label: saving ? 'Saving…' : 'Save scene', kind: 'primary', disabled: saving, onClick: () => quiet(save()) }),
-      button({ label: 'Neutral look', kind: 'quiet', onClick: () => engine.setLook({ exposure: 1, warmth: 0 }) }),
-    ] : [button({ label: 'Neutral look', kind: 'quiet', disabled: Math.abs(l.exposure - 1) < 1e-3 && Math.abs(l.warmth) < 1e-3, onClick: () => engine.setLook({ exposure: 1, warmth: 0 }) })]))
+    renderLook()
     const c = s.calib
     const bits = [
       `${sceneTitle(scenes.getScene(s.name) || s)}`,
@@ -101,7 +190,10 @@ export function mount(ctx) {
     info.textContent = bits.join(' · ')
   }
 
-  for (const ev of ['scene', 'camera', 'occlusion', 'grid', 'look', 'dirty', 'adjust']) engine.events.addEventListener(ev, () => { if (panel.isOpen() || ev === 'scene' || ev === 'dirty') render() })
+  const on = (ev, fn) => engine.events.addEventListener(ev, fn)
+  for (const ev of ['scene', 'camera', 'occlusion', 'grid', 'adjust']) on(ev, () => { if (panel.isOpen() || ev === 'scene') render() })
+  for (const ev of ['look', 'lighting']) on(ev, () => { if (panel.isOpen()) renderLook() })
+  on('dirty', () => { if (panel.isOpen()) renderLook(); else panel.setStatus(engine.getScene() && engine.isSceneDirty() ? h('span.sp-dirty', 'Unsaved') : null) })
   shell.events.addEventListener('panel', (e) => { if (e.detail.id === 'scene' && e.detail.open) render() })
   shell.events.addEventListener('mode', render)
   render()
