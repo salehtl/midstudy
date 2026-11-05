@@ -240,7 +240,7 @@ compScene.add(fsMesh(compMat))
 // The furniture scene: lights, the depth pre-pass, the grid, the pieces.
 const scene = new THREE.Scene()
 // The lights (planner/lighting.js, contract §4.8): lighting.json's probe, key and floor shadow, or the v1 lights.
-const lights = createLighting({ renderer, scene })
+const lights = createLighting({ renderer, scene, photoUv: PHOTO_UV, photoUniforms: { tPhoto: photoMat.uniforms.tPhoto, uRect: compMat.uniforms.uRect, uTarget: compMat.uniforms.uTarget } })
 
 // The depth pre-pass (§4.5): the photo's depth (+ tolerance) into the depth buffer, colour writes off. Depth 0 never occludes.
 const depthMat = new THREE.ShaderMaterial({
@@ -1106,7 +1106,7 @@ function setDirty(next) {
   Object.assign(dirty, next)
   emit('dirty', { ...dirty })
 }
-const sceneSig = () => JSON.stringify([cam, LOOK_KEYS.map((k) => look[k])])
+const sceneSig = () => JSON.stringify([cam]) // the Look saves itself (saveLookSoon), so only the camera waits for Save scene
 let sceneBaseline = ''
 const touchScene = () => setDirty({ ...dirty, scene: !!sceneName && sceneSig() !== sceneBaseline })
 // The layout is dirty when the placed pieces differ from the ones last saved or loaded (not merely when something
@@ -1272,6 +1272,7 @@ function floorNoteFor(data) {
 // that's still calibrating opens when it's done.
 async function openScene(name) {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`Scene names are slugs like "scene-20261104-201500" (got "${name}")`)
+  flushLook()
   const token = ++sceneToken
   Object.assign(sceneLoad, { loading: true, phase: 'photo', name, scene: null })
   emit('scene', { phase: 'loading', name })
@@ -1364,6 +1365,7 @@ function syncUrl(name) {
 }
 
 function closeScene() {
+  flushLook()
   sceneToken++
   Object.assign(sceneLoad, { loading: false, phase: null, name: null, scene: null })
   quiet(quietly(() => clearItemsInternal()))
@@ -1731,6 +1733,27 @@ function freezeAuto() {
   look.light_softness = round(r.light_softness, 4)
 }
 // setLighting(partial) (hook, §4.8): live. A direction or softness turns Auto lighting off unless auto_light is given.
+// The Look saves itself: PUT /api/scenes/<name> {look} 0.7 s after the last change (and at once when the scene is
+// closed or another opens, or the page hides), so a lighting tweak is never lost and never waits for Save scene.
+let lookTimer = 0
+function saveLookSoon() {
+  if (!sceneName) return
+  clearTimeout(lookTimer)
+  lookTimer = setTimeout(flushLook, 700)
+}
+function flushLook() {
+  if (!lookTimer) return
+  clearTimeout(lookTimer)
+  lookTimer = 0
+  const name = sceneName
+  if (!name) return
+  const saved = { ...look }
+  quiet(apiJson(sceneUrl(name), { method: 'PUT', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ look: lookToSave() }) })
+    .then(() => { if (name === sceneName && savedScene) savedScene.look = saved })
+    .catch((e) => { throw reportError(e.status ? 'Could not save the look' : "The look isn't saved: the server isn't answering", e) }))
+}
+addEventListener('pagehide', flushLook)
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushLook() })
 function setLighting(p = {}) {
   if (!p || typeof p !== 'object') { reportError('setLighting needs an object like { light_strength: 1.2 }'); return }
   const before = JSON.stringify(look)
@@ -1741,14 +1764,14 @@ function setLighting(p = {}) {
   for (const [k, [lo, hi]] of Object.entries(LOOK_NUM)) if (isNum(p[k])) look[k] = Math.min(hi, Math.max(lo, k === 'light_azimuth_deg' ? wrapAz(p[k]) : p[k]))
   for (const k of Object.keys(LOOK_BOOL)) if (typeof p[k] === 'boolean' && !(k === 'auto_light' && p[k] === false)) look[k] = p[k]
   applyLook()
-  if (JSON.stringify(look) !== before) touchScene()
+  if (JSON.stringify(look) !== before) saveLookSoon()
 }
 // resetLighting() (hook, Reset): Auto lighting, strength, ambient, exposure and warmth back; the shadows to their
 // defaults; the stored direction and softness gone.
 function resetLighting() {
   Object.assign(look, { auto_light: true, light_strength: 1, ambient: 1, exposure: 1, warmth: 0, cast_shadows: null, contact_shadows: true, light_azimuth_deg: null, light_elevation_deg: null, light_softness: null })
   applyLook()
-  touchScene()
+  saveLookSoon()
 }
 function setLook(s = {}) {
   setLighting({ ...(isNum(s.exposure) ? { exposure: s.exposure } : {}), ...(isNum(s.warmth) ? { warmth: s.warmth } : {}) })

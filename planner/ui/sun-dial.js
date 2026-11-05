@@ -1,10 +1,13 @@
 // The light direction control of Scene › Look (contract §4.8, handle `light-dir`): a round dial seen from above.
 // The centre is straight overhead (90°), the rim 5° above the horizon; the top of the dial is ahead (into the photo,
 // −Z), the right is +X and the bottom is the camera's side (a small camera mark there looks up into the room). The sun
-// handle sits at x = sin(az)·r, y = −cos(az)·r with r = (90 − el)/85 of the radius. Pressing anywhere on the dial and
-// dragging sets azimuth and elevation from the pointer (mouse, pen or touch; touch-action: none, so a drag on the
-// phone doesn't scroll the sheet), reported at most once per animation frame. Keyboard: ←/→ azimuth ∓/±5°, ↑/↓
-// elevation ±5° (Shift: 15°). The inferred light can show as a faint dashed marker. Styles: styles/scenes.css (.sd-*).
+// handle sits at x = sin(az)·r, y = −cos(az)·r with r = (90 − el)/85 of the radius. With a mouse or pen, pressing
+// anywhere on the dial and dragging sets azimuth and elevation from the pointer. By touch the dial sits in a scrolling
+// sheet, so a vertical swipe across it scrolls the sheet (touch-action: pan-y) and changes nothing; the sun itself (a
+// 48 px grip, touch-action: none) drags in any direction, and a sideways drag or a tap elsewhere on the dial moves the
+// light there. Reported at most once per animation frame. Keyboard: ←/→ azimuth ∓/±5°, ↑/↓ elevation ±5° (Shift:
+// 15°), Page Up/Down elevation ±15°, Home overhead, End low. The inferred light can show as a faint dashed marker.
+// Styles: styles/scenes.css (.sd-*).
 //   sunDial({ onChange({ az, el }) }) → wrap element; wrap.dial (the focusable control), wrap.set({ az, el, inferred })
 //   lightWords(az, el) → "the left · 35° up" style words, lightSide(az) → "the left"
 import { h } from './kit.js'
@@ -68,7 +71,8 @@ export function sunDial({ onChange, label = 'Light direction' } = {}) {
   sun.append(svg('circle', { class: 'sd-sun-halo', cx: 0, cy: 0, r: 22 }), rays, svg('circle', { class: 'sd-sun-core', cx: 0, cy: 0, r: 9 }))
   s.append(defs, disk, sky, cone, ...rings, axes, zenith, cam, inferred, ray, sun)
 
-  const dial = h('div.sd', { tabindex: 0, role: 'slider', 'aria-label': label, 'aria-valuemin': -180, 'aria-valuemax': 180, dataset: { midstudy: 'light-dir', tip: 'Drag the sun to move the light' } }, s)
+  const grip = h('div.sd-grip', { 'aria-hidden': 'true' })
+  const dial = h('div.sd', { tabindex: 0, role: 'slider', 'aria-label': label, 'aria-valuemin': -180, 'aria-valuemax': 180, title: 'Drag the sun to move the light', dataset: { midstudy: 'light-dir' } }, s, grip)
   const readout = h('p.sd-readout.tnum')
   const wrap = h('div.sd-wrap', dial, readout)
   wrap.dial = dial
@@ -76,12 +80,15 @@ export function sunDial({ onChange, label = 'Light direction' } = {}) {
   let az = 0, el = 45
   let inf = null
   let dragId = null
+  let touch = null // a touch that started on the dial but not on the sun: { id, x, y } until it shows what it is
   let pending = null
   let raf = 0
 
   function draw() {
     const [x, y] = spot(az, el)
     sun.setAttribute('transform', `translate(${r1(x)} ${r1(y)})`)
+    grip.style.left = `${r1(((x + HALF) / (2 * HALF)) * 100)}%`
+    grip.style.top = `${r1(((y + HALF) / (2 * HALF)) * 100)}%`
     ray.setAttribute('x2', r1(x))
     ray.setAttribute('y2', r1(y))
     const words = lightWords(az, el)
@@ -128,18 +135,34 @@ export function sunDial({ onChange, label = 'Light direction' } = {}) {
     dial.classList.remove('is-dragging')
     flush()
   }
-  dial.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    e.preventDefault()
+  function start(e) {
     dragId = e.pointerId
     try { dial.setPointerCapture(e.pointerId) } catch { /* synthetic pointer */ }
     dial.classList.add('is-dragging')
     dial.focus({ preventScroll: true })
     fromPointer(e)
+  }
+  dial.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (e.pointerType === 'touch' && !grip.contains(e.target)) { touch = { id: e.pointerId, x: e.clientX, y: e.clientY }; return }
+    e.preventDefault()
+    start(e)
   })
-  dial.addEventListener('pointermove', (e) => { if (e.pointerId === dragId) fromPointer(e) })
-  dial.addEventListener('pointerup', (e) => { if (e.pointerId === dragId) { fromPointer(e); end(e) } })
-  dial.addEventListener('pointercancel', end)
+  dial.addEventListener('pointermove', (e) => {
+    if (touch && e.pointerId === touch.id) {
+      const dx = e.clientX - touch.x, dy = e.clientY - touch.y
+      if (Math.hypot(dx, dy) < 8) return
+      touch = null
+      if (Math.abs(dx) > Math.abs(dy)) start(e) // sideways: a drag of the light; up or down: the sheet scrolls
+      return
+    }
+    if (e.pointerId === dragId) fromPointer(e)
+  })
+  dial.addEventListener('pointerup', (e) => {
+    if (touch && e.pointerId === touch.id) { touch = null; fromPointer(e); flush(); return } // a tap: the light goes there
+    if (e.pointerId === dragId) { fromPointer(e); end(e) }
+  })
+  dial.addEventListener('pointercancel', (e) => { if (touch && e.pointerId === touch.id) touch = null; end(e) })
   dial.addEventListener('lostpointercapture', end)
   dial.addEventListener('keydown', (e) => {
     const step = e.shiftKey ? 15 : 5
@@ -147,6 +170,10 @@ export function sunDial({ onChange, label = 'Light direction' } = {}) {
     else if (e.key === 'ArrowRight') az = wrapAz(az + step)
     else if (e.key === 'ArrowUp') el = clampEl(el + step)
     else if (e.key === 'ArrowDown') el = clampEl(el - step)
+    else if (e.key === 'PageUp') el = clampEl(el + 15)
+    else if (e.key === 'PageDown') el = clampEl(el - 15)
+    else if (e.key === 'Home') el = MAX_EL
+    else if (e.key === 'End') el = MIN_EL
     else return
     e.preventDefault()
     draw()

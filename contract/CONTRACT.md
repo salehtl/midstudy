@@ -432,7 +432,7 @@ floorToPhoto([x, y, z]): [px, py]                   // §4.1 projection (any poi
 renderView(opts?: { model?: string, prompt?: string, keepRoom?: boolean }): Promise<RenderMeta>
 compare(a: string, b: string): void                 // opens Compare with two render names
 getLighting(): Lighting                            // §4.8
-setLighting(partial: Partial<LookSettings>): void  // §4.8; live, clamped; saved by saveScene() (the Look panel saves itself)
+setLighting(partial: Partial<LookSettings>): void  // §4.8; live, clamped; the Look saves itself (PUT {look} 0.7 s after the last change, at once on a scene switch or page hide)
 resetLighting(): void                              // §4.8: back to the inferred light
 getState(): {
   scene: { name, title, camera: Camera, camera_source, floor_found, hasDepth, occlusion, adjustFloor } | null,
@@ -503,7 +503,7 @@ Moving the light direction or softness turns `auto_light` off and saves the valu
 - **Splats** (Gaussian splats carry their source photo's light): colour-matched to the room instead of lit: exposure and white balance (`white_balance`, the ambient level), at most a weak directional term, using what the pinned Spark version supports. Their hidden mesh or stand-in box casts the floor shadow and receives no light.
 - **Without `lighting.json`** (an older scene, a fallback calibration): the v1 lights exactly, no cast shadow unless `cast_shadows` is turned on; the controls still work on those lights (`auto_light` then means the v1 key direction).
 - **Backfill** (scenes calibrated before `lighting.json` existed): opening a scene whose `lighting_status` is `missing` starts `POST /api/scenes/<name>/light` (the `light` step alone: MoGe-2 on the photo and the fit, a few seconds, $0; no recalibration, the camera and depth stay). The planner keeps the v1 lights meanwhile, polls the scene, and lights the furniture as soon as `lighting.json` is there; Auto lighting then follows it. A scene that is `none` (no clear light) or `failed` keeps the v1 lights; Scene › Look offers **Infer lighting** to try again.
-- **Scene › Look** has: Auto lighting (`light-auto`) with Reset (`light-reset`), the light direction as a draggable sun handle or compass (`light-dir`: drag sets azimuth and elevation; it also works by touch), sliders for strength (`light-strength`), softness (`light-softness`), ambient (`light-ambient`), exposure (`look-exposure`) and warmth (`look-warmth`), and toggles for the floor shadow (`light-shadows`) and contact shadows (`contact-shadows`). Changes apply live and are saved with the scene. On the phone (390 × 844) every control is reachable by touch with targets ≥ 44 px and no sideways scroll.
+- **Scene › Look** has: Auto lighting (`light-auto`) with Reset (`light-reset`), the light direction as a draggable sun handle or compass (`light-dir`: drag sets azimuth and elevation; it also works by touch), sliders for strength (`light-strength`), softness (`light-softness`), ambient (`light-ambient`), exposure (`look-exposure`) and warmth (`look-warmth`), and toggles for the floor shadow (`light-shadows`) and contact shadows (`contact-shadows`). Changes apply live and save themselves (`PUT /api/scenes/<name>` with `{look}` 0.7 s after the last change, and at once when another scene opens or the page hides), so the scene is never left unsaved by the Look; Save scene is for the camera. On the phone (390 × 844) every control is reachable by touch with targets ≥ 44 px and no sideways scroll.
 
 **Hook** (§4.6):
 

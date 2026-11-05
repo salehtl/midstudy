@@ -20,6 +20,32 @@ const near = (a, b) => Math.abs(a - b) < 1e-3
 // the key light's linear colour (largest component 1) as a CSS colour, for the readout's sun
 const cssColor = (rgb) => (Array.isArray(rgb) && rgb.length === 3 ? `rgb(${rgb.map((c) => Math.round(255 * Math.min(1, Math.max(0, c)) ** (1 / 2.2))).join(' ')})` : null)
 
+// By touch (the phone's sheet scrolls), a Look slider's native input takes no touches (scenes.css): a vertical swipe
+// across it scrolls the sheet and changes nothing, a sideways drag anywhere on the row moves the value by how far the
+// finger went (no jump to where it landed). Mouse and keyboard use the native input.
+function touchSlide(row, { min, max, step }) {
+  let t = null
+  const input = row.input
+  const snap = (v) => Math.min(max, Math.max(min, Math.round((v - min) / step) * step + min))
+  row.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') t = { id: e.pointerId, x: e.clientX, y: e.clientY, v0: Number(input.value), on: false } })
+  row.addEventListener('pointermove', (e) => {
+    if (!t || e.pointerId !== t.id) return
+    const dx = e.clientX - t.x, dy = e.clientY - t.y
+    if (!t.on) {
+      if (Math.hypot(dx, dy) < 8) return
+      if (Math.abs(dx) <= Math.abs(dy)) { t = null; return } // up or down: the sheet scrolls
+      t.on = true
+      try { row.setPointerCapture(e.pointerId) } catch { /* synthetic pointer */ }
+    }
+    const w = input.getBoundingClientRect().width || 1
+    const v = Number(snap(t.v0 + (dx / w) * (max - min)).toFixed(4))
+    if (v !== Number(input.value)) { input.value = String(v); input.dispatchEvent(new Event('input', { bubbles: true })) }
+  })
+  const end = (e) => { if (t && e.pointerId === t.id) { if (t.on) input.dispatchEvent(new Event('change', { bubbles: true })); t = null } }
+  row.addEventListener('pointerup', end)
+  row.addEventListener('pointercancel', end)
+}
+
 export function mount(ctx) {
   const { engine, scenes, shell, kit } = ctx
   const { h, button, toggle, slider } = kit
@@ -43,11 +69,11 @@ export function mount(ctx) {
   const src = h('div.sp-lsrc', { role: 'status' }, srcGlyph, h('span.sp-lsrc-words', srcText, srcDetail), inferB)
   const auto = mark(toggle({ label: 'Auto lighting', hint: 'Follows the light in the photo', checked: true, onChange: (v) => engine.setLighting({ auto_light: v }) }), 'light-auto')
   const dial = sunDial({ onChange: ({ az, el }) => engine.setLighting({ light_azimuth_deg: az, light_elevation_deg: el }) })
-  const range = (handle, opts) => { const r = slider(opts); mark(r.input, handle); return r }
+  const range = (handle, opts) => { const r = slider(opts); mark(r.input, handle); touchSlide(r, opts); return r }
   const strength = range('light-strength', { label: 'Strength', min: 0, max: 3, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ light_strength: v }) })
   const softness = range('light-softness', { label: 'Softness', min: 0, max: 1, step: 0.01, value: 0.35, format: (v) => `${softWord(v)} · ${v.toFixed(2)}`, onInput: (v) => engine.setLighting({ light_softness: v }) })
   const ambient = range('light-ambient', { label: 'Ambient', min: 0, max: 3, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ ambient: v }) })
-  const exposure = range('look-exposure', { label: 'Exposure', min: 0.25, max: 2.5, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ exposure: v }) })
+  const exposure = range('look-exposure', { label: 'Exposure', min: 0.25, max: 4, step: 0.05, value: 1, format: times, onInput: (v) => engine.setLighting({ exposure: v }) })
   const warmth = range('look-warmth', { label: 'Warmth', min: -1, max: 1, step: 0.05, value: 0, format: warmthWord, onInput: (v) => engine.setLighting({ warmth: v }) })
   const floorShadow = mark(toggle({ label: 'Floor shadow', hint: "The light's shadow on the floor", checked: true, onChange: (v) => engine.setLighting({ cast_shadows: v }) }), 'light-shadows')
   const contact = mark(toggle({ label: 'Contact shadows', hint: 'A soft shadow under each piece', checked: true, onChange: (v) => engine.setLighting({ contact_shadows: v }) }), 'contact-shadows')
@@ -120,6 +146,7 @@ export function mount(ctx) {
     } else if (l.status === 'none') {
       glyph = sun('default')
       text = 'No clear light in this photo · default lights'
+      failed = 'none'
     } else if (l.status === 'failed') {
       glyph = pic('warning', { size: 18 })
       text = "Couldn't infer the light"
@@ -136,8 +163,9 @@ export function mount(ctx) {
     srcText.textContent = text
     srcDetail.textContent = detail
     srcDetail.hidden = !detail
-    src.classList.toggle('is-failed', failed)
+    src.classList.toggle('is-failed', failed === true)
     inferB.hidden = !failed
+    inferB.querySelector('span').textContent = failed === 'none' ? 'Try again' : 'Infer lighting'
   }
 
   // The Look's values (every 'look' and 'lighting' event, so many times a second while the dial is dragged).

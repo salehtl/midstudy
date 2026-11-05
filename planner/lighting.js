@@ -15,7 +15,7 @@
 // API: createLighting({ renderer, scene }) → {
 //   setData(lightingJson | null), setCamera(R: Matrix3 camera→world), setLook(resolved), prepare(object3d),
 //   fitShadow(box3 | null), inferred() → the key in the world frame or null, inUse() → the key in use,
-//   mode() 'photo' | 'default', splatGrade() → { gain: [r, g, b] } (for colour-matching splats; follow-up) }
+//   mode() 'photo' | 'default', splatGain() → [r, g, b] (colour-matching splats), caster(object3d) → a shadow-only copy }
 // resolved look: { auto_light, light_azimuth_deg, light_elevation_deg, light_softness, light_strength, ambient,
 //                  cast_shadows (boolean) } with the direction and softness already chosen (inferred or stored).
 import * as THREE from 'three'
@@ -123,26 +123,50 @@ const POISSON = [[-0.94201624, -0.39906216], [0.94558609, -0.76890725], [-0.0941
   [-0.91588581, 0.45771432], [-0.81544232, -0.87912464], [-0.38277543, 0.27676845], [0.97484398, 0.75648379],
   [0.44323325, -0.97511554], [0.53742981, -0.47373420], [-0.26496911, -0.41893023], [0.79197514, 0.19090188],
   [-0.24188840, 0.99706507], [-0.81409955, 0.91437590], [0.19984126, 0.78641367], [0.14383161, -0.14100790]]
-const catcherMat = new THREE.ShaderMaterial({
-  uniforms: {
-    tShadow: { value: null }, uShadowMatrix: { value: new THREE.Matrix4() }, uDark: { value: 0 }, uTan: { value: 0.05 },
-    uRange: { value: 10 }, uWidth: { value: 4 }, uSearch: { value: 0.02 }, uBias: { value: 0.002 }, uMask: { value: 0 },
-  },
-  vertexShader: 'varying vec3 vWorld;\nvoid main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
-  fragmentShader: `
+// A splat item's GLB or stand-in box is invisible (Spark draws the splat): this copy of it draws nothing in the
+// furniture pass (no colour, no depth) but casts its shadow, since the shadow pass draws every visible caster.
+const casterMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+// three.js's ACES Filmic (the furniture's tone curve, and the one lighting.json's fit took the photo back through), as
+// its two matrices and their inverses, for the catcher to work on the photo's pixels in radiance.
+const colMat = (c0, c1, c2) => new THREE.Matrix3().set(c0[0], c1[0], c2[0], c0[1], c1[1], c2[1], c0[2], c1[2], c2[2])
+const ACES_IN = colMat([0.59719, 0.07600, 0.02840], [0.35458, 0.90834, 0.13383], [0.04823, 0.01566, 0.83777])
+const ACES_OUT = colMat([1.60475, -0.10208, -0.00327], [-0.53108, 1.10813, -0.07276], [-0.07367, -0.00605, 1.07602])
+function makeCatcherMat({ photoUv, photoUniforms }) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      ...photoUniforms, // tPhoto (the photo's sRGB bytes), uRect, uTarget: shared with the engine's photo pass
+      tShadow: { value: null }, uShadowMatrix: { value: new THREE.Matrix4() }, uKeep: { value: new THREE.Vector3(1, 1, 1) }, uTan: { value: 0.05 },
+      uRange: { value: 10 }, uWidth: { value: 4 }, uSearch: { value: 0.02 }, uBias: { value: 0.002 }, uMask: { value: 0 },
+      uIn: { value: ACES_IN }, uOut: { value: ACES_OUT }, uInInv: { value: ACES_IN.clone().invert() }, uOutInv: { value: ACES_OUT.clone().invert() },
+    },
+    vertexShader: 'varying vec3 vWorld;\nvoid main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `
 #include <packing>
+${photoUv}
 varying vec3 vWorld;
+uniform sampler2D tPhoto;
 uniform sampler2D tShadow;
 uniform mat4 uShadowMatrix;
-uniform float uDark;    // how much of the floor's light a full shadow takes away (linear)
+uniform vec3 uKeep;     // the share of the floor's light a full shadow keeps (ambient / (ambient + key)), per channel
 uniform float uTan;     // tan of the light's angular radius
 uniform float uRange;   // shadow camera far − near (m), to turn depth differences into meters
 uniform float uWidth;   // shadow camera frustum width (m), to turn meters into shadow-map uv
 uniform float uSearch;  // blocker search radius (uv)
 uniform float uBias;
 uniform float uMask;    // 1 while the engine draws the keep-room mask: the visible shadow in white
+uniform mat3 uIn, uOut, uInInv, uOutInv;
 const vec2 P[16] = vec2[16](${POISSON.map(([a, b]) => `vec2(${a}, ${b})`).join(', ')});
 float depthAt(vec2 uv) { return unpackRGBAToDepth(texture2D(tShadow, uv)); }
+vec3 toLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 toSrgb(vec3 c) { return mix(c * 12.92, pow(c, vec3(1.0 / 2.4)) * 1.055 - 0.055, step(0.0031308, c)); }
+vec3 rrt(vec3 v) { return (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081); }
+vec3 aces(vec3 x) { return clamp(uOut * rrt(uIn * (x / 0.6)), 0.0, 1.0); }
+vec3 acesInv(vec3 d) {
+  vec3 y = uOutInv * clamp(d, 0.0, 0.985);
+  vec3 qa = 1.0 - 0.983729 * y, qb = 0.0245786 - 0.4329510 * y, qc = -(0.000090537 + 0.238081 * y);
+  vec3 v = (-qb + sqrt(max(qb * qb - 4.0 * qa * qc, 0.0))) / (2.0 * qa);
+  return max(uInInv * v * 0.6, 0.0);
+}
 void main() {
   vec4 sc = uShadowMatrix * vec4(vWorld, 1.0);
   sc.xyz /= sc.w;
@@ -158,17 +182,24 @@ void main() {
     lit += step(z, depthAt(sc.xy + P[i] * pen));
     lit += step(z, depthAt(sc.xy + vec2(P[i].y, -P[i].x) * pen * 0.55));
   }
-  // uDark darkens the floor's light (linear); the composite blends over the photo's sRGB bytes, so turn it into the
-  // alpha that gives that linear darkening there
-  float a = 1.0 - pow(1.0 - uDark * (1.0 - lit / 32.0), 1.0 / 2.2);
-  if (uMask > 0.5) { if (a < 0.05) discard; gl_FragColor = vec4(1.0); return; }
+  float occ = 1.0 - lit / 32.0;
+  if (occ < 0.004) discard;
+  if (uMask > 0.5) { if (occ < 0.1) discard; gl_FragColor = vec4(1.0); return; }
+  // The photo's pixel taken back to radiance (ACES undone, as lighting.json's fit did), the key's share taken away
+  // where it is blocked, then the tone curve again: the alpha of black over the photo's bytes that gives that pixel.
+  vec3 photo = texture2D(tPhoto, photoUv()).rgb;
+  vec3 shaded = toSrgb(aces(acesInv(toLinear(photo)) * (1.0 - occ * (1.0 - uKeep))));
+  const vec3 Y = vec3(0.2126, 0.7152, 0.0722);
+  float a = clamp(1.0 - dot(shaded, Y) / max(dot(photo, Y), 1e-3), 0.0, 1.0);
   if (a < 0.003) discard;
   gl_FragColor = vec4(0.0, 0.0, 0.0, a);
 }`,
-  transparent: true, depthWrite: false, depthTest: true, toneMapped: false,
-})
+    transparent: true, depthWrite: false, depthTest: true, toneMapped: false,
+  })
+}
 
-export function createLighting({ renderer, scene }) {
+export function createLighting({ renderer, scene, photoUv, photoUniforms }) {
+  const catcherMat = makeCatcherMat({ photoUv, photoUniforms })
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFShadowMap
   const pmrem = new THREE.PMREMGenerator(renderer)
@@ -270,16 +301,14 @@ export function createLighting({ renderer, scene }) {
     key.castShadow = shadows
     key.shadow.radius = 1 + 3 * look.light_softness
     if (!shadows) catcher.visible = false // fitShadow turns it on before a frame with pieces
-    // How dark a full shadow is: the share of the floor's light that comes from the key (with lighting.json, from its
-    // SH and key; with the v1 lights, about half), lighter for a soft, diffuse light.
+    // What a full shadow keeps of the floor's light, per channel: ambient / (ambient + key) on an up-facing floor (with
+    // lighting.json from its SH and key, so a shadow under a warm sun is cooler; with the v1 lights about half).
     const ly = Math.max(0, look.dir[1])
-    let share
+    const keep = catcherMat.uniforms.uKeep.value
     if (data) {
-      const keyFloor = lum(data.key.color) * data.key.intensity * s * ly
-      const ambFloor = Math.max(1e-4, lum(irradianceAt(worldSH, [0, 1, 0])) * a)
-      share = keyFloor / (ambFloor + keyFloor)
-    } else share = clamp(0.55 * s * ly / (0.55 * s * ly + 0.45 * a), 0, 1)
-    catcherMat.uniforms.uDark.value = clamp(share, 0, 0.9) * (1 - 0.35 * look.light_softness)
+      const amb = irradianceAt(worldSH, [0, 1, 0])
+      keep.set(...[0, 1, 2].map((c) => { const A = Math.max(1e-4, amb[c] * a), K = data.key.color[c] * data.key.intensity * s * ly; return clamp(A / (A + K), 0.08, 1) }))
+    } else { const k = clamp((0.45 * a) / (0.45 * a + 0.55 * s * ly + 1e-6), 0.08, 1); keep.set(k, k, k) }
     catcherMat.uniforms.uTan.value = 0.006 + 0.42 * look.light_softness * look.light_softness
   }
 
@@ -299,7 +328,7 @@ export function createLighting({ renderer, scene }) {
     key.position.copy(c).addScaledVector(d, back)
     key.updateMatrixWorld()
     key.target.updateMatrixWorld()
-    const half = r + 0.15 + catcherMat.uniforms.uTan.value * Math.min(reach, 2.5) // room for the penumbra
+    const half = r + 0.15 + catcherMat.uniforms.uTan.value * Math.min(reach, 8) // room for the penumbra
     sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half
     sc.near = 0.01
     sc.far = back + r + reach + 0.5
@@ -325,12 +354,27 @@ export function createLighting({ renderer, scene }) {
     },
     setCamera(m) { R = m.clone(); worldSH = null; shEnv?.dispose?.(); shEnv = null; apply() },
     setLook(l) { look = { ...look, ...l, dir: l.dir ? [...l.dir] : look.dir }; apply() },
-    // For colour-matching splats (their light is baked in): a per-channel gain from the room's light colour and level
-    // against a neutral grey ambient of the v1 look. Used by the splat drawing once it lands (follow-up).
-    splatGrade() {
-      if (!data) return { gain: [1, 1, 1] }
+    // Splats carry their source photo's light, so they are colour-matched, not lit (§4.8): the room light's colour
+    // (white_balance, luminance 1) times how much of the room's light the controls keep (1 at the defaults: ambient
+    // and key weighted by how they light an upright surface on average). No directional term.
+    splatGain() {
+      const a = look.ambient, s = look.light_strength
+      if (!data) return [1, 1, 1].map(() => (V1.hemi + V1.env) * a / (V1.hemi + V1.env + 0.5 * V1.key) + 0.5 * V1.key * s / (V1.hemi + V1.env + 0.5 * V1.key))
       const wb = data.white_balance?.rgb || [1, 1, 1]
-      return { gain: wb.map((v) => v * look.ambient) }
+      const A = Math.max(1e-4, lum(irradianceAt(worldSH || rotateSH(data.ambient.sh, R), [0, 1, 0])))
+      const K = 0.5 * lum(data.key.color) * data.key.intensity
+      const level = (A * a + K * s) / (A + K)
+      return wb.map((v) => v * level)
+    },
+    caster(root) {
+      const c = root.clone(true)
+      c.name = 'shadow-caster'
+      c.traverse((o) => {
+        o.visible = true
+        o.raycast = () => {}
+        if (o.isMesh) { o.material = casterMat; o.castShadow = true; o.receiveShadow = false }
+      })
+      return c
     },
   }
 }
