@@ -143,7 +143,7 @@ CUDA, then MPS, then CPU).
 ## Evals
 
 All evals are free: fal is mocked, and they set the mock variables, a $0 cap and scratch data folders under
-`evals/out/` themselves. Browser evals run headless Helium (`/Applications/Helium.app`, or `MIDSTUDY_BROWSER`).
+`evals/out/` themselves. Browser evals run the headless Chrome at `$PUPPETEER_EXECUTABLE_PATH` (or `MIDSTUDY_BROWSER`).
 [evals/README.md](evals/README.md) describes every check.
 
 ```sh

@@ -38,7 +38,7 @@ Only phase-boundary agents commit; nothing is pushed.
 - Tools come from the flake's dev shell: run `nix develop -c <cmd>` from the repo root (python 3.12, uv, node 22, git). Never install anything globally (`brew`, `npm -g`, `pipx`, `nix profile`). Nix only sees files git tracks: `git add` a new file before relying on it through nix.
 - Python: uv projects in `pipeline/` (and `calib/`). `evals/py <script>` runs eval helpers with pinned deps (numpy, pillow, jsonschema, trimesh, pygltflib).
 - Node is for evals and fixtures only (`playwright-core`, `ajv`, `three`); the planner has no build step. `nix develop -c npm install` once.
-- Browser: **Helium**, headless: `/Applications/Helium.app/Contents/MacOS/Helium` (or `MIDSTUDY_BROWSER`) with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`.
+- Browser: the headless Chrome at `$PUPPETEER_EXECUTABLE_PATH` (from the Mac's flake; `MIDSTUDY_BROWSER` overrides it) with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`. Never launch Helium or any browser the user browses with.
 - Calibration while `calib/` is being built, and in fast evals: `serve.py --calib "python3 fixtures/stub_calib.py"`, or the real CLI with `MIDSTUDY_CALIB_MOCK=fixtures/calib`.
 - Servers you start pick a free port and are stopped when you're done. Scratch output goes to `evals/out/` (git-ignored).
 - No ssh, nothing on homeserver, no `git push`, no changes to git config or remotes.

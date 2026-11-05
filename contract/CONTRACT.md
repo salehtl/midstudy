@@ -602,7 +602,7 @@ resetLighting(): void
 
 ### 5.1 Golden scenes (`fixtures/scenes/`, `fixtures/calib/`)
 
-`fixtures/make_scene.mjs` renders one textured room (oak plank floor, plaster walls, rug, door with casing, window, painting, floor lamp) with three.js 0.180.0 in headless Helium from a known camera under known lights. Each scene has a box **sofa** (2.0 × 0.82 × 0.9 m) and a **table** (1.0 × 0.42 × 0.55 m, top and four legs, turned 12°) at known positions. Same room and objects, three cameras, and two more lightings with the living-wide camera:
+`fixtures/make_scene.mjs` renders one textured room (oak plank floor, plaster walls, rug, door with casing, window, painting, floor lamp) with three.js 0.180.0 in headless Chrome from a known camera under known lights. Each scene has a box **sofa** (2.0 × 0.82 × 0.9 m) and a **table** (1.0 × 0.42 × 0.55 m, top and four legs, turned 12°) at known positions. Same room and objects, three cameras, and two more lightings with the living-wide camera:
 
 | id | size | camera |
 |---|---|---|
@@ -642,4 +642,4 @@ The evals track added PLAN.md §6.2 (`eval:scenes-api`, `eval:calib`, `eval:plan
 - Calibration in fast evals: `--calib "python3 fixtures/stub_calib.py"` or the real CLI with `MIDSTUDY_CALIB_MOCK=fixtures/calib`. `eval:calib` runs the real model.
 - Real photos in `fixtures/photos/` are git-ignored and never copied anywhere tracked; `fixtures/photos/private/` is never opened.
 - Servers pick a free port and are stopped at the end. Scratch output goes to `evals/out/`.
-- Headless browser: Helium (`/Applications/Helium.app/Contents/MacOS/Helium`, or `MIDSTUDY_BROWSER`) with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`, driven by `playwright-core`.
+- Headless browser: the headless Chrome at `$PUPPETEER_EXECUTABLE_PATH` (from the Mac's flake; `MIDSTUDY_BROWSER` overrides it) with `--use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist`, driven by `playwright-core`.
