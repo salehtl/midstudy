@@ -169,8 +169,10 @@ See the "Evals" section appended below once the runs finish.
 - **main session (Phase 0 scripts)**: `scripts/eval-lock.mjs --exclusive` keeps the slots it already has while it waits
   for the rest, so two exclusive waiters deadlock. Observed from 22:49 to 23:14: f-perf held slots 0 and 2, k-media
   held slot 1, both were `--exclusive` and waiting, and every non-exclusive eval queued behind them until k-media's
-  `--wait-min 20` ran out. An exclusive waiter should release partial holdings on every round, or take all slots or
-  none.
+  `--wait-min 20` ran out. After that, f-perf kept slots 0 and 2 while still waiting, so every other eval in the
+  repository shared the single remaining slot for as long as f-perf waited. Between 22:49 and 23:15 this branch's
+  first eval never got a slot. An exclusive waiter should release whatever it holds after each failed round, or take
+  all slots or none.
 - **main session / ownership**: `core/miri.txt` (the crates Miri checks, one per line) and `proofs/axioms.txt` (allowed
   axioms) are owned by no Phase 1 track. They could go to kernels-hardening or k-media, and to proofs.
   `docs/notes/tscert.md` could become a pointer to `tscert/README.md`.
