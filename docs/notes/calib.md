@@ -1,5 +1,92 @@
 # Calib track notes
 
+## v2 (calib track of the refactor, branch `v2-calib`, 2026-11-05)
+
+`calib/` stays Python (MoGe-2 on PyTorch) and now is typed, validated and warm. Nothing it writes changed: on the five
+golden scenes and the lounge photo, real MoGe-2 on MPS, v1's one-shot, v2's one-shot and the v2 worker give the same
+`calib.json` and `lighting.json` (timings aside) and byte-identical `depth.png`.
+
+### What's new
+
+| Path | What |
+|---|---|
+| `src/midstudy_calib/contract_types.py` | TypedDicts generated from `contract/calib.schema.json`, `contract/lighting.schema.json` and calib's own `schemas/calib-cli.schema.json` by `scripts/gen_contract_types.py` (a small generator for the subset of JSON Schema these use; required keys plain, others `NotRequired`, `Literal` for const/enum). `tests/test_contract_types.py` fails when it or the schema copies drift, and checks each TypedDict's keys against its schema. |
+| `src/midstudy_calib/schemas/` | `calib.schema.json`, `lighting.schema.json`: byte copies of `contract/` (written by the generator; the Nix package carries `src/` only). `calib-cli.schema.json`: calib's own, the stdout results of every command (`run`/`fit`, `ingest`, `light`, `align`, the error) and the worker's request. |
+| `validate.py` | jsonschema (a runtime dependency now), Draft 2020-12, one registry of the three files. `fit` computes everything first, then checks `calib.json` and `lighting.json` (a mock's too) and only then writes `depth.png`, `lighting.json`, `calib.json`; every result line and worker response is checked too. A mismatch is a bug: exit 1 with `calibration failed unexpectedly (ContractViolation: calib.json doesn't match calib.schema.json: camera/fov_y_deg: …)` and nothing written. |
+| `records.py` | the hand-written types: `Model`, `Device`, the diagnostic keys calib adds (`CalibOut.fallback_reason`, `FittedFloor.normal_camera`, `MogeInfo`), `Result`. |
+| `worker.py`, `cli.py serve` | the warm worker (contract §4.3 Worker): JSON lines on stdin/stdout, MoGe kept loaded, the one-shot code path per request (`cli.dispatch`), failures answered `ok: false` without stopping, EOF exits 0. `serve --model/--device` are the requests' defaults. The one-shot CLI is unchanged (same arguments, output, exit codes; `serve` is the only addition to `--help`). |
+| `moge_runner.py` | the one untyped boundary (MoGe, torch), wrapped once: typed `MogeOutput` arrays out. One network held per process. Builds MoGe without its random init (`_no_weight_init`, then `load_state_dict(strict=True)`), pins the vitl revision (`cb0e8bb…`, the one `nix/moge-weights.nix` fetches; falls back to the Hub's main), and imports MoGe without `scipy.signal` (`import_moge`). |
+| `scripts/bench.py` | one-shot vs worker wall time on the golden scenes and the lounge, and `--compare` of two output folders. |
+| `scripts/check.sh` (`npm run check:py`) | generator `--check`, ruff and pyright `--strict` over `src`, `tests` and `scripts` (v1's `calib_report.py` typed too). |
+| `tests/` | 103 tests (62 in v1): `test_contract_types.py`, `test_worker.py` (protocol, mock parity with the one-shot CLI, failures, no torch under the mock), `test_moge_runner.py` (init skip, one model, pin, the `scipy.signal` stand-in, and the fast build against MoGe's own `from_pretrained` weight for weight when the weights are cached), shared helpers in `synthetic.py` and `cli_run.py`. |
+
+### How to run and check
+
+```sh
+nix develop -c uv sync --project calib
+nix develop -c npm run check:py                                   # types, lint, generated files: one line each
+nix develop -c bash -c 'cd calib && uv run pytest -q'             # 103 tests, ~40 s, vitl weights used when cached
+nix develop -c uv run --project calib python calib/scripts/gen_contract_types.py   # after a schema change
+printf '%s\n' '{"id":"a","cmd":"fit","args":["/abs/scene"]}' | nix develop -c uv run --project calib midstudy-calib serve
+nix develop -c uv run --project calib python calib/scripts/bench.py --mode both --label mine      # real MoGe, $0
+nix develop -c node scripts/eval-lock.mjs -- npm run eval:calib -- --mock                          # E2 ingest
+nix develop -c node scripts/eval-lock.mjs -- npm run eval:calib                                    # E2 real MoGe
+```
+
+### Measurements (M3 Max, MPS, vitl, real MoGe-2; the Mac shared with other agents)
+
+MEASUREMENTS
+
+### Decisions
+
+- **The worker reuses the one-shot code path** (`cli.dispatch` per request), so a worker response is the one-shot
+  result by construction; the tests compare files and result lines between the two under the mock, and the bench
+  compares them with real MoGe.
+- **One model held, on the device it last ran on.** A request for another model replaces it (never two ViT-Ls in
+  memory); an MPS failure under `auto` retries on the CPU as before and the next request moves the network back.
+  `moge.load_s` is the time this request spent loading (0 when warm).
+- **Skipping MoGe's random init is safe only because every weight is then loaded**: `strict=True` fails otherwise and
+  the slow path (MoGe's own `strict=False`) runs. Measured identical state dicts and outputs, CPU and MPS.
+- **The `scipy.signal` stand-in** is in `sys.modules` only while MoGe imports; its `fftconvolve` (unused by inference)
+  imports the real module on first call, and dunder lookups don't trigger it. Net gain about 0.9 s per cold start
+  (scipy.optimize, which MoGe's focal solver needs, is now imported at the first inference instead).
+- **Fit speedups that keep results bit-identical** (checked on the six scenes): sRGB through a lookup table; crease
+  pairs tested only where both samples are usable; the weight-free parts of the light's least squares computed once
+  for its six robust iterations; each neighbour dot product once; the floor's `nan_to_num` once.
+- **Not taken:** a faster PNG level for `depth.png` (zlib 1 saves 15 ms but the file grows 40–100 %, and the phone
+  downloads it); float32 or a coarser direction grid in the lighting fit (changes results); `x**4` as two squarings in
+  the shades-of-grey mean (not bit-identical).
+- **jsonschema at run time**, not only in tests: the task asks for every file and result to be checked before it is
+  written; it costs about 1 ms per document.
+- **calib-cli.schema.json lives in calib** (contract/ is f-contract's); `id` is an optional property of every result so
+  one-shot lines and worker responses share one schema.
+
+### Requests to other tracks
+
+- **packaging** (`nix/midstudy-calib.nix`): add `ps.jsonschema` to the Python env and `midstudy_calib.worker,
+  midstudy_calib.validate, midstudy_calib.contract_types, jsonschema` to the import check; `src/midstudy_calib/schemas/*.json`
+  must stay in the package (`cp -r src` does it). `nix/module.nix`: add `serve` to the `run | fit` case of the
+  calibDevice shim, so `serve --device X` sets the device of every worker request.
+- **f-contract**: adopt `calib/src/midstudy_calib/schemas/calib-cli.schema.json` as `contract/calib-cli.schema.json`
+  (the server validates calib's output and the worker protocol from it); then calib's copy becomes a generated copy
+  (one line in `gen_contract_types.py`'s `SOURCES`). Any change to `contract/calib.schema.json` or
+  `lighting.schema.json` needs `gen_contract_types.py` re-run (a test fails until then).
+- **server-core / server-routes** (Phase 2): the worker client as contract §4.3 Worker says (start on the first
+  calibration, restart after a crash, one-shot fallback, align stays one-shot).
+- **f-toolchain**: `check:py` in package.json is `bash calib/scripts/check.sh`; pyright 1.1.411 and ruff 0.15.14 in the
+  dev shell would save the script its `nix shell` one-offs.
+- **integration**: `fixtures/stub_calib.py` has no `serve`; the server's one-shot fallback covers it (the stub exits 2
+  at once), or the stub can gain a stdlib `serve` later.
+- **whoever makes worktrees**: `fixtures/photos/` is git-ignored, so worktrees don't have it. For E2 real and
+  `eval:real` I symlinked the three photos `evals/calib_eval.py` names from the main checkout (read only, never
+  `private/`) and removed the links at the end.
+
+### Left
+
+- `requires-python` is still `<3.13` while the Nix package runs 3.13 (HANDOFF R3); the code is 3.12+ (PEP 695 aliases).
+
+## v1 notes
+
 > **Since verify round 2 (see `verify-fix-2.md`):** with an EXIF focal length within 8° of MoGe's FOV, `fit` uses the
 > EXIF FOV, keeps MoGe's pitch and roll, multiplies the height by `k = tan(fov_moge/2) / tan(fov_exif/2)` and scales
 > `depth.png` to agree with that camera's floor (`fov_source`, `moge.{height_m, scale, depth_scale}` in calib.json).

@@ -31,11 +31,10 @@ exclude-dependencies = ["gradio", "opencv-python", "pipeline"]
 testpaths = ["tests"]
 pythonpath = ["tests"]
 
-# pyright --strict over src, tests and the scripts the checks run (`calib/scripts/check.sh`, docs/REFACTOR.md §3
-# check:py). The one untyped boundary is MoGe/torch, wrapped once in moge_runner.py. calib_report.py (a measurement
-# script from v1, untyped) is linted by ruff but not type-checked.
+# pyright --strict over src, tests and scripts (`calib/scripts/check.sh`, docs/REFACTOR.md §3 check:py). The one
+# untyped boundary is MoGe/torch, wrapped once in moge_runner.py.
 [tool.pyright]
-include = ["src", "tests", "scripts/bench.py", "scripts/gen_contract_types.py"]
+include = ["src", "tests", "scripts"]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
 venvPath = "."
