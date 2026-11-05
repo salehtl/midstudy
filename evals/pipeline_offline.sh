@@ -224,12 +224,109 @@ else
 fi
 bad_case rug-model fixtures/models/arrow.glb --engine rug --name "Not A Rug" --dims 100x100x1 --library "$LIB"
 
+# --- v1.1 idol engine (2026-11-05, written before the code; contract §1, §3.2, §3.4): the default engine, a stand-in
+# box, a per-axis splat fit and splat.spz. Mock: fixtures/fal/speridlabs-idol (the Morris chair, 262,144 splats). -----
+splat_facts() {  # one JSON line about a splat.ply and its splat.spz: counts, extent (idol percentiles), back-top, sizes
+  evals/py -c "
+import gzip, json, struct, sys, numpy as np
+from pathlib import Path
+ply, spz = Path(sys.argv[1]), Path(sys.argv[2])
+raw = ply.read_bytes(); end = raw.index(b'end_header\n') + 11
+names = [l.split()[2] for l in raw[:end].decode().split('\n') if l.startswith('property')]
+types = [l.split()[1] for l in raw[:end].decode().split('\n') if l.startswith('property')]
+d = np.frombuffer(raw, dtype=[(n, '<f4' if t == 'float' else '<f8') for n, t in zip(names, types)], offset=end)
+xyz = np.stack([d['x'], d['y'], d['z']], 1).astype(float)
+lo, hi = np.percentile(xyz, 0.1, 0), np.percentile(xyz, 99.9, 0)
+top = xyz[:, 1] >= np.percentile(xyz[:, 1], 90)
+out = {'ply_count': len(d), 'props': names, 'extent': (hi - lo).round(4).tolist(), 'lo_y': round(float(lo[1]), 4),
+       'center_xz': [round(float((lo[0] + hi[0]) / 2), 4), round(float((lo[2] + hi[2]) / 2), 4)],
+       'top10_mean_z': round(float(xyz[top, 2].mean()), 4), 'ply_bytes': ply.stat().st_size}
+if spz.is_file():
+    b = spz.read_bytes(); u = gzip.decompress(b)
+    m, v, n, sh, fb, fl, _ = struct.unpack_from('<IIIBBBB', u, 0)
+    out.update({'spz_bytes': len(b), 'spz_magic': hex(m), 'spz_version': v, 'spz_count': n, 'spz_sh': sh, 'spz_frac': fb})
+print(json.dumps(out))
+" "$1" "$2"
+}
+if run idol "$IMG" --name "Mock Idol Chair" --id mock-idol --dims 80x90x95 --library "$LIB"; then
+  ok "an image add with no --engine runs (idol is the default)"
+  check "idol summary: engine idol, mock, \$0, paths.spz" '[ "$(lastline $OUT/idol.out | json "o.engine+\"|\"+o.mock+\"|\"+o.cost_usd+\"|\"+(o.paths.spz||\"\").endsWith(\"mock-idol/splat.spz\")")" = "idol|true|0|true" ]' "$(lastline $OUT/idol.out | head -c 400)"
+  check "idol writes model.glb (stand-in), splat.ply, splat.spz and thumb.jpg" '[ -f $LIB/mock-idol/model.glb ] && [ -f $LIB/mock-idol/splat.ply ] && [ -f $LIB/mock-idol/splat.spz ] && [ -f $LIB/mock-idol/thumb.jpg ]'
+  check "idol called speridlabs/idol with image_type real and 262,144 Gaussians, on the metadata-free upload" 'node -e "
+    const r = JSON.parse(require(\"fs\").readFileSync(\"$LIB/mock-idol/raw/request.json\", \"utf8\"))
+    process.exit(r.image_type === \"real\" && r.num_gaussians === 262144 && /uploads\/engine-input\.jpg$/.test(r.image_url) && !(\"prompt\" in r) ? 0 : 1)"' "$(tr -d '\n' <"$LIB/mock-idol/raw/request.json" 2>/dev/null | head -c 300)"
+  check "the log names the endpoint" 'grep -q "calling speridlabs/idol (mock)" $OUT/idol.out' "$(grep calling $OUT/idol.out | head -c 200)"
+  b=$(evals/py evals/glb_info.py "$LIB/mock-idol/model.glb" | json "o.bounds.flat().map(v=>v.toFixed(3)).join(' ')+' '+o.images+' '+o.materials")
+  check "the stand-in model.glb is an untextured box exactly at 80 x 95 x 90 cm, centered on the floor" '[ "$b" = "-0.400 0.000 -0.450 0.400 0.950 0.450 0 1" ]' "bounds images materials: $b"
+  f=$(splat_facts "$LIB/mock-idol/splat.ply" "$LIB/mock-idol/splat.spz")
+  echo "     splat facts: $f" | head -c 600; echo
+  check "splat.ply keeps all 262,144 splats, without nx/ny/nz" 'node -e "const f=$f; process.exit(f.ply_count===262144 && !f.props.includes(\"nx\") && f.props.includes(\"f_dc_0\") ? 0 : 1)"'
+  check "splat.ply is fitted per axis: its p0.1-p99.9 extent is 80 x 95 x 90 cm within 2 %, on the floor, centered" 'node -e "
+    const f=$f, want=[0.8,0.95,0.9]
+    process.exit(f.extent.every((v,i)=>Math.abs(v-want[i])/want[i]<=0.02) && Math.abs(f.lo_y)<=0.01 && f.center_xz.every(c=>Math.abs(c)<=0.01) ? 0 : 1)"' "extent ${f}"
+  check "the idol splat stands upright with its front to +Z (NOTES.md frame): the top 10 % (the backrest) sits in the back half" 'node -e "const f=$f; process.exit(f.top10_mean_z < -0.1*0.9 ? 0 : 1)"' "top10_mean_z from $f"
+  check "splat.spz: gzipped SPZ v2 (NGSP), SH 0, 12 fractional bits, all 262,144 splats, at most 6 MB" 'node -e "
+    const f=$f; process.exit(f.spz_magic===\"0x5053474e\" && f.spz_version===2 && f.spz_sh===0 && f.spz_frac===12 && f.spz_count===262144 && f.spz_bytes<=6*1024*1024 ? 0 : 1)"' "$f"
+  check "idol library entry: engine idol, default_render splat, assets.spz, prompt null" 'node -e "
+    const it = JSON.parse(require(\"fs\").readFileSync(\"$LIB/library.json\", \"utf8\")).items.find(i => i.id === \"mock-idol\")
+    process.exit(it && it.source.engine === \"idol\" && it.default_render === \"splat\" && it.assets.spz === \"mock-idol/splat.spz\" && it.assets.splat === \"mock-idol/splat.ply\" && it.source.prompt === null ? 0 : 1)"'
+  check "a local input is recorded by its name only, no folder path (library.json and costs.csv are tracked, library.json is served)" 'node -e "
+    const it = JSON.parse(require(\"fs\").readFileSync(\"$LIB/library.json\", \"utf8\")).items.find(i => i.id === \"mock-idol\")
+    process.exit(it && it.source.input === require(\"path\").basename(\"$IMG\") ? 0 : 1)" && ! grep -q "/Users/\|$(pwd)" "$LIB/costs.csv"' "$(grep -o '\"input\": *\"[^\"]*\"' "$LIB/library.json" | sort -u | tr '\n' ' ')"
+  check "sam3d adds write splat.spz too (count = its splat.ply's, under the cap)" '[ -f $LIB/mock-sam/splat.spz ] && node -e "const f=$(splat_facts "$LIB/mock-sam/splat.ply" "$LIB/mock-sam/splat.spz"); process.exit(f.spz_count===Math.min(f.ply_count,262144) && f.spz_version===2 ? 0 : 1)"'
+  if run idol-rescale --rescale mock-idol --dims 70x85x100 --library "$LIB"; then
+    f2=$(splat_facts "$LIB/mock-idol/splat.ply" "$LIB/mock-idol/splat.spz")
+    b2=$(evals/py evals/glb_info.py "$LIB/mock-idol/model.glb" | json "o.bounds.flat().map(v=>v.toFixed(3)).join(' ')")
+    check "--rescale an idol item refits the stand-in box, splat.ply and splat.spz per axis (70 x 100 x 85 cm), \$0" 'node -e "
+      const f=$f2, want=[0.7,1.0,0.85]
+      process.exit(f.extent.every((v,i)=>Math.abs(v-want[i])/want[i]<=0.02) && f.spz_count===262144 ? 0 : 1)" && [ "$b2" = "-0.350 0.000 -0.425 0.350 1.000 0.425" ] && [ "$(lastline $OUT/idol-rescale.out | json "o.cost_usd")" = 0 ]' "box $b2; $f2"
+  else
+    bad "--rescale an idol item — $(tail -n 2 "$OUT/idol-rescale.err" | tr '\n' ' ')"
+  fi
+else
+  bad "an image add with no --engine runs (idol is the default) — $(tail -n 3 "$OUT/idol.err" | tr '\n' ' ')"
+fi
+if run idol-prompt "$IMG" --engine idol --prompt chair --name "Idol Prompt" --id idol-prompt --dims 60x60x80 --library "$LIB"; then
+  check "--prompt with idol is ignored with a note" 'grep -q "prompt only applies to sam3d" $OUT/idol-prompt.out'
+else
+  bad "idol with --prompt — $(tail -n 1 "$OUT/idol-prompt.err")"
+fi
+if MIDSTUDY_FAL_MOCK_COST=1 run idol-paid "$IMG" --engine idol --name "Idol Paid Mock" --id idol-paid --dims 60x60x80 --library "$LIB"; then
+  check "MIDSTUDY_FAL_MOCK_COST=1 records idol at \$0.10" '[ "$(lastline $OUT/idol-paid.out | json "o.cost_usd")" = 0.1 ] && tail -n 1 "$LIB/costs.csv" | grep -q "idol-paid,idol,0.1,true"' "$(tail -n 1 "$LIB/costs.csv")"
+else
+  bad "MIDSTUDY_FAL_MOCK_COST=1 idol run — $(tail -n 1 "$OUT/idol-paid.err")"
+fi
+bad_case idol-model fixtures/models/arrow.glb --engine idol --name "Not A Photo" --dims 100x100x100 --library "$LIB"
+# Above 262,144 splats, splat.spz keeps the ones that cover the most (opacity x area), not the most opaque: a live
+# SAM 3D splat (878k) kept by opacity alone shrank to 77-94 % of its extent and looked see-through (verify v1.1).
+cover=$(uv run --project pipeline python -c "
+import json, numpy as np, tempfile
+from pathlib import Path
+from midstudy_pipeline import splat
+rng = np.random.default_rng(1)
+names = ['x','y','z','f_dc_0','f_dc_1','f_dc_2','opacity','scale_0','scale_1','scale_2','rot_0','rot_1','rot_2','rot_3']
+n_in, n_out = 300000, 100000   # many small fully opaque splats inside, fewer big half-opaque ones on a 1 m shell
+d = np.zeros(n_in + n_out, dtype=[(k, '<f4') for k in names])
+p = rng.normal(size=(n_in + n_out, 3)); p /= np.linalg.norm(p, axis=1, keepdims=True)
+p[:n_in] *= rng.uniform(0, 0.3, (n_in, 1))
+for i, k in enumerate('xyz'): d[k] = p[:, i]
+d['opacity'][:n_in], d['opacity'][n_in:] = 8.0, 0.0
+for k in ('scale_0', 'scale_1', 'scale_2'): d[k][:n_in], d[k][n_in:] = np.log(0.002), np.log(0.03)
+d['rot_0'] = 1.0
+t = Path(tempfile.mkdtemp())
+splat.write_ply(t / 'in.ply', d)
+r = splat.write_spz(t / 'in.ply', t / 'out.spz')
+_, xyz = splat.read_spz(t / 'out.spz')
+print(json.dumps({'count': r['count'], 'radius_p99': float(np.percentile(np.linalg.norm(xyz, axis=1), 99))}))
+" 2>&1 | tail -n 1)
+check "splat.spz above 262,144 splats keeps the ones that cover the most: a 1 m shell of big half-opaque splats survives" 'node -e "const c=$cover; process.exit(c.count===262144 && c.radius_p99>0.95 ? 0 : 1)"' "$cover"
+
 # --- costs + contract validation (L2) ----------------------------------------
 check "costs.csv has a header and one row per successful run" '[ "$(tail -n +2 "$LIB/costs.csv" 2>/dev/null | grep -c .)" -ge 6 ]' "$(cat "$LIB/costs.csv" 2>/dev/null | tr '\n' ' ')"
 check "costs.csv columns are date,id,engine,cost_usd,mock,input" '[ "$(head -n 1 "$LIB/costs.csv" 2>/dev/null)" = "date,id,engine,cost_usd,mock,input" ]'
 check "mock runs record \$0 and mock=true" 'node -e "
   const rows = require(\"fs\").readFileSync(\"$LIB/costs.csv\", \"utf8\").trim().split(\"\n\").slice(1).map(r => r.split(\",\"))
-  process.exit(rows.length && rows.every(r => r[4] === \"true\" && (Number(r[3]) === 0 || r[1] === \"paid-mock\")) ? 0 : 1)"' "$(cat "$LIB/costs.csv" 2>/dev/null | tr '\n' ' ')"
+  process.exit(rows.length && rows.every(r => r[4] === \"true\" && (Number(r[3]) === 0 || r[1] === \"paid-mock\" || r[1] === \"idol-paid\")) ? 0 : 1)"' "$(cat "$LIB/costs.csv" 2>/dev/null | tr '\n' ' ')"
 if evals/py evals/validate_library.py "$LIB/library.json" >"$OUT/validate.out" 2>&1; then
   ok "library passes evals/validate_library.py"
 else

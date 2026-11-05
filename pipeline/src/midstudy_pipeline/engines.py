@@ -12,22 +12,25 @@ import numpy as np
 from . import MidstudyError, frames
 from .rug import foreground_mask
 
-ENDPOINTS = {"sam3d": "fal-ai/sam-3/3d-objects", "trellis2": "fal-ai/trellis-2"}
+ENDPOINTS = {"idol": "speridlabs/idol", "sam3d": "fal-ai/sam-3/3d-objects", "trellis2": "fal-ai/trellis-2"}
 TRELLIS_COST = {512: 0.25, 1024: 0.30, 1536: 0.35}
+IDOL_GAUSSIANS = 262_144  # fal's default and Idol's measured output (contract §3.2)
 
 
 def cost_usd(engine: str, resolution: int) -> float:
-    return {"sam3d": 0.02, "trellis2": TRELLIS_COST.get(resolution, 0.0), "glb": 0.0, "rug": 0.0}[engine]
+    return {"idol": 0.10, "sam3d": 0.02, "trellis2": TRELLIS_COST.get(resolution, 0.0), "glb": 0.0, "rug": 0.0}[engine]
 
 
 def arguments(engine: str, image_url: str, prompt: str, resolution: int) -> dict:
+    if engine == "idol":
+        return {"image_url": image_url, "image_type": "real", "num_gaussians": IDOL_GAUSSIANS}
     if engine == "sam3d":
         return {"image_url": image_url, "prompt": prompt, "export_textured_glb": True}
     return {"image_url": image_url, "resolution": resolution}
 
 
 def mock_slug(endpoint: str) -> str:
-    """fal-ai/sam-3/3d-objects -> sam-3-3d-objects, fal-ai/trellis-2 -> trellis-2."""
+    """fal-ai/sam-3/3d-objects -> sam-3-3d-objects, fal-ai/trellis-2 -> trellis-2, speridlabs/idol -> speridlabs-idol."""
     return endpoint.removeprefix("fal-ai/").replace("/", "-")
 
 
@@ -135,7 +138,8 @@ def _file_url(resp: dict, key: str, list_key: str | None = None) -> str | None:
 
 
 def run(fal, engine: str, image: Path, prompt: str, resolution: int, raw_dir: Path) -> dict:
-    """Run an image engine. Returns {"glb": Path, "splat": Path | None} inside raw_dir (untouched outputs)."""
+    """Run an image engine. Returns {"glb": Path | None, "splat": Path | None, "splat_to_glb": 3x3} inside raw_dir
+    (untouched outputs). idol returns no GLB: the caller writes the stand-in box."""
     endpoint = ENDPOINTS[engine]
     raw_dir.mkdir(parents=True, exist_ok=True)
     image_url = fal.upload(image)
@@ -146,8 +150,10 @@ def run(fal, engine: str, image: Path, prompt: str, resolution: int, raw_dir: Pa
         try:
             resp = fal.call(endpoint, args)
             break
-        except NoMasks:
-            if engine != "sam3d" or attempt == 2:
+        except NoMasks as e:
+            if engine != "sam3d":
+                raise MidstudyError(f"fal call to {endpoint} failed ({e})") from None  # the retries are SAM 3D's own
+            if attempt == 2:
                 raise MidstudyError(f"SAM 3D found no {prompt} in the picture, even with a mask of the piece. Use a "
                                     "photo of the piece on its own against a plain background, or try TRELLIS 2. For a "
                                     "rug seen from above, choose Flat rug (free)") from None
@@ -170,6 +176,13 @@ def run(fal, engine: str, image: Path, prompt: str, resolution: int, raw_dir: Pa
     (raw_dir / "response.json").write_text(json.dumps(resp, indent=2) + "\n")
     (raw_dir / "request.json").write_text(json.dumps(args, indent=2) + "\n")
 
+    if engine == "idol":
+        # model_mesh is the splat (a PLY, despite the name), the only file fetched; model_glb is a point-cloud preview
+        # of the splat centers and preprocessed_image the crop Idol saw: neither is fetched (contract §3.2).
+        splat_url = _file_url(resp, "model_mesh")
+        if not splat_url:
+            raise MidstudyError(f"{endpoint} returned no model_mesh (the splat)")
+        return {"glb": None, "splat": fal.fetch(splat_url, raw_dir), "splat_to_glb": np.eye(3)}
     if engine == "sam3d":
         glb_url = _file_url(resp, "model_glb", "individual_glbs")
         splat_url = _file_url(resp, "gaussian_splat", "individual_splats")

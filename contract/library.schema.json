@@ -45,6 +45,7 @@
           "properties": {
             "glb": { "$ref": "#/$defs/relpath" },
             "splat": { "oneOf": [{ "$ref": "#/$defs/relpath" }, { "type": "null" }] },
+            "spz": { "oneOf": [{ "$ref": "#/$defs/relpath" }, { "type": "null" }] },
             "thumb": { "oneOf": [{ "$ref": "#/$defs/relpath" }, { "type": "null" }] }
           }
         },
@@ -54,7 +55,7 @@
           "required": ["engine", "input", "cost_usd", "created"],
           "additionalProperties": false,
           "properties": {
-            "engine": { "enum": ["sam3d", "trellis2", "glb", "rug", "fixture"] },
+            "engine": { "enum": ["idol", "sam3d", "trellis2", "glb", "rug", "fixture"] },
             "input": { "type": "string" },
             "prompt": { "type": ["string", "null"] },
             "cost_usd": { "type": "number", "minimum": 0 },

@@ -267,6 +267,53 @@ def self_check(bounds: np.ndarray, dims_m: np.ndarray) -> None:
         raise MidstudyError(f"self-check failed: GLB min y is {y0:.3f} m, max {FLOOR_TOL * 100:.1f} cm from 0")
 
 
+def stand_in_box(dims_m: np.ndarray, out: Path) -> dict:
+    """The stand-in model.glb of a splat-only item (idol, contract §1): a plain box exactly at dims_m (w, h, d) in the
+    item frame (footprint centered at x = z = 0, min y = 0), one untextured material, no images. The planner never
+    draws it: it gives the item its exact size for picking, dragging, stacking, worldBounds and the contact shadow.
+    Returns the per-axis fit error in percent after the §1 self-check."""
+    w, h, d = (float(v) for v in dims_m)
+    x0, x1, y0, y1, z0, z1 = -w / 2, w / 2, 0.0, h, -d / 2, d / 2
+    faces = [  # 4 corners counterclockwise seen from outside, and the normal
+        ([(x1, y0, z1), (x1, y0, z0), (x1, y1, z0), (x1, y1, z1)], (1, 0, 0)),
+        ([(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)], (-1, 0, 0)),
+        ([(x0, y1, z1), (x1, y1, z1), (x1, y1, z0), (x0, y1, z0)], (0, 1, 0)),
+        ([(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)], (0, -1, 0)),
+        ([(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)], (0, 0, 1)),
+        ([(x1, y0, z0), (x0, y0, z0), (x0, y1, z0), (x1, y1, z0)], (0, 0, -1)),
+    ]
+    pos = np.array([p for quad, _ in faces for p in quad], np.float32)
+    nrm = np.array([n for _, n in faces for _ in range(4)], np.float32)
+    idx = np.array([[4 * f, 4 * f + 1, 4 * f + 2, 4 * f, 4 * f + 2, 4 * f + 3] for f in range(6)], np.uint16).ravel()
+    pb, nb, ib = pos.tobytes(), nrm.tobytes(), idx.tobytes()
+    blob = pb + nb + ib + b"\0" * (-len(ib) % 4)
+    doc = {
+        "asset": {"version": "2.0", "generator": "midstudy-add stand-in"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "stand-in", "mesh": 0}],
+        "meshes": [{"name": "stand-in", "primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1}, "indices": 2, "material": 0}]}],
+        "materials": [{"name": "stand-in", "pbrMetallicRoughness": {"baseColorFactor": [0.6, 0.6, 0.6, 1.0],
+                                                                    "metallicFactor": 0.0, "roughnessFactor": 1.0}}],
+        "buffers": [{"byteLength": len(blob)}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": len(pb), "target": 34962},
+            {"buffer": 0, "byteOffset": len(pb), "byteLength": len(nb), "target": 34962},
+            {"buffer": 0, "byteOffset": len(pb) + len(nb), "byteLength": len(ib), "target": 34963},
+        ],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": len(pos), "type": "VEC3",
+             "min": [float(v) for v in pos.min(axis=0)], "max": [float(v) for v in pos.max(axis=0)]},
+            {"bufferView": 1, "componentType": 5126, "count": len(nrm), "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5123, "count": len(idx), "type": "SCALAR"},
+        ],
+    }
+    write_glb(out, doc, blob)
+    bounds = measure(out)
+    self_check(bounds, dims_m)
+    return errors_pct(bounds, dims_m)
+
+
 def normalize(src: Path, rotation: np.ndarray, dims_m: np.ndarray, out: Path) -> dict:
     """Write `out` in the item frame: rotated, footprint centered, on the floor, scaled per axis to dims_m (w, h, d).
 

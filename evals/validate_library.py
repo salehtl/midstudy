@@ -6,7 +6,9 @@ Usage (from the repo root):
 
 Prints one line per item and exits non-zero if anything fails.
 """
+import gzip
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -20,9 +22,15 @@ SCHEMA = json.loads((REPO / "contract" / "library.schema.json").read_text())
 GLB_DIM_TOL = 0.02     # per axis
 GLB_CENTER_TOL = 0.01  # m, footprint center
 GLB_FLOOR_TOL = 0.005  # m, min y
-SPLAT_H_TOL = 0.05
-SPLAT_FLOOR_TOL = 0.03
-SPLAT_CENTER_TOL = 0.05
+SPLAT_DIM_TOL = 0.02     # per axis, on the engine's percentile extent (§1)
+SPLAT_FLOOR_TOL = 0.01   # m
+SPLAT_CENTER_TOL = 0.01  # m
+# §1: the extent of a splat is a percentile range of its centers, by engine (measured on the fixtures).
+SPLAT_PCT = {"idol": (0.1, 99.9)}
+SPLAT_PCT_DEFAULT = (1.0, 99.0)
+SPZ_MAX_SPLATS = 262_144
+SPZ_MAX_BYTES = 6 * 1024 * 1024
+SPZ_POS_TOL = 0.005      # m: spz extent vs splat.ply extent (24-bit fixed point, 12 fractional bits)
 
 PLY_TYPES = {"float": "<f4", "float32": "<f4", "double": "<f8", "float64": "<f8",
              "uchar": "u1", "uint8": "u1", "char": "i1", "int8": "i1",
@@ -77,18 +85,67 @@ def check_glb(path: Path, dims_m: np.ndarray) -> list[str]:
     return errs
 
 
-def check_splat(path: Path, dims_m: np.ndarray) -> list[str]:
+def splat_extent(xyz: np.ndarray, engine: str) -> tuple[np.ndarray, np.ndarray]:
+    lo_pct, hi_pct = SPLAT_PCT.get(engine, SPLAT_PCT_DEFAULT)
+    return np.percentile(xyz, lo_pct, axis=0), np.percentile(xyz, hi_pct, axis=0)
+
+
+def check_splat(path: Path, dims_m: np.ndarray, engine: str) -> tuple[list[str], np.ndarray]:
     xyz = read_ply_xyz(path)
-    lo, hi = np.percentile(xyz, 1, axis=0), np.percentile(xyz, 99, axis=0)
+    lo, hi = splat_extent(xyz, engine)
+    lo_pct, hi_pct = SPLAT_PCT.get(engine, SPLAT_PCT_DEFAULT)
     errs = []
-    h, target = hi[1] - lo[1], dims_m[1]
-    if abs(h - target) / target > SPLAT_H_TOL:
-        errs.append(f"splat height (p1-p99) is {h * 100:.1f} cm, expected {target * 100:.1f} cm")
+    size = hi - lo
+    err = np.abs(size - dims_m) / dims_m
+    for axis, e, sz, t in zip("whd", err, size, dims_m):
+        if e > SPLAT_DIM_TOL:
+            errs.append(f"splat {axis} (p{lo_pct:g}-p{hi_pct:g}) is {sz * 100:.1f} cm, expected {t * 100:.1f} cm "
+                        f"({e:.1%} off, max {SPLAT_DIM_TOL:.0%})")
     if abs(lo[1]) > SPLAT_FLOOR_TOL:
-        errs.append(f"splat floor (p1 y) is {lo[1]:.3f} m, expected 0")
+        errs.append(f"splat floor (p{lo_pct:g} y) is {lo[1]:.3f} m, expected 0 (±{SPLAT_FLOOR_TOL * 100:.0f} cm)")
     cx, cz = (lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2
     if abs(cx) > SPLAT_CENTER_TOL or abs(cz) > SPLAT_CENTER_TOL:
-        errs.append(f"splat footprint center is ({cx:.3f}, {cz:.3f}) m, expected (0, 0)")
+        errs.append(f"splat footprint center is ({cx:.3f}, {cz:.3f}) m, expected (0, 0) (±{SPLAT_CENTER_TOL * 100:.0f} cm)")
+    return errs, xyz
+
+
+def read_spz_xyz(path: Path) -> tuple[dict, np.ndarray]:
+    """Header and positions of a gzipped SPZ v2 file (§1)."""
+    packed = path.read_bytes()
+    if len(packed) > SPZ_MAX_BYTES:
+        raise ValueError(f"splat.spz is {len(packed) / 1e6:.1f} MB, max {SPZ_MAX_BYTES / 2**20:.0f} MB")
+    if packed[:2] != b"\x1f\x8b":
+        raise ValueError("splat.spz is not gzip-compressed")
+    raw = gzip.decompress(packed)
+    magic, version, count, sh, frac, flags, _ = struct.unpack_from("<IIIBBBB", raw, 0)
+    head = {"magic": magic, "version": version, "count": count, "sh_degree": sh, "fractional_bits": frac, "bytes": len(packed)}
+    if magic != 0x5053474E:
+        raise ValueError(f"splat.spz magic is {magic:#x}, expected 0x5053474e (NGSP)")
+    if version != 2 or sh != 0 or frac != 12:
+        raise ValueError(f"splat.spz header {head}: expected version 2, SH degree 0, 12 fractional bits")
+    if not 0 < count <= SPZ_MAX_SPLATS:
+        raise ValueError(f"splat.spz has {count} splats, expected 1–{SPZ_MAX_SPLATS}")
+    want = 16 + count * (9 + 1 + 3 + 3 + 3)
+    if len(raw) != want:
+        raise ValueError(f"splat.spz holds {len(raw)} bytes unpacked, expected {want} for {count} splats with SH 0")
+    b = np.frombuffer(raw, dtype=np.uint8, count=count * 9, offset=16).reshape(count, 3, 3).astype(np.int32)
+    v = b[..., 0] | (b[..., 1] << 8) | (b[..., 2] << 16)
+    v = np.where(v & 0x800000, v - (1 << 24), v)
+    return head, v.astype(np.float64) / (1 << frac)
+
+
+def check_spz(path: Path, ply_xyz: np.ndarray | None, engine: str) -> list[str]:
+    head, xyz = read_spz_xyz(path)
+    errs = []
+    if ply_xyz is not None:
+        n_ply = len(ply_xyz)
+        if n_ply <= SPZ_MAX_SPLATS and head["count"] != n_ply:
+            errs.append(f"splat.spz has {head['count']} splats, splat.ply {n_ply} (all of them fit under {SPZ_MAX_SPLATS})")
+        lo_p, hi_p = splat_extent(ply_xyz, engine)
+        lo_s, hi_s = splat_extent(xyz, engine)
+        off = max(np.abs(lo_p - lo_s).max(), np.abs(hi_p - hi_s).max())
+        if off > SPZ_POS_TOL + (0.02 * float((hi_p - lo_p).max()) if n_ply > SPZ_MAX_SPLATS else 0):
+            errs.append(f"splat.spz extent differs from splat.ply's by {off * 100:.1f} cm (same frame and positions expected)")
     return errs
 
 
@@ -116,7 +173,8 @@ def validate(library_path: Path) -> int:
         dims_m = np.array([item["dims_cm"]["w"], item["dims_cm"]["h"], item["dims_cm"]["d"]]) / 100
         errs = []
         assets = item["assets"]
-        for key in ["glb", "splat", "thumb"]:
+        engine = item["source"]["engine"]
+        for key in ["glb", "splat", "spz", "thumb"]:
             if assets.get(key) and not (base / assets[key]).is_file():
                 errs.append(f"{key} asset missing: {assets[key]}")
         if not errs:
@@ -124,13 +182,24 @@ def validate(library_path: Path) -> int:
                 errs += check_glb(base / assets["glb"], dims_m)
             except Exception as e:  # noqa: BLE001 - report any load failure as a check failure
                 errs.append(f"GLB failed to load: {e}")
+            ply_xyz = None
             if assets.get("splat"):
                 try:
-                    errs += check_splat(base / assets["splat"], dims_m)
+                    serr, ply_xyz = check_splat(base / assets["splat"], dims_m, engine)
+                    errs += serr
                 except Exception as e:  # noqa: BLE001
                     errs.append(f"splat failed to load: {e}")
-        if item["default_render"] == "splat" and not assets.get("splat"):
+            if assets.get("spz"):
+                try:
+                    errs += check_spz(base / assets["spz"], ply_xyz, engine)
+                except Exception as e:  # noqa: BLE001
+                    errs.append(f"splat.spz failed to load: {e}")
+        if item["default_render"] == "splat" and not (assets.get("splat") or assets.get("spz")):
             errs.append("default_render is splat but there is no splat asset")
+        if engine in ("idol", "sam3d") and assets.get("splat") and not assets.get("spz"):
+            errs.append(f"a {engine} item with splat.ply must also have splat.spz (§1)")
+        if engine == "idol" and (item["default_render"] != "splat" or not assets.get("splat")):
+            errs.append("an idol item draws its splat: default_render must be splat, with assets.splat (§3.2)")
         if errs:
             failures += 1
             print(f"FAIL {item['id']}: " + "; ".join(errs))

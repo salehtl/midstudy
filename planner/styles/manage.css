@@ -59,7 +59,12 @@
 .ms-seg { width: 100%; height: auto; min-height: 32px; }
 .ms-seg > button { flex: 1 1 0; min-width: 0; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ms.is-phone .ms-seg { padding: 3px; border-radius: var(--radius-panel); }
-.ms.is-phone .ms-seg > button { height: 40px; font-size: 14px; border-radius: 8px; }
+/* each choice is itself a 44 px touch target (contract §2.3), not just the control around it */
+.ms.is-phone .ms-seg > button { height: 44px; font-size: 14px; border-radius: 8px; }
+/* the Add form's Model choice: four names on one row, even at 390 px. Each button starts at its label's width and
+   shares the rest, so a short name (Idol) leaves room for a long one (TRELLIS 2) instead of cutting it. */
+.ms-seg.ms-seg-engine > button { flex: 1 1 auto; padding: 0 8px; }
+.ms.is-phone .ms-seg.ms-seg-engine > button { flex: 1 1 auto; padding: 0 6px; }
 .ms-toggle { padding: 2px 0; }
 .ms.is-phone .ms-toggle { min-height: 44px; }
 .ms-error { margin: 0; padding: 10px 12px; border-radius: var(--radius-control); background: color-mix(in srgb, var(--color-danger) 12%, transparent); color: var(--color-danger); font-size: var(--text-body-desktop); line-height: 18px; }

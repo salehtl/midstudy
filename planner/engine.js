@@ -7,11 +7,17 @@
 //   1. furniture pass, into a half-float MSAA target: an optional depth pre-pass writes the photo's depth (depth.png,
 //      + 3 cm) into the depth buffer with colour writes off, then the pieces, their contact shadows and the floor grid
 //      draw on top of it (so the real sofa hides a piece behind it);
-//   2. the screen: the photo, drawn exactly as its bytes are (no tone mapping, exposure or warmth), contain-fit in the
+//   2. splat pass (only while splat items are placed, §4.5 Splats): Spark draws the splats (camera layer SPLAT_LAYER,
+//      nothing else) into a second half-float target that shares the furniture pass's depth texture, so splats test
+//      against the photo's depth and the meshes (3 cm tolerance, like meshes) and write none. Their GLB (the stand-in
+//      box for idol) is in the scene but invisible: it picks, drags, bounds and casts the contact shadow.
+//   3. the screen: the photo, drawn exactly as its bytes are (no tone mapping, exposure or warmth), contain-fit in the
 //      uncovered part of the window (letterbox bars), then the furniture pass composited over it with the Look
-//      (exposure, warmth), ACES Filmic and sRGB applied to the furniture only.
+//      (exposure, warmth), ACES Filmic and sRGB applied to the furniture only, then the splat pass over that: splat
+//      colours are photo colours, so only exposure × warmth applies to them, as a plain multiplier (no ACES). Contact
+//      shadows live in the furniture pass, so they never darken a splat.
 //   Zoom and pan are 2D (camera.setViewOffset over the photo's rectangle); the camera block never changes for them.
-//   Renders capture the same two passes at the photo's own resolution (no view offset, no UI).
+//   Renders capture the same passes at the photo's own resolution (no view offset, no UI), splats sorted first.
 //
 // Coordinates: "photo px" are contract §4.1 pixels on photo.jpg at its full size; "client px" are CSS pixels in the
 // window. projectPhoto(), photoToFloor() and floorToPhoto() implement §4.1 exactly; picking uses the same rays.
@@ -49,7 +55,7 @@
 //   saveLayoutInternal(name, { title }), loadLayoutInternal(name), deleteLayoutInternal(name) → the doc (for Undo),
 //   restoreLayoutInternal(doc), listLayoutsInternal(), refreshLayouts()
 //   captureComposite({ maxPx, quality }), captureMask(), postRender(shot, opts), renderViewInternal(opts),
-//   listRendersInternal(), compare(a, b)
+//   listRendersInternal(), compare(a, b), settleSplats() (sort the splats for the camera now; renderViewInternal does)
 //   reportError(msg, err) → Error, toast(text, kind, ms), onFrame(fn), worldToScreen(p) → { x, y, visible } (client px)
 //   projectPhoto(p) → [px, py, d], photoToFloor(px, py), floorToPhoto(p), clientToPhoto(x, y), photoToClient(px, py)
 // Events (engine.events, CustomEvents; read e.detail)
@@ -187,7 +193,10 @@ const photoScene = new THREE.Scene()
 photoScene.add(fsMesh(photoMat))
 
 // 2. the furniture, composited over the photo: un-premultiply, warmth tint, exposure + ACES Filmic, sRGB.
-const furnRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4, depthBuffer: true })
+// Its depth (the photo's depth pass, then the meshes) is resolved into a texture that the splat target shares.
+const furnDepth = new THREE.DepthTexture(1, 1)
+const furnRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4, depthBuffer: true, depthTexture: furnDepth })
+const splatRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true, depthTexture: furnDepth })
 const compMat = new THREE.ShaderMaterial({
   uniforms: { tFurn: { value: furnRT.texture }, uRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uTarget: { value: new THREE.Vector2(1, 1) }, uTint: { value: new THREE.Vector3(1, 1, 1) }, uExposure: { value: 1 } },
   vertexShader: fsVert,
@@ -221,6 +230,27 @@ void main() {
 })
 const compScene = new THREE.Scene()
 compScene.add(fsMesh(compMat))
+// 3. the splats, composited over that: Spark wrote them linear and premultiplied (a render target's colour space is
+// linear), so un-premultiply, then the plain Look multiplier (exposure × warmth tint), then sRGB: at the default Look a
+// splat shows its own colour, the photo's. uRect and uTarget are compMat's own uniforms (always the same values).
+const splatCompMat = new THREE.ShaderMaterial({
+  uniforms: { tSplat: { value: splatRT.texture }, uRect: compMat.uniforms.uRect, uTarget: compMat.uniforms.uTarget, uGain: { value: new THREE.Vector3(1, 1, 1) } },
+  vertexShader: fsVert,
+  fragmentShader: `${PHOTO_UV}
+uniform sampler2D tSplat;
+uniform vec3 uGain;
+vec3 srgb(vec3 c) { return mix(c * 12.92, pow(c, vec3(1.0 / 2.4)) * 1.055 - 0.055, step(0.0031308, c)); }
+void main() {
+  if (!inPhoto(photoUv())) discard;
+  vec4 c = texture2D(tSplat, gl_FragCoord.xy / uTarget);
+  if (c.a <= 0.002) discard;
+  vec3 rgb = srgb(clamp(c.rgb / c.a * uGain, 0.0, 1.0));
+  gl_FragColor = vec4(rgb, min(c.a, 1.0));
+}`,
+  transparent: true, depthTest: false, depthWrite: false, toneMapped: false,
+})
+const splatCompScene = new THREE.Scene()
+splatCompScene.add(fsMesh(splatCompMat))
 
 // The furniture scene: lights, the depth pre-pass, the grid, the pieces.
 const scene = new THREE.Scene()
@@ -419,7 +449,24 @@ window.addEventListener('resize', () => {
 })
 function resizeTargets() {
   renderer.getDrawingBufferSize(drawSize)
-  furnRT.setSize(Math.max(1, drawSize.x), Math.max(1, drawSize.y))
+  sizeTargets(Math.max(1, drawSize.x), Math.max(1, drawSize.y))
+}
+// The furniture and splat targets share one depth texture, so they always change size together.
+function sizeTargets(w, h) {
+  if (splatRT.width !== w || splatRT.height !== h) splatDrawn = null // a new size drops the target's contents
+  furnRT.setSize(w, h)
+  splatRT.setSize(w, h)
+}
+// The splat pass is the expensive one (hundreds of thousands of splats; seconds per frame in software rendering), and
+// most frames change nothing it draws (the UI wakes the loop, a toast, the grid). So it's redrawn only when its key
+// changes: the camera and view, the target size, the occlusion depth, every placed piece's transform (meshes hide
+// splats), and splatEpoch, which Spark's onDirty (a load, generate or sort landed) and every rebuilt piece bump.
+let splatEpoch = 0
+let splatDrawn = null
+function splatKey() {
+  const k = [splatEpoch, splatRT.width, splatRT.height, depthPass.visible ? 1 : 0, depthMat.uniforms.uScale.value, photo.depthTexture?.id ?? -1, ...camera.projectionMatrix.elements, ...camera.matrixWorld.elements]
+  for (const r of items.values()) k.push(r.uid, ...r.group.matrixWorld.elements)
+  return k.join(',')
 }
 resizeTargets()
 
@@ -591,8 +638,43 @@ async function readLibrary() {
     reportError(`Could not read library ${LIBRARY_URL}`, e)
   }
   library = list
+  syncPlaced()
   emit('library', { items: library.slice() })
   quiet(makeMissingThumbs())
+}
+
+// After a library change (Shows as, a rescale, a re-add: data.js reloads the library), placed copies whose entry
+// changed what they draw are rebuilt in place: same uid, group (position, rotation, elevation) and selection. A copy
+// whose entry is gone keeps drawing what it has; renames just take the new entry.
+function syncPlaced() {
+  for (const rec of items.values()) {
+    if (rec.missing) continue
+    const lib = library.find((l) => l.id === rec.id)
+    if (!lib) continue
+    const sig = libSig(lib)
+    if (sig === rec.sig) { rec.lib = lib; continue }
+    const was = JSON.parse(rec.sig)
+    const now = JSON.parse(sig)
+    if (JSON.stringify(was.slice(1)) !== JSON.stringify(now.slice(1))) {
+      // the files may have been rewritten at the same paths (a rescale or a re-add): read them again
+      for (const rel of [rec.lib.assets?.glb, rec.lib.assets?.spz, rec.lib.assets?.splat, lib.assets?.glb, lib.assets?.spz, lib.assets?.splat]) {
+        if (rel) { glbCache.delete(assetUrl(rel)); splatBytes.delete(assetUrl(rel)) }
+      }
+    }
+    rec.sig = sig
+    quiet(rebuildItem(rec, lib))
+  }
+}
+async function rebuildItem(rec, lib) {
+  const token = ++rec.build
+  let built
+  try { built = await buildChild(lib) } catch (e) { throw reportError(`Could not reload "${lib.name || rec.id}"`, e) }
+  if (token !== rec.build || items.get(rec.uid) !== rec) { disposeBuilt(built); return }
+  detachBuilt(rec)
+  rec.lib = lib
+  attachBuilt(rec, built)
+  rec.group.updateMatrixWorld(true)
+  emit('items', { change: 'render', uid: rec.uid })
 }
 
 // --- thumbnails for pieces added from a 3D file ----------------------------------------------------------------------
@@ -608,7 +690,9 @@ async function makeMissingThumbs() {
   thumbsRunning = true
   try {
     for (;;) {
-      const lib = library.find((l) => l.assets?.glb && !l.assets?.thumb && !l.missing && !thumbTried.has(l.id))
+      // never from a GLB that isn't what's drawn: a splat item's (an idol item's is a stand-in box, §1); their adds
+      // made a thumbnail from the photo anyway
+      const lib = library.find((l) => l.assets?.glb && !l.assets?.thumb && !l.missing && !isStandIn(l) && pickRender(l) !== 'splat' && !thumbTried.has(l.id))
       if (!lib) break
       thumbTried.add(lib.id)
       let image
@@ -674,6 +758,88 @@ function loadGlbTemplate(url) {
   return glbCache.get(url)
 }
 
+// --- splats (contract §4.5 Splats): Spark 2.4.0 from the importmap, imported on the first splat item ---------------------
+// A splat item is its GLB (or a box at its dims), invisible, plus a SplatMesh: both children of the item's group, so
+// position, rotation and elevation move them together. The SplatMesh and the SparkRenderer live on SPLAT_LAYER only:
+// the furniture pass and the keep-room mask never draw them, and the raycaster (layer 0) picks the GLB, not the splat.
+// Spark settings: sortRadial false orders by depth along the view (as nook did); everything else is Spark's default
+// (nook kept the defaults on phones), with LoD off (furniture splats have no LoD tree). onDirty wakes the on-demand
+// render loop when a load or a sort lands, so a splat appears without the pointer moving.
+const SPLAT_LAYER = 1
+let sparkModule = null // Promise<module>
+let spark = null       // the SparkRenderer
+function loadSpark() {
+  if (!sparkModule) {
+    sparkModule = import('@sparkjsdev/spark').then((m) => {
+      if (!spark) {
+        spark = new m.SparkRenderer({ renderer, onDirty: () => { splatEpoch++; wake(50) }, sortRadial: false, enableLod: false })
+        spark.name = 'spark'
+        spark.layers.set(SPLAT_LAYER)
+        spark.raycast = () => {}
+        scene.add(spark)
+      }
+      return m
+    })
+  }
+  return sparkModule
+}
+const splatBytes = new Map() // url -> Promise<Uint8Array> (Spark copies them before parsing, so they can be reused)
+function loadSplatBytes(url) {
+  if (!splatBytes.has(url)) {
+    const p = fetchBytes(url)
+    splatBytes.set(url, p)
+    p.catch(() => splatBytes.delete(url))
+  }
+  return splatBytes.get(url)
+}
+const splatAsset = (lib) => lib?.assets?.spz || lib?.assets?.splat || null // the SPZ first: what phones can load
+// An idol item's GLB is a stand-in box at its dims (§1): never drawn, never a thumbnail.
+const isStandIn = (lib) => lib?.source?.engine === 'idol'
+// What a library entry draws as: its splat when default_render is "splat" and it has one, else its GLB.
+const pickRender = (lib) => (!lib?.missing && lib?.default_render === 'splat' && splatAsset(lib) ? 'splat' : 'glb')
+async function loadSplatMesh(lib) {
+  const { SplatMesh } = await loadSpark()
+  const url = assetUrl(splatAsset(lib))
+  const bytes = await loadSplatBytes(url)
+  const mesh = new SplatMesh({ fileBytes: bytes, fileName: url.split(/[?#]/)[0] })
+  try {
+    await mesh.initialized
+    if (!(mesh.numSplats > 0)) throw new Error('the splat has no points')
+  } catch (e) {
+    try { mesh.dispose() } catch { /* ignore */ }
+    throw e
+  }
+  mesh.name = 'splat'
+  mesh.layers.set(SPLAT_LAYER)
+  mesh.raycast = () => {}
+  return mesh
+}
+// Splat items in the scene (their splat drawn): the splat pass runs only while there are some.
+const splatItemCount = () => { let n = 0; for (const r of items.values()) if (r.splat) n++; return n }
+// Sorts the splats for the camera as it is now and waits for the sort (a capture reads the frame right after).
+// The view offset (zoom, pan) doesn't change the order: it depends on the camera's position and direction only.
+// Settled means a sort that started after the last generate has landed, for the splat set now in the scene: Spark shows
+// a new set (`display`) only once its own sort is done. update() always regenerates for the camera and marks the set for
+// sorting, but a sort can't start while the set is still changing (a piece just added): it stays dirty and the next
+// update() takes it from there. So: update, wait for that sort, and repeat until one settles.
+async function settleSplats(timeoutMs = 30000) {
+  if (!spark || !splatItemCount()) return
+  const t0 = performance.now()
+  const left = () => performance.now() - t0 < timeoutMs
+  const settled = () => !spark.sorting && !spark.sortDirty && spark.sortTimeoutId === undefined && spark.display === spark.current
+  for (;;) {
+    while (spark.sorting && left()) await sleep(10)
+    let p
+    camera.layers.set(SPLAT_LAYER) // Spark picks up the SplatMeshes the camera's layers see
+    try { p = spark.update({ scene, camera }) } finally { camera.layers.set(0) }
+    await p
+    const t1 = performance.now()
+    while (!settled() && left() && (spark.sorting || performance.now() - t1 < 300)) await sleep(20)
+    if (settled() || !left()) break
+  }
+  if (!settled()) reportError('The splats were still sorting when the render was captured; try rendering again')
+}
+
 // A piece the library doesn't have any more (§2.8), or one without a GLB (v1 draws GLB only): a dashed box at its dims.
 const MISSING_DIMS = { w: 50, d: 50, h: 50 }
 const missingFill = new THREE.MeshBasicMaterial({ color: 0xe8735a, transparent: true, opacity: 0.14, depthWrite: false })
@@ -693,14 +859,74 @@ function missingChild(dims) {
 }
 const validDims = (d) => d && typeof d === 'object' && ['w', 'd', 'h'].every((k) => isNum(d[k]) && d[k] > 0)
 
-async function buildChild(lib) {
-  if (lib.missing || !lib.assets?.glb) return missingChild(validDims(lib.dims_cm) ? lib.dims_cm : MISSING_DIMS)
+// A splat item without a GLB: a plain box at its dims stands in for it (never drawn, like the idol stand-in).
+const boxMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+function boxChild(dims) {
+  const w = dims.w / 100, d = dims.d / 100, hgt = dims.h / 100
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d).translate(0, hgt / 2, 0), boxMat)
+  m.name = 'splat-box'
+  return { obj: m, box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, hgt, d / 2)) }
+}
+async function glbChild(lib) {
   const t = await loadGlbTemplate(assetUrl(lib.assets.glb))
   return { obj: t.scene.clone(true), box: t.box.clone() }
 }
-function disposeChild(obj) {
-  if (obj?.name === 'missing-item') obj.traverse((c) => c.geometry?.dispose())
+// → { obj, box, splat, render }: obj is what picks, drags, bounds and shadows (the GLB, a box, or the missing box); with
+// render 'splat', obj is invisible and `splat` (a SplatMesh) is what's drawn. A splat that won't load falls back to
+// the GLB (for idol, its stand-in box), with a non-blocking error.
+async function buildChild(lib) {
+  const dims = validDims(lib.dims_cm) ? lib.dims_cm : MISSING_DIMS
+  if (lib.missing) return { ...missingChild(dims), splat: null, render: 'glb' }
+  if (pickRender(lib) === 'splat') {
+    const [base, splat] = await Promise.allSettled([lib.assets?.glb ? glbChild(lib) : boxChild(dims), loadSplatMesh(lib)])
+    if (base.status === 'rejected') {
+      if (splat.status === 'fulfilled') { try { splat.value.dispose() } catch { /* ignore */ } }
+      throw base.reason
+    }
+    if (splat.status === 'fulfilled') {
+      base.value.obj.visible = false
+      return { ...base.value, splat: splat.value, render: 'splat' }
+    }
+    reportError(`Could not load the splat of "${lib.name || lib.id}"; showing ${isStandIn(lib) ? 'its box' : 'its mesh'} instead`, splat.reason)
+    if (!lib.assets?.glb) { disposeChild(base.value.obj); return { ...missingChild(dims), splat: null, render: 'glb' } }
+    return { ...base.value, splat: null, render: 'glb' }
+  }
+  if (!lib.assets?.glb) return { ...missingChild(dims), splat: null, render: 'glb' }
+  return { ...(await glbChild(lib)), splat: null, render: 'glb' }
 }
+// GLB clones share geometry and materials with the cached template; the boxes and the splat are the item's own.
+function disposeChild(obj) {
+  if (obj?.name === 'missing-item' || obj?.name === 'splat-box') obj.traverse((c) => c.geometry?.dispose())
+}
+function disposeBuilt(b) {
+  disposeChild(b?.obj)
+  if (b?.splat) { try { b.splat.dispose() } catch { /* ignore */ } }
+}
+// Puts a built child (buildChild) into the item's group, with its contact shadow; detachBuilt takes it out again.
+function attachBuilt(rec, b) {
+  rec.child = b.obj
+  rec.localBox = b.box
+  rec.splat = b.splat || null
+  rec.render = b.render
+  rec.noGlb = !rec.missing && !rec.lib.assets?.glb && rec.render !== 'splat'
+  rec.group.add(b.obj)
+  if (rec.splat) rec.group.add(rec.splat)
+  rec.shadow = makeContactShadow(rec)
+  rec.group.add(rec.shadow)
+  syncShadow(rec)
+  splatEpoch++
+}
+function detachBuilt(rec) {
+  splatEpoch++
+  for (const o of [rec.child, rec.splat, rec.shadow]) if (o) rec.group.remove(o)
+  disposeBuilt({ obj: rec.child, splat: rec.splat })
+  rec.child = null
+  rec.splat = null
+  rec.shadow = null
+}
+// What a placed copy depends on in its library entry: when this changes (Shows as, a rescale, a re-add), the copy is
+// rebuilt in place (reloadLibrary).
+const libSig = (lib) => JSON.stringify([lib?.default_render ?? null, lib?.assets ?? null, lib?.dims_cm ?? null, lib?.source?.created ?? null, lib?.fit ?? null])
 
 // Where a new piece lands (§4.5): the ray through the middle of the visible photo, else through the middle of its lower
 // third, when that floor point is 1–6 m from the camera; else 2.5 m straight ahead. Then the nearest free spot.
@@ -753,20 +979,14 @@ async function addItemInternal(id, opts = {}) {
   group.rotation.set(0, rot * DEG, 0)
   group.userData.uid = uid
   group.name = `item:${uid}`
-  const rec = { uid, id, lib, group, child: null, localBox: null, rotationDeg: rot, shadow: null, missing: !!lib.missing, noGlb: !lib.missing && !lib.assets?.glb }
+  const rec = { uid, id, lib, sig: libSig(lib), group, child: null, splat: null, render: 'glb', localBox: null, rotationDeg: rot, shadow: null, missing: !!lib.missing, noGlb: false, build: 0 }
   try {
-    const { obj, box } = await buildChild(lib)
-    rec.child = obj
-    rec.localBox = box
-    group.add(obj)
-    rec.shadow = makeContactShadow(rec)
-    group.add(rec.shadow)
-    syncShadow(rec)
+    attachBuilt(rec, await buildChild(lib)) // a splat item: its GLB and its splat have both loaded
   } catch (e) {
     throw reportError(`Could not load "${lib.name || id}"`, e)
   }
   if (gen !== itemsGen) {
-    disposeChild(rec.child)
+    detachBuilt(rec)
     throw new Error(`adding "${id}" was cancelled because the items were cleared`)
   }
   scene.add(group)
@@ -814,7 +1034,8 @@ function removeItemInternal(uid) {
   if (!rec) return
   if (selected === uid) select(null)
   scene.remove(rec.group)
-  disposeChild(rec.child)
+  rec.build++ // a rebuild in flight (reloadLibrary) drops its result
+  detachBuilt(rec)
   items.delete(uid)
   emit('items', { change: 'remove', uid })
 }
@@ -829,7 +1050,7 @@ function worldBounds(rec) {
 }
 function itemInfo(r) {
   return {
-    uid: r.uid, id: r.id, name: r.lib.name || r.id, lib: r.lib, render: 'glb',
+    uid: r.uid, id: r.id, name: r.lib.name || r.id, lib: r.lib, render: r.render,
     position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg,
     missing: !!r.missing, noGlb: !!r.noGlb,
   }
@@ -1561,7 +1782,7 @@ function layoutDoc(name, title = null) {
   return {
     version: 1, name, title: title || null, scene_name: sceneName, library: LIBRARY_URL,
     items: [...items.values()].map((r) => ({
-      uid: r.uid, id: r.id, render: 'glb',
+      uid: r.uid, id: r.id, render: r.render, // what was drawn; on load the library entry decides (§4.5 Splats)
       position: [round(r.group.position.x, 6), round(r.group.position.y, 6), round(r.group.position.z, 6)],
       rotation_y_deg: round(r.rotationDeg, 6),
       ...(validDims(r.lib.dims_cm) ? { dims_cm: { ...r.lib.dims_cm } } : {}), // a placeholder's size if the piece goes missing (§2.8)
@@ -1662,6 +1883,7 @@ function emitLook() { emit('look', getLook()) }
 function applyLook() {
   compMat.uniforms.uExposure.value = look.exposure
   compMat.uniforms.uTint.value.copy(warmthTint(look.warmth))
+  splatCompMat.uniforms.uGain.value.copy(warmthTint(look.warmth)).multiplyScalar(look.exposure) // §4.5: a plain multiplier
   emitLook()
 }
 function setLook(s = {}) {
@@ -1678,11 +1900,27 @@ function drawTo(target, { furniture = true } = {}) {
   renderer.setClearColor(0x000000, 0)
   renderer.clear(true, true, true)
   if (furniture) renderer.render(scene, camera)
+  // The splats, alone (camera layer SPLAT_LAYER), over the depth the furniture pass left in the shared depth texture
+  // (resolved from its MSAA buffer when that render ended): colour cleared, depth kept, Spark writes no depth.
+  // Skipped when nothing it draws changed (splatKey): splatRT still holds that picture.
+  const splats = furniture && !!spark && splatItemCount() > 0
+  const key = splats ? splatKey() : null
+  if (splats && key !== splatDrawn) {
+    renderer.setRenderTarget(splatRT)
+    renderer.setClearColor(0x000000, 0)
+    renderer.clear(true, false, false)
+    camera.layers.set(SPLAT_LAYER)
+    try { renderer.render(scene, camera) } catch (e) { splatDrawn = null; throw e } finally { camera.layers.set(0) }
+    // The key after the render: a generate Spark ran in it (bumping splatEpoch) is already in this picture; the sort
+    // it started bumps splatEpoch again when it lands, and that redraws.
+    splatDrawn = splatKey()
+  }
   renderer.setRenderTarget(target)
   renderer.setClearColor(BAR, 1)
   renderer.clear(true, true, true)
   renderer.render(photoScene, orthoCam)
   if (furniture) renderer.render(compScene, orthoCam)
+  if (splats) renderer.render(splatCompScene, orthoCam)
 }
 function renderFrame() { drawTo(null, { furniture: !!sceneName }) }
 
@@ -1696,10 +1934,10 @@ function withFullFrame(w, h, fn) {
   camera.updateProjectionMatrix()
   for (const m of [photoMat, depthMat, compMat]) { m.uniforms.uRect.value.set(0, 0, w, h); m.uniforms.uTarget.value.set(w, h) }
   depthMat.uniforms.uProj.value.copy(camera.projectionMatrix)
-  furnRT.setSize(w, h)
+  sizeTargets(w, h)
   try { return fn() } finally {
     grid.visible = saved.grid
-    furnRT.setSize(...saved.furn)
+    sizeTargets(...saved.furn)
     renderer.setRenderTarget(null)
     updateView()
   }
@@ -1734,7 +1972,11 @@ function captureMask() {
   const w = photo.w, h = photo.h
   const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.UnsignedByteType, depthBuffer: true })
   const swapped = []
-  for (const rec of items.values()) rec.group.traverse((o) => { if (o.isMesh || o.isLine) { swapped.push([o, o.material, o.visible]); o.material = maskMat; if (o.isLine) o.visible = false } })
+  const shown = [] // a splat item's invisible GLB (or box) stands for its splat here (the mask is dilated anyway)
+  for (const rec of items.values()) {
+    if (rec.splat && rec.child && !rec.child.visible) { rec.child.visible = true; shown.push(rec.child) }
+    rec.group.traverse((o) => { if (o.isMesh || o.isLine) { swapped.push([o, o.material, o.visible]); o.material = maskMat; if (o.isLine) o.visible = false } })
+  }
   let pixels
   try {
     pixels = withFullFrame(w, h, () => {
@@ -1748,6 +1990,7 @@ function captureMask() {
     })
   } finally {
     for (const [o, m, v] of swapped) { o.material = m; o.visible = v }
+    for (const o of shown) o.visible = false
     rt.dispose()
   }
   // binary, top-down rows
@@ -1833,11 +2076,17 @@ async function renderViewInternal(opts = {}) {
   if (!Object.hasOwn(RENDER_MODELS, model)) throw reportError(`Unknown render model "${model}" (use ${Object.keys(RENDER_MODELS).join(', ')})`)
   if (o.prompt != null && typeof o.prompt !== 'string') throw reportError('Render prompt must be a string')
   if (!sceneName) throw reportError('Open a scene first, then render it')
+  // §4.7: the splats sorted for the capture camera first, with the view still drawing (a piece placed a moment ago
+  // only joins Spark's sorted set through those frames). Then the view holds still for the capture itself.
+  try { await settleSplats() } catch (e) { reportError('Could not sort the splats for the render', e) }
+  holdFrames++
   let shot, mask = null
   try {
-    shot = captureComposite()
-    if (o.keepRoom) mask = captureMask()
-  } catch (e) { throw reportError('Could not capture the view', e) }
+    try {
+      shot = captureComposite()
+      if (o.keepRoom) mask = captureMask()
+    } catch (e) { throw reportError('Could not capture the view', e) }
+  } finally { holdFrames--; wake() }
   return postRender(shot, { model, prompt: o.prompt, keepRoom: !!o.keepRoom, mask })
 }
 async function listRendersInternal() {
@@ -1860,9 +2109,11 @@ function onFrame(fn) { frameFns.add(fn); return () => frameFns.delete(fn) }
 applyCamera()
 const clock = new THREE.Clock()
 let renderErrorReported = false
+let holdFrames = 0 // > 0 while a render captures the view (renderViewInternal)
 renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(clock.getDelta(), 0.1)
+    if (holdFrames) return
     if (performance.now() > awakeUntil && !framePending) return
     framePending = false
     renderFrame()
@@ -1887,7 +2138,7 @@ function getState() {
     items: [...items.values()].map((r) => {
       const b = worldBounds(r)
       return {
-        uid: r.uid, id: r.id, render: 'glb',
+        uid: r.uid, id: r.id, render: r.render, ...(r.splat ? { splats: r.splat.numSplats } : {}),
         position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg,
         ...(r.missing ? { missing: true } : {}),
         worldBounds: { min: b.min.toArray(), max: b.max.toArray() },
@@ -1927,7 +2178,7 @@ async function init() {
 
 export const engine = {
   events, errors, canvas,
-  three: { scene, camera, renderer },
+  three: { scene, camera, renderer, get spark() { return spark } },
   // setup
   init, mount, setStageInsets,
   // state
@@ -1974,7 +2225,7 @@ export const engine = {
   // layouts
   saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal, refreshLayouts, setLayoutName,
   // renders
-  captureComposite, captureMask, postRender, renderViewInternal, listRendersInternal, compare,
+  captureComposite, captureMask, postRender, renderViewInternal, listRendersInternal, compare, settleSplats,
   // errors + overlays + projection
   reportError, toast, onFrame, wake, worldToScreen, projectPhoto, photoToFloor, floorToPhoto, clientToPhoto, photoToClient,
 }

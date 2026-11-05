@@ -1,7 +1,7 @@
 # midstudy
 
 See furniture in your own room before you buy it. The room is **one phone photo**. Furniture is made from photos at
-real-world size (Meta's SAM 3D on fal) or comes from a 3D file. You place the pieces on the photo's floor in the
+real-world size (Idol or Meta's SAM 3D, on fal) or comes from a 3D file. You place the pieces on the photo's floor in the
 browser, save layouts, and render a photoreal image of the result.
 
 midstudy is a fork of [nook](https://github.com/salehtl/nook) without the room scan, for personal use. Where things
@@ -57,7 +57,7 @@ In the planner: **Library › Add furniture**, then one of:
 
 | Source | Engine | Cost |
 |---|---|---|
-| A photo of the piece | SAM 3D (default) or TRELLIS 2 | $0.02 (SAM 3D), $0.25–0.35 (TRELLIS 2) |
+| A photo of the piece | **Idol** (default), SAM 3D or TRELLIS 2 | $0.10 (Idol), $0.02 (SAM 3D), $0.25–0.35 (TRELLIS 2) |
 | An image link (the image's own URL, not the shop page) | same | same |
 | A 3D file: `.glb` or a zipped OBJ (the CLI also takes `.gltf`) | none | free |
 | A rug pictured from straight above (a shop's rug picture) | **Flat rug**: laid flat at W × D, H is its thickness (~1 cm) | free |
@@ -67,10 +67,24 @@ budget show before you confirm. Adds run as jobs in the Library panel. Furniture
 metadata before they go to fal. When SAM 3D finds nothing in a photo (it can miss the word it's given), it tries again
 by itself, first less strictly, then with a mask of the piece; the refused calls aren't charged.
 
+The engines make different things:
+
+- **Idol** ([speridlabs/idol](https://github.com/speridlabs/idol)) makes a Gaussian splat: a cloud of soft,
+  coloured points that looks like the photo of the piece, at about 3 MB. It has no mesh. A box at the piece's size
+  stands in for it: it's what you tap and drag, and it casts the contact shadow, but it is never drawn.
+- **SAM 3D** makes a mesh and a splat. The splat is shown by default; the piece's **Edit** sheet has **Shows as**
+  (Splat or Mesh), and pieces already placed switch at once.
+- **TRELLIS 2** makes a textured mesh with finer detail.
+
+The planner draws splats with [Spark](https://sparkjs.dev) 2.4.0. Their colours are the photo's own, so the
+**Look** sliders only brighten or warm them; meshes are lit and tone-mapped. The real furniture in the room photo
+hides both. Renders include splats like any other piece.
+
 The same from the command line (the planner picks it up on reload):
 
 ```sh
 nix develop -c uv run --project pipeline midstudy-add chair.jpg --name "Strandmon wing chair" --dims 82x96x101
+nix develop -c uv run --project pipeline midstudy-add chair.jpg --engine sam3d --name "Morris chair" --dims 70x80x95
 nix develop -c uv run --project pipeline midstudy-add chair.glb --engine glb --name "Sheen chair" --dims 60x65x85
 nix develop -c uv run --project pipeline midstudy-add rug.jpg --engine rug --name "Zen rug" --dims 160x230x1
 nix develop -c uv run --project pipeline midstudy-add --help
@@ -108,7 +122,7 @@ All evals are free: fal is mocked, and they set the mock variables, a $0 cap and
 
 ```sh
 nix develop -c npm install                  # once
-nix develop -c npm run eval:all             # E1, E3–E9, E11, E12 (about 5 min)
+nix develop -c npm run eval:all             # E1, E3–E9, E11–E13 (about 10 min)
 nix develop -c npm run eval:calib           # E2: real MoGe-2 on the golden scenes and fixtures/photos/
 nix develop -c npm run eval:calib -- --mock # E2 ingest only, no model (seconds)
 nix develop -c npm run eval:real            # the real path end to end on a photo from fixtures/photos/

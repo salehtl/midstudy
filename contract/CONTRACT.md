@@ -2,7 +2,7 @@
 
 The shared spec between the **planner** (`planner/`, with its server `planner/serve.py`), the **calibration** CLI (`calib/`, `midstudy-calib`) and the **furniture pipeline** (`pipeline/`, `midstudy-add`). They share only the files and HTTP routes described here. Conventions (units, axes, item frame, slugs) are in [CLAUDE.md](../CLAUDE.md) and apply everywhere. [PLAN.md](../PLAN.md) is the plan; where this file and PLAN.md disagree, PLAN.md wins and this file gets fixed.
 
-Sections 1–3 are nook's contract with the scan, rooms, iOS, Spark and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals.
+Sections 1–3 are nook's contract with the scan, rooms, iOS and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals. **v1.1 (2026-11-05, PLAN.md §12):** the `idol` engine (the default), the stand-in box for splat-only items, `splat.spz`, per-axis splat fitting, and the planner drawing splats with Spark (§1, §3.2, §3.4, §4.5 Splats).
 
 Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json).
 
@@ -13,8 +13,9 @@ Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout
 ```
 library/library.json          furniture library (library.schema.json); versioned in git
 library/costs.csv             one row per paid or mock call: date,id,engine,cost_usd,mock,input; versioned in git
-library/<id>/model.glb        normalized mesh, always present
-library/<id>/splat.ply        normalized 3DGS splat, optional (kept in the format; the v1 planner draws GLB only)
+library/<id>/model.glb        normalized mesh, always present (for `idol`: a stand-in box at dims_cm, never drawn)
+library/<id>/splat.ply        normalized 3DGS splat, optional (`idol`, `sam3d`)
+library/<id>/splat.spz        the same splat compressed for drawing (gzipped SPZ), written with every splat.ply
 library/<id>/thumb.jpg        square thumbnail, optional
 library/<id>/source.<ext>     the input image or model, as given (camera metadata included: never served)
 library/<id>/raw/             untouched engine outputs (debugging only, never served)
@@ -30,10 +31,11 @@ renders/<name>.jpg ...        renders (§2.6, §4.7)
 
 ### Normalized assets
 
-Both `model.glb` and `splat.ply` are stored **already in the item frame**: no runtime transform is needed beyond the item's placement.
+`model.glb`, `splat.ply` and `splat.spz` are stored **already in the item frame**: no runtime transform is needed beyond the item's placement.
 
-- **`model.glb`**: axis-aligned bounds have footprint center at x = z = 0 (±1 cm), min y = 0 (±0.5 cm), and size equal to `dims_cm` within **2 % per axis** (X = w, Y = h, Z = d). Materials and textures from the source are preserved.
-- **`splat.ply`**: standard 3DGS PLY, fitted with a **uniform** scale that matches height (1st–99th percentile of positions: height within 5 % of `dims_cm.h`, min y within ±3 cm of 0, footprint center within 5 cm of the origin).
+- **`model.glb`**: axis-aligned bounds have footprint center at x = z = 0 (±1 cm), min y = 0 (±0.5 cm), and size equal to `dims_cm` within **2 % per axis** (X = w, Y = h, Z = d). Materials and textures from the source are preserved. **Stand-in:** an `idol` item has no mesh (Idol makes only a splat), so its `model.glb` is a plain box exactly at `dims_cm` (one untextured material). The planner never draws it; it gives the item its exact size for selecting, dragging, stacking, `worldBounds` and the contact shadow (§4.5 Splats). An item is a stand-in exactly when `source.engine` is `idol`.
+- **`splat.ply`**: standard binary 3DGS PLY (`x y z f_dc_0..2 opacity scale_0..2 rot_0..3`, plus `f_rest_*` only when nothing rotated them; `nx ny nz` dropped), fitted **per axis**: the extent of the splat centers equals `dims_cm` on each axis, and each Gaussian's covariance is stretched by the same scale (Σ' = S Σ S, written back as `scale_*` and `rot_*`). The **extent** is a percentile range of the centers, by engine: the **1st–99th** for `sam3d` (its splat has floaters; this range matches its GLB within 1 %, measured on the fixture) and the **0.1th–99.9th** for `idol` (dense and nearly floater-free: the 1st–99th cuts 3–7 % of the real surface, measured on the fixture), the 1st–99th for anything else. Checks, on that extent: size within **2 % per axis** of `dims_cm`, min y within ±1 cm of 0, footprint center within 1 cm of the origin.
+- **`splat.spz`**: the splats of `splat.ply`, same frame, same positions (Spark reads both as they are), as **SPZ version 2** (Niantic's format), gzip-compressed: a 16-byte little-endian header (`0x5053474e` "NGSP", version 2, the count, SH degree 0, 12 fractional bits, flags 0, reserved 0), then positions (24-bit fixed point), alphas, colours, scales, rotations (3 bytes, the quaternion's x y z with w ≥ 0). At most **262,144** splats: above that, the ones that cover the least are dropped: they are ranked by opacity × the area of their two largest axes (a live SAM 3D splat has 760,000–880,000; ranking by opacity alone kept only its small inner splats). This is what the planner draws: **at most 6 MB**. Every write of `splat.ply` (add and `--rescale`) writes it too.
 
 ---
 
@@ -41,7 +43,7 @@ Both `model.glb` and `splat.ply` are stored **already in the item frame**: no ru
 
 A static web app in `planner/` (three.js `0.180.0` via importmap, no build step) plus `planner/serve.py` (Python stdlib only). Sections 2.1–2.10 keep nook's numbering, which the code's comments cite. What's new for scenes is in §4.
 
-> **State since the integration commit:** `planner/` implements §4 (scenes, the locked photo camera, occlusion, Adjust floor, keep-room renders, Compare); rooms, splats, Spark, the shell, hanging, retrain and `--scan-api` are gone.
+> **State since the integration commit:** `planner/` implements §4 (scenes, the locked photo camera, occlusion, Adjust floor, keep-room renders, Compare); rooms, the shell, hanging, retrain and `--scan-api` are gone. Splat items came back in v1.1 (§4.5 Splats), drawn with Spark; splat rooms did not.
 
 ### 2.1 Server
 
@@ -52,7 +54,7 @@ python3 planner/serve.py [--port 8765] [--host 127.0.0.1] [--library-dir library
                          [--daily-spend-usd 2] [--allowed-host NAME ...]
 ```
 
-- Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types, `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
+- Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types (`.spz` is `application/octet-stream`, sent as stored: no `Content-Encoding`), `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
 - All `/api` responses are JSON (errors are `{"error": "<one sentence>"}`).
 - Removed from nook: `/api/room`, `/api/rooms*`, `--room-file`, `--room-dir`, `--scan-api` and `/api/scan/*`, flat (scene-less) layouts.
 - Evals and agents always start it with `MIDSTUDY_NO_DOTENV=1`, `MIDSTUDY_FAL_MOCK=fixtures/fal` and `--daily-spend-usd 0` (§5.3).
@@ -79,7 +81,7 @@ interface Midstudy {
   ready: Promise<void>                       // first page state settled (a scene opened, or the Scenes page shown)
   errors: string[]
   getLibrary(): LibraryItem[]                // items from library.json, as-is
-  addItem(id: string, opts?: { position?: [x, y, z], rotation_y_deg?: number }): Promise<string>  // resolves with a new uid
+  addItem(id: string, opts?: { position?: [x, y, z], rotation_y_deg?: number }): Promise<string>  // resolves with a new uid once what it draws (GLB or splat) has loaded
   moveItem(uid: string, opts: { position?: [x, y, z], rotation_y_deg?: number }): void
   selectItem(uid: string | null): void       // as a tap on the item; null clears the selection
   removeItem(uid: string): void
@@ -157,7 +159,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 | `POST /api/library/items/<id>/restore` | | `200` the item (newest trashed copy), `404` when none, `409` when the id exists again |
 | `PUT /api/library/items/<id>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB (the planner's render of the model) | `200` the item: `<id>/thumb.jpg` written without metadata (§2.6), `assets.thumb` set; `404` unknown id, `400` not a JPEG, `413` over 2 MB, `503` while a job holds the library |
 
-**Meta:** `name` and `dims_cm` `{w,d,h}` required; `id` (default: slug of `name`), `category`, `mount`, `yaw`, `engine` (`sam3d` \| `trellis2` \| `rug` for images; `glb` for models), `prompt`, `resolution`. Anything wrong is `400` with one actionable sentence.
+**Meta:** `name` and `dims_cm` `{w,d,h}` required; `id` (default: slug of `name`), `category`, `mount`, `yaw`, `engine` (`idol` (default) \| `sam3d` \| `trellis2` \| `rug` for images; `glb` for models, where any other engine is a `400`), `prompt`, `resolution`. `cost_usd_estimate` is the engine's price from §3.2 ($0.10 for `idol`). Anything wrong is `400` with one actionable sentence.
 
 **Bodies:** `model` is a `.glb`, or a `.zip` holding one `.obj` with its `.mtl` and textures (`.usdz`: "convert to GLB first"); `image` is a JPEG, PNG, HEIC or WebP. **Limits:** models 200 MB, images 20 MB (`413`), `411` without a length. Zips: only `.obj .mtl .png .jpg .jpeg` extracted; no absolute paths, `..` or links; at most 500 MB unpacked and 1,000 entries. Uploads land in a private temp folder, never under a served path.
 
@@ -165,7 +167,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 
 **One writer:** every library write takes `<library>/.lock` (`flock`); PATCH, DELETE and restore wait up to 60 s for a running job, then answer `503`.
 
-**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `thumb.jpg`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `source.<ext>` (the upload as given: a phone photo's EXIF and GPS), `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
+**What `/library/` serves:** item assets (`<id>/model.glb`, `splat.ply`, `splat.spz`, `thumb.jpg`) and `library.json` (an empty library, `{"version": 1, "items": []}`, while the folder has none yet). `source.<ext>` (the upload as given: a phone photo's EXIF and GPS), `raw/`, `.trash/`, `.lock` and `costs.csv` get `404`.
 
 **Privacy:** what an image engine uploads to fal is `raw/engine-input.jpg` (or `.png` with transparency), a copy made by `midstudy-add`: EXIF orientation applied, no EXIF, GPS, XMP, IPTC or comments (the ICC profile stays). `source.<ext>` keeps the original and is never served. A model's embedded textures lose their camera metadata in `model.glb` (JPEG: APP1–APP15, comments, JFIF thumbnails and JFXX, anything after EOI; PNG: `eXIf`, `tEXt`, `iTXt`, `zTXt`, `tIME`), the image data kept as it is: a user's own GLB can embed a geotagged photo, and `model.glb` is served.
 
@@ -192,35 +194,37 @@ A placed item's `position[1]` is its bottom's height above the floor, 0–4 m (c
 
 ## 3. Pipeline (carried)
 
-A uv project in `pipeline/` (Python 3.12), console script `midstudy-add`, package `midstudy_pipeline`. No feature work in v1.
+A uv project in `pipeline/` (Python 3.12), console script `midstudy-add`, package `midstudy_pipeline`. v1.1 added the `idol` engine, the stand-in box, `splat.spz` and per-axis splat fitting (PLAN.md §12).
 
 ### 3.1 CLI
 
 ```
 uv run --project pipeline midstudy-add INPUT --name NAME --dims WxDxH
-    [--id SLUG] [--category TEXT] [--engine sam3d|trellis2|glb|rug] [--prompt TEXT]
+    [--id SLUG] [--category TEXT] [--engine idol|sam3d|trellis2|glb|rug] [--prompt TEXT]
     [--yaw 0|90|180|270] [--resolution 512|1024|1536] [--library DIR] [--notes TEXT] [--mount floor|wall]
 uv run --project pipeline midstudy-add --rescale ID [--dims WxDxH] [--yaw 0|90|180|270] [--library DIR]
 ```
 
-- `INPUT`: a local image or image URL (`sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
+- `INPUT`: a local image or image URL (`idol`, `sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
 - `--dims`: centimeters `W x D x H` (`x` or `×`, spaces and decimals allowed). Required for adds.
-- `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `sam3d`.
+- `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `idol`.
 - Image engines get a metadata-free, upright copy of the photo (`raw/engine-input.<ext>`, §2.8 Privacy); `source.<ext>` keeps the input as given.
 - `--yaw`: extra rotation around Y after the engine's default orientation; positive is counterclockwise seen from above, so `--yaw 90` turns +X into −Z. The planner's `rotation_y_deg` uses the same sign.
 - `--rescale ID` refits an existing item from its normalized assets: no model call, `cost_usd: 0`, no cost row.
-- Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}`. Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
+- Exit 0 on success; the **last line of stdout** is one JSON object `{"id", "engine", "cost_usd", "mock", "paths", "fit"}` (`paths.spz` beside `paths.splat`). Every failure exits non-zero with **one actionable line on stderr** prefixed `midstudy-add: `.
 
 ### 3.2 Engines
 
 | `--engine` | fal endpoint | arguments | cost recorded |
 |---|---|---|---|
-| `sam3d` (default) | `fal-ai/sam-3/3d-objects` | `image_url`, `prompt`, `export_textured_glb: true` | $0.02 |
+| `idol` (default) | `speridlabs/idol` | `image_url`, `image_type: "real"`, `num_gaussians: 262144` | $0.10 |
+| `sam3d` | `fal-ai/sam-3/3d-objects` | `image_url`, `prompt`, `export_textured_glb: true` | $0.02 |
 | `trellis2` | `fal-ai/trellis-2` | `image_url`, `resolution` | $0.25 / $0.30 / $0.35 for 512 / 1024 / 1536 |
 | `glb` | none | | $0.00 |
 | `rug` | none | | $0.00 |
 
 - **`sam3d` when it finds nothing** (fal 422 "Auto-segmentation produced no masks", refused before running, so not charged): it asks again with `detection_threshold: 0.2`, then with `mask_urls` holding a mask of the piece (`raw/mask.png`: the picture without its plain margin, or the whole picture), then fails with one plain line. `MIDSTUDY_FAL_MOCK_NO_MASKS=N` (evals) makes the first N mocked calls answer that way.
+- **`idol`** (added 2026-11-05; [speridlabs/idol](https://github.com/speridlabs/idol-sdk), Apache-2.0): one picture of one object to a 3D Gaussian splat. It removes the background and frames the object itself. The response has `model_mesh` (the splat, a PLY despite the name: the only file fetched), `model_glb` (a point-cloud preview of the splat centers, not fetched), `preprocessed_image` (not fetched), `camera` (`yaw`, `pitch` in radians, `radius`, `fov` in degrees: the predicted view of the input) and `num_gaussians`. Measured live: 15 s, 262,144 splats, DC colour only, 17.8 MB. No mesh: `midstudy-add` writes the stand-in box `model.glb` (§1) and `default_render: "splat"`; `prompt` is null. A failed call that fal charged keeps its outputs in `<library>/_failed/`, as for the other engines.
 - **`rug`** (added 2026-11-05): a rug pictured from straight above (a shop's picture) laid flat, with no model call. The picture's plain margin is cropped, it is turned a quarter when that matches W × D better, and it becomes the unlit top face of a W × D × H slab (H is the thickness, about 1 cm; sides in the rug's edge colour). The picture's top edge is the back (−Z). GLB only, no splat; `prompt` is null.
 
 The engines' frames are in `fixtures/fal/NOTES.md`.
@@ -228,11 +232,11 @@ The engines' frames are in `fixtures/fal/NOTES.md`.
 ### 3.3 Credentials and mock mode
 
 - `FAL_KEY` from the environment, else from `.env` at the repo root, unless `MIDSTUDY_NO_DOTENV=1`.
-- **`MIDSTUDY_FAL_MOCK=<dir>`**: no network calls to fal. Each call returns `<dir>/<slug>/response.json` (`sam-3-3d-objects`, `trellis-2`), file URLs resolve to `<dir>/<slug>/files/<basename>`. Mock runs record `mock: true`, `cost_usd: 0`; `FAL_KEY` isn't needed. `MIDSTUDY_FAL_MOCK_COST=1` (evals only) records the real price instead.
+- **`MIDSTUDY_FAL_MOCK=<dir>`**: no network calls to fal. Each call returns `<dir>/<slug>/response.json` (`sam-3-3d-objects`, `trellis-2`, `speridlabs-idol`: the endpoint without `fal-ai/`, `/` → `-`), file URLs resolve to `<dir>/<slug>/files/<basename>`. Mock runs record `mock: true`, `cost_usd: 0`; `FAL_KEY` isn't needed. `MIDSTUDY_FAL_MOCK_COST=1` (evals only) records the real price instead.
 
 ### 3.4 Normalization, library entry, acceptance
 
-Orientation from NOTES.md, then `--yaw`; translate to the footprint center and min y = 0; scale (GLB per axis, splat uniformly); write; self-check (§1) and refuse to upsert a bad item. The entry has `id, name, category, dims_cm, assets, default_render, source {engine, input, prompt, cost_usd, mock, created}, fit`; then a cost row; writes are atomic; every write takes `<library>/.lock`. `npm run eval:pipeline` (L1–L7 and the v4 additions) must pass.
+Orientation from NOTES.md, then `--yaw`; translate to the footprint center and min y = 0; scale per axis (GLB, and splat with its covariances, §1); write (`splat.spz` from the written `splat.ply`); self-check (§1) and refuse to upsert a bad item. The entry has `id, name, category, dims_cm, assets {glb, splat, spz, thumb}, default_render, source {engine, input, prompt, cost_usd, mock, created}, fit` (`source.input`: a URL as given, a local file by its name only, never a path; the server passes the upload's name); `default_render` is `"splat"` when the item has a splat (`idol`, `sam3d`), else `"glb"`; then a cost row; writes are atomic; every write takes `<library>/.lock`. `npm run eval:pipeline` (L1–L7 and the v4 additions) must pass.
 
 ---
 
@@ -399,7 +403,15 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 - **Occlusion:** with a `depth.png`, a full-screen pass writes the photo's depth into the depth buffer before the items draw (colour writes off), so an item fragment is hidden where the photo has something nearer, with a 3 cm tolerance. Depth 0 never occludes. **Occlusion** toggle, on by default when the scene has depth. `depth.png` is metric in the calibration's frame, so when the camera's `height_m` differs from `calib.json`'s (Adjust floor), the depth is scaled by `height_m / calib height_m` first; without a measured floor (`floor.found` false, or a fallback source) it is used as it is.
 - **Layouts:** per scene (§2.7), with unsaved-change warnings ("unsaved" means the pieces differ from the layout as saved or loaded, so Remove then Undo isn't). A scene opens with a layout: each device remembers the layout it last had open in each scene and when it chose it (saved, loaded, or none after deleting it); the scene reopens with that one, unless a layout was saved later on any device (`updated`), or the device has never had the scene open: then it opens with the most recently saved layout. So a reload keeps this device's choice, and the phone opens a scene with the layout the desktop just saved. Deleting a layout, a scene or a library item can be undone; deleted scenes are listed under Recently deleted on the Scenes page, with Restore.
 - **Render and Compare** (§4.7): in the Renders panel, pick two renders for a full-screen compare: side by side on desktop, a draggable split slider on both, swipe on the phone, and Swap A and B on both (`compare-swap`).
-- **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat drawing, LoD, True colour, Spark.
+- **Splats** (v1.1): [Spark](https://sparkjs.dev) `2.4.0` (`@sparkjsdev/spark`, `https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.4.0/dist/spark.module.js` in the importmap, beside three.js; no build step) draws splat items.
+  - An item **draws as a splat** when its library entry's `default_render` is `"splat"` and it has `assets.spz` (preferred: what phones can load) or else `assets.splat`; otherwise as its GLB. A missing or broken splat falls back to the GLB with a non-blocking error (§2.3 Errors).
+  - A splat item still loads its GLB, **never drawn** (no colour and no depth: writing depth would cut the splat), for picking, dragging, `worldBounds`, stacking and the contact shadow. So its size and bounds are exactly `dims_cm` (§2.5), as for a mesh. The splat is a child of the item's group: position, rotation and elevation move it, nothing else.
+  - **Occlusion** hides splats like meshes: they draw after the photo's depth pass and test against it (same 3 cm tolerance); between items, Spark sorts splats and meshes hide what's behind them.
+  - **Colour:** splat colours are photo colours (Idol and SAM 3D bake the light in), so they are not lit or tone-mapped (no ACES); Look's exposure and warmth apply to them as a plain multiplier, so a Look change still moves splats and meshes together.
+  - **Render** (§4.7): the capture includes splat items, sorted for the capture camera; the keep-room mask covers them (their box is enough, as the mask is dilated anyway).
+  - **Shows as** (the library Edit sheet, `PATCH default_render`, §2.8): Splat or Mesh, offered only for items with a splat **and** a real mesh (`sam3d`); not for `idol` (its GLB is a stand-in box), nor for items without a splat. Placed copies switch at once.
+  - The contact shadow of a splat item never darkens the splat above its bottom 30 % (nook's depth-only proxy does this).
+- **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat rooms, LoD, True colour.
 
 ### 4.6 Hook additions (`window.midstudy`)
 
@@ -424,13 +436,15 @@ renderView(opts?: { model?: string, prompt?: string, keepRoom?: boolean }): Prom
 compare(a: string, b: string): void                 // opens Compare with two render names
 getState(): {
   scene: { name, title, camera: Camera, camera_source, floor_found, hasDepth, occlusion, adjustFloor } | null,
-  items: Array<{ uid, id, render: 'glb', position: [x, y, z], rotation_y_deg, worldBounds: { min, max }, missing?: boolean }>,
+  items: Array<{ uid, id, render: 'glb' | 'splat', splats?: number, position: [x, y, z], rotation_y_deg, worldBounds: { min, max }, missing?: boolean }>,
+                               // render: what is drawn (§4.5 Splats); splats: the number of splats drawn (splat items only);
+                               // worldBounds come from the GLB (the stand-in box for idol), whatever is drawn
   layout: string | null,       // the layout last loaded or saved
   dirty: boolean,              // unsaved layout changes
 }
 ```
 
-Test handles (`data-midstudy`): `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. `scene-card` elements also carry `data-scene="<name>"`.
+Test handles (`data-midstudy`): `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. v1.1: `lib-engine` (the Add form's Model choice: buttons with `data-value` = the engine and `aria-pressed`, in the order `idol`, `sam3d`, `trellis2`, `rug`, labels names only: Idol, SAM 3D, TRELLIS 2, Flat rug), `lib-cost` (its price box, e.g. "$0.10"), `lib-shows-as` (the Edit sheet's Shows as: buttons `data-value` `splat` / `glb`, labels Splat / Mesh, `aria-pressed`). `scene-card` elements also carry `data-scene="<name>"`.
 
 ### 4.7 Render
 
@@ -472,6 +486,8 @@ Files in `fixtures/scenes/<id>/`:
 - `npm run eval:pipeline` (`evals/pipeline_offline.sh`): `midstudy-add` against `fixtures/fal`, offline, $0 (§3).
 - `npm run eval:library` (`evals/library_api.sh`): the library API, URL fetch rules and spend cap (§2.8–2.9), mocked, $0. Picks free ports unless `MIDSTUDY_EVAL_LIBRARY_PORT` is set.
 - `evals/validate_library.py <library.json>` checks any library against §1 and the schema; `evals/py` runs these helpers with pinned deps.
+
+v1.1 adds `npm run eval:splat` (E13, `evals/splat.mjs`, in `eval:all`): an `idol` add through the library API against the mock validates; on golden living-wide a splat probe (a magenta splat box with its stand-in box) and the Idol chair draw as splats at their true size and position, the photo hides the probe behind the sofa, Render's composite and keep-room mask include them, Shows as switches a `sam3d` item, GLB items and a Flat rug look the same with splats in the scene, the add form defaults to Idol at $0.10, and the phone (390 × 844) loads the Idol item's `splat.spz` (≤ 6 MB) within 30 s. `eval:pipeline` adds the `idol` engine and `splat.spz` checks.
 
 The evals track added PLAN.md §6.2 (`eval:scenes-api`, `eval:calib`, `eval:planner`, `eval:occlusion`, `eval:floor`, `eval:render`, `eval:phone`, `eval:all`; see `evals/README.md`). `npm run eval:real` (`evals/real_path.mjs`, not in `eval:all`) is the real path on this Mac: the default `--calib` (real MoGe-2) on the photos in `fixtures/photos/`, the real `midstudy-add` (GLB), fal mocked.
 

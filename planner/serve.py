@@ -244,14 +244,16 @@ DRAIN_SECONDS = 60             # ...for at most this long
 EARLY_DRAIN_SECONDS = 5        # after a 411/413 that was already sent
 SOCKET_TIMEOUT = float(os.environ.get("MIDSTUDY_SOCKET_TIMEOUT") or 30)  # s one read or write may block (a client that
                                                                              # stops sending is dropped); the env var is for evals
-ENGINE_PRICE = {"sam3d": lambda res: 0.02, "trellis2": lambda res: {512: 0.25, 1024: 0.30, 1536: 0.35}[res],
+ENGINE_PRICE = {"idol": lambda res: 0.10, "sam3d": lambda res: 0.02,
+                "trellis2": lambda res: {512: 0.25, 1024: 0.30, 1536: 0.35}[res],
                 "glb": lambda res: 0.0, "rug": lambda res: 0.0}
+IMAGE_ENGINES = ("idol", "sam3d", "trellis2", "rug")  # idol is the default (contract §2.8, §3.2)
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 ZIP_ALLOWED = {".obj", ".mtl", ".png", ".jpg", ".jpeg"}
 ZIP_MAX_ENTRIES = 1000
 ZIP_MAX_UNPACKED = 500 * 1024 * 1024
 # source.<ext> is never served: it is the upload as given, camera metadata (GPS) included (§2.8).
-LIBRARY_ASSET = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}/(model\.glb|splat\.ply|thumb\.jpg)\Z")
+LIBRARY_ASSET = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}/(model\.glb|splat\.ply|splat\.spz|thumb\.jpg)\Z")
 MIDSTUDY_ADD_TIMEOUT = 3600
 LOCK_WAIT = 60  # s a library edit waits for a running midstudy-add before answering 503
 FORGED = "cross-site request refused"
@@ -349,11 +351,13 @@ def check_meta(meta, kind: str) -> dict:
         raise ValueError(f"yaw must be 0, 90, 180 or 270 (degrees), got {yaw!r}")
     out["yaw"] = int(yaw)
     if kind == "model":
-        out["engine"] = "glb"  # forced for models
+        if meta.get("engine") not in (None, "", "glb"):
+            raise ValueError(f"engine must be glb for a 3D model (or left out), got {meta.get('engine')!r}")
+        out["engine"] = "glb"
     else:
-        engine = meta.get("engine") or "sam3d"
-        if engine not in ("sam3d", "trellis2", "rug"):
-            raise ValueError(f"engine must be sam3d, trellis2 or rug for an image, got {engine!r}")
+        engine = meta.get("engine") or "idol"
+        if engine not in IMAGE_ENGINES:
+            raise ValueError(f"engine must be idol, sam3d, trellis2 or rug for an image, got {engine!r}")
         out["engine"] = engine
     res = meta.get("resolution")
     if res in (None, ""):
@@ -2131,8 +2135,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if "default_render" in patch:
                     if patch["default_render"] not in ("glb", "splat"):
                         raise ValueError("default_render must be glb or splat")
-                    if not (item.get("assets") or {}).get(patch["default_render"]):
+                    assets = item.get("assets") or {}
+                    has = (assets.get("splat") or assets.get("spz")) if patch["default_render"] == "splat" else assets.get("glb")
+                    if not has:
                         raise ValueError(f"this item has no {patch['default_render']} asset, so it can't be its default render")
+                    if patch["default_render"] == "glb" and (item.get("source") or {}).get("engine") == "idol":
+                        # §4.5 Shows as: an Idol piece's model.glb is a stand-in box, never drawn.
+                        raise ValueError("an Idol piece has no mesh to show: its model.glb is a stand-in box")
                 yaw = patch.get("yaw", 0) or 0
                 if isinstance(yaw, bool) or yaw not in (0, 90, 180, 270):
                     raise ValueError("yaw must be 0, 90, 180 or 270 (degrees, relative to now)")

@@ -4,7 +4,7 @@ The item frame is Y-up with the front facing +Z (see CLAUDE.md). Each engine's n
 as (up axis, front axis) in the engine's own coordinates. Normalization rotates up -> +Y and front -> +Z,
 then applies --yaw.
 
-SOURCE: fixtures/fal/NOTES.md, measured on a real capture (2026-10-25). The sam3d splat row is the GLB's frame:
+SOURCE: fixtures/fal/NOTES.md, measured on real captures (2026-10-25; idol 2026-11-05). The sam3d splat row is the GLB's frame:
 the splat arrives in camera space and sam3d_splat_to_glb() maps it there first.
 """
 import math
@@ -16,6 +16,8 @@ ENGINE_FRAMES: dict[tuple[str, str], tuple[str, str]] = {
     ("sam3d", "glb"):      ("+Y", "+Z"),
     ("sam3d", "splat"):    ("+Y", "+Z"),
     ("trellis2", "glb"):   ("+Y", "+Z"),
+    ("idol", "splat"):     ("-Y", "+X"),  # measured 2026-11-05 on fixtures/fal/speridlabs-idol (the Morris chair)
+    ("idol", "glb"):       ("+Y", "+Z"),  # the stand-in box, built in the item frame
     ("glb", "glb"):        ("+Y", "+Z"),  # glTF is Y-up by spec; front +Z is the usual convention
     ("rug", "glb"):        ("+Y", "+Z"),  # built in the item frame (rug.py)
 }
