@@ -1,8 +1,8 @@
 # midstudy status
 
 As of 2026-11-05, branch `main` (`v1` fast-forwarded into it and pushed to GitHub). Every eval below was run on
-2026-11-05 on this Mac (M3 Max, MPS), with fal mocked. The only paid calls are the main session's live check (below,
-$0.10).
+2026-11-05 on this Mac (M3 Max, MPS), with fal mocked. The only paid calls are the live checks (below: v1 $0.10, the
+Idol check $0.1398, plus $0.10 to record Idol's mock) and the product page reader's (in its notes).
 
 **In short:** v1 is built and works end to end on the Mac: photo in, floor found, furniture placed, layouts saved,
 renders and Compare, now also checked against live fal. What's left is hosting on homeserver, which is packaged but has
@@ -71,6 +71,23 @@ never been built on Linux.
 
 `eval:all` (E1, E3–E9, E11–E15) takes about 10 min. With Idol (v1.1) it passed 11 of 11 twice before the product page reader was merged in and 13 of 13 after, all on 2026-11-05. One earlier run failed four timing checks (E3.32, E11.14, E12.13, E13.36) while three verifiers ran beside it, and none of those came back on a quieter machine. The product page reader alone passed 12 of 12 at 14:30 (an earlier run that day failed E3, E4, E5 and E11 on page-load timeouts while other sessions held the Mac's load average above 180). Logs are in `evals/out/main/` (git-ignored). The main session
 found E11.18 and E12.12 flaky (fixed timing in the evals, not the app; each then passed 3 runs out of 3).
+
+## Live check of Idol (v1.1, 2026-11-05, $0.1398)
+
+On your lounge photo, from a fresh checkout of the Idol work with its own data folders (`evals/out/live-idol/`,
+git-ignored; `side-by-side.jpg` shows the view's composite above the final render):
+
+- **Idol add** of the Morris chair photo through the library API, with no engine named (Idol is the default): live,
+  19 s, **$0.10**. The library entry has the stand-in box, `splat.ply` and a 3.0 MB `splat.spz` (262,144 splats),
+  fitted to 75 × 85 × 95 cm with 0 % error, and it passes `validate_library.py`.
+- **Two copies placed** where the v1 check put its SAM 3D chairs: both draw as splats within 0.5 s, on the rug next to
+  the sofa and the round table, at a believable size, with contact shadows.
+- **Render, Keep room exact on:** live nano-banana, 53 s, **$0.0398**, aligned with 597 inliers at 0.67 px. The result
+  is your photo at 2048 × 1152 with the two chairs pasted in and no visible seam.
+- Total **$0.1398** (`costs.csv` and `/api/spend` agree), under the check's $0.20 cap. No console or page errors.
+- What it shows: the chairs keep the light of their own product photo, so they look a little brighter and flatter
+  than the room's warm evening light. The lighting work is for that. Phase 0 made one more live Idol call ($0.10,
+  the same chair) to record the mock; it isn't in a `costs.csv`.
 
 ## Live check (PLAN.md §8, main session, 2026-11-05, $0.10)
 
