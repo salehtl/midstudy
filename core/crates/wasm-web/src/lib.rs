@@ -843,8 +843,9 @@ pub fn env_map(
     };
     let n = width
         .checked_mul(height)
+        .filter(|&n| n <= envmap::MAX_ENV_TEXELS)
         .and_then(|n| n.checked_mul(4))
-        .ok_or_else(|| JsError::new("envMap: bad size"))?;
+        .ok_or_else(|| JsError::new("envMap: the map is empty or too large"))?;
     if half {
         let mut f16s = vec![0_u16; n];
         envmap::env_map_f16(&photo, &spec, &mut f16s).map_err(err)?;

@@ -89,8 +89,42 @@ const colMat = (c0, c1, c2) => new THREE.Matrix3().set(c0[0], c1[0], c2[0], c0[1
 const ACES_IN = colMat([0.59719, 0.07600, 0.02840], [0.35458, 0.90834, 0.13383], [0.04823, 0.01566, 0.83777])
 const ACES_OUT = colMat([1.60475, -0.10208, -0.00327], [-0.53108, 1.10813, -0.07276], [-0.07367, -0.00605, 1.07602])
 // v1>>
+// <<v1 planner/lighting.js:156-187
+function makeEnvBakeMat() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tPhoto: { value: null }, uWorldToCam: { value: new THREE.Matrix3() }, uTanY: { value: 0.5 }, uAspect: { value: 1.5 },
+      uIn: { value: ACES_IN }, uOut: { value: ACES_OUT }, uInInv: { value: ACES_IN.clone().invert() }, uOutInv: { value: ACES_OUT.clone().invert() },
+    },
+    vertexShader: 'varying vec2 vUv;\nvoid main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+varying vec2 vUv;
+uniform sampler2D tPhoto;
+uniform mat3 uWorldToCam;
+uniform float uTanY, uAspect;
+uniform mat3 uIn, uOut, uInInv, uOutInv;
+vec3 toLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 acesInv(vec3 d) {
+  vec3 y = uOutInv * clamp(d, 0.0, 0.985);
+  vec3 qa = 1.0 - 0.983729 * y, qb = 0.0245786 - 0.4329510 * y, qc = -(0.000090537 + 0.238081 * y);
+  vec3 v = (-qb + sqrt(max(qb * qb - 4.0 * qa * qc, 0.0))) / (2.0 * qa);
+  return max(uInInv * v * 0.6, 0.0);
+}
+void main() {
+  // three.js's equirect convention: u = atan(z, x) / 2π + 0.5, v = asin(y) / π + 0.5
+  float phi = (vUv.x - 0.5) * 6.28318531, th = (vUv.y - 0.5) * 3.14159265;
+  vec3 c = uWorldToCam * vec3(cos(th) * cos(phi), sin(th), cos(th) * sin(phi));
+  c.z = -max(abs(c.z), 1e-3);
+  vec2 ndc = clamp(vec2(c.x / (-c.z) / (uTanY * uAspect), c.y / (-c.z) / uTanY), -1.0, 1.0);
+  vec3 p = texture2D(tPhoto, vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5)).rgb; // the photo texture has flipY false
+  gl_FragColor = vec4(acesInv(toLinear(p)), 1.0);
+}`,
+    depthTest: false, depthWrite: false, toneMapped: false,
+  })
+}
+// v1>>
 
-export { DEG, V1, lum, irrBasis, FIB, solve, ACES_IN, ACES_OUT }
+export { DEG, V1, lum, irrBasis, FIB, solve, ACES_IN, ACES_OUT, makeEnvBakeMat }
 
 // splatGain() lives in createLighting's closure: the state it reads (lighting.json as `data`, the Look, R).
 export function makeSplatGain({ data, look, R }) {

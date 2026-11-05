@@ -6,8 +6,9 @@ import * as THREE from 'three'
 /*@lift lighting 24..33*/
 /*@lift lighting 44..107*/
 /*@lift lighting 149..151*/
+/*@lift lighting 156..156*/
 
-export { DEG, V1, lum, irrBasis, FIB, solve, ACES_IN, ACES_OUT }
+export { DEG, V1, lum, irrBasis, FIB, solve, ACES_IN, ACES_OUT, makeEnvBakeMat }
 
 // splatGain() lives in createLighting's closure: the state it reads (lighting.json as `data`, the Look, R).
 export function makeSplatGain({ data, look, R }) {

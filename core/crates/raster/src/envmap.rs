@@ -240,8 +240,18 @@ fn trilinear(levels: &[Level<'_>], s: f64, t: f64, lod: f64) -> [f64; 3] {
     ]
 }
 
+/// The largest map made: 16 M texels (v1's is 512 × 256), so the output and scratch allocations stay bounded.
+pub const MAX_ENV_TEXELS: usize = 1 << 24;
+
 fn check(photo: &Rgba8<'_>, spec: &EnvSpec, out_len: usize) -> Result<usize, EnvError> {
     if photo.width == 0 || photo.height == 0 || spec.width == 0 || spec.height == 0 {
+        return Err(EnvError::BadSize);
+    }
+    if spec
+        .width
+        .checked_mul(spec.height)
+        .is_none_or(|n| n > MAX_ENV_TEXELS)
+    {
         return Err(EnvError::BadSize);
     }
     let need = photo

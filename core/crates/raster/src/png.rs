@@ -17,8 +17,10 @@ use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
 /// The 8-byte PNG signature.
 pub const SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 
-/// The most pixels a decoded image may have (64 Mpx; depth.png is at most 1024 px on its long side).
-pub const MAX_PIXELS: u64 = 1 << 26;
+/// The most pixels a decoded image may have: 16 Mpx (depth.png is at most 1024 px on its long side, 1 Mpx). It bounds
+/// the decoder's memory (inflated rows, samples, then f32 metres: about 8 bytes a pixel), so a hostile header can't
+/// make a wasm32 allocation fail (an allocation failure would trap instead of returning an error).
+pub const MAX_PIXELS: u64 = 1 << 24;
 
 /// Why a PNG was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]

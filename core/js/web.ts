@@ -66,18 +66,25 @@ export interface Plane {
 // --- loading --------------------------------------------------------------------------------------------------------
 
 let exports: InitOutput | null = null
+let loading: Promise<void> | null = null
 
-/** Loads the wasm (once). `source`: the .wasm's URL, a Response, its bytes or a compiled Module; default: fetched next
- * to the glue module. */
-export async function loadKernels(source?: InitInput): Promise<void> {
-  if (exports) return
-  exports = source === undefined ? await init() : await init({ module_or_path: source })
+/** Loads the wasm (once; concurrent calls share the load). `source`: the .wasm's URL, a Response, its bytes or a
+ * compiled Module; default: fetched next to the glue module. A failed load can be retried. */
+export function loadKernels(source?: InitInput): Promise<void> {
+  loading ??= (source === undefined ? init() : init({ module_or_path: source })).then(
+    (e) => { exports = e },
+    (err: unknown) => { loading = null; throw err },
+  )
+  return loading
 }
 
 /** Loads the wasm synchronously from its bytes or a compiled Module (Node, workers that already hold the bytes). */
 export function loadKernelsSync(source: SyncInitInput): void {
   if (exports) return
+  // A second instance would replace the first under objects already made from it.
+  if (loading) throw new Error('midstudy kernels: an asynchronous load is already in progress')
   exports = wasm.initSync({ module: source })
+  loading = Promise.resolve()
 }
 
 export function kernelsLoaded(): boolean {
