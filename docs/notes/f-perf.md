@@ -45,9 +45,10 @@ nix develop -c node evals/perf.mjs --results evals/out/perf/results.json --compa
   §1); `MIDSTUDY_PERF_SERVER_CMD` / `MIDSTUDY_PERF_ADD_CMD` override.
 
 Checked in this session: every suite end to end (three full baseline runs, 0 failed samples in runs 2 and 3), A/B with
-one worktree as both targets (ratios 0.94–1.09 at load 28, "no regression"), `--compare` of run 3 against the baseline
-(ratios 0.94–1.03 except the spiky `server_start` 0.67; exit 0) and of a copy with two metrics doubled (both `WORSE`,
-exit 1), `--make-baseline`, `--profile --with-calib`.
+one worktree as both targets (server/api: ratios 0.94–1.09 at load 28; the final code through `npm run eval:perf`,
+server/api/product: 1.00–1.18 at load 10; "no regression" both times), `--compare` of run 3 against the baseline
+(ratios 0.94–1.03 except two small, spiky ones: `server_start` 0.67, `render_capture_server` 1.12; exit 0) and of a copy
+with two metrics doubled (both `WORSE`, exit 1), `--make-baseline`, `--profile --with-calib`.
 
 ## The metrics
 
