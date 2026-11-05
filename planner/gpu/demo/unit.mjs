@@ -109,9 +109,12 @@ check('…covariances within 12 % of the trace (SPZ: ln-scale steps of 1/16, rot
 // --- a real splat.spz from the mocked pipeline --------------------------------------------------------------------------------
 const file = process.argv[2]
 if (file) {
-  const d = decodeSpzRaw(new Uint8Array(zlib.gunzipSync(fs.readFileSync(file))))
+  const raw = new Uint8Array(zlib.gunzipSync(fs.readFileSync(file)))
+  const t0 = performance.now()
+  const d = decodeSpzRaw(raw)
+  const ms = performance.now() - t0
   const size = [0, 1, 2].map((k) => (d.max[k] ?? 0) - (d.min[k] ?? 0))
-  check(`${file}: decodes (count, bounds)`, d.count > 0 && size.every((v) => v > 0 && v < 3), `${d.count} splats, extent ${size.map((v) => v.toFixed(3)).join(' × ')} m, min y ${(d.min[1] ?? 0).toFixed(3)}`)
+  check(`${file}: decodes (count, bounds)`, d.count > 0 && size.every((v) => v > 0 && v < 3), `${d.count} splats in ${ms.toFixed(0)} ms (Node), extent ${size.map((v) => v.toFixed(3)).join(' × ')} m, min y ${(d.min[1] ?? 0).toFixed(3)}`)
 }
 console.log(failed ? `unit: ${failed} failed` : 'unit: all passed')
 process.exit(failed ? 1 : 0)
