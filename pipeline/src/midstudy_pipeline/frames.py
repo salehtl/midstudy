@@ -17,6 +17,7 @@ ENGINE_FRAMES: dict[tuple[str, str], tuple[str, str]] = {
     ("sam3d", "splat"):    ("+Y", "+Z"),
     ("trellis2", "glb"):   ("+Y", "+Z"),
     ("glb", "glb"):        ("+Y", "+Z"),  # glTF is Y-up by spec; front +Z is the usual convention
+    ("rug", "glb"):        ("+Y", "+Z"),  # built in the item frame (rug.py)
 }
 
 _AXES = {

@@ -10,13 +10,14 @@ from pathlib import Path
 import numpy as np
 
 from . import MidstudyError, frames
+from .rug import foreground_mask
 
 ENDPOINTS = {"sam3d": "fal-ai/sam-3/3d-objects", "trellis2": "fal-ai/trellis-2"}
 TRELLIS_COST = {512: 0.25, 1024: 0.30, 1536: 0.35}
 
 
 def cost_usd(engine: str, resolution: int) -> float:
-    return {"sam3d": 0.02, "trellis2": TRELLIS_COST.get(resolution, 0.0), "glb": 0.0}[engine]
+    return {"sam3d": 0.02, "trellis2": TRELLIS_COST.get(resolution, 0.0), "glb": 0.0, "rug": 0.0}[engine]
 
 
 def arguments(engine: str, image_url: str, prompt: str, resolution: int) -> dict:
@@ -45,6 +46,10 @@ def download(url: str, dest: Path) -> Path:
     return dest
 
 
+class NoMasks(MidstudyError):
+    """SAM 3D's text detector found nothing (fal answers 422 before running, so the call isn't charged)."""
+
+
 class MockFal:
     """Replays <dir>/<slug>/response.json and copies <dir>/<slug>/files/<basename>. Never touches the network."""
 
@@ -54,12 +59,17 @@ class MockFal:
     def __init__(self, root: Path):
         self.root = root
         self.slug = None
+        self.no_masks = int(os.environ.get("MIDSTUDY_FAL_MOCK_NO_MASKS") or 0)
 
     def upload(self, path: Path) -> str:
         return f"https://mock.fal.invalid/uploads/{urllib.parse.quote(path.name)}"
 
     def call(self, endpoint: str, args: dict) -> dict:
         self.slug = mock_slug(endpoint)
+        # Evals: MIDSTUDY_FAL_MOCK_NO_MASKS=N makes the first N sam3d calls answer "no masks", as live fal does.
+        if endpoint == ENDPOINTS["sam3d"] and self.no_masks > 0:
+            self.no_masks -= 1
+            raise NoMasks("mock: Auto-segmentation produced no masks")
         resp = self.root / self.slug / "response.json"
         if not resp.is_file():
             raise MidstudyError(f"MIDSTUDY_FAL_MOCK: no recorded response at {resp}")
@@ -104,6 +114,9 @@ class LiveFal:
             return self.fal.subscribe(endpoint, arguments=args, with_logs=True, on_queue_update=on_update)
         except Exception as e:  # noqa: BLE001
             msg = str(e).replace("\n", " ")
+            if "produced no masks" in msg:
+                # Seen live 2026-11-05 (a rug picture, a bookshelf): fal answers 422 before running (no charge).
+                raise NoMasks(msg) from None
             raise MidstudyError(f"fal call to {endpoint} failed ({type(e).__name__}: {msg})") from None
 
     def fetch(self, url: str, dest_dir: Path) -> Path:
@@ -127,8 +140,30 @@ def run(fal, engine: str, image: Path, prompt: str, resolution: int, raw_dir: Pa
     raw_dir.mkdir(parents=True, exist_ok=True)
     image_url = fal.upload(image)
     args = arguments(engine, image_url, prompt, resolution)
-    print(f"midstudy-add: calling {endpoint}{' (mock)' if fal.mock else ''} with {json.dumps(args)}", flush=True)
-    resp = fal.call(endpoint, args)
+    resp = None
+    for attempt in range(3):
+        print(f"midstudy-add: calling {endpoint}{' (mock)' if fal.mock else ''} with {json.dumps(args)}", flush=True)
+        try:
+            resp = fal.call(endpoint, args)
+            break
+        except NoMasks:
+            if engine != "sam3d" or attempt == 2:
+                raise MidstudyError(f"SAM 3D found no {prompt} in the picture, even with a mask of the piece. Use a "
+                                    "photo of the piece on its own against a plain background, or try TRELLIS 2. For a "
+                                    "rug seen from above, choose Flat rug (free)") from None
+            if attempt == 0:
+                # The detector is picky about the word: ask again with a lower confidence threshold.
+                print(f"midstudy-add: SAM 3D found no '{prompt}' in the picture; trying again with a lower "
+                      "detection threshold (a refused call isn't charged)", flush=True)
+                args = dict(args, detection_threshold=0.2)
+            else:
+                # Skip the detector: hand SAM 3D a mask of the piece (everything but the picture's plain margin),
+                # or the whole picture when there's no plain margin.
+                mask = raw_dir / "mask.png"
+                how = foreground_mask(image, mask)
+                print(f"midstudy-add: still nothing; trying again with a mask of {how}", flush=True)
+                args = {k: v for k, v in args.items() if k != "detection_threshold"}
+                args["mask_urls"] = [fal.upload(mask)]
     fal.charged = True
     if not isinstance(resp, dict):
         raise MidstudyError(f"{endpoint} returned {type(resp).__name__}, expected a JSON object")

@@ -176,6 +176,54 @@ else
   bad "MIDSTUDY_FAL_MOCK_COST=1 mock run — $(tail -n 1 "$OUT/paidmock.err")"
 fi
 
+# --- sam3d "no masks" (live 2026-11-05): retry with a lower threshold, then with a mask of the piece -------------------
+if MIDSTUDY_FAL_MOCK_NO_MASKS=1 run nomask1 "$IMG" --engine sam3d --name "Retry One" --id retry-one --dims 75x80x95 --library "$LIB"; then
+  check "no masks once: tried again with detection_threshold 0.2, and succeeded" 'grep -q "\"detection_threshold\": 0.2" $OUT/nomask1.out && ! grep -q mask_urls $OUT/nomask1.out'
+else
+  bad "no masks once: the retry succeeds — $(tail -n 1 "$OUT/nomask1.err")"
+fi
+if MIDSTUDY_FAL_MOCK_NO_MASKS=2 run nomask2 "$IMG" --engine sam3d --name "Retry Two" --id retry-two --dims 75x80x95 --library "$LIB"; then
+  check "no masks twice: tried again with a mask of the piece (mask_urls), and succeeded" 'grep -q "mask_urls" $OUT/nomask2.out && [ -f $LIB/retry-two/raw/mask.png ]' "$(grep 'mask of' $OUT/nomask2.out)"
+else
+  bad "no masks twice: the mask retry succeeds — $(tail -n 1 "$OUT/nomask2.err")"
+fi
+if MIDSTUDY_FAL_MOCK_NO_MASKS=3 run nomask3 "$IMG" --engine sam3d --name "Retry Three" --id retry-three --dims 75x80x95 --library "$LIB"; then
+  bad "no masks three times is refused"
+else
+  check "no masks three times: one plain line, no fal JSON, nothing added" 'tail -n 1 $OUT/nomask3.err | grep -q "SAM 3D found no" && ! grep -q "loc" $OUT/nomask3.err && [ ! -d $LIB/retry-three ]' "$(tail -n 1 $OUT/nomask3.err)"
+fi
+
+# --- rug engine (2026-11-05): a top-down rug picture on a white margin -> a flat slab, no model call, $0 ---------
+RUG="$OUT/rug-picture.jpg"
+evals/py -c "
+from PIL import Image, ImageDraw
+im = Image.new('RGB', (800, 800), (255, 255, 255))
+d = ImageDraw.Draw(im)
+d.rectangle([250, 150, 549, 649], fill=(150, 90, 40))
+for y in range(170, 640, 40):
+    d.rectangle([270, y, 529, y + 15], fill=(230, 220, 200))
+im.save('$RUG', quality=92)
+"
+if run rug "$RUG" --engine rug --name "Flat Rug" --id flat-rug --dims 160x230x1 --category rug --library "$LIB"; then
+  ok "rug run succeeds"
+  check "rug summary: engine rug, \$0, no splat" '[ "$(lastline $OUT/rug.out | json "o.engine+\"|\"+o.cost_usd+\"|\"+o.paths.splat")" = "rug|0|null" ]' "$(lastline $OUT/rug.out)"
+  check "rug crops the white margin to the rug (300 x 500 px)" 'grep -q "cropped the picture.s plain margin to 300 x 500 px" $OUT/rug.out' "$(grep note $OUT/rug.out | tr '\n' ' ')"
+  b=$(evals/py evals/glb_info.py "$LIB/flat-rug/model.glb" | json "o.bounds.flat().map(v=>v.toFixed(3)).join(' ')")
+  check "rug is a 160 x 230 x 1 cm slab on the floor, centered" '[ "$b" = "-0.800 0.000 -1.150 0.800 0.010 1.150" ]' "bounds $b"
+  check "rug has its picture as a texture, and a thumbnail" '[ "$(evals/py evals/glb_info.py "$LIB/flat-rug/model.glb" | json "o.images")" = 1 ] && [ -f $LIB/flat-rug/thumb.jpg ]'
+  check "rug library entry: engine rug, glb only, prompt null" 'node -e "
+    const it = JSON.parse(require(\"fs\").readFileSync(\"$LIB/library.json\", \"utf8\")).items.find(i => i.id === \"flat-rug\")
+    process.exit(it && it.source.engine === \"rug\" && it.source.prompt === null && it.assets.splat === null && it.default_render === \"glb\" ? 0 : 1)"'
+else
+  bad "rug run succeeds — $(tail -n 3 "$OUT/rug.err" | tr '\n' ' ')"
+fi
+if run rug-wide "$RUG" --engine rug --name "Wide Rug" --id wide-rug --dims 230x160x1 --library "$LIB"; then
+  check "a portrait picture for a wide rug is turned a quarter" 'grep -q "turned the picture a quarter" $OUT/rug-wide.out' "$(grep note $OUT/rug-wide.out | tr '\n' ' ')"
+else
+  bad "rug run, wide — $(tail -n 3 "$OUT/rug-wide.err" | tr '\n' ' ')"
+fi
+bad_case rug-model fixtures/models/arrow.glb --engine rug --name "Not A Rug" --dims 100x100x1 --library "$LIB"
+
 # --- costs + contract validation (L2) ----------------------------------------
 check "costs.csv has a header and one row per successful run" '[ "$(tail -n +2 "$LIB/costs.csv" 2>/dev/null | grep -c .)" -ge 6 ]' "$(cat "$LIB/costs.csv" 2>/dev/null | tr '\n' ' ')"
 check "costs.csv columns are date,id,engine,cost_usd,mock,input" '[ "$(head -n 1 "$LIB/costs.csv" 2>/dev/null)" = "date,id,engine,cost_usd,mock,input" ]'

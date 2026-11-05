@@ -60,13 +60,15 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const name = textInput({ placeholder: 'Oak reading chair', maxLength: 120, label: 'Name', onInput: () => sync() })
   const dims = dimsFields(null, () => sync())
   const category = textInput({ placeholder: 'chair, lamp, shelf…', maxLength: 40, label: 'Category' })
-  const engineSeg = segmented([{ value: 'sam3d', label: `SAM 3D · ${usd(LIB_PRICE.sam3d)}` }, { value: 'trellis2', label: `TRELLIS 2 · from ${usd(LIB_PRICE.trellis2[512])}` }], st.engine,
-    (v) => { st.engine = v; sync() }, { label: 'Model' })
+  // Names only (three fit on a phone); the price box below shows what the chosen one costs.
+  const engineSeg = segmented([{ value: 'sam3d', label: 'SAM 3D' }, { value: 'trellis2', label: 'TRELLIS 2' }, { value: 'rug', label: 'Flat rug' }], st.engine,
+    (v) => { st.engine = v; rugDefaults(); sync() }, { label: 'Model' })
   engineSeg.classList.add('ms-seg')
   const resSeg = segmented(Object.entries(LIB_PRICE.trellis2).map(([r, p]) => ({ value: r, label: `${r} · ${usd(p)}` })), String(st.resolution),
     (v) => { st.resolution = Number(v); sync() }, { label: 'Detail' })
   resSeg.classList.add('ms-seg')
-  const engineRow = h('div.ms-row', h('span.ms-label', 'Model'), engineSeg, h('span.ms-hint', 'SAM 3D is quick and cheap; TRELLIS 2 keeps finer detail.'))
+  const engineHint = h('span.ms-hint')
+  const engineRow = h('div.ms-row', h('span.ms-label', 'Model'), engineSeg, engineHint)
   const resRow = h('div.ms-row', h('span.ms-label', 'Detail'), resSeg)
   const costBig = h('b.ms-cost-big.tnum')
   const costWord = h('span.ms-cost-word')
@@ -119,17 +121,29 @@ export function openAddSheet(ctx, { onAdded } = {}) {
     if (!dims.value()) return 'Enter its size in cm'
     return null
   }
+  // Flat rug: H is the thickness, so fill in 1 cm (and the category) when they're still empty.
+  function rugDefaults() {
+    if (st.engine !== 'rug') return
+    const hIn = dims.querySelectorAll('input')[2]
+    if (hIn && !hIn.value.trim()) hIn.value = '1'
+    if (!category.value.trim()) category.value = 'rug'
+  }
   function sync() {
     const isModel = st.source === 'model'
+    const isRug = !isModel && st.engine === 'rug'
+    engineHint.textContent = isRug
+      ? 'For a rug seen from straight above, like a shop’s picture: laid flat at W × D, H is its thickness (about 1 cm). No model call.'
+      : `SAM 3D (${usd(LIB_PRICE.sam3d)}) is quick and cheap; TRELLIS 2 (from ${usd(LIB_PRICE.trellis2[512])}) keeps finer detail. Flat rug (free): a rug pictured from above.`
     engineRow.hidden = isModel
     resRow.hidden = isModel || st.engine !== 'trellis2'
     const p = price()
-    costWord.textContent = isModel ? 'Your own model' : st.engine === 'trellis2' ? `TRELLIS 2 at ${st.resolution}` : 'SAM 3D from the photo'
+    costWord.textContent = isModel ? 'Your own model' : isRug ? 'Flat rug from the picture' : st.engine === 'trellis2' ? `TRELLIS 2 at ${st.resolution}` : 'SAM 3D from the photo'
     costBig.textContent = p > 0 ? fmtUsd(p) : 'Free'
     const spend = lib.getState().spend
-    budget.replaceChildren(isModel ? h('span.ms-budget', 'No model call: it’s normalized to its size and added. $0.') : budgetLine(spend, p))
+    budget.replaceChildren(isModel ? h('span.ms-budget', 'No model call: it’s normalized to its size and added. $0.')
+      : isRug ? h('span.ms-budget', 'No model call: the picture is laid on the floor at its size. $0.') : budgetLine(spend, p))
     const used = spend ? (spend.spent_usd || 0) + (spend.reserved_usd || 0) : 0
-    const over = !isModel && spend && p > Math.max(0, spend.cap_usd - used) + 1e-9
+    const over = !isModel && !isRug && spend && p > Math.max(0, spend.cap_usd - used) + 1e-9
     const why = problem()
     go.disabled = st.busy || !!why || !!over
     go.textContent = st.busy ? 'Sending…' : why || (p > 0 ? `Make it · ${fmtUsd(p)}` : 'Add · free')

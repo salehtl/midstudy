@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import MidstudyError, engines, glb, library, objzip, splat
+from . import MidstudyError, engines, glb, library, objzip, rug, splat
 from .frames import orientation, yaw_rotation
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -44,12 +44,13 @@ class Parser(argparse.ArgumentParser):
 def build_parser() -> Parser:
     p = Parser(prog="midstudy-add", description="Add a piece of furniture to the midstudy library at real-world size.")
     p.add_argument("input", metavar="INPUT", nargs="?",
-                   help="image path or URL (sam3d, trellis2), or .glb/.gltf path or URL, or an OBJ .zip (glb)")
+                   help="image path or URL (sam3d, trellis2, rug), or .glb/.gltf path or URL, or an OBJ .zip (glb)")
     p.add_argument("--name", help="human name, e.g. 'Strandmon wing chair' (required unless --rescale)")
     p.add_argument("--dims", help="W x D x H in cm, e.g. 75x80x95 (x or ×, spaces and decimals allowed)")
     p.add_argument("--id", help="slug; defaults to a slug of --name. An existing id is replaced")
     p.add_argument("--category", help="e.g. armchair")
-    p.add_argument("--engine", choices=["sam3d", "trellis2", "glb"], default="sam3d")
+    p.add_argument("--engine", choices=["sam3d", "trellis2", "glb", "rug"], default="sam3d",
+                   help="rug: a flat rug from a top-down picture, no model call ($0); H in --dims is its thickness")
     p.add_argument("--prompt", help="sam3d only: the object to extract; defaults to --category or 'furniture'")
     p.add_argument("--yaw", type=int, choices=[0, 90, 180, 270], default=0,
                    help="extra counterclockwise turn about +Y (seen from above) so the front faces +Z; "
@@ -193,7 +194,8 @@ def run(argv: list[str] | None) -> None:
             raise MidstudyError(f"can't make an id from --name '{name}'; pass --id reading-chair or similar")
 
     engine = args.engine
-    image_engine = engine in engines.ENDPOINTS
+    image_engine = engine in engines.ENDPOINTS  # a paid fal call
+    image_input = image_engine or engine == "rug"
     resolution = args.resolution or 512
     prompt = args.prompt or args.category or "furniture"
     if args.resolution and engine != "trellis2":
@@ -209,7 +211,7 @@ def run(argv: list[str] | None) -> None:
                         "then use --engine glb")
     if engine == "glb" and suffix not in MODEL_EXT and not (is_url and not suffix):
         raise MidstudyError(f"--engine glb needs a .glb, .gltf or OBJ .zip INPUT, got '{raw_input}'")
-    if image_engine and suffix in MODEL_EXT:
+    if image_input and suffix in MODEL_EXT:
         raise MidstudyError(f"INPUT is a 3D model ({suffix}); use --engine glb")
 
     mock_dir = resolve_mock_dir()
@@ -222,7 +224,7 @@ def run(argv: list[str] | None) -> None:
         local = Path(raw_input).expanduser()
         if not local.is_file():
             raise MidstudyError(f"INPUT not found: {raw_input}")
-        if image_engine:
+        if image_input:
             check_image(local)
 
     if image_engine and not mock_dir and not engines.load_fal_key(REPO):
@@ -234,11 +236,11 @@ def run(argv: list[str] | None) -> None:
 
     lib_dir = library_dir(args)
     with library.locked(lib_dir):  # the whole run (§2.8 "one writer")
-        add(args, lib_dir, name, item_id, (w, d, h), engine, image_engine, resolution, prompt, raw_input, is_url,
+        add(args, lib_dir, name, item_id, (w, d, h), engine, image_input, resolution, prompt, raw_input, is_url,
             local, mock_dir)
 
 
-def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, image_engine: bool, resolution: int,
+def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, image_input: bool, resolution: int,
         prompt: str, raw_input: str, is_url: bool, local: Path | None, mock_dir: Path | None) -> None:
     w, d, h = dims
     data = library.load(lib_dir)
@@ -255,7 +257,7 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
             dl.mkdir()
             local = engines.download(raw_input, dl / engines.url_basename(raw_input))
         ext = local.suffix.lower()
-        if image_engine:
+        if image_input:
             fmt = check_image(local)
             ext = ext or PIL_EXT.get(fmt, ".img")
         elif not ext:
@@ -265,13 +267,20 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
         if ext == ".zip":
             local = objzip.to_glb(local, staging / "unzipped", staging / "converted.glb")
             ext = ".glb"
-        if image_engine:
+        if image_input:
             # The engines and the thumbnail get a metadata-free, upright copy (raw/engine-input.<ext>); source.<ext>
             # keeps the original as given and is never served (contract §2.8).
             local = engine_input(local, staging / "raw")
 
         model_src, splat_src, splat_to_glb = local, None, np.eye(3)
-        if image_engine:
+        thumb_src = local
+        if engine == "rug":
+            say(f"rug ($0, no model call): {raw_input}")
+            thumb_src = staging / "raw" / "rug-texture.jpg"
+            model_src = staging / "raw" / "rug.glb"
+            for n in rug.build(local, (w, d, h), model_src, thumb_src):
+                say(f"note: {n}")
+        elif engine in engines.ENDPOINTS:
             fal = engines.MockFal(mock_dir) if mock else engines.LiveFal()
             say(f"{engine}{' (mock, $0)' if mock else f' (${cost:.2f})'}: {raw_input}")
             outputs = engines.run(fal, engine, local, prompt, resolution, staging / "raw")
@@ -291,9 +300,9 @@ def add(args, lib_dir: Path, name: str, item_id: str, dims: tuple, engine: str, 
                 say(f"note: {n}")
             say(f"splat.ply scaled uniformly to h = {num(h)} cm (error % w/d/h: "
                 f"{splat_fit['w']}/{splat_fit['d']}/{splat_fit['h']})")
-        thumb = image_engine
+        thumb = image_input
         if thumb:
-            make_thumb(local, staging / "thumb.jpg")
+            make_thumb(thumb_src, staging / "thumb.jpg")
         for scratch in ("download", "unzipped", "converted.glb", "converted.jpg"):
             if (staging / scratch).is_dir():
                 shutil.rmtree(staging / scratch)

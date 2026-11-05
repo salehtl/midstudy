@@ -157,7 +157,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 | `POST /api/library/items/<id>/restore` | | `200` the item (newest trashed copy), `404` when none, `409` when the id exists again |
 | `PUT /api/library/items/<id>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB (the planner's render of the model) | `200` the item: `<id>/thumb.jpg` written without metadata (§2.6), `assets.thumb` set; `404` unknown id, `400` not a JPEG, `413` over 2 MB, `503` while a job holds the library |
 
-**Meta:** `name` and `dims_cm` `{w,d,h}` required; `id` (default: slug of `name`), `category`, `mount`, `yaw`, `engine` (`sam3d` \| `trellis2` for images; `glb` for models), `prompt`, `resolution`. Anything wrong is `400` with one actionable sentence.
+**Meta:** `name` and `dims_cm` `{w,d,h}` required; `id` (default: slug of `name`), `category`, `mount`, `yaw`, `engine` (`sam3d` \| `trellis2` \| `rug` for images; `glb` for models), `prompt`, `resolution`. Anything wrong is `400` with one actionable sentence.
 
 **Bodies:** `model` is a `.glb`, or a `.zip` holding one `.obj` with its `.mtl` and textures (`.usdz`: "convert to GLB first"); `image` is a JPEG, PNG, HEIC or WebP. **Limits:** models 200 MB, images 20 MB (`413`), `411` without a length. Zips: only `.obj .mtl .png .jpg .jpeg` extracted; no absolute paths, `..` or links; at most 500 MB unpacked and 1,000 entries. Uploads land in a private temp folder, never under a served path.
 
@@ -198,12 +198,12 @@ A uv project in `pipeline/` (Python 3.12), console script `midstudy-add`, packag
 
 ```
 uv run --project pipeline midstudy-add INPUT --name NAME --dims WxDxH
-    [--id SLUG] [--category TEXT] [--engine sam3d|trellis2|glb] [--prompt TEXT]
+    [--id SLUG] [--category TEXT] [--engine sam3d|trellis2|glb|rug] [--prompt TEXT]
     [--yaw 0|90|180|270] [--resolution 512|1024|1536] [--library DIR] [--notes TEXT] [--mount floor|wall]
 uv run --project pipeline midstudy-add --rescale ID [--dims WxDxH] [--yaw 0|90|180|270] [--library DIR]
 ```
 
-- `INPUT`: a local image or image URL (`sam3d`, `trellis2`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
+- `INPUT`: a local image or image URL (`sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
 - `--dims`: centimeters `W x D x H` (`x` or `×`, spaces and decimals allowed). Required for adds.
 - `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `sam3d`.
 - Image engines get a metadata-free, upright copy of the photo (`raw/engine-input.<ext>`, §2.8 Privacy); `source.<ext>` keeps the input as given.
@@ -218,6 +218,10 @@ uv run --project pipeline midstudy-add --rescale ID [--dims WxDxH] [--yaw 0|90|1
 | `sam3d` (default) | `fal-ai/sam-3/3d-objects` | `image_url`, `prompt`, `export_textured_glb: true` | $0.02 |
 | `trellis2` | `fal-ai/trellis-2` | `image_url`, `resolution` | $0.25 / $0.30 / $0.35 for 512 / 1024 / 1536 |
 | `glb` | none | | $0.00 |
+| `rug` | none | | $0.00 |
+
+- **`sam3d` when it finds nothing** (fal 422 "Auto-segmentation produced no masks", refused before running, so not charged): it asks again with `detection_threshold: 0.2`, then with `mask_urls` holding a mask of the piece (`raw/mask.png`: the picture without its plain margin, or the whole picture), then fails with one plain line. `MIDSTUDY_FAL_MOCK_NO_MASKS=N` (evals) makes the first N mocked calls answer that way.
+- **`rug`** (added 2026-11-05): a rug pictured from straight above (a shop's picture) laid flat, with no model call. The picture's plain margin is cropped, it is turned a quarter when that matches W × D better, and it becomes the unlit top face of a W × D × H slab (H is the thickness, about 1 cm; sides in the rug's edge colour). The picture's top edge is the back (−Z). GLB only, no splat; `prompt` is null.
 
 The engines' frames are in `fixtures/fal/NOTES.md`.
 

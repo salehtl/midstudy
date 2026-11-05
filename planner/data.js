@@ -120,7 +120,7 @@ export function createScenes({ engine }) {
 //   estimate(meta, kind)      the price an add will reserve ($0 for a model)
 // Events (lib.events): 'jobs' { jobs }   'job-done' { job }   'job-failed' { job }   'spend' { spend }   'trash' { trash }
 // Actions reject with a reported error; a library change reloads the engine's library.
-export const LIB_PRICE = { glb: 0, sam3d: 0.02, trellis2: { 512: 0.25, 1024: 0.3, 1536: 0.35 } }
+export const LIB_PRICE = { glb: 0, rug: 0, sam3d: 0.02, trellis2: { 512: 0.25, 1024: 0.3, 1536: 0.35 } }
 export const MODEL_EXT = /\.(glb|zip|gltf|usdz|obj|fbx)$/i
 export function estimateCost(meta = {}, kind = 'image') {
   if (kind === 'model') return 0

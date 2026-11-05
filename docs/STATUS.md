@@ -16,6 +16,8 @@ never been built on Linux.
   glass balustrade. A photo with an EXIF focal length uses it, which fixes most of MoGe's size bias. Adjust floor
   (sliders, horizon drag, ruler, **Set scale** from a known length) fixes the rest by hand.
 - **Furniture.** Add from a photo or an image link (SAM 3D or TRELLIS 2 on fal), or from a GLB or zipped OBJ (free).
+  **Flat rug** (free, added 2026-11-05) lays a shop's top-down rug picture flat at W × D. When SAM 3D finds nothing in
+  a photo it tries again by itself (less strict, then with a mask of the piece).
   Pieces are placed, dragged, turned, lifted, removed and restored with undo. Real furniture in the photo hides them
   (occlusion from MoGe's depth).
 - **Layouts** per scene. A scene reopens with its layout on any device.
@@ -40,7 +42,7 @@ never been built on Linux.
 | E5 floor (`eval:floor`) | **pass** 34/34 | horizon drag pitch −5.75° (expected −5.74°); manual/auto save and reset |
 | E6 render (`eval:render`) | **pass** 36/36 | align 0.01 px on the synthetic pair; an unrelated image refused; the dialog opens with Keep room exact on |
 | E7 library (`eval:library`) | **pass** 69/69 | carried nook library API |
-| E8 pipeline (`eval:pipeline`) | **pass** 43/43 | `midstudy-add` against the fal mock |
+| E8 pipeline (`eval:pipeline`) | **pass** 54/54 | `midstudy-add` against the fal mock; Flat rug (crop, turn, 160 × 230 × 1 cm slab) and SAM 3D's no-mask retries (added 2026-11-05) |
 | E9 phone (`eval:phone`) | **pass** 48/48 | all targets ≥ 44 px, scroll width 390 at every stage |
 | E11 UX round 1 (`eval:ux`) | **pass** 28/28 | drag keeps the grabbed point under the pointer, Set scale, undo (E11.18 now waits for the Undo to finish in the UI) |
 | E12 UX round 2 (`eval:ux2`) | **pass** 26/26 | layouts across devices, ruler, thumbnails, Swap (E12.12 now waits for the photo to settle after Ruler on) |
@@ -87,6 +89,8 @@ On your lounge photo (`evals/out/live/`, git-ignored; `live-check.jpg` puts the 
 - **Not automated:** pinch zoom and two-finger pan, swiping between renders on the phone, the grid fading with
   distance, contact shadows, Look on furniture only.
 - **True sizes in your room.** Nothing has been checked against a tape measure.
+- **SAM 3D's no-mask retries against live fal.** Only mocked: whether the lower threshold or the mask gets the
+  bookshelf and the carpet through on the real service (and that refused calls stay free) is untested.
 
 ## Known gaps and open findings
 

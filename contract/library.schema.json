@@ -54,7 +54,7 @@
           "required": ["engine", "input", "cost_usd", "created"],
           "additionalProperties": false,
           "properties": {
-            "engine": { "enum": ["sam3d", "trellis2", "glb", "fixture"] },
+            "engine": { "enum": ["sam3d", "trellis2", "glb", "rug", "fixture"] },
             "input": { "type": "string" },
             "prompt": { "type": ["string", "null"] },
             "cost_usd": { "type": "number", "minimum": 0 },

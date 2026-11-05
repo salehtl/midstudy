@@ -60,16 +60,19 @@ In the planner: **Library › Add furniture**, then one of:
 | A photo of the piece | SAM 3D (default) or TRELLIS 2 | $0.02 (SAM 3D), $0.25–0.35 (TRELLIS 2) |
 | An image link (the image's own URL, not the shop page) | same | same |
 | A 3D file: `.glb` or a zipped OBJ (the CLI also takes `.gltf`) | none | free |
+| A rug pictured from straight above (a shop's rug picture) | **Flat rug**: laid flat at W × D, H is its thickness (~1 cm) | free |
 
 Every add needs the real size, **W × D × H in cm**, and the piece is scaled to it. The price and today's remaining
 budget show before you confirm. Adds run as jobs in the Library panel. Furniture photos are stripped of their
-metadata before they go to fal.
+metadata before they go to fal. When SAM 3D finds nothing in a photo (it can miss the word it's given), it tries again
+by itself, first less strictly, then with a mask of the piece; the refused calls aren't charged.
 
 The same from the command line (the planner picks it up on reload):
 
 ```sh
 nix develop -c uv run --project pipeline midstudy-add chair.jpg --name "Strandmon wing chair" --dims 82x96x101
 nix develop -c uv run --project pipeline midstudy-add chair.glb --engine glb --name "Sheen chair" --dims 60x65x85
+nix develop -c uv run --project pipeline midstudy-add rug.jpg --engine rug --name "Zen rug" --dims 160x230x1
 nix develop -c uv run --project pipeline midstudy-add --help
 ```
 

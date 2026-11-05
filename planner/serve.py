@@ -245,7 +245,7 @@ EARLY_DRAIN_SECONDS = 5        # after a 411/413 that was already sent
 SOCKET_TIMEOUT = float(os.environ.get("MIDSTUDY_SOCKET_TIMEOUT") or 30)  # s one read or write may block (a client that
                                                                              # stops sending is dropped); the env var is for evals
 ENGINE_PRICE = {"sam3d": lambda res: 0.02, "trellis2": lambda res: {512: 0.25, 1024: 0.30, 1536: 0.35}[res],
-                "glb": lambda res: 0.0}
+                "glb": lambda res: 0.0, "rug": lambda res: 0.0}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 ZIP_ALLOWED = {".obj", ".mtl", ".png", ".jpg", ".jpeg"}
 ZIP_MAX_ENTRIES = 1000
@@ -352,8 +352,8 @@ def check_meta(meta, kind: str) -> dict:
         out["engine"] = "glb"  # forced for models
     else:
         engine = meta.get("engine") or "sam3d"
-        if engine not in ("sam3d", "trellis2"):
-            raise ValueError(f"engine must be sam3d or trellis2 for an image, got {engine!r}")
+        if engine not in ("sam3d", "trellis2", "rug"):
+            raise ValueError(f"engine must be sam3d, trellis2 or rug for an image, got {engine!r}")
         out["engine"] = engine
     res = meta.get("resolution")
     if res in (None, ""):
