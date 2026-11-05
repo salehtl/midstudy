@@ -257,6 +257,72 @@ theorem worldBounds_z_least {w h d : ℝ} (hw : 0 ≤ w) (hh : 0 ≤ h) (hd : 0 
     simp at this ⊢
     linarith
 
+/-! ### Any box: the corners' bounds contain the whole turned box (geom LEAN.md property 16) -/
+
+/-- A pose's transform, `world(p) = Ry(θ) · p + position` (geom `Transform::apply`). -/
+def world (t : ℝ) (pos p : Vec3) : Vec3 := Ry t *ᵥ p + pos
+
+/-- The 8 corners of the local box `[lo, hi]` (geom `box_corners`, order aside). -/
+def corners (lo hi : Vec3) : List Vec3 :=
+  [![lo 0, lo 1, lo 2], ![hi 0, lo 1, lo 2], ![hi 0, lo 1, hi 2], ![lo 0, lo 1, hi 2],
+   ![lo 0, hi 1, lo 2], ![hi 0, hi 1, lo 2], ![hi 0, hi 1, hi 2], ![lo 0, hi 1, hi 2]]
+
+/-- A linear form `a·x + b·z` over a rectangle reaches its maximum and minimum at corners. -/
+private theorem lin_corner (a b x z x0 x1 z0 z1 : ℝ) (hx : x0 ≤ x ∧ x ≤ x1) (hz : z0 ≤ z ∧ z ≤ z1) :
+    (∃ x' z', (x' = x0 ∨ x' = x1) ∧ (z' = z0 ∨ z' = z1) ∧ a * x + b * z ≤ a * x' + b * z') ∧
+      (∃ x' z', (x' = x0 ∨ x' = x1) ∧ (z' = z0 ∨ z' = z1) ∧ a * x' + b * z' ≤ a * x + b * z) := by
+  constructor
+  · rcases le_total 0 a with ha | ha <;> rcases le_total 0 b with hb | hb
+    · exact ⟨x1, z1, Or.inr rfl, Or.inr rfl, by nlinarith⟩
+    · exact ⟨x1, z0, Or.inr rfl, Or.inl rfl, by nlinarith⟩
+    · exact ⟨x0, z1, Or.inl rfl, Or.inr rfl, by nlinarith⟩
+    · exact ⟨x0, z0, Or.inl rfl, Or.inl rfl, by nlinarith⟩
+  · rcases le_total 0 a with ha | ha <;> rcases le_total 0 b with hb | hb
+    · exact ⟨x0, z0, Or.inl rfl, Or.inl rfl, by nlinarith⟩
+    · exact ⟨x0, z1, Or.inl rfl, Or.inr rfl, by nlinarith⟩
+    · exact ⟨x1, z0, Or.inr rfl, Or.inl rfl, by nlinarith⟩
+    · exact ⟨x1, z1, Or.inr rfl, Or.inr rfl, by nlinarith⟩
+
+private theorem corner_mem {lo hi : Vec3} {x' y' z' : ℝ} (hx : x' = lo 0 ∨ x' = hi 0) (hy : y' = lo 1 ∨ y' = hi 1)
+    (hz : z' = lo 2 ∨ z' = hi 2) : ![x', y', z'] ∈ corners lo hi := by
+  rcases hx with rfl | rfl <;> rcases hy with rfl | rfl <;> rcases hz with rfl | rfl <;> simp [corners]
+
+/-- **Every point of the turned box is within its corners' bounds** (x): some corner reaches at least as far, some at
+most as far. -/
+theorem corners_bound_x {lo hi p : Vec3} (hp : p ∈ box lo hi) (t : ℝ) (pos : Vec3) :
+    (∃ q ∈ corners lo hi, world t pos p 0 ≤ world t pos q 0) ∧
+      (∃ q ∈ corners lo hi, world t pos q 0 ≤ world t pos p 0) := by
+  rw [mem_box] at hp
+  obtain ⟨hx, hy, hz⟩ := hp
+  obtain ⟨⟨x', z', hx', hz', h⟩, ⟨x'', z'', hx'', hz'', h'⟩⟩ := lin_corner (cos t) (sin t) _ _ _ _ _ _ hx hz
+  refine ⟨⟨![x', lo 1, z'], corner_mem hx' (Or.inl rfl) hz', ?_⟩, ⟨![x'', lo 1, z''], corner_mem hx'' (Or.inl rfl)
+    hz'', ?_⟩⟩ <;> simp [world] <;> linarith
+
+theorem corners_bound_z {lo hi p : Vec3} (hp : p ∈ box lo hi) (t : ℝ) (pos : Vec3) :
+    (∃ q ∈ corners lo hi, world t pos p 2 ≤ world t pos q 2) ∧
+      (∃ q ∈ corners lo hi, world t pos q 2 ≤ world t pos p 2) := by
+  rw [mem_box] at hp
+  obtain ⟨hx, hy, hz⟩ := hp
+  obtain ⟨⟨x', z', hx', hz', h⟩, ⟨x'', z'', hx'', hz'', h'⟩⟩ := lin_corner (-sin t) (cos t) _ _ _ _ _ _ hx hz
+  refine ⟨⟨![x', lo 1, z'], corner_mem hx' (Or.inl rfl) hz', ?_⟩, ⟨![x'', lo 1, z''], corner_mem hx'' (Or.inl rfl)
+    hz'', ?_⟩⟩ <;> simp [world] <;> linarith
+
+theorem corners_bound_y {lo hi p : Vec3} (hp : p ∈ box lo hi) (t : ℝ) (pos : Vec3) :
+    (∃ q ∈ corners lo hi, world t pos p 1 ≤ world t pos q 1) ∧
+      (∃ q ∈ corners lo hi, world t pos q 1 ≤ world t pos p 1) := by
+  rw [mem_box] at hp
+  obtain ⟨hx, hy, hz⟩ := hp
+  refine ⟨⟨![lo 0, hi 1, lo 2], corner_mem (Or.inl rfl) (Or.inr rfl) (Or.inl rfl), ?_⟩,
+    ⟨![lo 0, lo 1, lo 2], corner_mem (Or.inl rfl) (Or.inl rfl) (Or.inl rfl), ?_⟩⟩ <;> simp [world] <;> linarith
+
+/-- The footprint's centre (the mean of its four corners) is the world point of the box's centre on its floor
+(geom `footprint`). -/
+theorem footprint_centre (t : ℝ) (pos lo hi : Vec3) :
+    (1 / 4 : ℝ) • (world t pos ![lo 0, 0, hi 2] + world t pos ![hi 0, 0, hi 2] + world t pos ![hi 0, 0, lo 2] +
+      world t pos ![lo 0, 0, lo 2]) = world t pos ![(lo 0 + hi 0) / 2, 0, (lo 2 + hi 2) / 2] := by
+  ext i
+  fin_cases i <;> simp [world, Matrix.vecHead, Matrix.vecTail] <;> ring
+
 /-- At a quarter turn the world bounds are `d` wide and `w` deep: the X and Z extents swap (§2.5). -/
 theorem worldBounds_quarter (w d : ℝ) :
     (w * |cos (π / 2)| + d * |sin (π / 2)| = d) ∧ (w * |sin (π / 2)| + d * |cos (π / 2)| = w) := by
