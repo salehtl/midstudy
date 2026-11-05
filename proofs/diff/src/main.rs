@@ -1,7 +1,7 @@
-//! `midstudy-proofs-diff jpeg|png LIST OUTDIR`: for each path in LIST, `midstudy_media::jpeg::strip` and `is_clean`
-//! (or `png::strip`), printed exactly as `lake exe mediastrip` prints the Lean models' results:
-//! `name<TAB>ok<TAB>length<TAB>clean` (and the stripped bytes in OUTDIR/name) or `name<TAB>err<TAB>Kind<TAB>clean`
-//! (`clean` is `-` for PNG).
+//! `midstudy-proofs-diff jpeg|png|slug LIST OUTDIR`: for each path in LIST, `midstudy_media::jpeg::strip` and
+//! `is_clean` (or `png::strip`, or `slug::is_slug` of the file as a string), printed exactly as `lake exe mediastrip`
+//! prints the Lean models' results: `name<TAB>ok<TAB>length<TAB>clean` (and the stripped bytes in OUTDIR/name) or
+//! `name<TAB>err<TAB>Kind<TAB>clean` (`clean` is `-` for PNG); `name<TAB>res<TAB>true|false<TAB>-` for slugs.
 use std::io::Write;
 use std::path::Path;
 
@@ -13,11 +13,11 @@ fn kind(debug: &str) -> &str {
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let [_, mode, list, out_dir] = args.as_slice() else {
-        eprintln!("usage: midstudy-proofs-diff jpeg|png LIST OUTDIR");
+        eprintln!("usage: midstudy-proofs-diff jpeg|png|slug LIST OUTDIR");
         std::process::exit(2);
     };
-    if mode != "jpeg" && mode != "png" {
-        eprintln!("mode must be jpeg or png");
+    if mode != "jpeg" && mode != "png" && mode != "slug" {
+        eprintln!("mode must be jpeg, png or slug");
         std::process::exit(2);
     }
     let out_dir = Path::new(out_dir);
@@ -28,6 +28,12 @@ fn main() -> std::io::Result<()> {
         let name = Path::new(path)
             .file_name()
             .map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned());
+        if mode == "slug" {
+            // the generator writes valid UTF-8 only; anything else would be a harness bug
+            let text = std::str::from_utf8(&data).map_err(std::io::Error::other)?;
+            writeln!(out, "{name}\tres\t{}\t-", midstudy_media::slug::is_slug(text))?;
+            continue;
+        }
         let (result, clean) = if mode == "jpeg" {
             (
                 midstudy_media::jpeg::strip(&data)

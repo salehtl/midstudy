@@ -7,7 +7,9 @@ stuffed bytes and restart markers, trailing bytes), and mutations of all of them
 FF bytes, bad lengths).
 PNG: the repo's PNG fixtures (depth maps, id masks) with metadata chunks injected, synthetic chunk streams (every
 dropped type, IEND early or missing, bytes after IEND, huge lengths) and mutations.
-usage: python3 gen_corpus.py jpeg|png REPO_ROOT OUTDIR [N_SYNTH]
+Slugs: valid ones of every length 1-64, and near misses (65 long, upper case, leading '-', '_', '.', '/', '..', spaces,
+a trailing newline, non-ASCII letters, empty), as UTF-8 text files.
+usage: python3 gen_corpus.py jpeg|png|slug REPO_ROOT OUTDIR [N_SYNTH]
 """
 import random
 import struct
@@ -173,12 +175,37 @@ def main_png(root, out, n, rng):
     return files
 
 
+SLUG_HEAD = "abcdefghijklmnopqrstuvwxyz0123456789"
+SLUG_TAIL = SLUG_HEAD + "-"
+SLUG_BAD = ["A", "Z", "_", ".", "/", "\\", " ", "\n", "\r", "\t", "\x00", "é", "ß", "ǅ", "٣", "²", "😀", "-", "..", "%2e"]
+
+
+def main_slug(n, rng):
+    files = []
+    for k in range(n):
+        r = rng.random()
+        length = rng.randrange(1, 66)
+        s = rng.choice(SLUG_HEAD) + "".join(rng.choice(SLUG_TAIL) for _ in range(length - 1))
+        if r < 0.5:
+            pass  # valid when 1-64 long
+        elif r < 0.8:
+            i = rng.randrange(len(s) + 1)
+            s = s[:i] + rng.choice(SLUG_BAD) + s[i:]
+        elif r < 0.9:
+            s = s + "\n"
+        else:
+            s = rng.choice(["", "-a", "a" * 64, "a" * 65, ".", "..", "a/b", "../a", "scene-20261105-120000", "Ä"])
+        files.append((f"slug{k:05d}.txt", s.encode("utf-8")))
+    return files
+
+
 def main():
     mode, root, out = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
     n = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(20261105)
-    files = main_png(root, out, n, rng) if mode == "png" else main_jpeg(root, n, rng)
+    files = (main_png(root, out, n, rng) if mode == "png" else main_slug(n, rng) if mode == "slug"
+             else main_jpeg(root, n, rng))
     with open(out / "list.txt", "w") as lst:
         for name, data in files:
             (out / name).write_bytes(data)
