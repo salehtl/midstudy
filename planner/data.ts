@@ -9,8 +9,10 @@
 //   rename(name, title) / remove(name)   PUT title / DELETE (moves it to scenes/.trash on the server)
 // Events (scenes.events, ScenesEvents): 'scenes' { scenes }   'ready' { scene } a scene finished calibrating while this
 //   page was open   'failed' { scene }
-// Helpers: friendlyDate(iso|Date) ("Sun 26 Oct, 09:36"), relDate ("Today, 09:36"), clock, sceneTitle(scene), fmtBytes(n)
-// The decisions and the wording are planner/logic/ (text.ts, money.ts, messages.ts, library.ts, scenes.ts).
+// Helpers: friendlyDate(iso|Date) ("Sun 26 Oct, 09:36"), relDate ("Today, 09:36"), shortDate ("26 Oct, 09:36"), clock,
+// sceneTitle(scene), fmtBytes(n)
+// The decisions and the wording are planner/logic/ (text.ts, money.ts, messages.ts, library.ts, scenes.ts); the scenes
+// come typed from the engine's 'scenes' event (planner/wire.ts SceneSummary).
 import { RequestError, quiet, withMidstudy } from './engine.js'
 import type { Engine, Req } from './engine.js'
 import { Bus } from './bus.js'
@@ -34,10 +36,15 @@ export function friendlyDate(when: When): string {
   if (Number.isNaN(d.getTime())) return ''
   return text.friendlyText(parts(d))
 }
-/** "09:36". @public (a v1 export name) */
+/** "09:36". */
 export function clock(when: When): string {
   const d = asDate(when)
   return Number.isNaN(d.getTime()) ? '' : text.clockText(parts(d))
+}
+/** "26 Oct, 09:36". */
+export function shortDate(when: When): string {
+  const d = asDate(when)
+  return Number.isNaN(d.getTime()) ? '' : text.shortText(parts(d))
 }
 /** "Today, 09:36", "Yesterday, 09:36", else friendlyDate. */
 export function relDate(when: When): string {
@@ -166,7 +173,7 @@ export function createScenes({ engine }: { engine: Engine }) {
     getState: (): { loaded: boolean; offline: boolean } => ({ ...state }),
   }
 }
-/** The scenes store (ctx.scenes). @public */
+/** The scenes store (ctx.scenes). */
 export type Scenes = ReturnType<typeof createScenes>
 
 // --- the library manager's store (§2.8, §2.9) -------------------------------------------------------------------
@@ -180,14 +187,13 @@ export type Scenes = ReturnType<typeof createScenes>
 //   edit(id, patch)           PATCH → the item, or a rescale job (dims_cm, yaw)
 //   remove(id) / restore(id)  DELETE → move to the library's trash / POST …/restore → the item
 //   spend() → Promise<spend>  GET /api/spend
-//   estimate(meta, kind)      the price an add will reserve ($0 for a model)
+// The answers are read with planner/wire.ts (LibraryJob, LibraryEntry, TrashedItem, Spend); estimateCost(meta, kind)
+// is the price an add will reserve ($0 for a model).
 // Events (lib.events, LibEvents): 'jobs' { jobs }   'job-done' { job }   'job-failed' { job }   'spend' { spend }   'trash' { trash }
 // Actions reject with a reported error; a library change reloads the engine's library.
 // idol is the default image engine (contract §2.8, §3.2): $0.10, a splat with a stand-in box.
 export const LIB_PRICE = { glb: 0, rug: 0, idol: 0.1, sam3d: 0.02, trellis2: { 512: money.trellisPrice(512), 1024: money.trellisPrice(1024), 1536: money.trellisPrice(1536) } } as const
 export const DEFAULT_IMAGE_ENGINE = money.DEFAULT_IMAGE_ENGINE
-/** Model file names (v1's MODEL_EXT; money.isModelName decides). @public (a v1 export name) */
-export const MODEL_EXT = /\.(glb|zip|gltf|usdz|obj|fbx)$/i
 /** The price an add will reserve: $0 for a model file, else the engine's (contract §3.2). */
 export function estimateCost(meta: unknown = {}, kind = 'image'): number {
   const m = isRecord(meta) ? meta : {}
@@ -376,5 +382,5 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     getState: (): Readonly<LibState> => ({ ...state, jobs: state.jobs.slice(), trash: state.trash.slice() }),
   }
 }
-/** The library manager's store (ctx.lib). @public */
+/** The library manager's store (ctx.lib). */
 export type Library = ReturnType<typeof createLibrary>

@@ -7,9 +7,9 @@
 // The workspace's Render button sends shell event 'render-request' and its "Render ready · View" toast 'open-render'
 // { meta }; this panel takes both (preventDefault). engine.compare(a, b) (the hook) opens Compare.
 // The words: logic/renders.ts.
-import { RENDER_MODELS, isRenderModel, renderPrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
+import { RENDER_MODELS, clock, isRenderModel, relDate, renderPrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
 import type { SegOption } from '../kit.js'
-import { pic, withIcon, emptyState, dayDate, clock, money, modelShort, imageShot, messageOf } from './common.js'
+import { pic, withIcon, emptyState, money, modelShort, imageShot, messageOf } from './common.js'
 import { dots } from '../logic/text.js'
 import {
   ABOUT_S, alignNote, confirmSub, confirmTitle, defaultPromptText, failedTitle, failureReason, goText, modelNote, notAlignedText, ofText, ownPrompt,
@@ -75,8 +75,8 @@ export function mount(ctx: UiContext): void {
 
   const layoutOf = (m: RenderMeta): string => (m.layout ? engine.layoutDisplayName(m.layout) : '')
   // The layout is what tells two renders apart, so it leads (the title line), then the time, model and keep-room.
-  const titleLine = (m: RenderMeta): string => layoutOf(m) || dayDate(m.created)
-  const metaLine = (m: RenderMeta): string => renderMeta(layoutOf(m), dayDate(m.created), modelShort(m.model), m)
+  const titleLine = (m: RenderMeta): string => layoutOf(m) || relDate(m.created)
+  const metaLine = (m: RenderMeta): string => renderMeta(layoutOf(m), relDate(m.created), modelShort(m.model), m)
   const byName = (n: string): RenderMeta | undefined => engine.getRenders().find((r) => r.name === n)
   const focusable = (el: Element | null): HTMLElement | null => (el instanceof HTMLElement ? el : null)
 
@@ -191,7 +191,7 @@ export function mount(ctx: UiContext): void {
     }
     const m = openModal('confirm', ({ phone, close }) => {
       const title = confirmTitle(!!from, !!retry)
-      const sub = confirmSub(from ? dayDate(from.created) : null, !!retry)
+      const sub = confirmSub(from ? relDate(from.created) : null, !!retry)
       const sizeShot = shot ? { width: (shot.sentW ?? 0) || shot.width, height: (shot.sentH ?? 0) || shot.height } : null
       const price = (): number => (engine.isRenderMock() ? 0 : renderPrice(model, sizeShot))
       const goLabel = (): string => goText(engine.isRenderMock(), price())
@@ -300,8 +300,8 @@ export function mount(ctx: UiContext): void {
         const seg = segmented(sides, side, (v) => { side = v; img.src = srcOf(v) ?? '' }, { small: true, label: 'Show' })
         let x0: number | null = null
         const stage = h('div.rv-stage', { onpointerdown: (e) => { x0 = e.clientX }, onpointerup: (e) => { if (x0 !== null && Math.abs(e.clientX - x0) > 60) step(e.clientX < x0 ? 1 : -1); x0 = null } }, img)
-        return { label: `Render, ${dayDate(r.created)}`, el: h('div.rv-phone',
-          h('header.rv-head', closeBtn, h('div.rv-titles', h('h2.rv-title.tnum', layoutOf(r) || dayDate(r.created)), h('span.rv-sub.tnum', dots([layoutOf(r) ? dayDate(r.created) : null, of, modelShort(r.model), renderCost(r)])))),
+        return { label: `Render, ${relDate(r.created)}`, el: h('div.rv-phone',
+          h('header.rv-head', closeBtn, h('div.rv-titles', h('h2.rv-title.tnum', layoutOf(r) || relDate(r.created)), h('span.rv-sub.tnum', dots([layoutOf(r) ? relDate(r.created) : null, of, modelShort(r.model), renderCost(r)])))),
           h('div.rv-seg', seg), stage,
           h('footer.rv-foot', alignEl, promptEl, h('div.rv-actions', cmp, again))) }
       }
@@ -312,8 +312,8 @@ export function mount(ctx: UiContext): void {
         h('button.btn.btn-icon.btn-quiet', { type: 'button', 'aria-label': 'Newer', dataset: { tip: 'Newer', kbd: '←' }, onclick: () => { step(-1) } }, pic('chevron-left', { size: 16 })),
         h('span.tnum', of),
         h('button.btn.btn-icon.btn-quiet', { type: 'button', 'aria-label': 'Older', dataset: { tip: 'Older', kbd: '→' }, onclick: () => { step(1) } }, pic('chevron-right', { size: 16 }))) : null
-      return { label: `Render, ${dayDate(r.created)}`, el: h('div.rv-desk',
-        h('header.rv-head', h('h2.rv-title.tnum', `Render · ${dayDate(r.created)}`),
+      return { label: `Render, ${relDate(r.created)}`, el: h('div.rv-desk',
+        h('header.rv-head', h('h2.rv-title.tnum', `Render · ${relDate(r.created)}`),
           h('span.rv-sub.tnum', dots([layoutOf(r) || null, isRenderModel(r.model) ? RENDER_MODELS[r.model].label : r.model, renderCost(r)])),
           h('span.rv-spacer'),
           h('a.btn.btn-quiet', { href: (side === 'raw' ? r.raw_url : r.url) ?? undefined, target: '_blank', rel: 'noopener' }, 'Open image'), nav, h('span.rv-sep'), closeBtn),
@@ -349,8 +349,8 @@ export function mount(ctx: UiContext): void {
       const B = mb
       // A and B are told apart by their layout first (two renders of the same minute differ only there); the phone drops
       // the model to keep the caption readable.
-      const tag = (r: RenderMeta, i: 0 | 1): HTMLSpanElement => h('span.cv-tag', { title: dots([layoutOf(r), dayDate(r.created), modelShort(r.model)]) }, h('b', i ? 'B' : 'A'),
-        h('span.tnum', dots([layoutOf(r) || null, dayDate(r.created), phone ? null : modelShort(r.model)])))
+      const tag = (r: RenderMeta, i: 0 | 1): HTMLSpanElement => h('span.cv-tag', { title: dots([layoutOf(r), relDate(r.created), modelShort(r.model)]) }, h('b', i ? 'B' : 'A'),
+        h('span.tnum', dots([layoutOf(r) || null, relDate(r.created), phone ? null : modelShort(r.model)])))
       const closeBtn = h('button.btn.btn-icon.rv-close', { type: 'button', 'aria-label': 'Close', onclick: () => { close() } }, pic('close', { size: 16 }))
       const seg = segmented(modes, now, (v) => { mode = v; m.rerender() }, { small: true, label: 'Compare as' })
       // Swap A and B: a labelled button on the desktop, an icon button (44 px) in the phone's narrower header.

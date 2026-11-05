@@ -2,13 +2,8 @@
 // X-Midstudy-Meta / from-url body), what is still missing, the Flat rug prefill, the price and budget words; Edit's
 // patch. Pure, TScert-checked. Money is formatted by the shell's fmtUsd, passed in as usd.
 
+import type { DimsCm } from '../../logic/text.js'
 import { readSize } from './text.js'
-
-export interface Dims {
-  readonly w: number
-  readonly d: number
-  readonly h: number
-}
 
 /** The Model choice (handle lib-engine), in this order; Idol is the default. */
 export const ENGINES = [
@@ -19,7 +14,7 @@ export const ENGINES = [
 ] as const
 
 /** The W × D × H fields: a size when all three are numbers above 0, else null. */
-export function dimsOf(w: string, d: string, h: string): Dims | null {
+export function dimsOf(w: string, d: string, h: string): DimsCm | null {
   const x = readSize(w)
   const y = readSize(d)
   const z = readSize(h)
@@ -40,7 +35,7 @@ export function priceWord(v: number, usd: (v: number) => string): string {
  *  size made is its own piece: the same id would replace the other size). image: an image add (not a 3D file). */
 export interface AddFields {
   readonly name: string
-  readonly dims: Dims | null
+  readonly dims: DimsCm | null
   readonly category: string
   readonly productSizes: boolean
   readonly image: boolean
@@ -51,7 +46,7 @@ export interface AddFields {
  *  they apply. A key that does not apply is undefined, which JSON.stringify leaves out, as v1 left it unset. */
 export interface AddMeta {
   readonly name: string
-  readonly dims_cm: Dims | null
+  readonly dims_cm: DimsCm | null
   readonly id: string | undefined
   readonly category: string | undefined
   readonly engine: string | undefined
@@ -197,13 +192,13 @@ export function modelFileText(name: string, size: number): string {
 export interface EditFields {
   readonly name: string
   readonly category: string
-  readonly dims: Dims | null
+  readonly dims: DimsCm | null
   readonly turn: number
   readonly render: string
   readonly canSwitch: boolean
   readonly itemName: string | null
   readonly itemCategory: string | null
-  readonly itemDims: Dims | null
+  readonly itemDims: DimsCm | null
   readonly itemRender: string
 }
 /** What Edit changes (PATCH /api/library/items/<id>, sent as JSON), keys in v1's order; a key that does not change is
@@ -211,7 +206,7 @@ export interface EditFields {
 export interface EditPatch {
   readonly name: string | undefined
   readonly category: string | null | undefined
-  readonly dims_cm: Dims | undefined
+  readonly dims_cm: DimsCm | undefined
   readonly yaw: number | undefined
   readonly default_render: string | undefined
 }

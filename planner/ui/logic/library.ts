@@ -2,6 +2,7 @@
 // counts of placed pieces, each row's marks, the jobs making pieces, and Recently removed. Pure, TScert-checked.
 
 import { dots } from './text.js'
+import { upText } from './workspace.js'
 
 export type LibraryFilter = 'all' | 'inroom'
 
@@ -21,11 +22,6 @@ export interface JobFacts {
   readonly cost_usd?: number | null
   readonly cost_usd_estimate?: number | null
   readonly mock?: boolean | null
-}
-
-/** A piece's name, or its id. */
-export function itemName(it: ItemFacts): string {
-  return (it.name ?? '') || it.id
 }
 
 /** What the search box holds, as the filter compares it. */
@@ -114,6 +110,5 @@ export function jobFailedText(name: string, message: string | null | undefined):
 export function placedMark(missing: boolean, noGlb: boolean, y: number): string {
   if (missing) return 'Missing'
   if (noGlb) return 'No GLB'
-  const up = Math.round(y * 100)
-  return up > 0 ? `${String(up)} cm up` : ''
+  return upText(y)
 }

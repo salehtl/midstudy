@@ -1,6 +1,7 @@
 // The Layouts panel's rules and words (ui/panels/layouts.ts, contract §2.7): a typed name to its slug and back, the
 // Save as new form's check, the "Now in the scene" card, the list's order and each row's meta. Pure, TScert-checked.
 
+import { isSlug } from '../../logic/layout.js'
 import { dots } from './text.js'
 
 /** A layout as the panel lists it (GET /api/layouts details). */
@@ -17,19 +18,13 @@ function slugify(s: string | null | undefined): string {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '')
 }
 
-/** "evening-two-chairs" → "Evening two chairs". */
-export function pretty(name: string | null | undefined): string {
-  const s = (name ?? '').replace(/-/g, ' ')
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
-
 /** Save as new's check of the typed name: its slug, and an error or a hint. */
 export interface NameCheck {
   readonly slug: string
   readonly error: string | null
   readonly hint: string
 }
-export function checkName(text: string, taken: readonly string[], shown: (slug: string) => string, isSlug: (s: string) => boolean): NameCheck {
+export function checkName(text: string, taken: readonly string[], shown: (slug: string) => string): NameCheck {
   const slug = slugify(text)
   if (!text.trim()) return { slug, error: null, hint: 'Letters, numbers and spaces.' }
   if (!slug || !isSlug(slug)) return { slug, error: 'Use letters or numbers in the name.', hint: '' }

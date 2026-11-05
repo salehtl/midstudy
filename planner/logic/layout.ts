@@ -1,8 +1,8 @@
 // Layouts (contract §2.7, §4.5): when the pieces count as unsaved, the names shown, which layout a scene opens with,
 // the document a save writes, and the messages a load gives. v1's layoutSig, prettyLayout, layoutDisplayName,
-// recalledLayout, layoutToOpen, layoutDoc and the load toasts. Pure, for TScert (tscert/README.md).
-import { round, wrapDeg } from './num.js'
-import type { JsonObject } from './num.js'
+// recalledLayout, layoutToOpen, layoutDoc and the load toasts. Pure, for TScert (tscert/README.md): v1's round and
+// wrapDeg are the kernels' and come in as parameters (Kernels).
+import type { JsonObject, Kernels } from './num.js'
 
 /** The slug every id, layout and scene name is (CLAUDE.md conventions). */
 export const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -22,8 +22,8 @@ export interface PlacedPose {
 
 /** One piece as v1's layoutSig row read as text: the id, the position in 0.1 mm and the turn in 0.01°, comma-joined
  * (the numbers have no commas, so the row is unambiguous). */
-function poseText(p: PlacedPose): string {
-  return `${p.id},${String(Math.round(p.x * 1e4))},${String(Math.round(p.y * 1e4))},${String(Math.round(p.z * 1e4))},${String(Math.round(wrapDeg(p.rotation_y_deg) * 100))}`
+function poseText(p: PlacedPose, k: Kernels): string {
+  return `${p.id},${String(Math.round(p.x * 1e4))},${String(Math.round(p.y * 1e4))},${String(Math.round(p.z * 1e4))},${String(Math.round(k.wrapDeg(p.rotation_y_deg) * 100))}`
 }
 
 function byCodeUnits(a: string, b: string): number {
@@ -33,9 +33,9 @@ function byCodeUnits(a: string, b: string): number {
 /** v1's layoutSig: the placed pieces by library id, position (to 0.1 mm) and turn (to 0.01°), in a fixed order, so
  * "unsaved" means the pieces differ from the layout as saved or loaded (Remove then Undo is not). v1 sorted its rows
  * by this same text (Array.prototype.sort's default order); two signatures are equal exactly when v1's were. */
-export function layoutSig(pieces: readonly PlacedPose[]): string {
+export function layoutSig(pieces: readonly PlacedPose[], k: Kernels): string {
   const rows: string[] = []
-  for (const p of pieces) rows.push(poseText(p))
+  for (const p of pieces) rows.push(poseText(p, k))
   return JSON.stringify([...rows].sort(byCodeUnits))
 }
 
@@ -118,9 +118,9 @@ export interface PlacedForSave {
 }
 
 /** v1's layoutDoc items: positions and the turn rounded to 6 decimals; render is what was drawn. */
-export function docItem(p: PlacedForSave): LayoutDocItem {
-  const position: [number, number, number] = [round(p.x, 6), round(p.y, 6), round(p.z, 6)]
-  return { uid: p.uid, id: p.id, render: p.render, position, rotation_y_deg: round(p.rotation_y_deg, 6) }
+export function docItem(p: PlacedForSave, k: Kernels): LayoutDocItem {
+  const position: [number, number, number] = [k.roundTo(p.x, 6), k.roundTo(p.y, 6), k.roundTo(p.z, 6)]
+  return { uid: p.uid, id: p.id, render: p.render, position, rotation_y_deg: k.roundTo(p.rotation_y_deg, 6) }
 }
 
 /** v1's saveLayoutInternal title: the one given (trimmed, at most 120 characters), else the one kept for that name. */

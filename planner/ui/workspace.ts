@@ -12,13 +12,13 @@
 // Shell events it sends (cancelable; preventDefault() to take over): 'render-request' {}, 'open-render' { meta }
 // The decisions, placements and words: logic/workspace.ts.
 import { ring, unsavedGlyph, icon, svgFrom } from './icons.js'
-import { dimsText, quiet, sceneTitle, MAX_ELEVATION, CAMERA_RANGE, type CameraKey, type CameraPatch, type ItemSnapshot, type UiContext } from './seam.js'
+import { dimsText, horizonDragGain, horizonDragRow, quiet, sceneTitle, MAX_ELEVATION, CAMERA_RANGE, type CameraKey, type CameraPatch, type ItemSnapshot, type UiContext } from './seam.js'
 import type { Child } from './kit.js'
 import type { ToastHandle } from './shell.js'
 import { keyboardInset } from './logic/chrome.js'
 import { fixedMinus, readDecimal, readSigned, signed1 } from './logic/text.js'
 import {
-  adjustNote, bottomBar, clipInset, elevCm as cmOf, elevMeters, fillPercent, floorSavedText, frontCorner, gripSpot, horizonDragRow, horizonHandle as handleSpot,
+  adjustNote, bottomBar, clipInset, elevCm as cmOf, elevMeters, fillPercent, floorSavedText, frontCorner, gripSpot, horizonHandle as handleSpot,
   labelSpot, missingText, renderChip, repeatCm, repeatDelayMs, rulerHint as rulerHintText, scaleText, stageInsets, switcher as switcherOf, switcherLabel, upText,
   workspaceKey, type Pt, type Rect,
 } from './logic/workspace.js'
@@ -241,7 +241,7 @@ export function mount(ctx: UiContext): void {
   }
   const selUid = (): string | null => engine.getSelected()
   const elevCm = (): number => { const u = selUid(); return cmOf(u ? engine.getElevation(u) : 0) }
-  const setElevCm = (v: number): void => { const u = selUid(); if (u) engine.setElevation(u, elevMeters(v, MAX_ELEVATION)) }
+  const setElevCm = (v: number): void => { const u = selUid(); if (u) engine.setElevation(u, elevMeters(v)) }
   const nudge = (cm: number): void => { const u = selUid(); if (u) engine.nudgeElevation(u, cm / 100) }
   const raised = (): boolean => { const it = engine.getItem(selUid()); return !!it && it.position[1] > 0.0005 }
   function drop(): void { const u = selUid(); if (u) engine.dropToFloor(u) }
@@ -571,7 +571,7 @@ export function mount(ctx: UiContext): void {
     if (hz?.id !== e.pointerId) return
     const rect = engine.getPhotoRect()
     const s = rect.w / engine.getPhotoSize().w
-    engine.setPitchFromHorizon(horizonDragRow(hz.py0, e.clientY - hz.y0, s, engine.getCamera().fov_y_deg, rect.h, Math.tan))
+    engine.setPitchFromHorizon(horizonDragRow(hz.py0, e.clientY - hz.y0, s, horizonDragGain(engine.getCamera().fov_y_deg, rect.h)))
   })
   const hzUp = (): void => { hz = null; horizonHandle.classList.remove('is-active') }
   horizonHandle.addEventListener('pointerup', hzUp)

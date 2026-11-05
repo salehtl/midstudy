@@ -3,10 +3,10 @@
 // layouts: item count, saved date, the current one marked, Load (asks first when the furniture has unsaved changes),
 // and a "…" menu with Save current over it and Delete…. Frames C3 (phone) and C6 sections. The rules and words:
 // logic/layouts.ts.
-import { SLUG, quiet, sceneTitle, type DeletedLayout, type LayoutSummary, type UiContext } from '../seam.js'
+import { quiet, sceneTitle, shortDate, type DeletedLayout, type LayoutSummary, type UiContext } from '../seam.js'
 import type { ConfirmAction } from '../shell.js'
-import { pic, withIcon, shortDate, isOffline, messageOf, OFFLINE_BODY } from './common.js'
-import { cardMeta, cardTitle, checkName, loadBody, noLayoutsText, pretty, rowMeta, savedWithText, sortLayouts } from '../logic/layouts.js'
+import { pic, withIcon, isOffline, messageOf, OFFLINE_BODY } from './common.js'
+import { cardMeta, cardTitle, checkName, loadBody, noLayoutsText, rowMeta, savedWithText, sortLayouts } from '../logic/layouts.js'
 
 interface Failure {
   readonly message: string
@@ -32,8 +32,8 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
   const current = (): string => engine.getLayoutName().trim()
   const names = (): string[] => engine.getLayoutDetails().map((d) => d.name)
   // The name as the user typed it ("Phone A"), else the slug made readable ("two-chairs" → "Two chairs").
-  const show = (name: string): string => engine.layoutDisplayName(name) || pretty(name)
-  const formCheck = (text: string): ReturnType<typeof checkName> => checkName(text, names(), show, (s) => SLUG.test(s))
+  const show = (name: string): string => engine.layoutDisplayName(name)
+  const formCheck = (text: string): ReturnType<typeof checkName> => checkName(text, names(), show)
 
   async function save(name: string, { quietly = false, title = null }: { readonly quietly?: boolean; readonly title?: string | null } = {}): Promise<boolean> {
     if (busy) return false

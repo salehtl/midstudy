@@ -1,8 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "planner/main.{ts,js}",
-    "planner/**/*.worker.{ts,js}",
+    "planner/main.ts",
+    "planner/**/*.worker.ts",
     "server/src/main.ts",
     "pipeline/src/cli.ts",
     "core/js/{web,node}.ts",
@@ -13,7 +13,7 @@
     "fixtures/*.mjs"
   ],
   "project": [
-    "planner/**/*.{ts,js}",
+    "planner/**/*.ts",
     "server/**/*.ts",
     "pipeline/**/*.ts",
     "core/js/**/*.ts",
@@ -24,7 +24,6 @@
   ],
   "ignore": [
     "planner/dist/**",
-    "planner/**/*.js",
     "contract/gen/**"
   ],
   "ignoreDependencies": [

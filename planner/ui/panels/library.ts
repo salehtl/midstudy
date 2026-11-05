@@ -13,9 +13,10 @@ import { ring } from '../icons.js'
 import { openAddSheet, openEditSheet } from './libsheets.js'
 import { countBy, uniqueBy } from '../logic/lists.js'
 import {
-  addLabel, inRoomTip, inRoomWord, itemName, jobFailedText, jobKind, jobLine, makingText, nextFilter, nothingShown, placedCount,
+  addLabel, inRoomTip, inRoomWord, jobFailedText, jobKind, jobLine, makingText, nextFilter, nothingShown, placedCount,
   searchPlaceholder, searchQuery, shownItems, shownJobs, type LibraryFilter,
 } from '../logic/library.js'
+import { libName } from '../../logic/library.js'
 
 /** @public planner/main.js mounts every area: mod.mount(ctx). */
 export function mount(ctx: UiContext): void {
@@ -59,7 +60,7 @@ export function mount(ctx: UiContext): void {
   async function add(item: LibraryEntry): Promise<void> {
     if (!engine.getSceneName()) { shell.toast('Open a scene first, then add furniture to it.', { id: 'no-scene' }); shell.openPage('scenes'); return }
     let uid: string
-    const name = itemName(item)
+    const name = libName(item)
     // A splat can take a few seconds to download and set up: say so if it isn't there at once.
     const loading: { toast: ToastHandle | null } = { toast: null }
     const slow = setTimeout(() => { loading.toast = shell.toast(`Placing ${name}…`, { ms: 60000 }) }, 400)
@@ -95,19 +96,19 @@ export function mount(ctx: UiContext): void {
     ], { align: 'end' })
   }
   async function removeFromLibrary(item: LibraryEntry): Promise<void> {
-    const name = itemName(item)
+    const name = libName(item)
     try { await lib.remove(item.id) } catch { return } // reported
     const t = shell.toast(`${name} removed from the library`, { id: `lib-removed:${item.id}`, icon: 'trash', ms: 10000, action: { label: 'Undo', onClick: () => { quiet(restore(item)) } } })
     t.el.querySelector('.toast-action')?.setAttribute('data-midstudy', 'lib-undo')
   }
   async function restore(item: LibraryEntry | TrashedItem): Promise<void> {
     try { await lib.restore(item.id) } catch { return }
-    shell.toast(`${itemName(item)} is back in the library`, { kind: 'ok', id: `lib-restored:${item.id}` })
+    shell.toast(`${libName(item)} is back in the library`, { kind: 'ok', id: `lib-restored:${item.id}` })
   }
 
   // --- rows --------------------------------------------------------------------------------------------------------
   function row(item: LibraryEntry, n: number, selectedId: string | undefined, manage: boolean): HTMLElement {
-    const name = itemName(item)
+    const name = libName(item)
     const inRoom = n > 0
     const meta = [h('span.lib-dims.tnum', dimsText(item.dims_cm))]
     if (!item.assets?.glb) meta.push(h('span.p-tag', { dataset: { tip: 'No GLB: shown as a box' } }, 'No GLB'))
@@ -155,7 +156,7 @@ export function mount(ctx: UiContext): void {
     const head = h('button.lib-trash-head', { type: 'button', 'aria-expanded': String(trashOpen), onclick: () => { trashOpen = !trashOpen; trashList() } },
       h('span.caps', `Recently removed · ${String(items.length)}`), pic(trashOpen ? 'chevron-down' : 'chevron-right', { size: 16 }))
     const rows = trashOpen ? uniqueBy([...items].reverse(), (t) => t.id).map((t) => h('div.lib-trash-row',
-      h('span.lib-trash-name', itemName(t)), h('button.btn.btn-secondary.lib-job-btn', { type: 'button', onclick: () => { quiet(restore(t)) } }, 'Restore'))) : []
+      h('span.lib-trash-name', libName(t)), h('button.btn.btn-secondary.lib-job-btn', { type: 'button', onclick: () => { quiet(restore(t)) } }, 'Restore'))) : []
     trashEl.replaceChildren(head, ...rows)
   }
 

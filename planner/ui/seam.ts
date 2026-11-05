@@ -13,10 +13,11 @@ export type { DeletedLayout, Engine, ItemInfo, ItemSnapshot, LightingReport, Sho
 export type { Library } from '../data.js'
 export type { LayoutSummary, LibraryEntry, LibraryJob, RenderMeta, SceneSummary, Spend, TrashedItem, TrashedScene } from '../wire.js'
 export type { DimsCm } from '../logic/text.js'
-export { CAMERA_RANGE, MAX_ELEVATION, RENDER_MODELS, SLUG, dimsText, fmtUsd, quiet, renderPrice } from '../engine.js'
-export { DEFAULT_IMAGE_ENGINE, LIB_PRICE, estimateCost, fmtBytes, friendlyDate, relDate, sceneTitle } from '../data.js'
+export { CAMERA_RANGE, MAX_ELEVATION, RENDER_MODELS, dimsText, fmtUsd, quiet, renderPrice } from '../engine.js'
+export { DEFAULT_IMAGE_ENGINE, LIB_PRICE, clock, estimateCost, fmtBytes, friendlyDate, relDate, sceneTitle, shortDate } from '../data.js'
 export { isLibraryJob } from '../wire.js'
 export { isRenderModel } from '../logic/money.js'
+export { clampLook, horizonDragGain, horizonDragRow, wrapDeg } from '../../core/js/web.js'
 
 /** A field of the camera block (contract §4.1), and a change to some of them (engine.setCamera). */
 export type CameraKey = keyof Camera

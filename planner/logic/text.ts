@@ -1,6 +1,6 @@
 // What the planner writes for people: sizes, prices, dates, byte counts, scene titles, error lines and file names.
-// v1's fmtCm, dimsText, fmtUsd (engine.js), friendlyDate, clock, relDate, sceneTitle, fmtBytes (data.js), reportError's
-// line and the upload name. Pure, for TScert (tscert/README.md): the shells read Dates and pass their parts.
+// v1's fmtCm, dimsText, fmtUsd (engine.js), friendlyDate, clock, relDate, sceneTitle, fmtBytes (data.js), the panels'
+// short date (ui/panels/common.js), reportError's line and the upload name. Pure, for TScert (tscert/README.md): the shells read Dates and pass their parts.
 
 export interface DimsCm {
   readonly w: number
@@ -49,6 +49,11 @@ export function friendlyText(p: DateParts): string {
 /** v1's clock: "09:36". */
 export function clockText(p: DateParts): string {
   return `${pad2(p.hours)}:${pad2(p.minutes)}`
+}
+
+/** The panels' short date: "26 Oct, 09:36". */
+export function shortText(p: DateParts): string {
+  return `${String(p.day)} ${MONTHS[p.month] ?? 'undefined'}, ${clockText(p)}`
 }
 
 /** v1's relDate: "Today, 09:36", "Yesterday, 09:36", else the friendly date; `daysAgo` counts local midnights. */

@@ -1,12 +1,11 @@
-// The workspace's decisions (ui/workspace.ts): the rendering chip, the scene switcher's state, the height field, the
-// horizon drag, where the rotate grip, the piece's label and the horizon handle go, the photo's clip and stage, the
-// keys it takes, and its sentences. Pure, TScert-checked. Trigonometry comes in as parameters (Math.tan, Math.hypot
-// from the shell), so each result is the v1 expression's, bit for bit.
+// The workspace's decisions (ui/workspace.ts): the rendering chip, the scene switcher's state, the height field, where
+// the rotate grip, the piece's label and the horizon handle go, the photo's clip and stage, the keys it takes, and its
+// sentences. Pure, TScert-checked. Math.hypot comes in as a parameter, so each result is the v1 expression's, bit for
+// bit. The horizon drag's gain and row and the elevation's range are the kernels' (core/js/web.ts horizonDragGain,
+// horizonDragRow, clampElevation).
 
 import type { Mode } from './chrome.js'
 
-const PI = 3.141592653589793 // Math.PI
-const HORIZON_FINE = 0.12 // ° of tilt per CSS px, at most, when dragging the horizon
 const RENDER_ABOUT_S = 25 // seconds a render usually takes
 
 export interface Pt {
@@ -69,9 +68,9 @@ export function switcherLabel(title: string, word: string): string {
 export function elevCm(y: number | null): number {
   return Math.round(((y ?? 0) || 0) * 100)
 }
-/** A typed height in cm as meters: rounded to the cm, kept within 0 and the highest a piece may hang. */
-export function elevMeters(cm: number, maxM: number): number {
-  return Math.min(maxM * 100, Math.max(0, Math.round(cm))) / 100
+/** A typed height in cm as meters, to the cm (engine.setElevation keeps it within 0 and the highest a piece may hang). */
+export function elevMeters(cm: number): number {
+  return Math.round(cm) / 100
 }
 /** A held + or − button: cm per repeat (5 after 14 repeats) and the delay to the next one (50 ms after 8). */
 export function repeatCm(n: number): number {
@@ -79,14 +78,6 @@ export function repeatCm(n: number): number {
 }
 export function repeatDelayMs(n: number): number {
   return n > 8 ? 50 : 100
-}
-
-/** The row a horizon drag asks for. The line follows the finger, except on a small photo (the phone at Fit: about
- *  0.4° a pixel), where the tilt moves at most HORIZON_FINE degrees per CSS pixel, so it can be set finely. */
-export function horizonDragRow(py0: number, dyClient: number, scale: number, fovDeg: number, rectH: number, tan: (x: number) => number): number {
-  const degPerPx = ((360 / PI) * tan((fovDeg * PI) / 360)) / Math.max(1, rectH) // 1 / focal, in ° per CSS px
-  const gain = Math.min(1, HORIZON_FINE / degPerPx)
-  return py0 + (dyClient / scale) * gain
 }
 
 /** The footprint's front-right corner on screen and the unit direction from the footprint's centre to it. */

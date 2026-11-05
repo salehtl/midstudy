@@ -3,6 +3,7 @@
 // §2.4 and §4.6. Every UI module exports mount(ctx), ctx: UiContext = { engine, scenes, lib, shell, icons, kit }
 // (ui/seam.ts).
 import { engine } from './engine.js'
+import type { PlannerState, RenderSettings } from './engine.js'
 import { installInput } from './input.js'
 import { createScenes, createLibrary } from './data.js'
 import { createShell } from './ui/shell.js'
@@ -80,9 +81,9 @@ const hook = {
   saveLayout: (name: unknown, opts?: unknown) => engine.saveLayoutInternal(name, opts), // opts.title: the name as typed (optional)
   loadLayout: (name: unknown) => engine.loadLayoutInternal(name),
   listLayouts: () => engine.listLayoutsInternal().catch((e: unknown) => { throw engine.reportError('Could not list layouts', e) }),
-  getState: () => engine.getState(),
+  getState: (): PlannerState => engine.getState(),
   // look and renders (§2.6, §4.7)
-  getRenderSettings: () => engine.getRenderSettings(),
+  getRenderSettings: (): RenderSettings => engine.getRenderSettings(),
   setRenderSettings: (s: unknown) => {
     if (!isObject(s)) { engine.reportError('setRenderSettings needs an object'); return }
     const a = renderSettingsArgs(s['exposure'], s['warmth'], s['contactShadows'])

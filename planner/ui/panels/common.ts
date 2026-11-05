@@ -1,13 +1,13 @@
 // Shared bits for the area C panels (Library, In the scene, Layouts, Scene, Renders): thumbnails, empty states,
-// dates, money, and the "the server isn't answering" check. Styles: styles/panels.css. The words and numbers:
-// logic/text.ts, logic/dates.ts, logic/renders.ts.
+// money, and the "the server isn't answering" check. Styles: styles/panels.css. The words and numbers: logic/text.ts,
+// logic/renders.ts; dates are data.ts's (clock, relDate, shortDate).
 import { h } from '../kit.js'
 import { icon, svgFrom } from '../icons.js'
 import { RENDER_MODELS, isRenderModel, type Engine, type LibraryEntry } from '../seam.js'
 import { isOfflineText, monogram } from '../logic/text.js'
-import { clockText, dayDateText, shortDateText, type DateParts } from '../logic/dates.js'
 import { strokeWidth } from '../logic/glyphs.js'
 import { modelShort as shortName } from '../logic/renders.js'
+import { libName } from '../../logic/library.js'
 
 // Extra icons the panels need (same 20 px grid and stroke as ui/icons.ts).
 const EXTRA: ReadonlyMap<string, string> = new Map([
@@ -38,9 +38,9 @@ export function withIcon<B extends HTMLElement>(btn: B, name: string, size = 18)
 }
 
 // A library item's thumbnail, or its monogram when there's none (or it fails to load).
-export function itemThumb(engine: Engine, lib: LibraryEntry | null | undefined, cls = 'p-thumb'): HTMLElement {
-  const mono = (): HTMLElement => h(`span.${cls}.is-mono`, { 'aria-hidden': 'true' }, monogram((lib?.name ?? '') || lib?.id))
-  const rel = lib?.assets?.thumb
+export function itemThumb(engine: Engine, lib: LibraryEntry, cls = 'p-thumb'): HTMLElement {
+  const mono = (): HTMLElement => h(`span.${cls}.is-mono`, { 'aria-hidden': 'true' }, monogram(libName(lib)))
+  const rel = lib.assets?.thumb
   if (!rel) return mono()
   const img = h(`img.${cls}`, { alt: '', loading: 'lazy', draggable: false, src: engine.assetUrl(rel) })
   img.addEventListener('error', () => { img.replaceWith(mono()) }, { once: true })
@@ -60,33 +60,6 @@ export function messageOf(err: unknown): string {
 // message, else the error as text.)
 export const isOffline = (err: unknown): boolean => isOfflineText(messageOf(err) || (typeof err === 'string' ? err : err instanceof Error ? String(err) : ''))
 export const OFFLINE_BODY = "Your changes stay in this tab. Check the server is running and you're on its network, then retry."
-
-type When = string | number | Date | null | undefined
-// As `new Date(v)` reads it (null is 1970, undefined no date), or null when that is no date.
-function toDate(v: When): Date | null {
-  const d = v instanceof Date ? v : new Date(v === null ? 0 : v ?? NaN)
-  return Number.isNaN(d.getTime()) ? null : d
-}
-function partsOf(d: Date): DateParts {
-  return { weekday: d.getDay(), day: d.getDate(), month: d.getMonth(), hours: d.getHours(), minutes: d.getMinutes() }
-}
-const dayStart = (x: Date): number => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-// "10:12"
-export function clock(v: When): string {
-  const d = toDate(v)
-  return d ? clockText(partsOf(d)) : ''
-}
-// "26 Oct, 10:12"
-export function shortDate(v: When): string {
-  const d = toDate(v)
-  return d ? shortDateText(partsOf(d)) : ''
-}
-// "Today, 09:52" · "Yesterday, 18:31" · "Sat 25 Oct, 18:31"
-export function dayDate(v: When): string {
-  const d = toDate(v)
-  if (!d) return ''
-  return dayDateText(partsOf(d), Math.round((dayStart(new Date()) - dayStart(d)) / 864e5))
-}
 
 export { money } from '../logic/text.js'
 export const modelShort = (m: string | null | undefined): string => shortName(m, m && isRenderModel(m) ? RENDER_MODELS[m].label : undefined)

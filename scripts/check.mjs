@@ -9,6 +9,8 @@
 //   dead       knip (knip.json): no unused files, exports or dependencies
 //   gen        scripts/gen-contract.mjs (when it exists), then contract/gen/ must equal what is committed
 //   tscert     scripts/tscert-ratchet.mjs: TScert over the logic/ modules, tscert/baseline.json still certifies
+//   planner    the planner's own tests, no browser: its logic against v1 (npm run test:engine, test:ui) and the typed bus
+//              against an EventTarget (they load the wasm kernels)
 //   rust       in core/: cargo fmt --check, clippy -D warnings, tests; Miri (nightly shell) on core/miri.txt's
 //              crates; Kani harnesses when Kani is available
 //   fuzz       a smoke run per cargo-fuzz target under core/ (MIDSTUDY_FUZZ_SECONDS, default 60), nightly shell
@@ -24,7 +26,7 @@ let ts
 try { ts = (await import('typescript')).default } catch { console.error('check: typescript missing: run `nix develop -c npm install`'); process.exit(1) }
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
-const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tscert', 'py', 'rust', 'fuzz', 'proofs']
+const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tscert', 'planner', 'py', 'rust', 'fuzz', 'proofs']
 const wanted = argv.filter((a) => !a.startsWith('--'))
 for (const w of wanted) if (!ORDER.includes(w)) { console.error(`check: unknown check ${w} (${ORDER.join(', ')})`); process.exit(2) }
 const exists = (p) => fs.existsSync(path.join(ROOT, p))
@@ -115,6 +117,19 @@ const checks = {
     const r = sh('node', ['scripts/tscert-ratchet.mjs'])
     const last = r.out.trim().split('\n').at(-1) || ''
     return { ok: r.code === 0, line: last.replace(/^tscert: /, ''), out: r.out }
+  },
+
+  planner() {
+    if (!exists('planner/engine.test.mjs')) return { ok: true, line: 'nothing to check (no planner tests yet)' }
+    const b = sh('node', ['scripts/build.mjs', '--wasm-only', '--quiet'])
+    if (b.code !== 0) return { ok: false, line: 'the wasm build failed (the planner tests load the kernels)', out: b.out }
+    const lines = []
+    for (const t of ['test:engine', 'test:ui']) {
+      const r = sh('npm', ['run', '--silent', t])
+      if (r.code !== 0) return { ok: false, line: `npm run ${t} failed`, out: r.out }
+      lines.push(r.out.trim().split('\n').filter((l) => /groups pass|logic-vs-v1: ok|bus: ok/.test(l)).map((l) => l.replace(/^.*?: /, '')).join('; '))
+    }
+    return { ok: true, line: lines.join('; ') }
   },
 
   py() {

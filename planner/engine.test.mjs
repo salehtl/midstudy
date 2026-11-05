@@ -3,8 +3,9 @@
 // JavaScript: each v1 function below is copied verbatim from planner/{engine,lighting,input,data}.js at 979677c (v2 at
 // the start of Phase 2; the lines are cited), with the module state it read passed in as arguments. Random inputs from a
 // seeded generator, including the junk the hook can be given (strings, null, NaN, arrays, objects). The logic must give
-// exactly what v1 gave (numbers bit for bit, Object.is), and the kernels' clamps (core/js/web.ts) must agree with the
-// logic's where both exist.
+// exactly what v1 gave (numbers bit for bit, Object.is). v1's round, the wraps, the camera, Look and elevation clamps,
+// the rotate step, the depth scale and the warmth tint are the kernels' (core/js/web.ts): the logic takes them as
+// parameters (K below), the engine calls them, and the groups check them against v1 too.
 //
 // Usage (repo root): nix develop -c node planner/engine.test.mjs        (SEED=<n> N=<cases>; needs `npm run build`)
 // Exit 0 when every group passes; one line per group.
@@ -29,6 +30,14 @@ fs.writeFileSync(bundlePath, bundled.outputFiles[0].text)
 const L = await import(bundlePath)
 fs.rmSync(bundlePath, { force: true })
 L.k.loadKernelsSync(fs.readFileSync(path.join(ROOT, 'build/wasm/web/midstudy_wasm_web_bg.wasm')))
+/** What the engine passes the logic (engine.ts K). */
+const K = { roundTo: L.k.roundTo, wrapDeg: L.k.wrapDeg, wrapAz: L.k.wrapAz, clampLook: L.k.clampLook }
+/** engine.ts clampCamera: JSON to the kernels' clamp (a field that isn't a number is NaN, so it takes base's). */
+function clampJson(c, base) {
+  const o = c && typeof c === 'object' ? c : null
+  const field = (k) => { const v = o?.[k]; return typeof v === 'number' ? v : Number.NaN }
+  return L.k.clampCamera({ fov_y_deg: field('fov_y_deg'), height_m: field('height_m'), pitch_deg: field('pitch_deg'), roll_deg: field('roll_deg') }, base)
+}
 
 // --- random inputs -----------------------------------------------------------------------------------------------------
 let s = SEED || 1
@@ -283,30 +292,29 @@ const cameraIn = () => maybeObj(() => {
 const camera = () => clampCamera({ fov_y_deg: uni(20, 110), height_m: uni(0.2, 3), pitch_deg: uni(-80, 30), roll_deg: uni(-20, 20) })
 const rec = (x) => (x && typeof x === 'object' ? x : null) // what the shell passes the logic
 
-run('num: round, isNum, wrapDeg, wrapAz, clampNum, clampElev, elevationOf', () => {
+run('kernels: roundTo, wrapDeg, wrapAz, clampElevation, setElevation; isNum', () => {
   const v = finite(-1e4, 1e4), n = int(0, 8)
-  const name = 'num: round, isNum, wrapDeg, wrapAz, clampNum, clampElev, elevationOf'
-  check(name, [L.num.round(v, n), L.num.round(v), L.num.wrapDeg(v), L.num.wrapAz(v), L.num.clampElev(v / 1000), L.num.elevationOf(v / 1e3)],
+  const name = 'kernels: roundTo, wrapDeg, wrapAz, clampElevation, setElevation; isNum'
+  check(name, [L.k.roundTo(v, n), L.k.roundTo(v, 4), L.k.wrapDeg(v), L.k.wrapAz(v), L.k.clampElevation(v / 1000), L.k.roundTo(L.k.clampElevation(v / 1e3), 6)],
     [round(v, n), round(v), wrapDeg(v), wrapAz(v), clampElev(v / 1000), round(clampElev(v / 1e3), 6)], v)
   const j = rnd() < 0.5 ? junk() : number(-2, 2)
-  check(name, [L.num.isNum(j), L.num.clampNum(j, 0, 1, 7)], [isNum(j), clampNum(j, 0, 1, 7)], String(j))
+  check(name, L.num.isNum(j), isNum(j), String(j))
 })
-// turnBy and nudged against v1's exact expressions (rotateSelected, nudgeElevation)
-run('num: rotateSelected and nudgeElevation steps', () => {
+// rotateBy (kernels) and nudged (logic) against v1's exact expressions (rotateSelected, nudgeElevation)
+run('rotateSelected and nudgeElevation steps', () => {
   const v = finite(-720, 720), d = pick([15, -15]), y = uni(-1, 5), dy = pick([0.01, -0.01, 0.1, -0.1])
-  check('num: rotateSelected and nudgeElevation steps', [L.num.turnBy(v, d), L.num.nudged(y, dy)], [round(wrapDeg(v + d), 6), Math.round((y + dy) * 1000) / 1000], { v, d, y, dy })
+  check('rotateSelected and nudgeElevation steps', [L.k.rotateBy(v, d), L.num.nudged(y, dy)], [round(wrapDeg(v + d), 6), Math.round((y + dy) * 1000) / 1000], { v, d, y, dy })
 })
-run('camera: clampCamera (logic and kernels), setCamera merge, sameCamera, sceneSig', () => {
+run('camera: clampCamera (kernels, on JSON), setCamera merge, sameCamera, sceneSig', () => {
+  const name = 'camera: clampCamera (kernels, on JSON), setCamera merge, sameCamera, sceneSig'
   const c = cameraIn(), base = camera()
-  const want = clampCamera(c, base)
-  check('camera: clampCamera (logic and kernels), setCamera merge, sameCamera, sceneSig', L.camera.clampCamera(rec(c), base), want, c)
-  if (rec(c)) check('camera: clampCamera (logic and kernels), setCamera merge, sameCamera, sceneSig', L.k.clampCamera(Object.fromEntries(Object.entries(c).filter(([, v]) => typeof v === 'number')), base), want, c)
+  check(name, clampJson(c, base), clampCamera(c, base), c)
   const cam = camera(), p = cameraIn()
-  const merged = rec(p) ? L.camera.mergeCamera(cam, p) : cam
+  const merged = rec(p) ? clampJson(p, cam) : cam
   const next = L.camera.sameCamera(merged, cam) ? cam : merged
-  check('camera: clampCamera (logic and kernels), setCamera merge, sameCamera, sceneSig', next, setCameraV1(cam, p), { cam, p })
+  check(name, next, setCameraV1(cam, p), { cam, p })
   const a = camera(), b = rnd() < 0.5 ? a : { ...a, height_m: a.height_m + pick([1e-7, 2e-6, 0]) }
-  check('camera: clampCamera (logic and kernels), setCamera merge, sameCamera, sceneSig', [L.camera.sameCamera(a, b), L.camera.sceneSig(a) === L.camera.sceneSig(b)], [sameCamera(a, b), JSON.stringify([a]) === JSON.stringify([b])], { a, b })
+  check(name, [L.camera.sameCamera(a, b), L.camera.sceneSig(a) === L.camera.sceneSig(b)], [sameCamera(a, b), JSON.stringify([a]) === JSON.stringify([b])], { a, b })
 })
 run('camera: floor note and depth scale', () => {
   const calib = pick([null, undefined, 0, {}, { floor: { found: false }, source: 'moge-2' }, { floor: { found: true }, source: pick(['moge-2', 'truth', 'exif', 'default', undefined]), camera: { height_m: pick([1.4, 0, -1, '1.2', null]) } }, { source: 'exif' }])
@@ -319,7 +327,7 @@ run('camera: floor note and depth scale', () => {
   const h = uni(0.2, 3)
   const cr = rec(calib)
   const measured = !!rec(cr?.floor)?.found && (cr?.source === 'moge-2' || cr?.source === 'truth')
-  check('camera: floor note and depth scale', L.camera.depthScaleOf(h, measured, Number(rec(cr?.camera)?.height_m)), depthScaleV1(calib, h), { calib, h })
+  check('camera: floor note and depth scale', L.k.depthScale(h, Number(rec(cr?.camera)?.height_m), measured), depthScaleV1(calib, h), { calib, h })
 })
 const lookIn = () => maybeObj(() => {
   const o = {}
@@ -330,18 +338,19 @@ const lookIn = () => maybeObj(() => {
 run('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', () => {
   const l = lookIn()
   const look = lookFrom(l)
-  check('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', L.look.lookFrom(rec(l)), look, l)
+  check('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', L.look.lookFrom(rec(l), K), look, l)
   const p = lookIn()
   const resolved = { light_azimuth_deg: finite(-400, 400), light_elevation_deg: finite(-10, 100), light_softness: uni(0, 1) }
   const v1 = setLightingV1(look, p, resolved)
   if (!v1.error) {
     const pr = rec(p)
-    const next = L.look.patchLook(L.look.lookFrom(rec(l)), pr, L.look.needsFreeze(look, pr) ? resolved : null)
+    const next = L.look.patchLook(L.look.lookFrom(rec(l), K), pr, L.look.needsFreeze(look, pr) ? resolved : null, K)
     check('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', [next, L.look.lookChanged(look, next)], [v1.look, v1.changed], { look, p })
   }
   check('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', [L.look.defaultLook(), L.look.lookToSave(look)], [resetLightingV1(look), lookToSaveV1(look)], look)
   const w = number(-1, 1)
-  if (isNum(w)) check('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', L.look.warmthTint(w), warmthTint(w), w)
+  // the furniture's tint: the kernels' warmth tint, as engine.ts applyLook reads it (splatMultiplier × 1 × [1, 1, 1])
+  if (isNum(w)) check('look: lookFrom, setLighting (freeze, merge, changed), resetLighting, lookToSave, warmthTint', L.k.splatMultiplier(w, 1, [1, 1, 1]), warmthTint(w), w)
 })
 run('look: resolvedLook (with the kernels\' azElOf and dirOf)', () => {
   const look = lookFrom(lookIn())
@@ -380,7 +389,7 @@ run('view: stage, fit, clamp, zoom, pan, client ↔ photo, visible rect, getView
   check(name, view, v1.view, { view0, photo })
   const t = L.view.xformOf(st, photo, view)
   const x = uni(-100, 3000), y = uni(-100, 2000)
-  check(name, [L.view.clientToPhoto(t, x, y), L.view.photoToClient(t, x, y), L.view.photoRect(t, photo), L.view.visibleRect(L.view.photoRect(t, photo), st), L.view.viewReport(view)],
+  check(name, [L.view.clientToPhoto(t, x, y), L.view.photoToClient(t, x, y), L.view.photoRect(t, photo), L.view.visibleRect(L.view.photoRect(t, photo), st), L.view.viewReport(view, K)],
     [v1.clientToPhoto(x, y), v1.photoToClient(x, y), v1.getPhotoRect(), v1.visiblePhotoRect(), v1.getView()], { x, y })
   const z = rnd() < 0.1 ? junk() : uni(0.5, 6)
   const before = L.view.clientToPhoto(t, x, y)
@@ -396,7 +405,7 @@ const ids = ['sofa', 'chair', 'a,1', 'a', 'lamp-2']
 run('layout: dirty state (layoutSig equality), prettyLayout, layoutToOpen', () => {
   const pieces = Array.from({ length: int(0, 4) }, () => ({ id: pick(ids), x: pick([0, 1, -1, uni(-3, 3)]), y: pick([0, uni(0, 2)]), z: pick([-2, uni(-6, 0)]), rotationDeg: pick([0, 90, -270, 450, uni(-720, 720)]) }))
   const other = rnd() < 0.4 ? [...pieces].reverse() : rnd() < 0.5 ? pieces.map((p) => ({ ...p, x: p.x + pick([0, 1e-5, 4e-5, 1e-3]) })) : Array.from({ length: int(0, 4) }, () => ({ id: pick(ids), x: pick([0, 1]), y: 0, z: -2, rotationDeg: pick([0, 360, 90]) }))
-  const sig = (ps) => L.layout.layoutSig(ps.map((p) => ({ id: p.id, x: p.x, y: p.y, z: p.z, rotation_y_deg: p.rotationDeg })))
+  const sig = (ps) => L.layout.layoutSig(ps.map((p) => ({ id: p.id, x: p.x, y: p.y, z: p.z, rotation_y_deg: p.rotationDeg })), K)
   const name = 'layout: dirty state (layoutSig equality), prettyLayout, layoutToOpen'
   check(name, [sig(pieces) === sig(other), sig([]) === L.layout.EMPTY_SIG], [layoutSigV1(pieces) === layoutSigV1(other), layoutSigV1([]) === '[]'], { pieces, other })
   const n = pick(['two-chairs', '', 'a', '-x-', 'Phone A', 'z'])

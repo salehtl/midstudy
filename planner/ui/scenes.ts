@@ -7,7 +7,8 @@ import { icon, ring } from './icons.js'
 import { fmtBytes, quiet, relDate, sceneTitle, type SceneSummary, type TrashedScene, type UiContext } from './seam.js'
 import { openSheet } from './sheet.js'
 import type { Child } from './kit.js'
-import { busyText, deleteBody, isCalibrating, isPhotoFile, sceneFlags, sceneMeta, scenesHint, uploadProgress } from './logic/scenes.js'
+import { busyText, deleteBody, isPhotoFile, sceneFlags, sceneMeta, scenesHint, uploadProgress } from './logic/scenes.js'
+import { sceneBusy } from '../logic/scenes.js'
 import { uniqueBy } from './logic/lists.js'
 import { dots } from './logic/text.js'
 
@@ -91,7 +92,7 @@ export function mount(ctx: UiContext): void {
   // --- render ---------------------------------------------------------------------------------------------------
   function card(s: SceneSummary): HTMLDivElement {
     const isOpen = s.name === engine.getSceneName()
-    const busy = isCalibrating(s.calib_status)
+    const busy = sceneBusy(s.calib_status)
     const src = (s.thumb_url ?? '') || s.photo_url
     const thumb = h('span.sc-thumb', src ? h('img', { src, alt: '', loading: 'lazy', draggable: false }) : h('span.sc-thumb-none', icon('image', { size: 28 })))
     if (busy) thumb.append(h('span.sc-busy', ring(null, { size: 28 }), h('span', busyText(!!s.photo_url))))

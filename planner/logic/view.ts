@@ -1,8 +1,9 @@
 // The view onto the photo (contract §4.5): the stage (the window minus the chrome's insets), contain-fit, 2D zoom up
 // to 4× and pan, and the mapping between photo pixels and client (CSS) pixels: client = o + s · photo px. v1's
 // stageRect, fitScale, viewParams, clampCenter, zoomAt, panBy, clientToPhoto, photoToClient, visiblePhotoRect, getView,
-// setStageInsets. Pure, for TScert (tscert/README.md).
-import { isNum, round } from './num.js'
+// setStageInsets. Pure, for TScert (tscert/README.md): v1's round is the kernels' and comes in as a parameter.
+import { isNum } from './num.js'
+import type { Kernels } from './num.js'
 
 export interface Box {
   readonly x: number
@@ -128,8 +129,8 @@ export function visibleRect(p: Box, st: Box): Box {
 }
 
 /** v1's getView(). */
-export function viewReport(v: ViewState): ViewReport {
-  return { zoom: round(v.zoom, 4), cx: round(v.cx, 2), cy: round(v.cy, 2), fit: v.zoom <= 1.0001 }
+export function viewReport(v: ViewState, k: Kernels): ViewReport {
+  return { zoom: k.roundTo(v.zoom, 4), cx: k.roundTo(v.cx, 2), cy: k.roundTo(v.cy, 2), fit: v.zoom <= 1.0001 }
 }
 
 /** The photo's rectangle in the drawing buffer's pixels (top-left origin) for the screen passes: v1's updateView rect,

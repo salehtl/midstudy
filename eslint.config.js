@@ -1,8 +1,7 @@
 // ESLint for the v2 TypeScript (docs/REFACTOR.md §3, check:lint): typescript-eslint strict-type-checked and
 // stylistic-type-checked, typed through the tsconfig areas (tsconfig.json references them). The rules REFACTOR.md
 // names are errors: no `any`, no non-null `!`, no `as` casts except `as const`, no @ts-ignore/@ts-expect-error/@ts-nocheck.
-// Legacy JavaScript (planner/*.js until it is ported, evals, fixtures, scripts) and generated or built files are not
-// linted.
+// JavaScript (evals, fixtures, scripts: the planner is TypeScript only) and generated or built files are not linted.
 import { defineConfig, globalIgnores } from 'eslint/config'
 import tseslint from 'typescript-eslint'
 

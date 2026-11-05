@@ -34,6 +34,7 @@
     "check:dead": "node scripts/check.mjs dead",
     "check:gen": "node scripts/check.mjs gen",
     "check:tscert": "node scripts/check.mjs tscert",
+    "check:planner": "node scripts/check.mjs planner",
     "check:rust": "node scripts/check.mjs rust",
     "check:fuzz": "node scripts/check.mjs fuzz",
     "check:proofs": "node scripts/check.mjs proofs",
@@ -42,6 +43,8 @@
     "gen:contract": "node scripts/gen-contract.mjs",
     "test:contract": "node --test contract/test/contract.test.mjs && node contract/test/typecheck.mjs",
     "test:engine": "node planner/engine.test.mjs",
+    "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
+    "test:ui-smoke": "node planner/ui/test/smoke.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {

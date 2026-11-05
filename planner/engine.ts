@@ -4,10 +4,12 @@
 // is y = 0, the camera stands at (0, height, 0) and looks along −Z (contract §4.1). Items are stored in their item frame.
 //
 // v2: a strict TypeScript shell around three things. The pure decisions are planner/logic/*.ts (TScert-certified:
-// clamps, the Look, the view maths, layouts' dirty state, the landing choice, messages, prices). The geometry is the
+// the Look's merge and report, the view maths, layouts' dirty state, the landing choice, messages, prices). The maths is the
 // Rust kernels (core/js/web.ts: the §4.1 projection and its inverse, the horizon, landing, hit hulls, bounds, screen
-// rects, drags, the ruler, SH rotation, the splats' colour level), with depth.png decoded and the keep-room mask built
-// in a worker (planner/engine.worker.ts). Every render pass is planner/engine.passes.ts. three.js stays where three
+// rects, drags, the ruler, SH rotation, the splats' colour level and the warmth tint, and the small maths the contract's
+// rules are made of: the camera block's ranges, default and clamp, the Look's clamps, the angle wraps, v1's round, the
+// elevation range, the rotate step and the occlusion depth's scale), with depth.png decoded in a worker
+// (planner/engine.worker.ts). Every render pass is planner/engine.passes.ts. three.js stays where three
 // needs it (rendering, loading, raycasting meshes).
 //
 // Drawing (each frame, on demand; engine.passes.ts drawFrame):
@@ -27,50 +29,48 @@
 //   Renders capture the same passes at the photo's own resolution (no view offset, no UI), splats sorted first.
 //
 // Coordinates: "photo px" are contract §4.1 pixels on photo.jpg at its full size; "client px" are CSS pixels in the
-// window. projectPhoto(), photoToFloor() and floorToPhoto() implement §4.1 exactly (the kernels); picking uses the same
-// rays.
+// window. photoToFloor() and floorToPhoto() implement §4.1 exactly (the kernels); picking uses the same rays.
 //
+// The engine object (Engine = typeof engine; the UI's types come from here and planner/wire.ts, through ui/seam.ts)
 // State getters
-//   getScene()          { name, title, w, h, camera, camera_source, calib, floor_found, hasDepth, photo_url, ... } | null
+//   getScene()          SceneInfo: the scene object, calib (calib.json's public part), w, h, camera, camera_source,
+//                       hasDepth | null
 //   getSceneLoad()      { loading, phase: 'calibrating'|'photo'|null, name, scene (the §4.4 object while it calibrates) }
-//   getCamera()         the camera block in use (§4.1)
-//   getCalibCamera()    calib.json's camera, or null
+//   getCamera(), getCameraSource(), getSavedScene()   the camera block in use (§4.1), its source, the scene as saved
 //   getAdjustFloor(), getOcclusion(), getGridVisible(), getFloorNote() (the "Check the floor" reason, or null)
 //   getView()           { zoom, cx, cy, fit } zoom 1–4; cx, cy the photo px at the stage centre
-//   getPhotoRect()      { x, y, w, h } the photo's rectangle in client px (beyond the window when zoomed)
-//   getStageRect()      { x, y, w, h } the part of the window the photo fits into (client px)
-//   isSceneDirty() / isLayoutDirty() / getDirty() { scene, layout }
-//   getItems() / getItem(uid) / getItemBounds(uid) / getSelected() / getDrag() / getFootprint(uid) / hitItemAt(uid, x, y, pad)
-//   itemAt(x, y)        the placed piece under a client point, or null
-//   getLook()           { exposure, warmth, contactShadows }
-//   getLibrary(), assetUrl(rel), getLayouts(), getLayoutDetails(), getLayoutName(), getRenders(), isRenderMock()
-//   getLayoutTitle(), layoutDisplayName(slug)   a layout's name as typed ("Phone A"), else the slug made readable
-//   getScenesTrash()    [{name, title, created, deleted}] deleted scenes the server keeps
-//   getRuler()          { active, points: [[x,0,z]…], meters|null }
-//   getState() / getRenderSettings()   the window.midstudy shapes (contract §2.4, §4.6)
+//   getPhotoRect(), getVisiblePhotoRect()   the photo's rectangle in client px (beyond the window when zoomed), cut to
+//                       the stage; getPhotoSize() { w, h, has }
+//   isSceneDirty() / isLayoutDirty()
+//   getItems() / getItem(uid) / getSelected() / getDrag() / getFootprint(uid) / getElevation(uid) / getScreenRect(uid)
+//   hitItemAt(uid, x, y, pad), itemAt(x, y)   the placed piece under a client point
+//   getLibrary(), assetUrl(rel), getLayoutDetails(), getLayoutName(), layoutDisplayName(slug), getRenders(), isRenderMock()
+//   getScenesTrash()    deleted scenes the server keeps
+//   getRuler()          { active, points: [[x,0,z]…], meters|null };   horizonAt(px)
+//   getLighting(), getState(), getRenderSettings()   the window.midstudy shapes (contract §2.4, §4.6, §4.8)
 // Actions (async ones return Promises that reject with a reported error)
 //   init(), mount(el), setStageInsets({ left, right, top, bottom }) (client px the chrome covers)
 //   listScenesInternal(), openScene(name) (also loads the layout last open there on this device), closeScene(),
 //   waitForScene(name), createScene(file, meta), deleteScene(name), restoreScene(name), renameScene(name, title),
-//   saveScene(), saveThumbnail()
+//   saveScene(), recalibrate()
 //   setCamera(partial), resetCamera(), setAdjustFloor(on), setOcclusion(on), setGridVisible(on), setPitchFromHorizon(py)
 //   zoomAt(clientX, clientY, zoom), zoomBy(factor, clientX?, clientY?), panBy(dxClient, dyClient), fitView()
 //   addItemInternal(id, opts), moveItemInternal(uid, opts), removeItemInternal(uid), clearItemsInternal(), select(uid|null),
 //   rotateSelected(deg), setSnap(on), beginItemDrag / beginRotateDrag / dragTo / endItemDrag, removeItemWithUndo(uid),
 //   restoreItem(snapshot), setElevation(uid, m), nudgeElevation(uid, dm), dropToFloor(uid), reloadLibrary()
-//   tap(clientX, clientY), setRulerActive(on), clearRuler(), setRulerTrueLength(m) (scales the camera height)
-//   setLook({exposure, warmth}), setContactShadows(on)
+//   tap(clientX, clientY), setRulerActive(on), setRulerPointAt(i, x, y), setRulerTrueLength(m) (scales the camera height)
+//   setLook({exposure, warmth}), setContactShadows(on), setLighting(partial), resetLighting(), inferLighting()
 //   saveLayoutInternal(name, { title }), loadLayoutInternal(name), deleteLayoutInternal(name) → the doc (for Undo),
-//   restoreLayoutInternal(doc), listLayoutsInternal(), refreshLayouts()
-//   captureComposite({ maxPx, quality }) → Promise, captureMask() → Promise, postRender(shot, opts),
-//   renderViewInternal(opts), listRendersInternal(), compare(a, b), settleSplats() (sort the splats for the camera now)
-//   reportError(msg, err) → Error, toast(text, kind, ms), onFrame(fn), worldToScreen(p) → { x, y, visible } (client px)
-//   projectPhoto(p) → [px, py, d], photoToFloor(px, py), floorToPhoto(p), clientToPhoto(x, y), photoToClient(px, py)
-// Events (engine.events, CustomEvents; read e.detail; EngineEvents below types each detail)
+//   restoreLayoutInternal(doc), listLayoutsInternal()
+//   captureComposite({ maxPx, quality }) → Promise<Shot>, postRender(shot, opts), renderViewInternal(opts),
+//   listRendersInternal(), compare(a, b)
+//   reportError(msg, err) → Error, onFrame(fn), worldToScreen(p) → { x, y, visible } (client px), photoToFloor(px, py),
+//   floorToPhoto(p), photoToClient(px, py)
+// Events (engine.events: a typed Bus, planner/bus.ts; e.detail is EngineEvents[name])
 //   'scene'  { phase: 'loading'|'calibrating'|'opened'|'failed'|'closed'|'saved'|'title'|'deleted', name }
 //   'scenes' { scenes }   'camera' { camera, source }   'adjust' { on }   'occlusion' { on }   'grid' { visible }
 //   'view' getView()      'dirty' { scene, layout }     'items' { change, uid }   'selection' { uid }   'drag' { mode, uid, phase }
-//   'look' getLook()      'library' { items }   'layouts' { names?, details?, name? }   'renders' { renders }
+//   'look' { exposure, warmth, contactShadows }   'library' { items }   'layouts' { names?, details?, name? }   'renders' { renders }
 //   'render' { phase: 'start'|'done'|'failed', model, meta? }   'compare' { a, b }   'ruler' getRuler()
 //   'error' { text }      'toast' { text, kind, ms }   'lighting' { status, error }
 // Performance marks (E17): performance.measure 'midstudy:<step>' for scene-open, photo, depth-decode, envmap (lighting.ts),
@@ -83,9 +83,10 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import type { SparkRenderer, SplatMesh } from '@sparkjsdev/spark'
 import {
-  KernelWorker, SceneCamera, azElOf, boxCorners as kBoxCorners, decodeDepth, dirOf, dragHeight as kDragHeight, dragLift,
-  dragMove, dragRotate, footprint as kFootprint, gripAngle, keepRoomMask, liftPlane, loadKernels, rulerRescale,
-  splatMultiplier, worldBounds as kWorldBounds,
+  DEFAULT_CAMERA, KernelWorker, SceneCamera, azElOf, boxCorners as kBoxCorners, clampCamera as kClampCamera, clampElevation,
+  clampLook, decodeDepth, depthScale as kDepthScale, dirOf, dragHeight as kDragHeight, dragLift, dragMove, dragRotate,
+  footprint as kFootprint, gripAngle, keepRoomMask, liftPlane, loadKernels, rotateBy, roundTo, rulerRescale, splatMultiplier,
+  worldBounds as kWorldBounds, wrapAz, wrapDeg,
 } from '../core/js/web.js'
 import type { DepthMap, ItemBox, KeepRoomMask, Plane, Rect } from '../core/js/web.js'
 import { V1_KEY_DIR, V1_SOFTNESS, createLighting } from './lighting.js'
@@ -105,7 +106,7 @@ import * as msg from './logic/messages.js'
 import * as money from './logic/money.js'
 import type { RenderModel } from './logic/money.js'
 import * as num from './logic/num.js'
-import type { JsonObject } from './logic/num.js'
+import type { JsonObject, Kernels } from './logic/num.js'
 import * as sceneLogic from './logic/scenes.js'
 import * as text from './logic/text.js'
 import type { DimsCm } from './logic/text.js'
@@ -118,32 +119,27 @@ import type { CalibInfo, LayoutSummary, LibraryEntry, RenderMeta, SceneSummary, 
 
 /** The engine's value types (planner/logic/, planner/wire.ts). */
 export type { Camera, LightingReport, LibraryEntry, RenderMeta }
-export type Vec3 = [number, number, number]
+type Vec3 = [number, number, number]
 
 /** The slug every id, layout and scene name is (CLAUDE.md conventions). */
-export const SLUG = layoutLogic.SLUG
+const SLUG = layoutLogic.SLUG
 const DEG = Math.PI / 180
 
 /** A non-empty string, else null. */
 const str = (x: unknown): string | null => (typeof x === 'string' && x !== '' ? x : null)
 
 const params = new URLSearchParams(location.search)
-/** §2.2: ?library=<url>, default /library/library.json. @public (a v1 export name, kept for the UI port) */
-export const LIBRARY_URL = str(params.get('library')) ?? '/library/library.json'
+/** §2.2: ?library=<url>, default /library/library.json. */
+const LIBRARY_URL = str(params.get('library')) ?? '/library/library.json'
 const libraryBase = new URL(LIBRARY_URL, location.href)
 
-/** v1's round(v, n). @public (a v1 export name) */
-export const round = num.round
-/** A deep copy of plain JSON data (v1's clone). @public (a v1 export name) */
-export function clone<T>(o: T): T {
+/** A deep copy of plain JSON data (v1's clone). */
+function clone<T>(o: T): T {
   return o === null || o === undefined ? o : structuredClone(o)
 }
-/** A finite number (v1's isNum). @public (a v1 export name) */
-export const isNum = num.isNum
+const isNum = num.isNum
 /** "W × D × H cm" (v1's dimsText). */
 export const dimsText = (d: DimsCm | null | undefined): string => text.dimsText(d)
-/** Degrees into (−180, 180] (v1's wrapDeg). @public (a v1 export name) */
-export const wrapDeg = num.wrapDeg
 /** Fire-and-forget wrapper for UI handlers: failures are already reported, never thrown. */
 export function quiet(p: unknown): void {
   Promise.resolve(p).catch(() => undefined)
@@ -164,16 +160,19 @@ export function withMidstudy(opts: Req = {}): Req {
 /** §2.10: an item's bottom at most this far above the floor (m). */
 export const MAX_ELEVATION = num.MAX_ELEVATION
 
-// --- the camera block (contract §4.1) ------------------------------------------------------------------------------
-export const CAMERA_RANGE = cameraLogic.CAMERA_RANGE
-/** The camera without a calibration (§4.1). @public (a v1 export name) */
-export const DEFAULT_CAMERA: Camera = cameraLogic.DEFAULT_CAMERA
-/** v1's clampCamera(c, base): each field clamped and rounded to 6 decimals. @public (a v1 export name) */
-export function clampCamera(c: unknown, base: Camera = DEFAULT_CAMERA): Camera {
-  return cameraLogic.clampCamera(isRecord(c) ? c : null, base)
+// --- the kernels' small maths (core/js/web.ts): the logic takes them as parameters (logic/num.ts Kernels) ----------
+const K: Kernels = { roundTo, wrapDeg, wrapAz, clampLook }
+
+// --- the camera block (contract §4.1): the ranges, the default and the clamp are the kernels' -----------------------
+/** Every writer clamps to these (§4.1), [lo, hi]. */
+export { CAMERA_RANGE } from '../core/js/web.js'
+/** v1's clampCamera(c, base) on JSON: the kernels' clamp (each field clamped and rounded to 6 decimals); a field that
+ * isn't a finite number takes base's. */
+function clampCamera(c: unknown, base: Camera = DEFAULT_CAMERA): Camera {
+  const o = rec(c)
+  const field = (k: keyof Camera): number => { const v = o?.[k]; return typeof v === 'number' ? v : Number.NaN }
+  return kClampCamera({ fov_y_deg: field('fov_y_deg'), height_m: field('height_m'), pitch_deg: field('pitch_deg'), roll_deg: field('roll_deg') }, base)
 }
-/** v1's LOOK_DEFAULT. @public (a v1 export name) */
-export const LOOK_DEFAULT = lookLogic.LOOK_DEFAULT
 
 // --- small typed helpers for JSON from the server -------------------------------------------------------------------
 function isRecord(x: unknown): x is JsonObject {
@@ -413,10 +412,10 @@ function depthScale(): number {
   const floor = rec(c?.['floor'])
   const source = c?.['source']
   const measured = !!floor?.['found'] && (source === 'moge-2' || source === 'truth')
-  return cameraLogic.depthScaleOf(cam.height_m, measured, Number(rec(c?.['camera'])?.['height_m']))
+  return kDepthScale(cam.height_m, Number(rec(c?.['camera'])?.['height_m']), measured)
 }
 function emitView(): void { emit('view', getView()) }
-function getView(): ViewReport { return viewLogic.viewReport(view) }
+function getView(): ViewReport { return viewLogic.viewReport(view, K) }
 function setStageInsets(ins: unknown = {}): void {
   const o = rec(ins) ?? {}
   stageInsets = viewLogic.insetsFrom(o['left'], o['right'], o['top'], o['bottom'])
@@ -1042,7 +1041,7 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   const group = new THREE.Group()
   group.rotation.order = 'YXZ'
   const x = at[0], z = at[2]
-  group.position.set(typeof x === 'number' ? x : 0, given && isNum(p1) ? num.clampElev(p1) : 0, typeof z === 'number' ? z : 0)
+  group.position.set(typeof x === 'number' ? x : 0, given && isNum(p1) ? clampElevation(p1) : 0, typeof z === 'number' ? z : 0)
   group.rotation.set(0, rot * DEG, 0)
   group.userData['uid'] = uid
   group.name = `item:${uid}`
@@ -1073,7 +1072,7 @@ function moveItemInternal(uid: unknown, opts: unknown = {}): void {
     const pa: readonly unknown[] = pos
     const [x, y, z] = pa
     if (isNum(x)) r.group.position.x = x
-    if (isNum(y)) r.group.position.y = num.clampElev(y)
+    if (isNum(y)) r.group.position.y = clampElevation(y)
     if (isNum(z)) r.group.position.z = z
   }
   const rot = o['rotation_y_deg']
@@ -1093,7 +1092,7 @@ function getElevation(uid: string): number | null {
 function setElevation(uid: string, y: unknown): void {
   const r = items.get(uid)
   if (!r || !isNum(y)) return
-  moveItemInternal(uid, { position: [r.group.position.x, num.elevationOf(y), r.group.position.z] })
+  moveItemInternal(uid, { position: [r.group.position.x, roundTo(clampElevation(y), 6), r.group.position.z] })
 }
 function nudgeElevation(uid: string, dy: number): void {
   const y = getElevation(uid)
@@ -1105,7 +1104,7 @@ function dropToFloor(uid: string): void {
 }
 function rotateSelected(deg: number): void {
   const r = selected ? items.get(selected) : undefined
-  if (r) moveItemInternal(r.uid, { rotation_y_deg: num.turnBy(r.rotationDeg, deg) })
+  if (r) moveItemInternal(r.uid, { rotation_y_deg: rotateBy(r.rotationDeg, deg) })
 }
 function removeItemInternal(uid: unknown): void {
   const r = typeof uid === 'string' ? items.get(uid) : undefined
@@ -1167,8 +1166,8 @@ function select(uid: unknown): void {
 }
 function setSnap(on: unknown): void { snap = !!on }
 /** Footprint corners [front-left, front-right, back-right, back-left] on the floor (front faces +Z), centre, box, height.
- * @public */
-export interface Footprint {
+ */
+interface Footprint {
   corners: Vec3[]
   center: Vec3
   box: Vec3[]
@@ -1263,7 +1262,7 @@ function endItemDrag(): void {
   drag.uid = null
   emit('drag', { ...d, phase: 'end' })
 }
-/** What Undo puts back (removeItemWithUndo → restoreItem). @public */
+/** What Undo puts back (removeItemWithUndo → restoreItem). */
 export interface ItemSnapshot {
   uid: string
   id: string
@@ -1286,8 +1285,8 @@ async function restoreItem(s: ItemSnapshot): Promise<string> {
 }
 
 // --- the ruler (Adjust floor): two taps on the floor, the distance between them -------------------------------------
-/** getRuler() and the 'ruler' event. @public */
-export interface RulerState {
+/** getRuler() and the 'ruler' event. */
+interface RulerState {
   active: boolean
   points: Vec3[]
   meters: number | null
@@ -1409,7 +1408,7 @@ let sceneBaseline = ''
 const touchScene = (): void => { setDirty({ ...dirty, scene: !!sceneName && sceneSig() !== sceneBaseline }) }
 // The layout is dirty when the placed pieces differ from the ones last saved or loaded (not merely when something
 // happened: Remove then Undo puts back the same layout). Pieces compare by library id, position (to 0.1 mm) and turn.
-const layoutSig = (): string => layoutLogic.layoutSig([...items.values()].map((r) => ({ id: r.id, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg })))
+const layoutSig = (): string => layoutLogic.layoutSig([...items.values()].map((r) => ({ id: r.id, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg })), K)
 let layoutBaseline = layoutLogic.EMPTY_SIG
 const markLayoutClean = (): void => { layoutBaseline = layoutSig(); setDirty({ ...dirty, layout: false }) }
 events.addEventListener('items', () => { if (!quietItems) setDirty({ ...dirty, layout: layoutSig() !== layoutBaseline }) })
@@ -1596,7 +1595,7 @@ async function openScene(name: unknown): Promise<void> {
     sceneData = data
     cam = clampCamera(data['camera'])
     cameraSource = str(data['camera_source']) ?? 'default'
-    look = lookLogic.lookFrom(rec(data['look']))
+    look = lookLogic.lookFrom(rec(data['look']), K)
     lightingToken++
     setLightingData(data)
     const title = data['title']
@@ -1611,7 +1610,6 @@ async function openScene(name: unknown): Promise<void> {
     applyCamera()
     applyLook()
     setLayoutName('')
-    layoutNames = []
     layoutDetails = []
     renders = []
     layoutBaseline = layoutLogic.EMPTY_SIG
@@ -1676,7 +1674,6 @@ function closeScene(): void {
   ruler.active = false
   ruler.points = []
   grid.visible = false
-  layoutNames = []
   layoutDetails = []
   renders = []
   setLayoutName('')
@@ -1801,7 +1798,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
 function setCamera(partial: unknown = {}): void {
   const p = rec(partial)
   if (!p) return
-  const next = cameraLogic.mergeCamera(cam, p)
+  const next = clampCamera(p, cam) // v1's merge: the numbers p has over cam, clamped
   if (cameraLogic.sameCamera(next, cam)) return
   cam = next
   cameraSource = cameraLogic.sourceAfterChange(cam, savedScene ? savedScene.camera : null, savedScene ? savedScene.camera_source : 'manual')
@@ -1811,7 +1808,7 @@ function setCamera(partial: unknown = {}): void {
 }
 function resetCamera(): void {
   const c = rec(rec(sceneData?.['calib'])?.['camera'])
-  cam = cameraLogic.clampCamera(c, DEFAULT_CAMERA)
+  cam = clampCamera(c)
   cameraSource = c ? 'auto' : 'default'
   applyCamera()
   touchScene()
@@ -1835,7 +1832,6 @@ function setGridVisible(on: unknown): void {
 }
 
 // --- layouts (per scene, contract §2.7) --------------------------------------------------------------------------------
-let layoutNames: string[] = []
 let layoutDetails: LayoutSummary[] = []
 let layoutName = ''
 let layoutTitle = '' // the name as typed ("Phone A"), shown instead of the slug
@@ -1843,8 +1839,6 @@ function setLayoutName(name: unknown, title: unknown = null): void {
   layoutName = name === null || name === undefined ? '' : asText(name)
   layoutTitle = layoutLogic.currentTitle(layoutName, title)
 }
-/** v1's prettyLayout: "two-chairs" → "Two chairs". @public (a v1 export name) */
-export const prettyLayout = (name: unknown): string => layoutLogic.prettyLayout(name ? asText(name) : '')
 /** The listing's details as the layout logic reads them. */
 function details(): LayoutDetail[] {
   return layoutDetails.map((d) => {
@@ -1894,7 +1888,7 @@ function layoutDoc(name: string, title: string | null = null): LayoutDoc {
   return {
     version: 1, name, title: str(title), scene_name: sceneName, library: LIBRARY_URL,
     items: [...items.values()].map((r) => {
-      const it = layoutLogic.docItem({ uid: r.uid, id: r.id, render: r.render, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg })
+      const it = layoutLogic.docItem({ uid: r.uid, id: r.id, render: r.render, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg }, K)
       const dims = r.lib.dims_cm ?? null
       // a placeholder's size if the piece goes missing (§2.8)
       return dims && libLogic.validDims(dims) ? { ...it, dims_cm: { ...dims } } : it
@@ -1993,7 +1987,6 @@ async function listLayoutsInternal(): Promise<string[]> {
 async function refreshLayouts(): Promise<void> {
   let names: string[] = []
   try { names = await listLayoutsInternal() } catch (e) { reportError('Could not list layouts', e); return }
-  layoutNames = names
   emit('layouts', { names: names.slice(), details: layoutDetails.slice() })
 }
 
@@ -2011,7 +2004,7 @@ function resolvedLook(): ResolvedLook {
 }
 function applyLook(): void {
   P.comp.uExposure.value = look.exposure
-  const tint = lookLogic.warmthTint(look.warmth)
+  const tint = splatMultiplier(look.warmth, 1, [1, 1, 1]) // the kernels' warmth tint (× exposure 1 × gain 1, exactly)
   P.comp.uTint.value.set(tint[0], tint[1], tint[2])
   lights.setLook(resolvedLook())
   // splats (§4.5, §4.8): a plain multiplier, the Look's exposure × warmth times the room's light colour and level
@@ -2023,7 +2016,7 @@ function applyLook(): void {
 // getLighting() (hook, §4.8): the Look's values in use, where the light comes from, and the key in the world frame.
 function getLighting(): LightingReport {
   const src = lightingData ? lightingData['source'] : null
-  return lookLogic.lightingReport(look, resolvedLook(), lights.inferred(), lights.inUse(), lookLogic.lightingSourceOf(!!lightingData, src), lightingStatus)
+  return lookLogic.lightingReport(look, resolvedLook(), lights.inferred(), lights.inUse(), lookLogic.lightingSourceOf(!!lightingData, src), lightingStatus, K)
 }
 // setLighting(partial) (hook, §4.8): live. A direction or softness turns Auto lighting off unless auto_light is given.
 // The Look saves itself: PUT /api/scenes/<name> {look} 0.7 s after the last change (and at once when the scene is
@@ -2056,7 +2049,7 @@ function setLighting(p: unknown = {}): void {
     inUse = { light_azimuth_deg: r.light_azimuth_deg, light_elevation_deg: r.light_elevation_deg, light_softness: r.light_softness }
   }
   const before = look
-  look = lookLogic.patchLook(look, o, inUse)
+  look = lookLogic.patchLook(look, o, inUse, K)
   applyLook()
   if (lookLogic.lookChanged(before, look)) saveLookSoon()
 }
@@ -2169,8 +2162,8 @@ function captureComposite(opts: { maxPx?: number | null; quality?: number } = {}
 // dilated by 3 % of the photo's width, and twice that below each piece for its shadow, and its PNG: the kernels, here
 // (a few ms at 2048 × 1152: the worker's copy and round trip would cost more than they free).
 // → { dataUrl, width, height, coverage }
-/** @public */
-export interface MaskShot {
+/** */
+interface MaskShot {
   dataUrl: string
   width: number
   height: number
@@ -2332,8 +2325,8 @@ renderer.setAnimationLoop(() => {
 })
 
 // --- state for window.midstudy (contract §2.4, §4.6) --------------------------------------------------------------------
-/** getState().scene (§4.6). @public */
-export interface SceneState {
+/** getState().scene (§4.6). */
+interface SceneState {
   name: string
   title: unknown
   camera: Camera
@@ -2350,8 +2343,8 @@ function getSceneState(): SceneState | null {
     floor_found: rec(rec(sceneData?.['calib'])?.['floor'])?.['found'] ?? null, hasDepth: !!photo.depthTexture, occlusion, adjustFloor,
   }
 }
-/** getState().items[] (§4.6). @public */
-export interface StateItem {
+/** getState().items[] (§4.6). */
+interface StateItem {
   uid: string
   id: string
   render: Render
@@ -2361,7 +2354,7 @@ export interface StateItem {
   missing?: true
   worldBounds: { min: Vec3; max: Vec3 }
 }
-/** window.midstudy.getState() (§4.6). @public */
+/** window.midstudy.getState() (§4.6). */
 export interface PlannerState {
   scene: SceneState | null
   items: StateItem[]
@@ -2384,7 +2377,7 @@ function getState(): PlannerState {
     dirty: dirty.layout,
   }
 }
-/** window.midstudy.getRenderSettings() (§2.4). @public */
+/** window.midstudy.getRenderSettings() (§2.4). */
 export interface RenderSettings {
   toneMapping: 'aces'
   exposure: number
@@ -2429,8 +2422,6 @@ async function init(): Promise<string | null> {
   return first.status === 'fulfilled' ? first.value : null
 }
 
-/** Points the UI reads as client px (worldToScreen) or photo px. @public */
-export type { PointLike, Rect }
 
 /** What planner/input.ts installs (installInput). */
 export interface InputHandle {
@@ -2445,8 +2436,7 @@ const noInput = (): InputHandle | null => null
 const engineEvents: Events<EngineEvents> = events
 export const engine = {
   events: engineEvents, errors, canvas,
-  three: { scene, camera, renderer, get spark(): SparkRenderer | null { return spark } },
-  /** planner/input.ts's handle, set by main.ts (ui/shell.js gives it its key filter) */
+  /** planner/input.ts's handle, set by main.ts (ui/shell.ts gives it its key filter) */
   input: noInput(),
   // setup
   init, mount, setStageInsets,
@@ -2454,33 +2444,29 @@ export const engine = {
   getScene: (): SceneInfo | null => (sceneName ? { ...(sceneSummary(sceneData) ?? { name: sceneName }), name: sceneName, w: photo.w, h: photo.h, camera: cameraLogic.cameraCopy(cam), camera_source: cameraSource, hasDepth: !!photo.depthTexture, calib: calibInfo(sceneData?.['calib']) } : null),
   getSceneName: (): string | null => sceneName,
   getSceneLoad: (): SceneLoad => ({ ...sceneLoad }),
-  getScenesList: (): SceneSummary[] => scenesList.slice(),
   getCamera: (): Camera => cameraLogic.cameraCopy(cam),
   getCameraSource: (): string => cameraSource,
-  getCalibCamera: (): Camera | null => { const c = rec(sceneData?.['calib'])?.['camera']; return c ? clampCamera(c) : null },
   getSavedScene: (): SavedScene | null => clone(savedScene),
   getAdjustFloor: (): boolean => adjustFloor,
   getFloorNote: (): string | null => floorNote,
   getOcclusion: (): boolean => occlusion,
   getGridVisible: (): boolean => grid.visible,
-  getView, getPhotoRect, getStageRect: stageRect, getVisiblePhotoRect: visiblePhotoRect,
+  getView, getPhotoRect, getVisiblePhotoRect: visiblePhotoRect,
   getPhotoSize: (): { w: number; h: number; has: boolean } => ({ w: photo.w, h: photo.h, has: photo.has }),
   isSceneDirty: (): boolean => dirty.scene,
   isLayoutDirty: (): boolean => dirty.layout,
-  getDirty: (): { scene: boolean; layout: boolean } => ({ ...dirty }),
   getItems: (): ItemInfo[] => [...items.values()].map(itemInfo),
   getItem: (uid: string | null): ItemInfo | null => { const r = uid === null ? undefined : items.get(uid); return r ? itemInfo(r) : null },
-  getItemBounds: (uid: string): { min: Vec3; max: Vec3 } | null => { const r = items.get(uid); if (!r) return null; const b = worldBounds(r); return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] } },
   getSelected: (): string | null => selected,
   getDrag: (): { mode: DragMode; uid: string } | null => (drag.mode && drag.uid ? { mode: drag.mode, uid: drag.uid } : null),
   getFootprint, hitItemAt, itemAt, getScreenRect, getElevation,
-  getLook, getLibrary: (): LibraryEntry[] => library.slice(), assetUrl,
-  getLayouts: (): string[] => layoutNames.slice(), getLayoutDetails: (): LayoutSummary[] => layoutDetails.map((d) => ({ ...d })), getLayoutName: (): string => layoutName,
-  getLayoutTitle: (): string => layoutDisplayName(layoutName), layoutDisplayName, getScenesTrash: (): TrashedScene[] => scenesTrash.map((t) => ({ ...t })),
+  getLibrary: (): LibraryEntry[] => library.slice(), assetUrl,
+  getLayoutDetails: (): LayoutSummary[] => layoutDetails.map((d) => ({ ...d })), getLayoutName: (): string => layoutName,
+  layoutDisplayName, getScenesTrash: (): TrashedScene[] => scenesTrash.map((t) => ({ ...t })),
   getRenders: (): RenderMeta[] => renders.slice(), isRenderMock: (): boolean => renderMock,
   getRuler, getState, getRenderSettings, horizonAt,
   // scenes
-  listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, restoreScene, renameScene, saveScene, saveThumbnail, recalibrate,
+  listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, restoreScene, renameScene, saveScene, recalibrate,
   setCamera, resetCamera, setAdjustFloor, setOcclusion, setGridVisible, setPitchFromHorizon,
   // view
   zoomAt, zoomBy, panBy, fitView,
@@ -2488,15 +2474,14 @@ export const engine = {
   addItemInternal, moveItemInternal, removeItemInternal, clearItemsInternal, select, rotateSelected, setSnap,
   beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem,
   setElevation, nudgeElevation, dropToFloor, reloadLibrary: (): Promise<void> => loadLibrary(),
-  tap, setRulerActive, clearRuler, setRulerPointAt, setRulerTrueLength,
+  tap, setRulerActive, setRulerPointAt, setRulerTrueLength,
   // look and lighting (§4.8)
   setLook, setContactShadows, getLighting, setLighting, resetLighting, inferLighting,
-  getLightingStatus: (): LightingStatus => ({ ...lightingStatus }),
   // layouts
-  saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal, refreshLayouts, setLayoutName,
+  saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal,
   // renders
-  captureComposite, captureMask, postRender, renderViewInternal, listRendersInternal, compare, settleSplats,
+  captureComposite, postRender, renderViewInternal, listRendersInternal, compare,
   // errors + overlays + projection
-  reportError, toast, onFrame, wake, worldToScreen, projectPhoto, photoToFloor, floorToPhoto, clientToPhoto, photoToClient,
+  reportError, onFrame, worldToScreen, photoToFloor, floorToPhoto, photoToClient,
 }
 export type Engine = typeof engine

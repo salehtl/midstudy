@@ -1,7 +1,8 @@
 // The light direction dial's maths (ui/sun-dial.ts, contract §4.8): azimuth and elevation to a spot on the dial and
 // back from a pointer, the keys, and the words for where the light comes from. The dial is seen from above: the centre
 // is overhead (90°), the rim 5° above the horizon, the top ahead (−Z), the right +X. Pure, TScert-checked; sin, cos and
-// atan2 come in from the shell (Math's), so each result is v1's bit for bit.
+// atan2 come in from the shell (Math's), so each result is v1's bit for bit, and so do the Look's azimuth wrap and
+// elevation range (the kernels' wrapDeg and clampLook: DialMath).
 
 const PI = 3.141592653589793 // Math.PI
 export const DIAL_R = 100 // the disk's radius in viewBox units
@@ -15,19 +16,14 @@ export interface Trig {
   cos(x: number): number
   atan2(y: number, x: number): number
 }
+/** The dial's maths: trigonometry, an azimuth into (−180, 180] and an elevation kept within 5–90° (contract §4.8). */
+export interface DialMath extends Trig {
+  wrapDeg(d: number): number
+  clampEl(e: number): number
+}
 
 // Where the light comes from, in words (seen from the camera): 45° sectors.
 const SIDES = ['ahead', 'ahead on the right', 'the right', 'behind on the right', 'behind the camera', 'behind on the left', 'the left', 'ahead on the left'] as const
-
-export function clampEl(e: number): number {
-  return Math.min(MAX_EL, Math.max(MIN_EL, e))
-}
-
-/** An azimuth in (−180, 180]. */
-export function wrapAz(a: number): number {
-  const w = ((((a + 180) % 360) + 360) % 360) - 180
-  return w === -180 ? 180 : w
-}
 
 /** One decimal (what the dial reports and draws). */
 export function r1(v: number): number {
@@ -35,19 +31,19 @@ export function r1(v: number): number {
 }
 
 /** "the left", "ahead on the right", … */
-function lightSide(az: number): string {
-  return SIDES[Math.round(((wrapAz(az) + 360) % 360) / 45) % 8] ?? ''
+function lightSide(az: number, m: DialMath): string {
+  return SIDES[Math.round(((m.wrapDeg(az) + 360) % 360) / 45) % 8] ?? ''
 }
 
 /** "the left · 35° up", or "overhead" from 82° up. */
-export function lightWords(az: number, el: number): string {
+export function lightWords(az: number, el: number, m: DialMath): string {
   if (el >= 82) return 'overhead'
-  return `${lightSide(az)} · ${String(Math.round(el))}° up`
+  return `${lightSide(az, m)} · ${String(Math.round(el))}° up`
 }
 
 /** The dial's aria-valuetext. */
-export function lightValueText(az: number, el: number): string {
-  return el >= 82 ? 'Light from overhead' : `Light from ${lightSide(az)}, ${String(Math.round(el))}° up`
+export function lightValueText(az: number, el: number, m: DialMath): string {
+  return el >= 82 ? 'Light from overhead' : `Light from ${lightSide(az, m)}, ${String(Math.round(el))}° up`
 }
 
 /** The radius (viewBox units) of an elevation's ring. */
@@ -56,10 +52,10 @@ export function ringRadius(el: number): number {
 }
 
 /** The sun's spot in viewBox units: x = sin(az)·r, y = −cos(az)·r, r = (90 − el)/85 of the radius. */
-export function spot(az: number, el: number, trig: Trig): readonly [number, number] {
-  const r = ringRadius(clampEl(el))
+export function spot(az: number, el: number, m: DialMath): readonly [number, number] {
+  const r = ringRadius(m.clampEl(el))
   const a = (az * PI) / 180
-  return [trig.sin(a) * r, -trig.cos(a) * r]
+  return [m.sin(a) * r, -m.cos(a) * r]
 }
 
 /** A viewBox coordinate as a percentage of the dial's box (the grip's left and top). */
@@ -83,27 +79,27 @@ export interface AzEl {
   readonly az: number
   readonly el: number
 }
-export function fromPointer(dx: number, dy: number, width: number, az: number, trig: Trig, hypot: (x: number, y: number) => number): AzEl {
+export function fromPointer(dx: number, dy: number, width: number, az: number, m: DialMath, hypot: (x: number, y: number) => number): AzEl {
   const k = (2 * DIAL_HALF) / width / DIAL_R // CSS px → disk radii
   const x = dx * k
   const y = dy * k
   const d = Math.min(1, hypot(x, y))
   return {
-    az: d > 0.03 ? wrapAz((trig.atan2(x, -y) * 180) / PI) : az,
-    el: clampEl(MAX_EL - d * (MAX_EL - MIN_EL)),
+    az: d > 0.03 ? m.wrapDeg((m.atan2(x, -y) * 180) / PI) : az,
+    el: m.clampEl(MAX_EL - d * (MAX_EL - MIN_EL)),
   }
 }
 
 /** A key on the dial: ←/→ azimuth ∓/±5° (Shift 15°), ↑/↓ elevation ±5° (Shift 15°), Page Up/Down elevation ±15°,
  *  Home overhead, End low. null: not the dial's key. */
-export function dialKey(key: string, shift: boolean, az: number, el: number): AzEl | null {
+export function dialKey(key: string, shift: boolean, az: number, el: number, m: DialMath): AzEl | null {
   const step = shift ? 15 : 5
-  if (key === 'ArrowLeft') return { az: wrapAz(az - step), el }
-  if (key === 'ArrowRight') return { az: wrapAz(az + step), el }
-  if (key === 'ArrowUp') return { az, el: clampEl(el + step) }
-  if (key === 'ArrowDown') return { az, el: clampEl(el - step) }
-  if (key === 'PageUp') return { az, el: clampEl(el + 15) }
-  if (key === 'PageDown') return { az, el: clampEl(el - 15) }
+  if (key === 'ArrowLeft') return { az: m.wrapDeg(az - step), el }
+  if (key === 'ArrowRight') return { az: m.wrapDeg(az + step), el }
+  if (key === 'ArrowUp') return { az, el: m.clampEl(el + step) }
+  if (key === 'ArrowDown') return { az, el: m.clampEl(el - step) }
+  if (key === 'PageUp') return { az, el: m.clampEl(el + 15) }
+  if (key === 'PageDown') return { az, el: m.clampEl(el - 15) }
   if (key === 'Home') return { az, el: MAX_EL }
   if (key === 'End') return { az, el: MIN_EL }
   return null

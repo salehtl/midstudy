@@ -10,7 +10,14 @@
 // Styles: styles/scenes.css (.sd-*). The maths: logic/sundial.ts.
 //   sunDial({ onChange({ az, el }) }) → wrap element; wrap.dial (the focusable control), wrap.set({ az, el, inferred })
 import { h } from './kit.js'
-import { boxPercent, clampEl, dialKey, DIAL_HALF, DIAL_R, fromPointer, lightValueText, lightWords, r1, ringRadius, spot, sunRays, touchIntent, wrapAz, type AzEl } from './logic/sundial.js'
+import { boxPercent, dialKey, DIAL_HALF, DIAL_R, fromPointer, lightValueText, lightWords, r1, ringRadius, spot, sunRays, touchIntent, type AzEl, type DialMath } from './logic/sundial.js'
+import { clampLook, wrapDeg } from './seam.js'
+
+/** The dial's maths: Math's trigonometry, the kernels' azimuth wrap and the Look's elevation range. */
+const M: DialMath = {
+  sin: (x) => Math.sin(x), cos: (x) => Math.cos(x), atan2: (y, x) => Math.atan2(y, x),
+  wrapDeg, clampEl: (e) => clampLook('light_elevation_deg', e) ?? e,
+}
 
 const NS = 'http://www.w3.org/2000/svg'
 function svg(tag: string, attrs: Readonly<Record<string, string | number>> = {}): SVGElement {
@@ -67,20 +74,20 @@ export function sunDial({ onChange, label = 'Light direction' }: { readonly onCh
   let raf = 0
 
   function draw(): void {
-    const [x, y] = spot(az, el, Math)
+    const [x, y] = spot(az, el, M)
     sun.setAttribute('transform', `translate(${String(r1(x))} ${String(r1(y))})`)
     grip.style.left = `${String(boxPercent(x))}%`
     grip.style.top = `${String(boxPercent(y))}%`
     ray.setAttribute('x2', String(r1(x)))
     ray.setAttribute('y2', String(r1(y)))
-    readout.textContent = `From ${lightWords(az, el)}`
+    readout.textContent = `From ${lightWords(az, el, M)}`
     dial.setAttribute('aria-valuenow', String(Math.round(az)))
-    dial.setAttribute('aria-valuetext', lightValueText(az, el))
+    dial.setAttribute('aria-valuetext', lightValueText(az, el, M))
   }
   function drawInferred(): void {
     inferred.style.display = inf ? '' : 'none'
     if (!inf) return
-    const [x, y] = spot(inf.az, inf.el, Math)
+    const [x, y] = spot(inf.az, inf.el, M)
     inferred.setAttribute('cx', String(r1(x)))
     inferred.setAttribute('cy', String(r1(y)))
   }
@@ -99,7 +106,7 @@ export function sunDial({ onChange, label = 'Light direction' }: { readonly onCh
   function moveTo(e: PointerEvent): void {
     const b = dial.getBoundingClientRect()
     if (!b.width) return
-    const next = fromPointer(e.clientX - (b.left + b.width / 2), e.clientY - (b.top + b.height / 2), b.width, az, Math, Math.hypot)
+    const next = fromPointer(e.clientX - (b.left + b.width / 2), e.clientY - (b.top + b.height / 2), b.width, az, M, Math.hypot)
     az = next.az
     el = next.el
     draw()
@@ -142,7 +149,7 @@ export function sunDial({ onChange, label = 'Light direction' }: { readonly onCh
   dial.addEventListener('pointercancel', (e) => { if (touch?.id === e.pointerId) touch = null; end(e) })
   dial.addEventListener('lostpointercapture', (e) => { end(e) })
   dial.addEventListener('keydown', (e) => {
-    const next = dialKey(e.key, e.shiftKey, az, el)
+    const next = dialKey(e.key, e.shiftKey, az, el, M)
     if (!next) return
     az = next.az
     el = next.el
@@ -156,8 +163,8 @@ export function sunDial({ onChange, label = 'Light direction' }: { readonly onCh
     inf = i && Number.isFinite(i.az) && Number.isFinite(i.el) ? { az: i.az, el: i.el } : null
     drawInferred()
     if (dragId !== null || pending) return
-    if (a !== undefined && Number.isFinite(a)) az = wrapAz(a)
-    if (e !== undefined && Number.isFinite(e)) el = clampEl(e)
+    if (a !== undefined && Number.isFinite(a)) az = M.wrapDeg(a)
+    if (e !== undefined && Number.isFinite(e)) el = M.clampEl(e)
     draw()
   }
   drawInferred()

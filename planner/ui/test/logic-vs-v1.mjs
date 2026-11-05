@@ -2,7 +2,10 @@
 // Differential test of planner/ui/logic/*.ts against v1: each `v1.*` below is the expression the v1 UI used (planner/ui/
 // *.js at the fork, 979677c), copied as it was and wrapped as a function of the same inputs. Seeded random inputs (and the
 // edge cases listed), every output compared with Object.is / JSON. The logic modules are bundled with esbuild first (their
-// `.js` specifiers name `.ts` files). Run: nix develop -c node planner/ui/test/logic-vs-v1.mjs [--seed N] [--n N]
+// `.js` specifiers name `.ts` files), with the kernels' face (core/js/web.ts): what v1 computed in the UI and the
+// kernels now own (the horizon drag, the elevation's range, the dial's azimuth wrap and elevation range) is checked
+// through them, as the shells call them. Needs `npm run build` (the wasm).
+// Run: nix develop -c node planner/ui/test/logic-vs-v1.mjs [--seed N] [--n N]
 import { build } from 'esbuild'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -16,11 +19,15 @@ const N = arg('--n', 4000)
 // --- the logic, bundled ---------------------------------------------------------------------------------------------------
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-logic-'))
 const entry = path.join(dir, 'entry.ts')
-const mods = ['text', 'dates', 'chrome', 'workspace', 'sundial', 'scenes', 'layouts', 'library', 'look', 'libforms', 'product', 'renders', 'lists', 'glyphs']
-fs.writeFileSync(entry, mods.map((m) => `export * as ${m} from ${JSON.stringify(path.join(ROOT, 'planner/ui/logic', `${m}.ts`))}`).join('\n'))
+const mods = ['text', 'chrome', 'workspace', 'sundial', 'scenes', 'layouts', 'library', 'look', 'libforms', 'product', 'renders', 'lists', 'glyphs']
+fs.writeFileSync(entry, [...mods.map((m) => `export * as ${m} from ${JSON.stringify(path.join(ROOT, 'planner/ui/logic', `${m}.ts`))}`), `export * as k from ${JSON.stringify(path.join(ROOT, 'core/js/web.ts'))}`].join('\n'))
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: path.join(dir, 'logic.mjs'), logLevel: 'error' })
 const L = await import(path.join(dir, 'logic.mjs'))
 fs.rmSync(dir, { recursive: true, force: true })
+const K = L.k
+K.loadKernelsSync(fs.readFileSync(path.join(ROOT, 'build/wasm/web/midstudy_wasm_web_bg.wasm')))
+/** The dial's maths as ui/sun-dial.ts builds it. */
+const M = { sin: Math.sin, cos: Math.cos, atan2: Math.atan2, wrapDeg: K.wrapDeg, clampEl: (e) => K.clampLook('light_elevation_deg', e) ?? e }
 
 // --- seeded random inputs -------------------------------------------------------------------------------------------------
 let s = SEED >>> 0
@@ -37,6 +44,12 @@ const failures = []
 function same(name, a, b, input) {
   checks++
   const ok = typeof a === 'number' || typeof b === 'number' ? Object.is(a, b) : JSON.stringify(a) === JSON.stringify(b)
+  if (!ok && failures.length < 30) failures.push(`${name}(${JSON.stringify(input)}): v1 ${JSON.stringify(a)} ≠ ts ${JSON.stringify(b)}`)
+}
+
+function near(name, a, b, rel, input) {
+  checks++
+  const ok = Object.is(a, b) || (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= rel * Math.max(1, Math.abs(a)))
   if (!ok && failures.length < 30) failures.push(`${name}(${JSON.stringify(input)}): v1 ${JSON.stringify(a)} ≠ ts ${JSON.stringify(b)}`)
 }
 
@@ -211,9 +224,11 @@ for (let i = 0; i < N; i++) {
   same('chip', v1.chip(el), W.renderChip(el), el)
   const y = maybe(num)
   same('elevCm', v1.elevCm(y), W.elevCm(y ?? null), y)
-  same('elevM', v1.elevM(v, 4), W.elevMeters(v, 4), v)
+  // the height field: v1 clamped in the UI, then setElevation stored round(clampElev(y), 6); now the kernels clamp
+  same('elevM', Math.round(v1.elevM(v, 4) * 1e6) / 1e6, K.roundTo(K.clampElevation(W.elevMeters(v)), 6), v)
   const py0 = rnd() * 1200, dy = (rnd() - 0.5) * 400, sc = rnd() * 2 + 0.01, fov = 20 + rnd() * 90, rh = rnd() * 1000
-  same('hzRow', v1.hzRow(py0, dy, sc, fov, rh), W.horizonDragRow(py0, dy, sc, fov, rh, Math.tan), [py0, dy, sc, fov, rh])
+  // the kernels' tan (Rust's, in wasm) and V8's Math.tan can differ in the last bit: the row agrees to 1e-12 relative
+  near('hzRow', v1.hzRow(py0, dy, sc, fov, rh), K.horizonDragRow(py0, dy, sc, K.horizonDragGain(fov, rh)), 1e-12, [py0, dy, sc, fov, rh])
   const pts = Array.from({ length: 4 }, () => ({ x: rnd() * 1400 - 100, y: rnd() * 900 - 100 }))
   const vr = { x: rnd() * 300, y: rnd() * 100, w: rnd() * 1200, h: rnd() * 800 }
   const lift = rnd() < 0.5 ? null : { left: rnd() * 1400, width: rnd() < 0.2 ? 0 : 56 }
@@ -232,15 +247,14 @@ for (let i = 0; i < N; i++) {
   same('missing', v1.missing(it), W.missingText(it ? it.name : null, !!it?.noGlb), it)
 
   const az = (rnd() - 0.5) * 2000, elv = rnd() * 120 - 10
-  same('wrapAz', v1.wrapAz(az), D.wrapAz(az), az)
-  same('lightWords', v1.lightWords(az, elv), D.lightWords(az, elv), [az, elv])
-  same('spot', v1.spot(az, elv), D.spot(az, elv, Math), [az, elv])
+  same('wrapAz', v1.wrapAz(az), M.wrapDeg(az), az)
+  same('lightWords', v1.lightWords(az, elv), D.lightWords(az, elv, M), [az, elv])
+  same('spot', v1.spot(az, elv), D.spot(az, elv, M), [az, elv])
   const dx0 = (rnd() - 0.5) * 400, dy0 = (rnd() - 0.5) * 400, width = rnd() * 300 + 1
-  same('fromPointer', v1.fromPointer(dx0, dy0, width, az), D.fromPointer(dx0, dy0, width, az, Math, Math.hypot), [dx0, dy0, width, az])
+  same('fromPointer', v1.fromPointer(dx0, dy0, width, az), D.fromPointer(dx0, dy0, width, az, M, Math.hypot), [dx0, dy0, width, az])
 
-  const nameCheck = L.layouts.checkName(w ?? '', ['oak', 'evening-lamp-by-the-window'], (x) => v1.pretty(x), (x) => /^[a-z0-9][a-z0-9-]{0,63}$/.test(x))
+  const nameCheck = L.layouts.checkName(w ?? '', ['oak', 'evening-lamp-by-the-window'], (x) => v1.pretty(x))
   same('checkName.slug', v1.slugify(w ?? ''), nameCheck.slug, w)
-  same('pretty', v1.pretty(w), L.layouts.pretty(w), w)
   const details = Array.from({ length: int(0, 6) }, () => ({ name: pick(['a', 'b', 'two-chairs', 'Z', 'é']), updated: maybe(() => pick(['2026-11-05T10:00:00Z', '2026-11-05T09:00:00Z', '', '2025-01-01T00:00:00Z'])) }))
   same('sortLayouts', v1.sortLayouts(details), L.layouts.sortLayouts(details), details)
 
@@ -282,7 +296,7 @@ for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'P
     const step = shift ? 15 : 5
     let handled = true
     if (k === 'ArrowLeft') az = v1.wrapAz(az - step); else if (k === 'ArrowRight') az = v1.wrapAz(az + step); else if (k === 'ArrowUp') el = Math.min(90, Math.max(5, el + step)); else if (k === 'ArrowDown') el = Math.min(90, Math.max(5, el - step)); else if (k === 'PageUp') el = Math.min(90, Math.max(5, el + 15)); else if (k === 'PageDown') el = Math.min(90, Math.max(5, el - 15)); else if (k === 'Home') el = 90; else if (k === 'End') el = 5; else handled = false
-    same('dialKey', handled ? { az, el } : null, D.dialKey(k, shift, 170, 87), [k, shift])
+    same('dialKey', handled ? { az, el } : null, D.dialKey(k, shift, 170, 87, M), [k, shift])
   }
 }
 

@@ -1,56 +1,13 @@
-// The camera block (contract §4.1): ranges, the default, v1's clamp, merge and sameness tests, where the floor check
-// note comes from, and the occlusion depth's scale (§4.5). Pure, for TScert (tscert/README.md). The projection itself
-// is the kernels' (core/js/web.ts SceneCamera).
-import { clampNum, round } from './num.js'
+// The camera block (contract §4.1): v1's sameness test, the scene's dirty signature, the camera source after a change
+// and where the floor check note comes from. Pure, for TScert (tscert/README.md). The ranges, the default camera, the
+// clamp, the occlusion depth's scale and the projection itself are the kernels' (core/js/web.ts CAMERA_RANGE,
+// DEFAULT_CAMERA, clampCamera, depthScale, SceneCamera).
 
 export interface Camera {
   readonly fov_y_deg: number
   readonly height_m: number
   readonly pitch_deg: number
   readonly roll_deg: number
-}
-
-/** A camera block as it may come in (a scene's JSON, the hook): anything per field. */
-export interface CameraInput {
-  readonly fov_y_deg?: unknown
-  readonly height_m?: unknown
-  readonly pitch_deg?: unknown
-  readonly roll_deg?: unknown
-}
-
-/** Every writer clamps to these (contract §4.1), [lo, hi]. */
-export const CAMERA_RANGE = {
-  fov_y_deg: [20, 110],
-  height_m: [0.2, 3.0],
-  pitch_deg: [-80, 30],
-  roll_deg: [-20, 20],
-} as const
-
-/** The camera without a calibration (contract §4.1). */
-export const DEFAULT_CAMERA: Camera = { fov_y_deg: 55, height_m: 1.4, pitch_deg: -10, roll_deg: 0 }
-
-/** v1's clampCamera(c, base): each field clamped and rounded to 6 decimals; a missing or non-finite one takes base's. */
-export function clampCamera(c: CameraInput | null, base: Camera): Camera {
-  return {
-    fov_y_deg: round(clampNum(c?.fov_y_deg, 20, 110, base.fov_y_deg), 6),
-    height_m: round(clampNum(c?.height_m, 0.2, 3.0, base.height_m), 6),
-    pitch_deg: round(clampNum(c?.pitch_deg, -80, 30, base.pitch_deg), 6),
-    roll_deg: round(clampNum(c?.roll_deg, -20, 20, base.roll_deg), 6),
-  }
-}
-
-/** v1's setCamera merge: the finite numbers of `p` over `cam`, then clamped with `cam` as the base. */
-export function mergeCamera(cam: Camera, p: CameraInput): Camera {
-  const pick = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
-  return clampCamera(
-    {
-      fov_y_deg: pick(p.fov_y_deg, cam.fov_y_deg),
-      height_m: pick(p.height_m, cam.height_m),
-      pitch_deg: pick(p.pitch_deg, cam.pitch_deg),
-      roll_deg: pick(p.roll_deg, cam.roll_deg),
-    },
-    cam,
-  )
 }
 
 /** v1's sameCamera: every field within 1e-6. */
@@ -103,8 +60,3 @@ export function floorNote(c: CalibFacts): string | null {
   return null
 }
 
-/** v1's depthScale (contract §4.5): height / calib height when the floor was measured (moge-2 or truth), else 1.
- * `calibHeight` is Number(calib.camera.height_m), NaN when unmeasured. */
-export function depthScaleOf(heightM: number, measured: boolean, calibHeight: number): number {
-  return measured && calibHeight > 0 ? heightM / calibHeight : 1
-}

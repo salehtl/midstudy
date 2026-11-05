@@ -12,6 +12,7 @@ import {
   addMeta, addProblem, budgetLine, changes, costWord, dimsOf, editPatch, editedText, engineHint, ENGINES, goLabel, modelFileText,
   nameFromFile, overBudget, priceWord, refits, replacesText, rugFill, saveLabel, type AddMeta,
 } from '../logic/libforms.js'
+import { libName } from '../../logic/library.js'
 
 const usd = (v: number): string => priceWord(v, fmtUsd)
 
@@ -169,7 +170,7 @@ export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (
     const m = meta()
     const existing = m.id ? ctx.engine.getLibrary().find((it) => it.id === m.id) : undefined
     replaceEl.hidden = !existing
-    if (existing) replaceText.textContent = replacesText((existing.name ?? '') || existing.id)
+    if (existing) replaceText.textContent = replacesText(libName(existing))
   }
   async function submit(): Promise<void> {
     if (problem() || st.busy) return
@@ -201,7 +202,7 @@ export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (
 export function openEditSheet(ctx: UiContext, item: LibraryEntry, { onRemove }: { readonly onRemove?: (item: LibraryEntry) => void } = {}): Sheet {
   const { shell, lib } = ctx
   const st = { turn: 0, render: (item.default_render ?? '') || 'glb', busy: false, error: '' }
-  const name = textInput({ value: (item.name ?? '') || item.id, maxLength: 120, label: 'Name', onInput: () => { sync() } })
+  const name = textInput({ value: libName(item), maxLength: 120, label: 'Name', onInput: () => { sync() } })
   const category = textInput({ value: item.category ?? '', placeholder: 'chair, lamp, shelf…', maxLength: 40, label: 'Category' })
   const dims = dimsFields(item.dims_cm, () => { sync() })
   const turn = segmented<string>([0, 90, 180, 270].map((d) => ({ value: String(d), label: d ? `${String(d)}°` : 'As is' })), '0', (v) => { st.turn = Number(v); sync() }, { label: 'Turn the model' })
@@ -224,7 +225,7 @@ export function openEditSheet(ctx: UiContext, item: LibraryEntry, { onRemove }: 
   const remove = h('button.btn.btn-quiet.ms-btn.ms-remove', { type: 'button', dataset: { midstudy: 'lib-remove' }, onclick: () => { sheet.close(); onRemove?.(item) } }, pic('trash', { size: 18 }), h('span', 'Remove'))
   const cancel = h('button.btn.btn-secondary.ms-btn', { type: 'button', onclick: () => { sheet.close() } }, 'Cancel')
   const save = h('button.btn.btn-primary.ms-btn.ms-primary', { type: 'button', onclick: () => { void submit() } }, 'Save')
-  const sheet = openSheet(shell, { title: `Edit ${(item.name ?? '') || item.id}`, sub: item.id, body, actions: [remove, h('span.ws-spacer'), cancel, save], cls: 'ms-edit' })
+  const sheet = openSheet(shell, { title: `Edit ${libName(item)}`, sub: item.id, body, actions: [remove, h('span.ws-spacer'), cancel, save], cls: 'ms-edit' })
 
   const patch = (): ReturnType<typeof editPatch> => editPatch({
     name: name.value, category: category.value, dims: dims.value(), turn: st.turn, render: st.render, canSwitch: !!showsAs,

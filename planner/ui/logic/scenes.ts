@@ -1,6 +1,7 @@
 // The Scenes page's words and choices (ui/scenes.ts, contract §4.5): a card's flags and meta line, the upload's
 // progress, the delete question, and which dropped files are photos. Pure, TScert-checked.
 
+import { sceneBusy } from '../../logic/scenes.js'
 import { dots, plural } from './text.js'
 
 /** What a scene card shows from the §4.4 scene object (only the fields read here). */
@@ -16,11 +17,6 @@ export interface SceneFacts {
   readonly camera_source?: string | null
 }
 
-/** A calibration that is queued or running. */
-export function isCalibrating(status: string | null | undefined): boolean {
-  return status === 'pending' || status === 'running'
-}
-
 /** One flag on a card: its class after sc-flag, its words, and its tooltip. */
 export interface SceneFlag {
   readonly cls: string
@@ -31,7 +27,7 @@ export function sceneFlags(s: SceneFacts, isOpen: boolean): SceneFlag[] {
   const flags: SceneFlag[] = []
   if (isOpen) flags.push({ cls: 'is-open', text: 'Open now', title: null })
   if (s.calib_status === 'failed') flags.push({ cls: 'is-failed', text: 'Calibration failed', title: s.calib_error ?? '' })
-  else if (!isCalibrating(s.calib_status) && s.floor_found === false && s.camera_source !== 'manual') flags.push({ cls: 'is-check', text: 'Check the floor', title: null })
+  else if (!sceneBusy(s.calib_status) && s.floor_found === false && s.camera_source !== 'manual') flags.push({ cls: 'is-check', text: 'Check the floor', title: null })
   else if (s.camera_source === 'manual') flags.push({ cls: '', text: 'Floor set by hand', title: null })
   return flags
 }

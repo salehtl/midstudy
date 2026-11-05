@@ -1,9 +1,10 @@
-// The Look (contract §4.8): exposure and warmth for the furniture, and the lighting controls. Ranges and defaults,
-// v1's lookFrom, setLighting's merge (with "Auto lighting" going off and freezing what was in use), Reset, what is
-// saved, the values in use, the hook's getLighting() report, the warmth tint, and the floor shadow catcher's numbers.
-// Pure, for TScert (tscert/README.md): trigonometry comes in as parameters (the shell passes the kernels' dirOf).
-import { clampNum, isNum, round, roundAll, wrapAz } from './num.js'
-import type { JsonObject } from './num.js'
+// The Look (contract §4.8): exposure and warmth for the furniture, and the lighting controls. Defaults, v1's lookFrom,
+// setLighting's merge (with "Auto lighting" going off and freezing what was in use), Reset, what is saved, the values in
+// use, the hook's getLighting() report, and the floor shadow catcher's numbers. Pure, for TScert (tscert/README.md):
+// the Look's clamps, v1's round and the wraps are the kernels' and come in as parameters (Kernels), as does
+// trigonometry (the shell passes the kernels' dirOf). The warmth tint is the kernels' too (splatMultiplier).
+import { isNum, roundAll } from './num.js'
+import type { JsonObject, Kernels, LookKey } from './num.js'
 
 export type Vec3 = readonly [number, number, number]
 
@@ -21,17 +22,9 @@ export interface LookState {
   readonly cast_shadows: boolean | null
 }
 
-/** v1's LOOK_DEFAULT (exposure and warmth). */
-export const LOOK_DEFAULT = { exposure: 1, warmth: 0 } as const
-
-function numOrNull(v: unknown, lo: number, hi: number): number | null {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return null
-  return Math.min(hi, Math.max(lo, v))
-}
-
-function azOrNull(v: unknown): number | null {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return null
-  return Math.min(180, Math.max(-180, wrapAz(v)))
+/** A Look number as it may come in, clamped by the kernels; null when it isn't a finite number. */
+function lookNum(k: Kernels, key: LookKey, v: unknown): number | null {
+  return isNum(v) ? k.clampLook(key, v) : null
 }
 
 function boolOr(v: unknown, d: boolean): boolean {
@@ -43,16 +36,16 @@ function boolOrNull(v: unknown): boolean | null {
 }
 
 /** v1's lookFrom: a scene's `look` (or anything) to the full Look, each key clamped or defaulted. */
-export function lookFrom(src: JsonObject | null): LookState {
+export function lookFrom(src: JsonObject | null, k: Kernels): LookState {
   if (src === null) return defaultLook()
   return {
-    exposure: clampNum(src['exposure'], 0.25, 4, 1),
-    warmth: clampNum(src['warmth'], -1, 1, 0),
-    light_azimuth_deg: azOrNull(src['light_azimuth_deg']),
-    light_elevation_deg: numOrNull(src['light_elevation_deg'], 5, 90),
-    light_softness: numOrNull(src['light_softness'], 0, 1),
-    light_strength: clampNum(src['light_strength'], 0, 3, 1),
-    ambient: clampNum(src['ambient'], 0, 3, 1),
+    exposure: lookNum(k, 'exposure', src['exposure']) ?? 1,
+    warmth: lookNum(k, 'warmth', src['warmth']) ?? 0,
+    light_azimuth_deg: lookNum(k, 'light_azimuth_deg', src['light_azimuth_deg']),
+    light_elevation_deg: lookNum(k, 'light_elevation_deg', src['light_elevation_deg']),
+    light_softness: lookNum(k, 'light_softness', src['light_softness']),
+    light_strength: lookNum(k, 'light_strength', src['light_strength']) ?? 1,
+    ambient: lookNum(k, 'ambient', src['ambient']) ?? 1,
     contact_shadows: boolOr(src['contact_shadows'], true),
     auto_light: boolOr(src['auto_light'], true),
     cast_shadows: boolOrNull(src['cast_shadows']),
@@ -87,30 +80,31 @@ export interface InUse {
 
 /** v1's setLighting(p) on `look`: freeze what was in use when Auto lighting goes off (inUse, given exactly when
  * needsFreeze), then the clamped numbers of p, then its booleans (auto_light only ever turned on here). */
-export function patchLook(look: LookState, p: JsonObject, inUse: InUse | null): LookState {
+export function patchLook(look: LookState, p: JsonObject, inUse: InUse | null, k: Kernels): LookState {
   const manual = goesManual(p)
   let az = look.light_azimuth_deg
   let el = look.light_elevation_deg
   let soft = look.light_softness
   if (manual && look.auto_light && inUse !== null) {
-    az = round(wrapAz(inUse.light_azimuth_deg), 3)
-    el = round(Math.min(90, Math.max(5, inUse.light_elevation_deg)), 3)
-    soft = round(inUse.light_softness, 4)
+    const elIn = inUse.light_elevation_deg
+    az = k.roundTo(k.wrapAz(inUse.light_azimuth_deg), 3)
+    el = k.roundTo(k.clampLook('light_elevation_deg', elIn) ?? elIn, 3)
+    soft = k.roundTo(inUse.light_softness, 4)
   }
-  const pAz = azOrNull(p['light_azimuth_deg'])
-  const pEl = numOrNull(p['light_elevation_deg'], 5, 90)
-  const pSoft = numOrNull(p['light_softness'], 0, 1)
+  const pAz = lookNum(k, 'light_azimuth_deg', p['light_azimuth_deg'])
+  const pEl = lookNum(k, 'light_elevation_deg', p['light_elevation_deg'])
+  const pSoft = lookNum(k, 'light_softness', p['light_softness'])
   const pAuto = p['auto_light']
   const pContact = p['contact_shadows']
   const pCast = p['cast_shadows']
   return {
-    exposure: clampNum(p['exposure'], 0.25, 4, look.exposure),
-    warmth: clampNum(p['warmth'], -1, 1, look.warmth),
+    exposure: lookNum(k, 'exposure', p['exposure']) ?? look.exposure,
+    warmth: lookNum(k, 'warmth', p['warmth']) ?? look.warmth,
     light_azimuth_deg: pAz ?? az,
     light_elevation_deg: pEl ?? el,
     light_softness: pSoft ?? soft,
-    light_strength: clampNum(p['light_strength'], 0, 3, look.light_strength),
-    ambient: clampNum(p['ambient'], 0, 3, look.ambient),
+    light_strength: lookNum(k, 'light_strength', p['light_strength']) ?? look.light_strength,
+    ambient: lookNum(k, 'ambient', p['ambient']) ?? look.ambient,
     contact_shadows: typeof pContact === 'boolean' ? pContact : look.contact_shadows,
     auto_light: pAuto === true ? true : manual ? false : look.auto_light,
     cast_shadows: typeof pCast === 'boolean' ? pCast : look.cast_shadows,
@@ -257,35 +251,35 @@ export interface LightingReport {
   readonly error: string | null
 }
 
-export function lightingReport(l: LookState, r: ResolvedLook, inf: InferredKey | null, k: KeyInUse, source: LightingSource, st: LightingStatus): LightingReport {
+export function lightingReport(l: LookState, r: ResolvedLook, inf: InferredKey | null, k: KeyInUse, source: LightingSource, st: LightingStatus, km: Kernels): LightingReport {
   return {
     exposure: l.exposure,
     warmth: l.warmth,
     contact_shadows: l.contact_shadows,
     auto_light: l.auto_light,
-    light_azimuth_deg: round(r.light_azimuth_deg, 3),
-    light_elevation_deg: round(r.light_elevation_deg, 3),
-    light_softness: round(r.light_softness, 4),
+    light_azimuth_deg: km.roundTo(r.light_azimuth_deg, 3),
+    light_elevation_deg: km.roundTo(r.light_elevation_deg, 3),
+    light_softness: km.roundTo(r.light_softness, 4),
     light_strength: l.light_strength,
     ambient: l.ambient,
     cast_shadows: r.cast_shadows,
     source,
     inferred: inf === null ? null : {
-      azimuth_deg: round(inf.azimuth_deg, 3),
-      elevation_deg: round(inf.elevation_deg, 3),
+      azimuth_deg: km.roundTo(inf.azimuth_deg, 3),
+      elevation_deg: km.roundTo(inf.elevation_deg, 3),
       softness: inf.softness,
-      direction: roundAll(inf.direction, 6),
+      direction: roundAll(inf.direction, 6, km),
       color: inf.color,
       intensity: inf.intensity,
       cct_k: inf.cct_k,
     },
     key: {
-      azimuth_deg: round(k.azimuth_deg, 3),
-      elevation_deg: round(k.elevation_deg, 3),
-      direction: roundAll(k.direction, 6),
+      azimuth_deg: km.roundTo(k.azimuth_deg, 3),
+      elevation_deg: km.roundTo(k.elevation_deg, 3),
+      direction: roundAll(k.direction, 6, km),
       color: k.color,
-      intensity: round(k.intensity, 6),
-      softness: round(k.softness, 4),
+      intensity: km.roundTo(k.intensity, 6),
+      softness: km.roundTo(k.softness, 4),
     },
     status: st.status,
     error: st.error,
@@ -305,15 +299,6 @@ export function lightingStatusOf(status: unknown, has: boolean, error: unknown):
     status: typeof status === 'string' && status !== '' ? status : has ? 'done' : 'missing',
     error: typeof error === 'string' && error !== '' ? error : null,
   }
-}
-
-/** v1's warmthTint: a warm (w > 0) or cool tint of luminance 1 (three.js Vector3.multiplyScalar by 1 / luminance). */
-export function warmthTint(w: number): Vec3 {
-  const x = 1 + 0.14 * w
-  const y = 1 + 0.015 * w
-  const z = 1 - 0.14 * w
-  const k = 1 / (0.2126 * x + 0.7152 * y + 0.0722 * z)
-  return [x * k, y * k, z * k]
 }
 
 /** The floor catcher's tan of the light's angular radius (contract §4.8: 0.006 + 0.6 · softness²). */
