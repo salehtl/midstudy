@@ -53,15 +53,15 @@ never been built on Linux.
 | E9 phone (`eval:phone`) | **pass** 48/48 | all targets ≥ 44 px, scroll width 390 at every stage |
 | E11 UX round 1 (`eval:ux`) | **pass** 28/28 | drag keeps the grabbed point under the pointer, Set scale, undo (E11.18 now waits for the Undo to finish in the UI) |
 | E12 UX round 2 (`eval:ux2`) | **pass** 26/26 | layouts across devices, ruler, thumbnails, Swap (E12.12 now waits for the photo to settle after Ruler on) |
-| E13 product page reader (`eval:product`) | **pass** 395/395 | 57 made-up shop pages (JSON-LD, microdata, OpenGraph, Shopify and WooCommerce feeds, tables, script JSON, prose for the model, a planted injection, order keys, foreign labels), blocked and broken pages, private links and redirects, 20 s and 10 MB limits, gzip bombs, a CPU-heavy page that once froze the server, the prompt, cost rows and the cap |
-| E14 product page form (`eval:product-ui`) | **pass** 117/117 | desktop and phone: Read, sizes, pictures, notes, Make through to a done job, a blocked shop, re-reads |
+| E14 product page reader (`eval:product`) | **pass** 395/395 | 57 made-up shop pages (JSON-LD, microdata, OpenGraph, Shopify and WooCommerce feeds, tables, script JSON, prose for the model, a planted injection, order keys, foreign labels), blocked and broken pages, private links and redirects, 20 s and 10 MB limits, gzip bombs, a CPU-heavy page that once froze the server, the prompt, cost rows and the cap |
+| E15 product page form (`eval:product-ui`) | **pass** 117/117 | desktop and phone: Read, sizes, pictures, notes, Make through to a done job, a blocked shop, re-reads |
 | Golden shop pages (`eval:product-live`) | **pass** 82/82 saved copies; live 48/48 + 4 WARN | ten real pages (IKEA AE and US, the Zennova carpet, Albany Park, Annie Selke, Boutique Rugs, Floyd, Industry West, Target, West Elm). Live, the four Shopify shops answered 429 from this Mac's IP (see Not verified) |
 | Real path (`eval:real`) | **pass** 31/31 | your lounge photo, real MoGe, GLB chair, two renders, Compare, phone |
 | Harness self-test (`eval:selftest`) | **pass** 22/22 | |
 | `calib/` unit tests (pytest) | **pass** 42/42 | |
 | `nix flake check --no-build --all-systems` | **pass** | evaluation only, nothing built |
 
-`eval:all` (E1, E3–E9, E11–E14) takes about 6 min; on 2026-11-05 at 14:30 it passed 12 of 12 on this branch (an earlier run that day failed E3, E4, E5 and E11 on page-load timeouts while other sessions held the Mac's load average above 180). Logs are in `evals/out/main/` (git-ignored). The main session
+`eval:all` (E1, E3–E9, E11, E12, E14, E15) takes about 6 min; on 2026-11-05 at 14:30 it passed 12 of 12 on this branch (an earlier run that day failed E3, E4, E5 and E11 on page-load timeouts while other sessions held the Mac's load average above 180). Logs are in `evals/out/main/` (git-ignored). The main session
 found E11.18 and E12.12 flaky (fixed timing in the evals, not the app; each then passed 3 runs out of 3).
 
 ## Live check (PLAN.md §8, main session, 2026-11-05, $0.10)

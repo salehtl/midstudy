@@ -1,4 +1,4 @@
-// E13 eval:product — the product page reader (contract §2.11, §2.9 Page fetches), no browser, $0.
+// E14 eval:product — the product page reader (contract §2.11, §2.9 Page fetches), no browser, $0.
 // The synthetic shop pages in fixtures/product-pages/ are served on one local port by evals/lib/pages_server.mjs, which
 // serve.py may reach only through MIDSTUDY_FETCH_ALLOW=127.0.0.1:<port>. The language model is mocked
 // (fixtures/fal/openrouter-router/), and MIDSTUDY_FAL_MOCK_LOG records what would have been sent to it.
@@ -18,7 +18,7 @@ const KEYS = ['url', 'name', 'category', 'is_rug', 'dims_candidates', 'variants'
 const CAND_KEYS = ['w', 'd', 'h', 'unit', 'label', 'unit_note', 'notes', 'quote', 'source']
 const LONG_SLUG = 'long-oak-bench-story'
 
-const ev = createEval('E13', 'product', { timeoutS: 900 })
+const ev = createEval('E14', 'product', { timeoutS: 900 })
 const synth = syntheticPages()
 // One extra page made here (not a fixture): 60,000 characters of prose with the only size word near the end, to check
 // the prompt's 20,000-character cap and that the parts around size words come first.

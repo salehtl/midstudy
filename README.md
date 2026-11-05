@@ -126,9 +126,9 @@ All evals are free: fal is mocked, and they set the mock variables, a $0 cap and
 
 ```sh
 nix develop -c npm install                  # once
-nix develop -c npm run eval:all             # E1, E3–E9, E11–E14 (about 6 min)
-nix develop -c npm run eval:product         # E13: the product page reader on made-up shop pages (seconds)
-nix develop -c npm run eval:product-ui      # E14: the Product page form, desktop and phone
+nix develop -c npm run eval:all             # E1, E3–E9, E11, E12, E14, E15 (about 6 min)
+nix develop -c npm run eval:product         # E14: the product page reader on made-up shop pages (seconds)
+nix develop -c npm run eval:product-ui      # E15: the Product page form, desktop and phone
 nix develop -c npm run eval:product-live    # the golden set of real shop pages, from saved copies (-- --live: the web)
 nix develop -c npm run eval:calib           # E2: real MoGe-2 on the golden scenes and fixtures/photos/
 nix develop -c npm run eval:calib -- --mock # E2 ingest only, no model (seconds)

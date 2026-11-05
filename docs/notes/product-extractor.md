@@ -9,7 +9,7 @@ Branch `claude/product-import-6b48ab`, 2026-11-05. Spec: contract §2.11 and §2
 |---|---|
 | `planner/product_page.py` | The extractor, stdlib only. `configure(...)` once, then `read(url, llm, reserve, release, costs_file)` → `(status, body)`; never raises. |
 | `planner/serve.py` | Three small hunks: `fal_call(..., timeout=FAL_TIMEOUT)`; `load_product_page()` right after `fetch_image` (loads the extractor by path with `sys.dont_write_bytecode` set, so `python3 -I` works and no `planner/__pycache__` appears, and hands it serve.py's own `address_blocked`, `fetch_allowed`, `PRIVATE`, `_PinnedHTTP`/`_PinnedHTTPS`, `fal_call`, `FalError`, `fal_key`, `fal_mock`, `mock_cost`, `counts_against_cap`, `append_cost`, `slugify`); the route `POST /api/library/product` in `do_POST` (so §2.9 forged/Host rules apply) and `post_library_product()` after `post_library_from_url()`. |
-| `evals/product_extract.mjs` | E13, `npm run eval:product`: 273 checks, about 25 s, $0. |
+| `evals/product_extract.mjs` | E14, `npm run eval:product`: 273 checks, about 25 s, $0. |
 | `evals/product_live.mjs` | `npm run eval:product-live`: the golden set, snapshots by default, `--live`, `--live --llm`. |
 
 ### Fetching (§2.9)
@@ -109,11 +109,11 @@ is unusable. A fal HTTP error writes no row (the call failed) and adds a warning
 `$MIDSTUDY_FAL_MOCK/openrouter-router/<slug>.json`, else `response.json`, else "found nothing".
 
 **`MIDSTUDY_FAL_MOCK_LOG=<file>`** (evals only): in mock mode each model call appends one JSON line
-`{"endpoint": "openrouter/router", "args": {…exactly what would be sent…}}`. E13 uses it to check the prompt.
+`{"endpoint": "openrouter/router", "args": {…exactly what would be sent…}}`. E14 uses it to check the prompt.
 
 ## Evals
 
-- **E13** (`nix develop -c npm run eval:product`): every manifest case against its `expect`, plus: the 12 refused links are
+- **E14** (`nix develop -c npm run eval:product`): every manifest case against its `expect`, plus: the 12 refused links are
   400 within 3 s with no request reaching the pages server; 400 for bad bodies; forged (no `X-Midstudy`, foreign Origin,
   foreign Host) 403 and nothing fetched; no request for a picture, no Cookie header, the honest UA on every request, feeds
   exactly once each and only for the Shopify/WooCommerce pages, `Accept-Encoding: gzip, deflate`; the mock log (one line per
@@ -130,7 +130,7 @@ is unusable. A fal HTTP error writes no row (the call failed) and adds a warning
 
 ### Results (final runs)
 
-- E13: 273/273, twice.
+- E14: 273/273, twice.
 - Snapshots: 80/81. The one FAIL is **floyd-bedside `no_dims`**: the snapshot's served HTML does hold a size, in a hidden
   accordion: `<strong>Overall</strong> 16” W x 13” L x 7” H` (curly inch marks), which the text layer reads as
   40.6 × 33.0 × 17.8 cm (W and L together: L is the depth). The golden note "no size anywhere in the served HTML" is wrong
@@ -155,5 +155,5 @@ is unusable. A fal HTTP error writes no row (the call failed) and adds a warning
 
 - The live Shopify pages weren't verifiable today (429). Their snapshot runs pass (Annie 8 variants, Boutique 7 offers with
   thickness 1.1 cm, Albany text) except Floyd as above.
-- serve.py's cap sentence formats the cap with two decimals, so a $0.0015 cap reads "$0.00" in the budget warning (E13 only).
+- serve.py's cap sentence formats the cap with two decimals, so a $0.0015 cap reads "$0.00" in the budget warning (E14 only).
 - `--live --llm` is written but never run (needs the main session, `MIDSTUDY_LIVE_LLM=1` and the user's OK).

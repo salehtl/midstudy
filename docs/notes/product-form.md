@@ -1,4 +1,4 @@
-# Product page: the form, the client call, the hook and E14 (builder B)
+# Product page: the form, the client call, the hook and E15 (builder B)
 
 Contract §2.11 (Planner, hook) and §2.4. Built in parallel with the server route (`planner/serve.py`,
 `planner/product_page.py`, builder A), so the form was checked first against in-browser stub answers (`--stub`), then
@@ -13,7 +13,7 @@ against the real route once it landed.
 | `planner/data.js` | `lib.readProduct(url, { llm })`: `POST /api/library/product` through the existing `fetchJson` (so it carries `X-Midstudy: 1`). |
 | `planner/main.js` | The hook `readProductPage(url, opts)`, next to `addItemFromUrl`. |
 | `planner/styles/manage.css` | An appended, marked section "Add furniture › Product page". |
-| `evals/product_ui.mjs` (new) | E14, `npm run eval:product-ui` (already in `package.json` and `evals/all.mjs`). |
+| `evals/product_ui.mjs` (new) | E15, `npm run eval:product-ui` (already in `package.json` and `evals/all.mjs`). |
 
 ## Decisions
 
@@ -51,7 +51,7 @@ against the real route once it landed.
 - No `role="status"` on `product-status`: `aria-live="polite"` is enough, and the harness's 44 px audit counts any
   `[data-midstudy]` element with a `role` as a target.
 
-## E14 (`evals/product_ui.mjs`)
+## E15 (`evals/product_ui.mjs`)
 
 Pages server (`syntheticPages()`) + `startServer(env MIDSTUDY_FETCH_ALLOW=127.0.0.1:<pages port>)`, a seeded golden
 scene, then the same flow on desktop (1280 × 800, clicks, Enter to read) and phone (390 × 844, taps), screenshots in
@@ -85,9 +85,9 @@ uses the real route.
 
 ## Results (2026-11-05)
 
-- `--stub` first, while the route was being written: 114/114 (`E14: 114/114 checks passed in 36.5 s`).
+- `--stub` first, while the route was being written: 114/114 (`E15: 114/114 checks passed in 36.5 s`).
 - Real route (builder A's `serve.py` + `product_page.py`, uncommitted in the worktree) once it landed: passed on the
-  first run with no form changes; final runs `E14: 115/115 checks passed in 37.4 s` and `… 36.8 s`, and once more for
+  first run with no form changes; final runs `E15: 115/115 checks passed in 37.4 s` and `… 36.8 s`, and once more for
   the screenshots now in `evals/out/product-ui/` (real mode).
 - Screenshots looked at, desktop and phone: no overflow, the four segments fit at 390 px, the strip and sizes stay inside
   the sheet. Fixed from them: Read was narrower than "Reading…" (the field jumped while reading), and the server's notes

@@ -1,4 +1,4 @@
-// E14 eval:product-ui — Add furniture's Product page source (contract §2.11 Planner, §2.4 readProductPage), desktop
+// E15 eval:product-ui — Add furniture's Product page source (contract §2.11 Planner, §2.4 readProductPage), desktop
 // 1280 × 800 and phone 390 × 844 (touch: taps). The synthetic shop pages (fixtures/product-pages/) are served by
 // evals/lib/pages_server.mjs on one local port, which serve.py may fetch through MIDSTUDY_FETCH_ALLOW. fal is mocked, $0.
 // On each device: Product page is the default source; reading the rug page shows the loading state, then 3 sizes, Flat
@@ -21,7 +21,7 @@ import {
 import { syntheticPages, startPagesServer } from './lib/pages_server.mjs'
 
 const STUB = process.argv.includes('--stub')
-const ev = createEval('E14', 'product-ui', { timeoutS: 900 })
+const ev = createEval('E15', 'product-ui', { timeoutS: 900 })
 const SYN = syntheticPages()
 const C = SYN.cases
 const MEDIA_JPEG = fs.readFileSync(path.join(REPO, 'fixtures/fal/sam-3-3d-objects/input.jpg'))
