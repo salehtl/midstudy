@@ -1,0 +1,14 @@
+[package]
+name = "midstudy-geom"
+version = "0.1.0"
+description = "midstudy's camera model (contract §4.1) and the planner's geometry, in f64, with no allocation in hot paths"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }

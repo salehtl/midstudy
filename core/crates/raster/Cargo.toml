@@ -1,0 +1,24 @@
+[package]
+name = "midstudy-raster"
+version = "0.1.0"
+description = "midstudy's raster kernels: the depth.png decoder, the keep-room mask, the environment map from the photo, SH rotation"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+midstudy-geom = { path = "../geom" }
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+
+[features]
+# For the fuzz targets only (fuzz/Cargo.toml): skip chunk CRC checks so the fuzzer reaches the inflater and the
+# filters instead of spending its time on CRCs. Never enable it anywhere else.
+fuzzing = []
+
+[dev-dependencies]
+proptest = "1"
+sha2 = "0.10"
+serde_json = { version = "1", features = ["float_roundtrip"] }

@@ -1,0 +1,31 @@
+# cargo-fuzz targets for the raster crate's byte parsers (docs/REFACTOR.md §3 check:rust). Its own workspace, so the
+# core workspace never builds libFuzzer: `cd core/crates/raster && RUSTC_BOOTSTRAP=1 cargo fuzz run decode_png`.
+[package]
+name = "midstudy-raster-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+midstudy-raster = { path = "..", features = ["fuzzing"] }
+
+[[bin]]
+name = "decode_png"
+path = "fuzz_targets/decode_png.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mask_and_env"
+path = "fuzz_targets/mask_and_env.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

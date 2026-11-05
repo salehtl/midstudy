@@ -1,0 +1,18 @@
+[package]
+name = "midstudy-wasm-web"
+version = "0.1.0"
+description = "The planner's wasm build of midstudy-geom and midstudy-raster (wasm-bindgen, --target web)"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+midstudy-geom = { path = "../geom" }
+midstudy-raster = { path = "../raster" }
+wasm-bindgen = "=0.2.121"
