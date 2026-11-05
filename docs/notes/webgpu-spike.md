@@ -15,9 +15,9 @@ Everything is new files under `planner/gpu/` (nothing else in `planner/` changed
 | `planner/gpu/radix-sort.ts` | `GpuRadixSort`: stable LSD radix sort of u32 keys + u32 values in three.js compute nodes (TSL): 8-bit digits, 1–4 passes, 3 dispatches per pass (workgroup-atomic histogram → one-workgroup scan → scatter with stable in-block ranks from 256-bit per-digit masks + `countOneBits`). WebGPU backend only. |
 | `planner/gpu/splat-layer.ts` | `SplatLayer` (interface below): data textures, the key kernel, the GPU sort or the CPU worker sort, the TSL draw material (Spark 2.4's projection), its own half-float target. |
 | `planner/gpu/sort-cpu.ts`, `sort-worker.ts`, `sort-messages.ts` | The CPU sort (same 16-bit keys, stable counting sort, 262,144 splats in ~7 ms in Node) in a module worker; the WebGL2 path, and the reference the GPU sort is checked against. |
-| `planner/gpu/passes.ts` | TSL ports of engine.js's screen passes: the photo exactly as is + letterbox, the depth pre-pass (depth.png → depth buffer, +3 cm, colour off), the furniture composite (un-premultiply, warmth, exposure, ACES, sRGB), the splat composite (multiplier, sRGB). |
-| `planner/gpu/light-rig.ts` | v1's lighting at the default Look: LightProbe from lighting.json's SH (v1's `rotateSH`), key DirectionalLight, reflections from the photo (v1's env bake in TSL, PMREM by three), the PCSS shadow catcher in TSL with its own shadow map, `ProbeStandardNodeMaterial`/`ProbePhysicalNodeMaterial` (v1's `MIDSTUDY_PROBE_DIFFUSE` as a node-material class + a uniform). |
-| `planner/gpu/demo/` | `index.html` + `demo.ts` (a golden scene drawn as engine.js draws it, hook `window.gpuDemo`), `probe.html` + `probe.ts` (capabilities), `check.mjs` (the comparison and numbers), `assets.mjs`, `tools.mjs` (esbuild from the pinned nixpkgs + a static server), `unit.mjs` (Node checks), `depth-png.ts`. |
+| `planner/gpu/passes.ts` | TSL ports of engine.js's screen passes: the photo exactly as is + letterbox, the depth pre-pass (depth.png → depth buffer, +3 cm, colour off), the furniture composite (un-premultiply, warmth, exposure, ACES, sRGB), the splat composite (multiplier, sRGB), the floor grid, `clearTarget()` (the WebGL2 clear workarounds). |
+| `planner/gpu/light-rig.ts` | v1's lighting at the default Look: LightProbe from lighting.json's SH (v1's `rotateSH`), key DirectionalLight, reflections from the photo (v1's env bake in TSL, PMREM by three), the PCSS shadow catcher in TSL with its own shadow map, `ProbeStandardNodeMaterial`/`ProbePhysicalNodeMaterial` (v1's `MIDSTUDY_PROBE_DIFFUSE` as a node-material class + a uniform), `flipSides()`, the keep-room `maskMode`. |
+| `planner/gpu/demo/` | `index.html` + `demo.ts` (a golden scene drawn as engine.js draws it, hook `window.gpuDemo`), `probe.html` + `probe.ts` (capabilities), `check.mjs` (the comparison and numbers), `assets.mjs`, `tools.mjs` (esbuild from the pinned nixpkgs + a static server), `unit.mjs` (Node checks), `gltrace.mjs` (a WebGL call trace of the fallback), `depth-png.ts`. |
 | `planner/gpu/tsconfig.json`, `tsconfig.worker.json` | Strict TS, REFACTOR.md §3's flags. |
 
 ## Commands
@@ -82,7 +82,7 @@ judged with E13/E4/E16's own measures (`evals/lib/images.py`):
 | splat probe (80 × 120 × 50 cm) edges vs its projected box, tol 3 % | pass (≤ 7 px) | pass (≤ 7 px) | pass (≤ 7 px) |
 | probe magenta inside its silhouette / green stand-in never drawn | 100 % | 100 % | 100 % |
 | Idol chair (262,144 splats) vs where its splat.spz points project, tol 5 % | 3 px | 3 px | 3 px |
-| near splat in front of a far one, render right after placing | 100 % (94.3 % once under load) | 100 % | 100 % |
+| near splat in front of a far one, render right after placing | 100 % in runs 2–3, 94.3 % in runs 4–6 (v1's sort race) | 100 % | 100 % |
 | sofa hides the splat behind it / occlusion off shows it | 100 % / 100 % | 100 % / 100 % | 100 % / 100 % |
 | lit grey box faces vs lighting.json (E16, ±12 %) | +2.4…+3.1 % | +2.3…+2.9 % | +2.3…+2.9 % |
 | its floor shadow away from the light (E16, ≤ 35°) | 10.4° | 10.3° | 10.3° |
@@ -95,34 +95,41 @@ JPEG q92, so ~1 is noise): splat cases mean 1.3–2.3 (p99 10–27), the Idol ch
 GPU radix sort: equal to a stable CPU sort of its own keys for 302,350 splats (Idol chair + probe) at 16, 24 and 32
 bits; the GPU-sorted and CPU-sorted frames are identical (mean 0). SPZ and PLY of one probe draw alike (mean 0.99).
 
-Runs: WG 63/67 (run 3: WebGPU all green; the 4 WebGL2 fails were the colour-mask bug below), then 60/67 (run 4:
-every WebGPU and WebGL2 self-check green; the 7 fails were v1's references flaking under machine load 13–47: an
-all-black v1 `lit` composite and v1's own order race at 94.3 %). FINAL_RUN_PLACEHOLDER
+Runs (each through `scripts/eval-lock.mjs`): run 3 63/67 (WebGPU all green; the 4 WebGL2 fails were the first
+clear bug below), run 4 60/67 (every WebGPU and WebGL2 self-check green; the fails were v1's references flaking under
+machine load 13–47: an all-black v1 `lit` composite, and v1's order reference at 94.3 %), run 5 66/71 (found the
+second WebGL2 clear bug: a black view at Fit), **run 6 (final code): 69/69 passed**, 2 skipped: the v1-vs-v2
+comparison of the `order` case, because v1's own reference lost its sort race (94.3 % of the probe in front, E13
+passes it at ≥ 90 %) while both v2 backends show 100 %. Also in run 6: the view letterboxes the photo on both
+backends (bars exactly v1's bytes, the photo at Fit within mean 1.9 of the photo resized), a browser without the
+WebGPU flags (navigator.gpu present, no adapter) falls back to WebGL2 by itself and draws the same picture (mean 0),
+and the two backends draw every case alike (whole frame, mean ≤ 0.018, p99 0).
 
 ## Numbers (262,144 splats: the Idol chair; SwiftShader, so compare relatively; `--perf` under `--exclusive`)
 
-Measured 2026-11-05, 1280 × 800 view, the chair at (1.25, 0, −3.1) on living-wide with its contact and cast
-shadows, occlusion on (`evals/out/webgpu-spike/summary.json` → kept as `evals/out/wg-perf1-summary.json`):
+Measured 2026-11-06 on the final code, 1280 × 800 view, the chair at (1.25, 0, −3.1) on living-wide with its
+contact and cast shadows, occlusion on (`evals/out/webgpu-spike/summary.json`, kept as
+`evals/out/wg-perf2-summary.json`; an earlier run, before the last WebGL2 fix, agreed within 10 %):
 
 | | WebGPU, GPU sort | WebGPU, CPU sort | WebGL2 fallback, CPU sort | v1: Spark 2.4 on WebGL |
 |---|---|---|---|---|
-| sort, 262,144 splats | **72–84 ms** GPU time (timestamp queries; keys + 2 radix passes, 7 dispatches) | 1.5 ms (worker) | 3.5 ms (worker) | 3.8 s per re-sort (move 1 mm → settled: Spark renders a depth read-back pass of every splat, then sorts in its worker) |
-| splat pass alone | 4.8–5.2 s | 4.6–4.8 s | (not synced: see below) | 3.8 s |
-| whole frame (photo, furniture, shadows, splats, composites) | 4.9 s with a sort, 4.9 s without | 4.8 s | 4.7 s | — |
-| time to the first splat frame (fetch, decode, upload, sort, draw) | 13.8 s (≈ 6.5 s of it compiling the 7 compute pipelines) | 7.3 s | 6.9 s | 29.0 s (add 0.2 s, first sort 24.9 s, draw 4.1 s) |
-| decode splat.spz | 41 ms (browser), 35 ms (Node) | 41 ms | 40 ms | (Spark's own, in add: 0.2 s) |
+| sort, 262,144 splats | **79–87 ms** GPU time (timestamp queries; keys + 2 radix passes, 7 dispatches) | 1.6 ms (worker) | 3.7 ms (worker) | 3.9–4.1 s per re-sort (move 1 mm → settled: Spark renders a depth read-back pass of every splat, then sorts in its worker) |
+| splat pass alone | 4.8 s | 4.8 s | (not synced: see below) | 4.0 s |
+| whole frame (photo, furniture, shadows, splats, composites) | 4.93 s with a sort, 4.86 s without | 4.84 s | 4.90 s | — |
+| time to the first splat frame (fetch, decode, upload, sort, draw) | 13.6 s (≈ 6.7 s of it compiling the 7 compute pipelines) | 6.8 s | 6.9 s | 31.5 s (add 0.3 s, first sort 27.2 s, draw 4.0 s) |
+| decode splat.spz | 41 ms (browser), 35 ms (Node) | 40 ms | 40 ms | (inside Spark's add: 0.3 s) |
 | splat memory on the GPU | 17.1 MB (48 B/splat textures + 16 B/splat sort buffers) | 13.6 MB | 13.6 MB | 5.2 MB (packed 16 B/splat + ordering 4 B/splat) |
 
 What the numbers say:
 - **The draw is SwiftShader's triangle cost, not our shader.** The splat pass takes ~5 s with the full projection,
   with a debug shader that only projects the center, and with one that draws a fixed grid of quads with no texture
   reads at all (5.2 / 5.2 / 5.3 s, `splatDebug=center|grid`): 524,288 tiny triangles bound it. Spark draws the same
-  count in 3.8 s on ANGLE's SwiftShader. On a real GPU both are milliseconds; not measurable here.
+  count in 4.0 s on ANGLE's SwiftShader. On a real GPU both are milliseconds; not measurable here.
 - **The sort is no longer the bottleneck.** Spark's re-sort costs a full extra pass of every splat on SwiftShader
-  (its depth read-back) plus a round trip; the GPU radix sort is 72–84 ms of compute and lands in the same frame;
-  the worker sort is 1.5–3.5 ms (and on SwiftShader, where "GPU" is the CPU, faster than the GPU sort).
-- **First frame:** pipeline compilation dominates on SwiftShader; ours is 2–4× quicker to a first splat frame than
-  Spark's. On WebGPU the 7 compute pipelines cost ~6.5 s to compile in software (`sort: 'cpu'` avoids it).
+  (its depth read-back) plus a round trip; the GPU radix sort is 79–87 ms of compute and lands in the same frame;
+  the worker sort is 1.6–3.7 ms (and on SwiftShader, where "GPU" is the CPU, faster than the GPU sort).
+- **First frame:** pipeline compilation dominates on SwiftShader; ours is 2.3–4.6× quicker to a first splat frame
+  than Spark's. On WebGPU the 7 compute pipelines cost ~6.7 s to compile in software (`sort: 'cpu'` avoids it).
 - JS heap deltas read 0 (Chrome's `performance.memory` is coarse in the headless shell); GPU bytes are computed
   from the buffers each side allocates. The WebGL2 "splat pass alone" timing isn't synced (a 1-pixel read of the
   canvas doesn't wait for an off-screen target there), so only its whole-frame number counts.
@@ -197,7 +204,7 @@ is exact; the photo is byte-exact; WebGPU and WebGL2 draw the same picture. Cond
   float32 textures read with `textureLoad` (no filtering needed). iOS: WebGPU in Safari 26+; older phones take the
   WebGL2 fallback (same draw, CPU sort), which must stay first-class in the evals.
 - **First-frame cost.** Pipeline compilation (the radix kernels, the splat material, node materials) dominates the
-  first splat frame on SwiftShader (numbers below). On a real GPU it is far smaller but non-zero; `renderer.compileAsync`
+  first splat frame on SwiftShader (numbers above). On a real GPU it is far smaller but non-zero; `renderer.compileAsync`
   at scene open can hide it.
 - **Memory.** The layer keeps 48 B/splat of float textures + 16 B/splat of sort buffers (+ the item texture), about
   3–4× Spark's packed 16 B/splat. Fine for a few furniture pieces at 262,144 splats each; packing (f16 covariance,
@@ -237,7 +244,8 @@ is exact; the photo is byte-exact; WebGPU and WebGL2 draw the same picture. Cond
   here). TSL's typings need `ShaderNodeObject<UniformNode<T>>` parameter types under `exactOptionalPropertyTypes`
   (generic `ShaderNodeObject<Node>` doesn't accept them); eslint's no-`as` rule is met with `Reflect.get` for three's
   internals.
-- **pipeline:** none (splat.spz as written decodes; checked against `splat.py`'s reader).
+- **pipeline:** none. splat.spz as `midstudy-add` writes it decodes, and the drawn Idol chair lands where
+  `images.py splat-proj` (the same decoding as `splat.py`'s `read_spz`) puts its points.
 
 ## What's left
 
