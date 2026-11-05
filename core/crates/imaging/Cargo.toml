@@ -1,0 +1,21 @@
+# midstudy's imaging kernels (docs/REFACTOR.md, track pipeline): what midstudy-add does to pictures, bit for bit as v1's
+# Pillow 13 did it: JPEG decode and encode exactly as libjpeg-turbo 3 (contract §2.8: the engine input, upright and
+# without metadata; the 256 px thumbnail; the rug's texture), PNG and WebP decoding, the EXIF orientation, Pillow's
+# Lanczos resampling, and the rug's margin crop, quarter turn and edge colour and SAM 3D's foreground mask (§3.2).
+# Called from Node through crates/wasm-pipeline.
+[package]
+name = "midstudy-imaging"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+png = "0.18"
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+image-webp = "0.2"
+
+[dev-dependencies]
+
+[lints]
+workspace = true
