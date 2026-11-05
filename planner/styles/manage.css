@@ -191,7 +191,7 @@
 .ms-prod-field .ms-input { flex: 1 1 auto; }
 .ms-prod-read { flex-shrink: 0; min-width: 104px; gap: 6px; } /* wide enough for "Reading…": the field doesn't jump */
 .ms.is-phone .ms-prod-read { min-width: 120px; padding: 0 12px; }
-.ms-prod-read:disabled { color: var(--color-muted); }
+.ms-prod-read:disabled, .ms-prod-read.is-busy { color: var(--color-muted); }
 .ms-prod-status { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 0; color: var(--color-text); font-size: var(--text-body-desktop); line-height: 18px; }
 .ms.is-phone .ms-prod-status { font-size: 14px; line-height: 20px; }
 .ms-prod-status > svg { flex-shrink: 0; margin-top: 1px; }
@@ -204,6 +204,7 @@
 .ms-prod-err-text { margin: 0; color: var(--color-danger); font-size: var(--text-body-desktop); line-height: 18px; overflow-wrap: anywhere; }
 .ms.is-phone .ms-prod-err-text { font-size: 14px; line-height: 20px; }
 .ms-prod-uselink { gap: 6px; }
+.ms-prod-picwarn { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 /* the page's pictures: a strip that scrolls sideways inside itself, never the page */
 .ms-prod-picrow { gap: 8px; }
 .ms-prod-pics {
@@ -215,7 +216,8 @@
   border-radius: var(--radius-control); background: var(--color-raised); border: 1px solid var(--color-line);
 }
 .ms.is-phone .ms-prod-pic { width: 88px; height: 88px; border-radius: var(--radius-panel); }
-.ms-prod-pic img { display: block; width: 100%; height: 100%; object-fit: cover; -webkit-user-select: none; user-select: none; }
+/* contain, not cover: a runner or a tall shelf is seen whole before it's chosen */
+.ms-prod-pic img { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; -webkit-user-select: none; user-select: none; }
 .ms-prod-pic[aria-pressed="false"] img { opacity: .72; }
 @media (hover: hover) { .ms-prod-pic[aria-pressed="false"]:hover img { opacity: 1; } }
 .ms-prod-pic[aria-pressed="true"] { border-color: transparent; box-shadow: 0 0 0 2px var(--color-accent); }
@@ -225,14 +227,15 @@
 }
 .ms-prod-pic[aria-pressed="true"] .ms-prod-tick { display: flex; }
 /* the page's sizes, above W × D × H: picking one fills them */
-.ms-prod-sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 6px; }
+.ms-prod-sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .ms-prod-size {
   display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; min-width: 0; min-height: 44px; padding: 5px 10px;
   border-radius: var(--radius-control); background: var(--color-ground); border: 1px solid var(--color-line); text-align: left;
 }
 .ms.is-phone .ms-prod-size { min-height: 52px; padding: 6px 12px; border-radius: var(--radius-panel); }
-.ms-prod-size b { max-width: 100%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ms-prod-size span { max-width: 100%; color: var(--color-muted); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* both lines wrap: a shop's '72" W x 36" D x 32" H' and the cm size it means are read whole */
+.ms-prod-size b { max-width: 100%; font-weight: 600; overflow-wrap: anywhere; }
+.ms-prod-size span { max-width: 100%; color: var(--color-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .ms.is-phone .ms-prod-size span { font-size: 13px; line-height: 18px; }
 @media (hover: hover) { .ms-prod-size[aria-pressed="false"]:hover { background: var(--color-hover); } }
 .ms-prod-size[aria-pressed="true"] { background: color-mix(in srgb, var(--color-accent) 14%, var(--color-raised)); border-color: color-mix(in srgb, var(--color-accent) 70%, transparent); }

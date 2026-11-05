@@ -1,0 +1,4 @@
+[{"id":78,"name":"Wool Carpet – Sand","slug":"wool-carpet-sand","type":"variable","description":"<p>Hand tufted wool.</p>","short_description":"",
+  "images":[{"id":1,"src":"/media/sand-1.jpg"}],"categories":[{"id":9,"name":"Carpets","slug":"carpets"}],
+  "attributes":[{"id":1,"name":"Size","taxonomy":"pa_size","has_variations":true,"terms":[{"id":50,"name":"160*230","slug":"160230","default":true},{"id":51,"name":"200*300","slug":"200300","default":false},{"id":52,"name":"Sample swatch","slug":"sample","default":false}]}],
+  "variations":[],"dimensions":{"length":"","width":"","height":""},"formatted_dimensions":"N/A"}]

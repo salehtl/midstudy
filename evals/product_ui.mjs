@@ -247,13 +247,13 @@ async function flow(device) {
   const req = await reqP
   let sent = null
   try { sent = JSON.parse(req?.postData() || 'null') } catch { /* not JSON */ }
-  ev.check(`${device}: Make posts the chosen picture and size to from-url (engine rug, the name, its slug)`,
-    madeHit === true && sent?.image_url === rugPics[1] && near(sent.dims_cm?.w, 200) && near(sent.dims_cm?.d, 300) && near(sent.dims_cm?.h, 0.8) && sent.engine === 'rug' && sent.name === RUG.name && sent.id === 'dune-flatweave-rug',
+  ev.check(`${device}: Make posts the chosen picture and size to from-url (engine rug, the name; a shop with several sizes: the slug of the name and that size)`,
+    madeHit === true && sent?.image_url === rugPics[1] && near(sent.dims_cm?.w, 200) && near(sent.dims_cm?.d, 300) && near(sent.dims_cm?.h, 0.8) && sent.engine === 'rug' && sent.name === RUG.name && sent.id === 'dune-flatweave-rug-200x300',
     `${madeHit}; ${fmt(sent)?.replaceAll(P, '{P}')}`)
   const job = await waitFor(async () => (await jobs()).find((j) => !jobsBefore.some((b) => b.id === j.id)), { timeoutMs: 10000 })
   ev.check(`${device}: one library job, engine rug`, job && (await jobs()).length === jobsBefore.length + 1 && job.engine === 'rug', fmt(job && { id: job.id, engine: job.engine, status: job.status }))
   const doneJob = job ? await waitFor(async () => { const j = (await api.get(srv.base, `/api/library/jobs/${job.id}`)).json; return ['done', 'failed'].includes(j?.status) ? j : null }, { timeoutMs: 240000, intervalMs: 500 }) : null
-  const item = ((await api.get(srv.base, '/api/library')).json?.items || []).find((i) => i.id === 'dune-flatweave-rug')
+  const item = ((await api.get(srv.base, '/api/library')).json?.items || []).find((i) => i.id === 'dune-flatweave-rug-200x300')
   ev.check(`${device}: the job ends done; the item has the chosen size and picture link`,
     doneJob?.status === 'done' && near(item?.dims_cm?.w, 200) && near(item?.dims_cm?.d, 300) && near(item?.dims_cm?.h, 0.8) && item?.source?.input === rugPics[1],
     `${doneJob?.status ?? 'no answer'} ${doneJob?.status === 'failed' ? doneJob.message : ''}; item ${fmt(item && { dims: item.dims_cm, input: item.source?.input?.replace(P, '{P}'), engine: item.source?.engine })}`)
@@ -304,6 +304,9 @@ async function flow(device) {
   f = await waitRead(D)
   ev.check(`${device}: a blocked shop shows the contract's sentence (product-error) and Use Image link instead`, f?.error === BLOCKED && f.useLink, fmt({ error: f?.error, useLink: f?.useLink }))
   ev.check(`${device}: after the error, Make waits for a good read`, f?.go?.disabled, f?.go?.text)
+  // verify round (2026-11-05): the last page's size and category don't stay behind for another product
+  ev.check(`${device}: a failed read clears the last page's size and category (the typed name stays)`,
+    f?.w === '' && f?.d === '' && f?.h === '' && f?.category === '' && f?.name === typed, fmt({ name: f?.name, w: f?.w, d: f?.d, h: f?.h, category: f?.category }))
   await stage(D, 'blocked', '7-blocked')
   await press(D, handle(D, 'product-use-link'))
   f = await form(D)

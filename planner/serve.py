@@ -418,7 +418,9 @@ PRIVATE = "that address is on a private network"
 WEB_PAGE = "that's a web page: paste the image's own link (right-click the image, Copy Image Address)"
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in (
     "0.0.0.0/8", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10",
-    "224.0.0.0/4", "240.0.0.0/4", "::1/128", "::/128", "fd7a:115c:a1e0::/48", "fc00::/7", "fe80::/10", "ff00::/8")]
+    "224.0.0.0/4", "240.0.0.0/4", "::1/128", "::/128", "fd7a:115c:a1e0::/48", "fc00::/7", "fe80::/10", "ff00::/8",
+    # NAT64's local-use prefix, IPv4-translated addresses and the old site-local range can all reach private hosts
+    "64:ff9b:1::/48", "::ffff:0:0:0/96", "fec0::/10")]
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
 IMAGE_SUFFIX = {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
                 "image/heic": ".heic", "image/heif": ".heif"}
@@ -1538,6 +1540,8 @@ class Handler(SimpleHTTPRequestHandler):
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             raise ValueError(f"body is not valid JSON: {e}") from None
+        except RecursionError:
+            raise ValueError("body is not valid JSON: it is nested too deeply") from None
 
     def api_path(self):
         path = unquote(urlsplit(self.path).path)

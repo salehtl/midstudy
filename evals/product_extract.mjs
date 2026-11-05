@@ -206,9 +206,11 @@ ev.check('no request carried a Cookie header', cookies.length === 0, cookies.len
 const uas = [...new Set(pages.hits.map((h) => h.headers['user-agent']))]
 ev.check(`every request said User-Agent: ${UA}`, uas.length === 1 && uas[0] === UA, uas)
 const feeds = pages.hits.filter((h) => h.path.endsWith('.js') || h.path.startsWith('/wp-json/')).map((h) => h.path + h.query)
-const wantFeeds = ['/products/moss-wool-rug.js', '/wp-json/wc/store/v1/products?slug=walnut-sideboard', '/wp-json/wc/store/v1/products?slug=silk-carpet-rose']
-ev.check('feeds: one request each, to the page\'s own origin, only for Shopify and WooCommerce pages',
-  wantFeeds.every((f) => feeds.filter((x) => x === f).length === 1) && feeds.every((f) => wantFeeds.includes(f)), feeds)
+// one request per read of a Shopify or WooCommerce page (the Moss rug is read twice: plain and with ?variant=2)
+const wantFeeds = { '/products/moss-wool-rug.js': 2, '/wp-json/wc/store/v1/products?slug=walnut-sideboard': 1, '/wp-json/wc/store/v1/products?slug=silk-carpet-rose': 1,
+  '/wp-json/wc/store/v1/products?slug=wool-carpet-sand': 1, '/products/deep-feed-stool.js': 1 }
+ev.check('feeds: one request per read, to the page\'s own origin, only for Shopify and WooCommerce pages',
+  Object.entries(wantFeeds).every(([f, n]) => feeds.filter((x) => x === f).length === n) && feeds.every((f) => f in wantFeeds), feeds)
 const gz = pages.hits.filter((h) => h.path === '/gzip')
 ev.check('pages are asked for gzip/deflate', gz.length > 0 && gz.every((h) => /gzip/.test(h.headers['accept-encoding'] || '')), gz.map((h) => h.headers['accept-encoding']))
 
@@ -286,6 +288,24 @@ if (roomy.up) {
   ev.check('cap $0.03: the library is untouched by reads (only costs.csv)', lib0.json === lib1.json && lib0.entries === lib1.entries, lib1.entries)
   await roomy.stop()
 } else ev.check('third server (cap $0.03) starts', false, roomy.why)
+
+// --- 7. verify round fixes (2026-11-05): a link's user:password never kept; CPU-heavy pages never hold the server ------
+ev.section('verify round: user:password in a link, a CPU-heavy page')
+const ogPath = synth.cases['og-only'].path
+const withUser = await read(srv.base, `http://shopper:hunter2@127.0.0.1:${pages.port}${ogPath}#frag`)
+ev.check('a link with user:password@ reads, and the answer\'s url leaves them out', withUser.status === 200 && typeof withUser.json?.url === 'string' && !/hunter2|shopper@/.test(withUser.json.url),
+  `HTTP ${withUser.status}, url ${withUser.json?.url}`)
+const lastRow = csvRows(srv.dirs.costs).at(-1)
+ev.check('…and its cost row leaves them out too (costs.csv is in git)', !!lastRow && lastRow.engine === 'product:llm' && !/hunter2|shopper/.test(lastRow.input) && lastRow.input.endsWith(ogPath),
+  fmt(lastRow))
+const heavy = timed(() => read(srv.base, `${pages.base}/products/digits-chair`))
+await sleep(150)
+const pings = []
+for (let i = 0; i < 4; i++) { pings.push(await timed(() => api.get(srv.base, '/api/spend', { timeoutMs: 10000 }))); await sleep(100) }
+const heavyDone = await heavy
+const worst = Math.max(...pings.map((p) => p.s))
+ev.check('a page with a 12,000-digit run and 20,000 escaped quotes reads in under 8 s', heavyDone.r.status === 200 && heavyDone.s < 8, `HTTP ${heavyDone.r.status} in ${heavyDone.s.toFixed(2)} s`)
+ev.check('…and GET /api/spend answers within 1 s meanwhile', pings.every((p) => p.r.status === 200) && worst < 1, `slowest ${worst.toFixed(2)} s`)
 
 const lib = libState(srv.dirs.library)
 const libJson = JSON.parse(lib.json || '{"items":[]}')

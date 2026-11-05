@@ -30,7 +30,12 @@ const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); re
 const andList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : xs[0] || '')
 export const dimsLabel = (c) => (c.h > 0 ? `${cm(c.w)} × ${cm(c.d)} × ${cm(c.h)} cm` : `${cm(c.w)} × ${cm(c.d)} cm, no height`)
 // the layers the server says it used, plus where each size came from
-const layersOf = (d) => [...(Array.isArray(d?.source_layers_used) ? d.source_layers_used : []), ...(d?.dims_candidates || []).map((c) => c.source).filter(Boolean)]
+// the layers that gave something: the model counts only when one of the sizes is its own
+const layersOf = (d) => {
+  const cands = Array.isArray(d?.dims_candidates) ? d.dims_candidates : []
+  const layers = (Array.isArray(d?.source_layers_used) ? d.source_layers_used : []).filter((k) => k !== 'llm' || cands.some((c) => c.source === 'llm'))
+  return [...layers, ...cands.map((c) => c.source).filter(Boolean)]
+}
 export function whereText(layers) {
   const out = []
   for (const k of Array.isArray(layers) ? layers : []) { const w = WHERE[k] || 'the page'; if (!out.includes(w)) out.push(w) }
@@ -48,13 +53,21 @@ export function productSource({ lib, form, onChange, onUseLink }) {
   url.setAttribute('autocapitalize', 'off')
   url.setAttribute('autocorrect', 'off')
   url.setAttribute('enterkeyhint', 'go')
-  url.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); read() } })
+  url.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return
+    e.preventDefault()
+    if (window.matchMedia?.('(pointer: coarse)').matches) url.blur() // the phone's keyboard closes, so the result shows
+    read()
+  })
   const readBtn = h('button.btn.btn-secondary.ms-prod-read', { type: 'button', dataset: { midstudy: 'product-read' }, onclick: () => read() })
   const status = h('p.ms-prod-status', { 'aria-live': 'polite', dataset: { midstudy: 'product-status' }, hidden: true })
   const errText = h('p.ms-prod-err-text', { dataset: { midstudy: 'product-error' } })
   const useLink = h('button.btn.btn-secondary.ms-prod-uselink', { type: 'button', dataset: { midstudy: 'product-use-link' }, onclick: () => onUseLink?.(IMAGE_LINK.test(url.value.trim()) ? url.value.trim() : null) },
     pic('link', { size: 16 }), h('span', 'Use Image link instead'))
   const errBox = h('div.ms-prod-error', { role: 'alert', hidden: true }, errText, useLink)
+  const picWarn = h('div.ms-prod-picwarn', { hidden: true },
+    h('p.ms-prod-err-text', 'None of the page’s pictures would load.'),
+    h('button.btn.btn-secondary.ms-prod-uselink', { type: 'button', onclick: () => onUseLink?.(null) }, pic('link', { size: 16 }), h('span', 'Use Image link instead')))
   const strip = h('div.ms-prod-pics', { role: 'group', 'aria-label': 'Pictures on the page' })
   const picRow = h('div.ms-row.ms-prod-picrow', { hidden: true }, h('span.ms-label', 'Picture to make it from'), strip,
     h('span.ms-hint', 'The clearest one of the piece on its own works best (a rug: seen from straight above).'))
@@ -63,7 +76,7 @@ export function productSource({ lib, form, onChange, onUseLink }) {
   const el = h('div.ms-src.ms-prod',
     h('div.ms-row', h('span.ms-label', 'Product page link'), h('div.ms-prod-field', url, readBtn),
       h('span.ms-hint', 'Free to read. When the size is only in the page’s words, a small language model reads it (about $0.001).')),
-    status, errBox, picRow)
+    status, errBox, picWarn, picRow)
 
   const dimInputs = () => [...form.dims.querySelectorAll('input')]
   // a field the user typed in since the last prefill keeps its value
@@ -100,6 +113,16 @@ export function productSource({ lib, form, onChange, onUseLink }) {
     }
   }
 
+  // another page failed to read: the last page's name, size, category and Flat rug go (typed values stay)
+  function clearPrefill() {
+    put(form.name, 'name', '')
+    setDims(null)
+    put(form.category, 'category', '')
+    if (last.rug && form.getEngine() === 'rug' && last.engineBefore) form.setEngine(last.engineBefore)
+    last.rug = false
+    last.engineBefore = null
+  }
+
   function foundText(d) {
     const parts = []
     if (d.name) parts.push('the name')
@@ -109,10 +132,13 @@ export function productSource({ lib, form, onChange, onUseLink }) {
     if (p) parts.push(p === 1 ? '1 picture' : `${p} pictures`)
     const where = whereText(layersOf(d))
     let s = parts.length ? `Found ${andList(parts)}${where ? ` (from ${where})` : ''}.` : 'Read the page, but found nothing to use.'
-    if (!n) s += ' No size on the page: enter it below.'
+    const skipped = (d.warnings || []).some((w) => /language model (was skipped|is off)/i.test(w))
+    if (!n) s += skipped ? ' No size in the page’s data, and the language model was skipped: enter it below.' : ' No size on the page: enter it below.'
+    else if (!(d.dims_candidates[st.size]?.h > 0)) s += ' No height on the page: enter it below.'
     if (!p) s += ' No picture on the page: use Image link instead.'
     return s
   }
+  const allPicturesFailed = () => !!st.data?.images.length && st.failed.size >= st.data.images.length
 
   async function read() {
     if (st.busy) return
@@ -145,30 +171,34 @@ export function productSource({ lib, form, onChange, onUseLink }) {
       prefill(st.data)
     } catch (e) {
       if (seq !== st.seq) return
+      if (st.data) clearPrefill()
       st.data = null
       st.readUrl = ''
       st.picture = -1
-      st.error = { text: e?.message || 'Couldn’t read that page.', blocked: !!e?.blocked }
+      st.error = { text: sentence(e?.message || 'Couldn’t read that page.'), blocked: !!e?.blocked }
     } finally {
       if (seq === st.seq) {
+        const hadFocus = document.activeElement === readBtn || document.activeElement === document.body
         st.busy = false
         render()
         changed()
+        if (hadFocus) (st.error && !useLink.hidden ? useLink : readBtn).focus({ preventScroll: true }) // focus stays in the sheet
       }
     }
   }
 
   // --- drawing ---------------------------------------------------------------------------------------------------
   function render() {
-    readBtn.disabled = st.busy
+    readBtn.disabled = st.busy // focus that falls to <body> meanwhile is put back on Read (or Use Image link) after
     readBtn.setAttribute('aria-busy', String(st.busy))
     readBtn.replaceChildren(...(st.busy ? [ring(null, { size: 16 }), h('span', 'Reading…')] : [h('span', 'Read')]))
     if (st.busy) setStatus('busy', 'Reading the page…')
-    else if (st.data) setStatus(st.data.dims_candidates.length && st.data.images.length ? 'ok' : 'warn', foundText(st.data))
+    else if (st.data) setStatus(st.data.dims_candidates.length && st.data.images.length && st.data.dims_candidates[st.size]?.h > 0 && !allPicturesFailed() ? 'ok' : 'warn', foundText(st.data))
     else setStatus(null, '')
     errBox.hidden = !st.error || st.busy
     errText.textContent = st.error?.text || ''
     useLink.hidden = !st.error || !!st.error.local
+    picWarn.hidden = !allPicturesFailed()
     renderPics()
     renderSizes()
     renderNotes()
@@ -205,6 +235,10 @@ export function productSource({ lib, form, onChange, onUseLink }) {
   }
   function markPicture() {
     for (const b of strip.children) b.setAttribute('aria-pressed', String(Number(b.dataset.index) === st.picture))
+    const chosen = strip.querySelector('[aria-pressed="true"]')
+    if (chosen && (chosen.offsetLeft < strip.scrollLeft || chosen.offsetLeft + chosen.offsetWidth > strip.scrollLeft + strip.clientWidth)) {
+      strip.scrollLeft = Math.max(0, chosen.offsetLeft - 8)
+    }
   }
   function pickPicture(i) {
     if (st.failed.has(i)) return
@@ -224,6 +258,8 @@ export function productSource({ lib, form, onChange, onUseLink }) {
       markPicture()
     }
     picRow.hidden = st.failed.size >= n
+    picWarn.hidden = !allPicturesFailed()
+    if (allPicturesFailed()) setStatus('warn', foundText(st.data))
     renderNotes()
     changed()
   }
@@ -237,8 +273,8 @@ export function productSource({ lib, form, onChange, onUseLink }) {
     const cands = st.data?.dims_candidates || []
     sizesEl.hidden = !st.active || cands.length < 2
     const label = (i) => st.data.variants.find((v) => v.dims_index === i)?.label || cands[i].label || `Size ${i + 1}`
-    sizesEl.replaceChildren(...(cands.length < 2 ? [] : cands.map((c, i) => h('button.ms-prod-size', { type: 'button', dataset: { midstudy: 'product-size', index: String(i) }, onclick: () => pickSize(i) },
-      h('b', clipText(label(i), 40)), h('span.tnum', dimsLabel(c))))))
+    sizesEl.replaceChildren(...(cands.length < 2 ? [] : cands.map((c, i) => h('button.ms-prod-size', { type: 'button', title: `${label(i)}: ${dimsLabel(c)}`, 'aria-label': `${label(i)}: ${dimsLabel(c)}`, dataset: { midstudy: 'product-size', index: String(i) }, onclick: () => pickSize(i) },
+      h('b', clipText(label(i), 60)), h('span.tnum', dimsLabel(c))))))
     markSizes()
   }
   function markSizes() {
@@ -270,13 +306,14 @@ export function productSource({ lib, form, onChange, onUseLink }) {
       }
       for (const v of d.variants) if (v && v.dims_index == null && v.label) lines.push(['info', `The shop also has ${clipText(v.label, 40)}, but its size couldn’t be read.`])
       for (const w of d.warnings) lines.push(['warn', sentence(w)])
-      if (d.images.length && st.failed.size >= d.images.length) lines.push(['warn', 'None of the page’s pictures would load: use Image link instead.'])
-      else if (st.failed.size) lines.push(['info', `${st.failed.size} of the page’s pictures wouldn’t load, so ${st.failed.size === 1 ? 'it’s' : 'they’re'} left out.`])
+      if (c && !(c.h > 0)) lines.push(['warn', 'No height on the page: enter it in Height.'])
+      if (st.failed.size && !allPicturesFailed()) lines.push(['info', `${st.failed.size} of the page’s pictures wouldn’t load, so ${st.failed.size === 1 ? 'it’s' : 'they’re'} left out.`])
       const where = whereText(layersOf(d))
       if (where) lines.push(['info', `Read from ${where}.`])
-      const usedLlm = layersOf(d).includes('llm')
+      const askedLlm = (d.source_layers_used || []).includes('llm')
+      if (askedLlm && !d.dims_candidates.some((x) => x.source === 'llm')) lines.push(['info', 'A language model looked for the size in the page’s words and found none.'])
       if (d.cost_usd > 0) lines.push(['info', `The language model cost ${fmtUsd(d.cost_usd)}.`])
-      else if (usedLlm && d.mock) lines.push(['info', 'The language model was a test stand-in: no charge.'])
+      else if (askedLlm && d.mock) lines.push(['info', 'The language model was a test stand-in: no charge.'])
     }
     notesEl.hidden = !st.active || !lines.length
     notesEl.replaceChildren(...lines.map(([kind, text]) => h(`li.is-${kind}`, pic(kind === 'warn' ? 'warning' : kind === 'quote' ? 'search' : 'info', { size: 14 }), h('span', text))))
@@ -285,6 +322,7 @@ export function productSource({ lib, form, onChange, onUseLink }) {
   render()
   return {
     el, sizesEl, notesEl, read,
+    multiSize: () => (st.data?.dims_candidates?.length || 0) > 1,
     setActive(on) {
       st.active = !!on
       el.hidden = !on
@@ -297,6 +335,7 @@ export function productSource({ lib, form, onChange, onUseLink }) {
       if (!st.data) return url.value.trim() ? 'Read the page first' : 'Paste a product page link'
       if (url.value.trim() !== st.readUrl) return 'Read this link first'
       if (!st.data.images.length) return 'No picture on the page'
+      if (allPicturesFailed()) return 'No picture would load: use Image link'
       if (st.picture < 0) return 'Choose a picture'
       return null
     },

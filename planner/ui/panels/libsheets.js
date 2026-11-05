@@ -83,13 +83,14 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const budget = h('div.ms-budget-slot')
   const cost = h('div.ms-cost', h('div.ms-cost-head', costWord, costBig), budget)
   const errEl = h('p.ms-error', { role: 'alert', hidden: true })
+  const replaceEl = h('p.ms-note', { hidden: true }, pic('info', { size: 16 }), h('span'))
 
   const body = h('div.ms-form',
     source, product.el, photoBox, linkBox, modelBox,
     formRow('Name', name),
     h('div.ms-row', h('span.ms-label', 'Real size · W × D × H'), product.sizesEl, dims, h('span.ms-hint', 'Measure the piece, or take it from the product page: the model is fitted to exactly this.'), product.notesEl),
     formRow('Category', category, 'Optional'),
-    engineRow, resRow, cost, errEl)
+    engineRow, resRow, cost, replaceEl, errEl)
   const cancel = h('button.btn.btn-secondary.ms-btn', { type: 'button', onclick: () => sheet.close() }, 'Cancel')
   const go = h('button.btn.btn-primary.ms-btn.ms-primary', { type: 'button', onclick: () => submit() })
   const sheet = openSheet(shell, { title: 'Add furniture', sub: 'Made at its real size from a product page, a photo, an image link or a 3D file.', body, actions: [cancel, go], cls: 'ms-add', onClose: () => { if (preview) URL.revokeObjectURL(preview) } })
@@ -115,7 +116,9 @@ export function openAddSheet(ctx, { onAdded } = {}) {
   const kind = () => (st.source === 'model' ? 'model' : 'image')
   const meta = () => {
     const m = { name: name.value.trim(), dims_cm: dims.value() }
-    const id = slug(m.name)
+    // a shop that sells several sizes: each size made is its own piece (the same id would replace the other size)
+    const d = m.dims_cm
+    const id = slug(st.source === 'product' && product.multiSize() && d ? `${m.name} ${+d.w.toFixed(1)}x${+d.d.toFixed(1)}` : m.name)
     if (id) m.id = id
     if (category.value.trim()) m.category = category.value.trim()
     if (kind() === 'image') { m.engine = st.engine; if (st.engine === 'trellis2') m.resolution = st.resolution }
@@ -159,6 +162,11 @@ export function openAddSheet(ctx, { onAdded } = {}) {
     go.textContent = st.busy ? 'Sending…' : why || (p > 0 ? `Make it · ${fmtUsd(p)}` : 'Add · free')
     errEl.hidden = !st.error
     errEl.textContent = st.error
+    // re-adding an id replaces that piece (§2.8): say so before Make
+    const m = meta()
+    const existing = m.id && (ctx.engine?.getLibrary?.() || []).find((it) => it.id === m.id)
+    replaceEl.hidden = !existing
+    if (existing) replaceEl.lastChild.textContent = `“${existing.name || existing.id}” is already in your library: this replaces it.`
   }
   async function submit() {
     if (problem() || st.busy) return

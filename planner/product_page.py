@@ -56,6 +56,9 @@ TIMEOUT = "the page took more than 20 s to read: try again, or paste the image l
 NOT_ON_PAGE = "the language model gave a size that isn't on the page, so it was ignored"
 
 _deps: dict = {}
+_tl = threading.local()  # this request's deadline for the work after the download (EXTRACT_S)
+EXTRACT_S = 10.0
+TOO_LONG = "the page took too long to read: paste the image link and size instead"
 
 
 def configure(**deps) -> None:
@@ -72,6 +75,13 @@ class ProductError(Exception):
 
 
 # --- fetching (§2.9 Page fetches) ----------------------------------------------------------------------------------
+def _tick() -> None:
+    """Called between lines and blocks: past this request's deadline, the read ends with a 422."""
+    dl = getattr(_tl, "deadline", None)
+    if dl is not None and time.monotonic() > dl:
+        raise ProductError(422, TOO_LONG)
+
+
 class _Budget:
     def __init__(self, seconds: float):
         self.deadline = time.monotonic() + seconds
@@ -97,7 +107,11 @@ class _Response:
 
 def _target(url: str):
     """(scheme, host, port, parts) of an http(s) link, else ProductError 400."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        parts.hostname, parts.port  # noqa: B018 - both raise ValueError on a malformed host or port
+    except ValueError:
+        raise ProductError(400, "that link isn't a valid web address: paste the product page's full address") from None
     scheme = parts.scheme.lower()
     if scheme not in ("http", "https"):
         raise ProductError(400, "only http and https links work: paste the product page's web address")
@@ -231,11 +245,24 @@ def _get(url: str, budget: _Budget, *, max_bytes: int, accept: str, same_origin:
                 raise TimeoutError() from None
             if isinstance(e, ssl.SSLError):
                 raise ProductError(422, f"couldn't connect securely to {host}: check the link opens in a browser") from None
-            raise ProductError(422, f"couldn't read the page from {host} ({type(e).__name__}): check the link opens in a browser") from None
+            raise ProductError(422, f"couldn't read the page from {host}: check the link opens in a browser") from None
         finally:
             watchdog.cancel()
             conn.close()
     raise ProductError(422, f"the link redirects more than {MAX_REDIRECTS} times: open it in a browser and paste the address it ends on")
+
+
+def _public_url(url: str) -> str:
+    """The link without a user:password@ part or a #fragment (it is answered, and the cost row is in git)."""
+    p = urlsplit(url)
+    host = p.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = p.port
+    except ValueError:
+        port = None
+    return urlunsplit((p.scheme, host + (f":{port}" if port else ""), p.path, p.query, ""))
 
 
 def _origin(url: str) -> str:
@@ -250,29 +277,53 @@ def _charset(ctype_header: str, body: bytes) -> str:
         m = re.search(rb"<meta[^>]+charset\s*=\s*[\"']?([A-Za-z0-9._:-]+)", body[:4096], re.I)
         cs = m.group(1).decode("ascii", "replace") if m else None
     try:
-        return codecs.lookup(cs).name if cs else "utf-8"
+        info = codecs.lookup(cs) if cs else None
     except LookupError:
         return "utf-8"
+    return info.name if info is not None and getattr(info, "_is_text_encoding", True) and info.name != "idna" else "utf-8"
+
+
+def _decode(body: bytes, charset: str) -> str:
+    try:
+        return body.decode(charset, "replace")
+    except (UnicodeError, LookupError):
+        return body.decode("utf-8", "replace")
 
 
 # --- numbers, units, sizes ------------------------------------------------------------------------------------------
 _FR = {"½": .5, "¼": .25, "¾": .75, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": .125, "⅜": .375, "⅝": .625, "⅞": .875, "⅕": .2,
        "⅖": .4, "⅗": .6, "⅘": .8, "⅙": 1 / 6, "⅚": 5 / 6}
 _FRC = "".join(_FR)
-NUM = rf"(?:\d+(?:[.,]\d+)?(?:(?:[ \u00a0]+|-)\d+[ ]?[/⁄][ ]?\d+(?!\d)|[ \u00a0]?[{_FRC}])?|\d+[ ]?[/⁄][ ]?\d+(?!\d)|[{_FRC}])"
+# Digit runs are bounded ({1,7}, {1,4}): re holds the GIL for a whole search, and an unbounded \d+ followed by a
+# required unit backtracks quadratically over a long run of digits, which would stall every request the server answers.
+NUM = (rf"(?:\d{{1,7}}(?:[.,]\d{{1,4}})?(?:(?:[  ]+|-)\d{{1,3}}[ ]?[/⁄][ ]?\d{{1,3}}(?!\d)|[  ]?[{_FRC}])?"
+       rf"|\d{{1,3}}[ ]?[/⁄][ ]?\d{{1,3}}(?!\d)|[{_FRC}])")
 _IN_U = r"(?:\"|″|”|''|′′|(?:inch(?:es)?|in\.?)(?![a-z]))"
 _FT_U = r"(?:'(?!')|′(?!′)|’|(?:ft\.?|feet|foot)(?![a-z]))"
 UNITS = (r"(?:(?:cms?|centimet(?:er|re)s?|mm|millimet(?:er|re)s?|met(?:er|re)s?|m|inch(?:es)?|in\.?|ft\.?|feet|foot)"
          r"(?![a-z²³])|\"|″|”|''|′′|'(?!')|′(?!′)|’)")
-_LABELS = r"overall\s+(?:width|depth|height|length)|width|depth|height|length|diameter|dia\.?|ø|w|d|h|l"
-_POST = r"width|depth|height|length|wide|deep|high|tall|long|w|d|h|l"
+# Axis words in other languages shop pages often use (German, French, Spanish, Italian, Dutch).
+_FOREIGN = {"breite": "w", "tiefe": "d", "höhe": "h", "hoehe": "h", "largeur": "w", "profondeur": "d", "hauteur": "h",
+            "ancho": "w", "anchura": "w", "fondo": "d", "profundidad": "d", "alto": "h", "altura": "h",
+            "larghezza": "w", "profondità": "d", "altezza": "h", "breedte": "w", "diepte": "d", "hoogte": "h"}
+_FOREIGN_RE = "|".join(sorted(_FOREIGN, key=len, reverse=True))
+_LABELS = rf"overall\s+(?:width|depth|height|length)|width|depth|height|length|diameter|diam\.?|dia\.?|ø|{_FOREIGN_RE}|w|d|h|l"
+_POST = r"width|depth|height|length|wide|deep|high|tall|long|diameter|diam\.?|dia\.?|w|d|h|l"
 _ITEM = re.compile(rf"""
     (?:(?<![0-9A-WYZa-wyz_.,/'"’])(?P<pre>{_LABELS})\s*[:.=]?\s*|(?<![0-9A-WYZa-wyz_.,/\\-]))
-    (?:(?P<ft>\d+)\s*{_FT_U}\s*(?P<ftin>{NUM})\s*{_IN_U}
-      |(?P<num>{NUM})(?:\s*(?P<unit>{UNITS}))?)
-    (?:\s*\(?\s*(?P<post>{_POST})\s*\)?(?![a-z0-9]))?
+    (?:(?P<ft>\d{{1,4}})\s*{_FT_U}\s*(?P<ftin>{NUM})\s*{_IN_U}
+      |(?P<num>{NUM})(?:\s*(?:–|—|-|to)\s*(?P<to>\d{{1,7}}(?:[.,]\d{{1,4}})?)(?![\d/⁄]))?(?:\s*(?P<unit>{UNITS}))?)
+    (?:\s*\(?\s*(?P<post>{_POST})\s*\)?(?![a-z0-9])(?!\s*[:=]?\s*\d))?
     """, re.I | re.X)
-_JOIN = re.compile(r"\s*(?:x|×|\*|by)\s*\Z", re.I)
+# Between two numbers of one size: x, ×, * or by, and maybe an axis letter this reader doesn't know ("B 120 x T 60").
+_JOIN = re.compile(r"\s*(?:x|×|\*|by)\s*(?:[A-Za-z]{1,2}\.?\s*:?\s*)?\Z", re.I)
+_TAIL_UNIT = re.compile(rf"\s*(?P<unit>{UNITS})", re.I)
+# An order key next to unlabelled numbers: "(W x D x H)", "W x D x H:", "HxWxD", "L x W x H in cm".
+_KEY_TOK = r"width|depth|height|length|w|d|h|l|b|t|p"
+_ORDER_KEY = re.compile(rf"(?<![A-Za-z0-9])\(?\s*(?P<a>{_KEY_TOK})\s*[x×*]\s*(?P<b>{_KEY_TOK})(?:\s*[x×*]\s*(?P<c>{_KEY_TOK}))?"
+                        rf"\s*\)?(?![A-Za-z0-9])", re.I)
+_KEY_AXIS = {"w": "w", "width": "w", "b": "w", "d": "d", "depth": "d", "t": "d", "p": "d", "h": "h", "height": "h",
+             "l": "l", "length": "l"}
 _CM = {"cm": 1.0, "mm": 0.1, "m": 100.0, "in": 2.54, "ft": 30.48}
 _UNIT_WORD = {"cm": "centimetres", "mm": "millimetres", "m": "metres", "in": "inches", "ft": "feet"}
 _UNIT_CODE = {"cmt": "cm", "mmt": "mm", "mtr": "m", "inh": "in", "fot": "ft", "cm": "cm", "mm": "mm", "m": "m",
@@ -284,6 +335,7 @@ _DISTRACT = re.compile(
     re.I)
 _INTRO = re.compile(r"\b(?:overall|dimensions?|assembled|product\s+size)\b", re.I)
 _RUG = re.compile(r"\b(?:rugs?|carpets?|runners?|kilims?|dhurries|dhurrie|durries|tapis)\b", re.I)
+_SAMPLE = re.compile(r"\b(?:samples?|swatch(?:es)?)\b", re.I)
 _SIZE_OPT = re.compile(r"\b(?:size|sizes|dimensions?|measurements?|rug\s+size|gr[oö]ss?e|taille|maat)\b", re.I)
 
 
@@ -341,9 +393,9 @@ def _axis(label: str | None) -> str | None:
         return "h"
     if t in ("l", "length", "long"):
         return "l"
-    if t in ("ø", "dia", "diameter"):
+    if t in ("ø", "dia", "diam", "diameter"):
         return "dia"
-    return None
+    return _FOREIGN.get(t)
 
 
 def _fmt(v: float) -> str:
@@ -352,7 +404,7 @@ def _fmt(v: float) -> str:
 
 class _Item:
     """One measurement on a line: a value in the page's unit (or None for no unit), its axis label and its text."""
-    __slots__ = ("start", "end", "value", "unit", "axis", "raw", "num_text", "compound")
+    __slots__ = ("start", "end", "value", "unit", "axis", "raw", "num_text", "compound", "to")
 
     def __init__(self, m: re.Match):
         self.start, self.end = m.start(), m.end()
@@ -367,6 +419,24 @@ class _Item:
             self.unit = _unit(m.group("unit"))
             self.num_text = m.group("num").strip()
         self.raw = m.group(0).strip()
+        self.to = None if self.compound or not m.group("to") else _num(m.group("to"))  # "180–220 cm": extends to 220
+
+
+def _order_keys(line: str) -> tuple[str, list[tuple[int, int, list[str]]]]:
+    """The line with its order keys ("(W x D x H)", "HxWxD:") blanked out, so their letters can't become one number's
+    label, and the keys: (start, end, axes)."""
+    keys = []
+    for m in _ORDER_KEY.finditer(line):
+        toks = [m.group(g) for g in ("a", "b", "c") if m.group(g)]
+        axes = [_KEY_AXIS[x.lower()] for x in toks]
+        if len(set(axes)) == len(axes):
+            keys.append((m.start(), m.end(), axes))
+    if not keys:
+        return line, []
+    chars = list(line)
+    for s, e, _ in keys:
+        chars[s:e] = " " * (e - s)
+    return "".join(chars), keys
 
 
 def _items(line: str) -> list[_Item]:
@@ -378,7 +448,7 @@ def _items(line: str) -> list[_Item]:
     return out
 
 
-def _chains(items: list[_Item], line: str) -> list[list[_Item]]:
+def _chains(items: list[_Item], line: str, keys=()) -> list[list[_Item]]:
     chains, cur = [], []
     for it in items:
         if cur and _JOIN.match(line[cur[-1].end:it.start]) and len(cur) < 3:
@@ -389,7 +459,29 @@ def _chains(items: list[_Item], line: str) -> list[list[_Item]]:
             cur = [it]
     if cur:
         chains.append(cur)
+    for chain in chains:
+        # one unit after the last number covers the whole size: "200W x 90D x 85H cm", "200 (W) x 90 (D) x 85 (H) cm"
+        if len(chain) >= 2 and all(it.unit is None for it in chain):
+            m = _TAIL_UNIT.match(line, chain[-1].end)
+            if m and _unit(m.group("unit")) and not re.match(r"[A-Za-z]", line[m.end():m.end() + 1]):
+                u = _unit(m.group("unit"))
+                for it in chain:
+                    it.unit = u
+                chain[-1].end = m.end()
+        # an order key right before or after the numbers sets their axes: "(H x W x D)", "W x D x H: 84 x 38 x 34 in"
+        if keys and len(chain) >= 2 and all(it.axis is None for it in chain):
+            for s, e, axes in keys:
+                near = (0 <= chain[0].start - e <= 16) or (0 <= s - chain[-1].end <= 16)
+                if near and len(axes) == len(chain):
+                    for it, a in zip(chain, axes):
+                        it.axis = a
+                    break
     return chains
+
+
+def _line_chains(line: str) -> list[list[_Item]]:
+    blanked, keys = _order_keys(line)
+    return _chains(_items(blanked), blanked, keys)
 
 
 class Reading:
@@ -405,16 +497,16 @@ class Reading:
                 "source": self.source}
 
     def same(self, o: "Reading") -> bool:
-        def near(a, b):
-            return (a is None and b is None) or (a is not None and b is not None and abs(a - b) <= 0.5)
+        def near(a, b):  # within 0.5 cm, or 1 % (one size given in two units rounds differently)
+            return (a is None and b is None) or (a is not None and b is not None and abs(a - b) <= max(0.5, 0.01 * max(a, b)))
         return near(self.w, o.w) and near(self.d, o.d) and near(self.h, o.h)
 
 
 class _Ctx:
-    """What the size rules need to know about the page: rug or not, the page's unit hint, and the warnings."""
+    """What the size rules need to know about the page: rug or bed, the page's unit hint, and the warnings."""
 
-    def __init__(self, is_rug: bool, hint: str | None, warnings: list[str]):
-        self.is_rug, self.hint, self.warnings = is_rug, hint, warnings
+    def __init__(self, is_rug: bool, hint: str | None, warnings: list[str], is_bed: bool = False):
+        self.is_rug, self.hint, self.warnings, self.is_bed = is_rug, hint, warnings, is_bed
         self.unitless_dropped = False
 
     def drop_unitless(self) -> None:
@@ -423,42 +515,96 @@ class _Ctx:
             self.warnings.append("a size without a unit was left out: the page doesn't say what it measures in")
 
 
-def _make_reading(parts: list[tuple[str | None, float, str | None, str]], ctx: _Ctx, *, source: str, quote: str,
+def _plausible(w, d, h, is_rug: bool) -> bool:
+    if w is None or d is None or not (1 <= w <= 2000 and 1 <= d <= 2000):
+        return False
+    return h is None or ((0.1 <= h <= 30) if is_rug else (1 <= h <= 2000))
+
+
+def _make_reading(parts: list[tuple], ctx: _Ctx, *, source: str, quote: str,
                   label: str | None, pair_ok: bool, warn_unitless: bool = True) -> Reading | None:
-    """parts: (axis label or None, value in its unit, unit or None, number text). Applies §2.11 Mapping and Units."""
+    """parts: (axis label or None, value in its unit, unit or None, number text[, extends-to value]). Applies §2.11
+    Mapping and Units."""
     units = [p[2] for p in parts]
     notes: list[str] = []
     unit_note = None
+    tries = [None]
     if all(u is None for u in units):
         if not ctx.hint:
             if warn_unitless:
                 ctx.drop_unitless()
             return None
-        units = [ctx.hint] * len(parts)
-        unit_note = f"no unit on the page: read as {ctx.hint}, as the page's other sizes"
+        # the page's unit first; a size that can't be right in it ("160*230" on a page that measures in m) is read in cm
+        tries = [ctx.hint] + (["cm"] if ctx.hint != "cm" else [])
+    for hinted in tries:
+        if hinted:
+            units = [hinted] * len(parts)
+            unit_note = f"no unit on the page: read as {hinted}, as the page's other sizes" if hinted == ctx.hint else \
+                f"no unit on the page: read as cm (in {ctx.hint} it would be far too big)"
+        else:
+            fill = next((u for u in reversed(units) if u), None)
+            units = [u or fill for u in units]
+        got = _map_axes(parts, units, ctx, pair_ok)
+        if got is not None:
+            break
     else:
-        fill = next((u for u in reversed(units) if u), None)
-        units = [u or fill for u in units]
+        return None
+    out, axis_of, map_notes = got
+    notes += map_notes
+    w, d, h = out.get("w"), out.get("d"), out.get("h")
+    main = units[0]
+    if unit_note is None and any(u != "cm" for u in units):
+        order = sorted(range(len(parts)), key=lambda i: "wdh".index(axis_of[i]) if axis_of[i] in "wdh" else 3)
+        ps = [(parts[i], units[i]) for i in order]
+        if any(p[2] == "ft" and "'" in p[3] for p, _ in ps):
+            marks = {"ft": "'", "in": '"'}
+            unit_note = "from feet and inches: " + " × ".join(
+                p[3] if "'" in p[3] else f"{p[3]}{marks.get(u, ' ' + u)}" for p, u in ps)
+        elif len(set(units)) == 1:
+            unit_note = f"from {_UNIT_WORD[main]}: " + " × ".join(p[3] for p, _ in ps) + f" {main}"
+        else:
+            unit_note = "from " + " × ".join(f"{p[3]} {u}" for p, u in ps)
+    for p, u, a in zip(parts, units, axis_of):
+        if len(p) > 4 and p[4] and a in ("w", "d", "h"):
+            notes.append(f"{ {'w': 'width', 'd': 'depth', 'h': 'height'}[a] } extends to {_fmt(p[4])} {u} (the smaller size is used)")
+    return Reading(w, d, h, main, label, unit_note, notes, quote, source)
+
+
+def _map_axes(parts, units, ctx: _Ctx, pair_ok: bool):
+    """(out {w, d, h} in cm, the axis each part got, notes), or None when the reading isn't a plausible size."""
+    notes: list[str] = []
     cm = [p[1] * _CM[u] for p, u in zip(parts, units)]
     axes = [p[0] for p in parts]
-    if "l" in axes and "w" in axes:  # the page names its width, so its length is the other side
-        axes = ["d" if a == "l" else a for a in axes]
-        notes.append("length read as depth (the page gives a width too)")
+    if "l" in axes and "w" in axes:
+        # Both given: on most pages (sofas, tables, "L x W x H") the length is the long side, side to side; a bed's
+        # length runs head to foot, so it is the depth.
+        li, wi = axes.index("l"), axes.index("w")
+        if ctx.is_bed:
+            axes[li] = "d"
+            notes.append("length read as depth (a bed's length runs head to foot)")
+        elif cm[li] > cm[wi]:
+            axes[li], axes[wi] = "w", "d"
+            notes.append("length read as width and width as depth (the longer side is the width)")
+        else:
+            axes[li] = "d"
+            notes.append("length read as depth (the page gives a longer width)")
     elif "l" in axes:
         axes = ["w" if a == "l" else a for a in axes]
         notes.append("length read as width")
     out: dict[str, float] = {}
-    for a, v in zip(axes, cm):
+    axis_of: list[str | None] = list(axes)
+    for i, (a, v) in enumerate(zip(axes, cm)):
         if a == "dia":
             if "w" in out or "d" in out:
                 return None
             out["w"] = out["d"] = v
             notes.append("diameter read as width and depth")
+            axis_of[i] = "w"
         elif a:
             if a in out:
                 return None
             out[a] = v
-    free = [v for a, v in zip(axes, cm) if a is None]
+    free = [i for i, a in enumerate(axes) if a is None]
     if free:
         order = [k for k in ("w", "d", "h") if k not in out]
         if len(free) > len(order):
@@ -470,37 +616,23 @@ def _make_reading(parts: list[tuple[str | None, float, str | None, str]], ctx: _
                 return None
             if not ctx.is_rug:
                 notes.append("read as W × D")
-        for k, v in zip(order, free):
-            out[k] = v
-    w, d, h = out.get("w"), out.get("d"), out.get("h")
-    if w is None or d is None:
+        for k, i in zip(order, free):
+            out[k] = cm[i]
+            axis_of[i] = k
+    if not _plausible(out.get("w"), out.get("d"), out.get("h"), ctx.is_rug):
         return None
-    if not (1 <= w <= 2000 and 1 <= d <= 2000):
-        return None
-    if h is not None and not ((0.1 <= h <= 30) if ctx.is_rug else (1 <= h <= 2000)):
-        return None
-    main = units[0]
-    if unit_note is None and any(u != "cm" for u in units):
-        if any(p[2] == "ft" and "'" in p[3] for p in parts):
-            marks = {"ft": "'", "in": '"'}
-            unit_note = "from feet and inches: " + " × ".join(
-                p[3] if "'" in p[3] else f"{p[3]}{marks.get(u, ' ' + u)}" for p, u in zip(parts, units))
-        elif len(set(units)) == 1:
-            unit_note = f"from {_UNIT_WORD[main]}: " + " × ".join(p[3] for p in parts) + f" {main}"
-        else:
-            unit_note = "from " + " × ".join(f"{p[3]} {u}" for p, u in zip(parts, units))
-    return Reading(w, d, h, main, label, unit_note, notes, quote, source)
+    return out, axis_of, notes
 
 
 def _parts(chain: list[_Item]) -> list[tuple]:
-    return [(it.axis, it.value, it.unit, it.num_text) for it in chain]
+    return [(it.axis, it.value, it.unit, it.num_text, it.to) for it in chain]
 
 
 def _parse_size_text(text: str, ctx: _Ctx, *, source: str, label: str | None = None, pair_ok: bool = True,
                      warn_unitless: bool = True) -> Reading | None:
     """A structured size string ("W 48 x D 55 x H 82 cm", "7' 6\" x 9' 6\"", "3*4"): its first chain of 2-3."""
     text = _squash(html.unescape(str(text))[:2000])
-    for chain in _chains(_items(text), text):
+    for chain in _line_chains(text):
         if 2 <= len(chain) <= 3:
             r = _make_reading(_parts(chain), ctx, source=source, quote=text.strip()[:200],
                               label=label if label is not None else text.strip()[:80], pair_ok=pair_ok,
@@ -516,8 +648,10 @@ def _single(value, unit_hint: str | None = None):
         v = value.get("value")
         if v is None and "@value" in value:
             v = value.get("@value")
+        if v is None:
+            v = value.get("minValue")  # an extendable piece: its smallest size
         code = str(value.get("unitCode") or value.get("unitText") or "").strip().lower()
-        unit = _UNIT_CODE.get(code)
+        unit = _UNIT_CODE.get(code) or unit_hint
         got = _single(v, unit)
         if got is None:
             return None
@@ -549,7 +683,7 @@ _SKIP = {"script", "style", "template", "noscript", "svg", "title", "math", "ifr
 _OUT_TAGS = {"header", "footer", "nav", "aside"}
 _OUT_CLASS = re.compile(r"(?:^|[\s_-])(?:related|recommend\w*|upsells?|up-sell|cross-?sells?|similar|you-may\w*|also-\w+|"
                         r"recently\w*|footer|mega-?menu|menus?|nav|navigation|drawer|mini-?cart|cart|reviews?|testimonials?|"
-                        r"instagram|blog)(?:$|[\s_-])", re.I)
+                        r"instagram|blog|look|shop-?the-?look|complete-?the-?look|bundles?)(?:$|[\s_-])", re.I)
 
 
 class _Page(HTMLParser):
@@ -560,6 +694,7 @@ class _Page(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.base = base_url
         self.lines: list[str] = []
+        self.out_lines: list[str] = []  # text inside header, footer, nav, aside or "related products" blocks
         self._cur: list[str] = []
         self.skip = 0
         self.ld: list[str] = []
@@ -583,7 +718,7 @@ class _Page(HTMLParser):
         if self._cur:
             line = _squash("".join(self._cur))
             if line:
-                self.lines.append(line)
+                (self.out_lines if self.out else self.lines).append(line)
             self._cur = []
 
     def handle_starttag(self, tag, attrs):
@@ -612,6 +747,7 @@ class _Page(HTMLParser):
             self.skip += 1
             closers.append("skip")
         if tag not in _VOID and (tag in _OUT_TAGS or _OUT_CLASS.search(a.get("class", "") + " " + a.get("id", ""))):
+            self._nl()  # the text before it is the page's own
             self.out += 1
             closers.append("out")
         if tag in _BLOCK:
@@ -660,6 +796,7 @@ class _Page(HTMLParser):
                 if c == "skip":
                     self.skip = max(0, self.skip - 1)
                 elif c == "out":
+                    self._nl()  # the block's last text is still the block's
                     self.out = max(0, self.out - 1)
                 elif c == "title" and self._title is not None:
                     self.title = re.sub(r"\s+", " ", "".join(self._title)).strip()
@@ -766,11 +903,11 @@ def _loads_lenient(text: str):
     text = text.strip().rstrip(";")
     try:
         return json.loads(text, strict=False)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, RecursionError):
         pass
     try:
         return json.loads(re.sub(r",\s*([}\]])", r"\1", text), strict=False)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, RecursionError):
         return None
 
 
@@ -855,6 +992,8 @@ class _Images:
             return None
         if re.search(r"\.svg$", p.path, re.I) or re.search(r"(?i)(?:^|[/_-])(?:logo|icon|sprite|placeholder|spinner|badge)s?[._-]", p.path):
             return None
+        if _private_host(p):
+            return None
         return u
 
     def add(self, raw, kind: str, layer: str, w=None, h=None) -> bool:
@@ -868,6 +1007,15 @@ class _Images:
             return False
         k = self.key(u)
         if k in self.keys:
+            # one picture: keep its largest copy, and https over http
+            old = self.keys[k]
+            new_size, old_size = _copy_size(u, w), _copy_size(old["url"], old["w"])
+            better = (new_size or 0) > (old_size or 0) or (
+                (new_size or 0) == (old_size or 0) and u.startswith("https:") and old["url"].startswith("http:"))
+            if better:
+                old["url"] = u
+                if w or h:
+                    old["w"], old["h"] = w, h
             return False
         entry = {"url": u, "w": w, "h": h, "kind": kind}
         self.keys[k] = entry
@@ -875,6 +1023,38 @@ class _Images:
         if layer:
             self.used.add(layer)
         return True
+
+
+def _private_host(p) -> bool:
+    """A picture link to a private, loopback or local address: the planner would make the user's browser request it.
+    The evals' exempt address (MIDSTUDY_FETCH_ALLOW) is allowed, as for page fetches."""
+    host = (p.hostname or "").lower().rstrip(".")
+    try:
+        port = p.port or (443 if p.scheme.lower() == "https" else 80)
+    except ValueError:
+        return True
+    if _deps.get("fetch_allowed") and _deps["fetch_allowed"](host, port):
+        return False
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa")):
+        return True
+    try:
+        import ipaddress
+        ipaddress.ip_address(host.strip("[]").split("%", 1)[0])
+    except ValueError:
+        return False  # a name: the browser resolves it (and from-url checks it at Make)
+    return bool(_deps.get("address_blocked") and _deps["address_blocked"](host.strip("[]")))
+
+
+def _copy_size(url: str, w) -> int | None:
+    """How big this copy of a picture is: a width or size parameter, a Shopify-style _600x600 suffix, or its width."""
+    p = urlsplit(url)
+    m = re.search(r"(?:^|&)(?:width|w|size|imwidth)=(\d{2,5})(?:&|$)", p.query)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"_(\d{2,5})x(\d{0,5})(?:@\dx)?\.[A-Za-z0-9]+$", p.path)
+    if m:
+        return int(m.group(1))
+    return _px(w)
 
 
 def _px(v) -> int | None:
@@ -918,7 +1098,7 @@ _CATEGORIES = [  # (category, regex of words), in the order a tie is settled
     ("wardrobe", r"wardrobes?|armoires?"),
     ("dresser", r"dressers?|chests?\s+of\s+drawers"),
     ("rug", r"rugs?|carpets?|runners?|kilims?|dhurries|dhurrie|tapis"),
-    ("sofa", r"sofas?|couch(?:es)?|sectionals?|loveseats?|settees?"),
+    ("sofa", r"sofa\s*beds?|sofas?|couch(?:es)?|sectionals?|loveseats?|settees?|daybeds?"),
     ("ottoman", r"ottomans?|poufs?|pouffes?|footstools?"),
     ("stool", r"(?:bar\s+)?stools?"),
     ("bench", r"benches|bench"),
@@ -941,6 +1121,7 @@ def _category_of(text: str | None) -> str | None:
     """The category word that ends last in the text (English puts the head noun last: "Desk Lamp" is a lamp)."""
     if not text:
         return None
+    text = re.sub(r"\([^)]*\)", " ", text)  # "Dining Set (Table + 4 Chairs)": what's in brackets isn't the head
     best = None
     for rank, (cat, rx) in enumerate(_CAT_RE):
         for m in rx.finditer(text):
@@ -1003,8 +1184,12 @@ def _mprop(item, name):
 def _parse_page(text: str, url: str) -> _Doc:
     page = _Page(url)
     try:
-        page.feed(text)
+        for i in range(0, len(text), 1 << 16):
+            _tick()
+            page.feed(text[i:i + (1 << 16)])
         page.close()
+    except ProductError:
+        raise
     except Exception:  # noqa: BLE001 - HTMLParser is lenient; anything left is what it read
         pass
     return _Doc(page, url)
@@ -1068,8 +1253,8 @@ def _feed_json(url: str, origin: str, budget: _Budget, warnings: list[str], shop
         warnings.append(f"{what} is over 2 MB, so it was skipped")
         return None
     try:
-        return json.loads(r.body.decode(_charset(r.header("content-type"), r.body), "replace").lstrip("﻿"))
-    except (json.JSONDecodeError, ValueError):
+        return json.loads(_decode(r.body, _charset(r.header("content-type"), r.body)).lstrip("﻿"))
+    except (json.JSONDecodeError, ValueError, RecursionError):
         warnings.append(f"{what} isn't valid JSON, so it was skipped")
         return None
 
@@ -1077,8 +1262,29 @@ def _feed_json(url: str, origin: str, budget: _Budget, warnings: list[str], shop
 # --- page text: lines, script strings, unit hint -------------------------------------------------------------------
 _SKIP_KEYS = re.compile(r"recommend|related|similar|upsell|cross.?sell|also.?(?:bought|viewed|like)|sponsor|carousel|"
                         r"bundle|complete.?the.?look|you.?may|accessor", re.I)
-_HAS_SIZE = re.compile(rf"(?:{NUM})\s*(?:{UNITS})|dimension", re.I)
-_STR_LIT = re.compile(r'"((?:[^"\\\n]|\\.){4,200000})"' + r"|'((?:[^'\\\n]|\\.){4,200000})'")
+_HAS_SIZE = re.compile(rf"(?<![0-9])(?:{NUM})\s*(?:{UNITS})|dimension", re.I)
+_LIT_BODY = {'"': re.compile(r'(?:[^"\\\n]|\\.)*'), "'": re.compile(r"(?:[^'\\\n]|\\.)*")}
+
+
+def _literals(text: str):
+    """The string literals of a script ("…" or '…', 4 to 200,000 characters), in one linear pass: an unterminated or
+    escaped-quote run is skipped past, never rescanned from each quote inside it."""
+    n = len(text)
+    i = 0
+    nxt = {'"': text.find('"'), "'": text.find("'")}
+    while True:
+        for q in nxt:
+            if 0 <= nxt[q] < i:
+                nxt[q] = text.find(q, i)
+        cands = [p for p in nxt.values() if p >= 0]
+        if not cands:
+            return
+        j = min(cands)
+        q = text[j]
+        end = _LIT_BODY[q].match(text, j + 1).end()
+        if end < n and text[end] == q and 4 <= end - j - 1 <= 200000:
+            yield text[j + 1:end]
+        i = end + 1
 
 
 def _js_unescape(s: str) -> str:
@@ -1118,6 +1324,7 @@ def _script_strings(scripts: list[tuple[str, str]]) -> list[str]:
     def walk(x, depth=0):
         if depth > 40 or len(out) > 400:
             return
+        _tick()
         if isinstance(x, str):
             st = x.strip()
             if st[:1] in "{[" and len(st) > 20:
@@ -1142,8 +1349,8 @@ def _script_strings(scripts: list[tuple[str, str]]) -> list[str]:
             if data is not None:
                 walk(data)
                 continue
-        for m in _STR_LIT.finditer(text):
-            lit = m.group(1) if m.group(1) is not None else m.group(2)
+        for lit in _literals(text):
+            _tick()
             if not _HAS_SIZE.search(lit):
                 continue
             walk(_js_unescape(lit))
@@ -1154,6 +1361,7 @@ def _unit_hint(lines: list[str]) -> str | None:
     """The unit the page measures in elsewhere: "(m)", "in cm", or its sizes written with a unit."""
     votes: dict[str, int] = {}
     for line in lines:
+        _tick()
         for m in re.finditer(r"\(\s*(cm|mm|m|in|inch|inches|ft|feet|metres|meters|centimetres|centimeters)\s*\)", line, re.I):
             u = _unit(m.group(1))
             if u:
@@ -1178,6 +1386,21 @@ def _context(line: str, start: int, prev_end: int, prev_line: str | None) -> str
     return ctx
 
 
+def _window(line: str, start: int, end: int, n: int = 200) -> str:
+    """At most n characters of the line around [start, end), cut at word boundaries."""
+    if len(line) <= n:
+        return line.strip()
+    q0 = max(0, start - max(0, n - (end - start)) // 2)
+    q1 = min(len(line), q0 + n)
+    if q0 > 0:
+        sp = line.find(" ", q0, start)
+        q0 = sp + 1 if sp >= 0 else q0
+    if q1 < len(line):
+        sp = line.rfind(" ", end, q1)
+        q1 = sp if sp >= 0 else q1
+    return line[q0:q1].strip()
+
+
 def _text_readings(lines: list[str], ctx: _Ctx) -> list[Reading]:
     """§2.11 layer 3: labelled triples and pairs with units, labelled singles grouped (tables), distractors left out."""
     found: list[tuple[int, int, Reading]] = []
@@ -1189,9 +1412,9 @@ def _text_readings(lines: list[str], ctx: _Ctx) -> list[Reading]:
             if line.strip():
                 prev_line = line
             continue
-        items = _items(line)
+        _tick()
         prev_end = 0
-        for chain in _chains(items, line):
+        for chain in _line_chains(line):
             start, end = chain[0].start, chain[-1].end
             context = _context(line, start, prev_end, prev_line if len(chain) >= 2 else None)
             if len(chain) >= 2:
@@ -1202,8 +1425,7 @@ def _text_readings(lines: list[str], ctx: _Ctx) -> list[Reading]:
                     rest = (line[:start] + line[end:]).strip(" \t:-–—|")
                     if len(rest.split()) > 2 or not ctx.hint:
                         continue
-                q0 = max(0, start - max(0, 200 - (end - start)) // 2)
-                quote = line[q0:q0 + 200].strip()
+                quote = _window(line, start, end)
                 r = _make_reading(_parts(chain), ctx, source="text", quote=quote, label=line[start:end].strip()[:80],
                                   pair_ok=False, warn_unitless=False)
                 if r:
@@ -1240,24 +1462,33 @@ def _text_readings(lines: list[str], ctx: _Ctx) -> list[Reading]:
     return [r for _, _, r in found]
 
 
-_THICK = re.compile(rf"(?P<k>thickness|pile\s+height|pile\s+depth|total\s+height|rug\s+height)\s*[:\-–]?\s*(?:approx\.?\s*)?"
-                    rf"(?P<v>{NUM})\s*(?P<u>{UNITS})|(?P<v2>{NUM})\s*(?P<u2>{UNITS})\s+(?:thick|in\s+thickness)\b", re.I)
+_THICK = re.compile(rf"(?P<k>thickness|pile\s+height|pile\s+depth|pile|total\s+height|rug\s+height|height)\s*[:\-–]?\s*"
+                    rf"(?:approx\.?\s*)?(?P<v>{NUM})(?:\s*(?P<u>{UNITS}))?(?![\d.,])"
+                    rf"|(?P<v2>{NUM})\s*(?P<u2>{UNITS})\s+(?:thick|in\s+thickness)\b", re.I)
 
 
-def _thickness(lines: list[str]) -> tuple[float, str] | None:
-    """A rug's thickness (wins) or pile height, in cm, with the page text it came from."""
+def _thickness(lines: list[str], hint: str | None) -> tuple[float, str, bool] | None:
+    """A rug's thickness (wins) or pile height, in cm, with the page text it came from and whether its unit was
+    assumed (a unitless "Thickness: 0.25" is inches on a page in inches or feet, else cm)."""
     best = {}
     for line in lines:
+        _tick()
         for m in _THICK.finditer(line):
             v = _num(m.group("v") or m.group("v2"))
             u = _unit(m.group("u") or m.group("u2"))
-            if v is None or not u:
+            assumed = False
+            if v is None:
                 continue
+            if not u:
+                if m.group("v2") or (m.group("k") or "").lower() == "height":
+                    continue
+                u, assumed = ("in" if hint in ("in", "ft") else "cm"), True
             cm = v * _CM[u]
-            if not 0.1 <= cm <= 10:
+            if not 0.1 <= cm <= (5 if (m.group("k") or "").lower() == "height" else 10):
                 continue
-            kind = "pile" if (m.group("k") or "").lower().startswith("pile") else "thick"
-            best.setdefault(kind, (cm, m.group(0).strip()))
+            k = (m.group("k") or "").lower()
+            kind = "pile" if k.startswith("pile") else "thick"
+            best.setdefault(kind, (cm, m.group(0).strip() + (f" (read as {_UNIT_WORD[u]})" if assumed else ""), assumed))
     return best.get("thick") or best.get("pile")
 
 
@@ -1311,6 +1542,8 @@ def _jsonld_sizes(doc: _Doc, ctx: _Ctx, sz: _Sizes, used: set) -> None:
         seen, uniq = set(), []
         for label, r in vs:
             k = re.sub(r"\s+", " ", label.lower())
+            if _SAMPLE.search(label):
+                continue
             if k not in seen:
                 seen.add(k)
                 uniq.append((label, r))
@@ -1341,9 +1574,10 @@ def _jsonld_sizes(doc: _Doc, ctx: _Ctx, sz: _Sizes, used: set) -> None:
                 sz.cands.append(r)
                 used.add("jsonld")
         else:
-            m = re.fullmatch(r"\s*(?:overall\s+|product\s+)?(width|depth|height|length)\s*", name, re.I)
+            m = re.fullmatch(r"\s*(?:overall\s+|product\s+|item\s+)?(width|depth|height|length)\s*"
+                             r"(?:\(\s*(cm|mm|m|in|inch|inches|ft|feet)\s*\)|in\s+(cm|mm|inches))?\s*:?\s*", name, re.I)
             if m:
-                got = _single(prop)
+                got = _single(prop, _unit(m.group(2) or m.group(3)))
                 if got:
                     singles.append((_axis(m.group(1)), got[0], got[1], got[2]))
     if singles:
@@ -1358,7 +1592,7 @@ def _explicit(node: dict, ctx: _Ctx, source: str) -> Reading | None:
     """width/depth/height (and length) as text or QuantitativeValue."""
     parts, quote = [], []
     for key in ("width", "depth", "height", "length"):
-        if key == "length" and node.get("width") is not None:
+        if key == "length" and node.get("width") is not None and node.get("depth") is not None:
             continue
         got = _single(node.get(key))
         if got:
@@ -1410,7 +1644,7 @@ def _shopify_sizes(doc: _Doc, ctx: _Ctx, sz: _Sizes, used: set) -> None:
         return
     for opt in _as_list(f.get("options")):
         if isinstance(opt, dict) and _SIZE_OPT.search(str(opt.get("name", ""))):
-            values = [str(v) for v in _as_list(opt.get("values")) if isinstance(v, (str, int, float))]
+            values = [str(v) for v in _as_list(opt.get("values")) if isinstance(v, (str, int, float)) and not _SAMPLE.search(str(v))]
             vs = [(v, _parse_size_text(v, ctx, source="shopify", label=v)) for v in values]
             if len(vs) > 1 or (vs and vs[0][1]):
                 sz.variants = vs
@@ -1427,7 +1661,7 @@ def _woo_sizes(doc: _Doc, ctx: _Ctx, sz: _Sizes, used: set) -> None:
         for att in _as_list(f.get("attributes")):
             if not isinstance(att, dict) or not _SIZE_OPT.search(str(att.get("name", "")) + " " + str(att.get("taxonomy", ""))):
                 continue
-            terms = [t for t in _as_list(att.get("terms")) if isinstance(t, dict) and t.get("name")]
+            terms = [t for t in _as_list(att.get("terms")) if isinstance(t, dict) and t.get("name") and not _SAMPLE.search(str(t["name"]))]
             terms.sort(key=lambda t: 0 if t.get("default") else 1)  # the shop's default first, then its order
             vs = [(html.unescape(str(t["name"])), _parse_size_text(str(t["name"]), ctx, source="woocommerce",
                                                                    label=html.unescape(str(t["name"])))) for t in terms]
@@ -1452,6 +1686,49 @@ def _woo_sizes(doc: _Doc, ctx: _Ctx, sz: _Sizes, used: set) -> None:
                     "WooCommerce length × width × height read as W × D × H"]
                 sz.feed.append(r)
                 used.add("woocommerce")
+
+
+def _link_variant(doc: _Doc, sz: _Sizes, warnings: list[str]) -> None:
+    """Move the size option the link names to the front: a shop writes ?variant=<id> (Shopify) or
+    ?attribute_pa_<size>=<slug> (WooCommerce) into the address when a size is picked, so a copied link names it."""
+    if len(sz.variants) < 2:
+        return
+    q = {}
+    for part in urlsplit(doc.url).query.split("&"):
+        k, _, v = part.partition("=")
+        if k and v:
+            q.setdefault(unquote(k).lower(), unquote(v.replace("+", " ")))
+    label = None
+    vid = q.get("variant")
+    if vid and doc.shopify:
+        pos = next((i + 1 for i, o in enumerate(_as_list(doc.shopify.get("options")))
+                    if isinstance(o, dict) and _SIZE_OPT.search(str(o.get("name", "")))), None)
+        for v in _as_list(doc.shopify.get("variants")):
+            if isinstance(v, dict) and str(v.get("id")) == vid and pos:
+                label = v.get(f"option{pos}")
+    if vid and label is None and doc.product:
+        for v in _as_list(doc.product.get("hasVariant")) + _as_list(doc.product.get("offers")):
+            if isinstance(v, dict) and re.search(rf"[?&]variant={re.escape(vid)}(?:&|$|#)", str(v.get("url") or v.get("@id") or "")):
+                label = _text(v.get("size")) or (re.split(r"\s+[-–—/|]\s+", _text(v.get("name")) or "")[-1] or None)
+                break
+    if label is None and doc.woo:
+        for att in _as_list(doc.woo.get("attributes")):
+            if not isinstance(att, dict):
+                continue
+            slug = q.get(f"attribute_{att.get('taxonomy', '')}".lower()) or q.get(f"attribute_{str(att.get('name', '')).lower()}")
+            for term in _as_list(att.get("terms")):
+                if slug and isinstance(term, dict) and str(term.get("slug")) == slug:
+                    label = html.unescape(str(term.get("name")))
+    if not isinstance(label, str):
+        return
+    norm = lambda s: re.sub(r"\s+", " ", s).strip().lower()
+    for i, (lab, r) in enumerate(sz.variants):
+        if norm(lab) == norm(label) or norm(label).startswith(norm(lab)) or norm(lab).startswith(norm(label)):
+            if i:
+                sz.variants.insert(0, sz.variants.pop(i))
+            if r is not None:
+                r.notes.append("the size picked in the link")
+            return
 
 
 # --- the language model (layer 4) ------------------------------------------------------------------------------------
@@ -1518,7 +1795,7 @@ def _llm_json(output: str):
     for c in cands:
         try:
             data = json.loads(c.strip())
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, RecursionError):
             continue
         if isinstance(data, dict):
             return data
@@ -1622,7 +1899,7 @@ def _run_llm(url: str, lines: list[str], ctx: _Ctx, reserve, release, costs_file
         p = urlsplit(url)
         host_slug = _deps["slugify"](p.hostname or "page") or "page"
         _deps["append_cost"](costs_file, stamp, f"product-{host_slug}"[:64].rstrip("-"), "product:llm", cost, mock,
-                             urlunsplit((p.scheme, p.netloc, p.path, "", "")))
+                             _public_url(urlunsplit((p.scheme, p.netloc, p.path, "", ""))))
         output = answer.get("output") if isinstance(answer, dict) else None
         data = _llm_json(output)
         if data is None:
@@ -1641,6 +1918,7 @@ def _run_llm(url: str, lines: list[str], ctx: _Ctx, reserve, release, costs_file
 # --- read() ----------------------------------------------------------------------------------------------------------
 def read(url: str, llm: bool = True, reserve=None, release=None, costs_file=None) -> tuple[int, dict]:
     """POST /api/library/product (§2.11). (status, body); never raises."""
+    _tl.deadline = None
     try:
         return 200, _read(url, llm, reserve, release, costs_file)
     except ProductError as e:
@@ -1648,7 +1926,7 @@ def read(url: str, llm: bool = True, reserve=None, release=None, costs_file=None
     except TimeoutError:
         return 422, {"error": TIMEOUT}
     except Exception as e:  # noqa: BLE001 - a page this reader can't handle is a 422, never a 500
-        return 422, {"error": f"couldn't read that page ({type(e).__name__}): paste the image link and size instead"}
+        return 422, {"error": "couldn't read that page: paste the image link and size instead"}
 
 
 def _read(url: str, llm: bool, reserve, release, costs_file) -> dict:
@@ -1660,17 +1938,20 @@ def _read(url: str, llm: bool, reserve, release, costs_file) -> dict:
         msg = BLOCKED[:-1] + ", or try again in a minute." if r.status == 429 else BLOCKED
         raise ProductError(422, msg, blocked=True)
     if r.status != 200:
-        raise ProductError(422, f"the page answered HTTP {r.status}: check the link opens in a browser")
+        if r.status in (404, 410):
+            raise ProductError(422, "the shop says this page doesn't exist: check the link opens in a browser")
+        raise ProductError(422, f"the shop couldn't show this page (error {r.status}): check the link opens in a browser")
     ctype = r.ctype
     if ctype.startswith("image/"):
-        raise ProductError(422, "that's a picture: use Image link")
+        raise ProductError(422, "that's a picture, not a product page: use Image link for it")
     head = r.body[:512].lstrip().lower()
     if ctype not in ("text/html", "application/xhtml+xml") and not (not ctype and (head.startswith(b"<!doctype html") or head.startswith(b"<html"))):
-        raise ProductError(422, f"that link isn't a web page (it's {ctype or 'untyped'}): paste the product page's link")
+        raise ProductError(422, "that link isn't a web page: paste the product page's link")
     if r.cut:
         warnings.append("the page is over 10 MB: only its first 10 MB were read")
-    raw = r.body.decode(_charset(r.header("content-type"), r.body), "replace")
-    doc = _parse_page(raw, r.url)
+    raw = _decode(r.body, _charset(r.header("content-type"), r.body))
+    _tl.deadline = time.monotonic() + EXTRACT_S  # the work after the download is bounded too
+    doc = _parse_page(raw, _public_url(r.url))
     if _is_robot_check(doc, raw):
         raise ProductError(422, BLOCKED, blocked=True)
     _feeds(doc, raw, budget, warnings)
@@ -1725,7 +2006,7 @@ def _extract(doc: _Doc, raw: str, warnings: list[str], llm: bool, reserve, relea
     for v in _mprop(micro, "category"):
         if isinstance(v, str):
             texts.append(("microdata", v))
-    is_rug = any(_RUG.search(t) for _, t in texts if t)
+    is_rug = any(_category_of(t) == "rug" for _, t in texts if t)
     category = None
     if is_rug:
         category = "rug"
@@ -1813,19 +2094,26 @@ def _extract(doc: _Doc, raw: str, warnings: list[str], llm: bool, reserve, relea
         extra += _text_lines(p["description"])
     script_lines = _script_strings(page.scripts)
     all_lines = lines + extra + script_lines
-    hint = _unit_hint(all_lines)
-    ctx = _Ctx(is_rug, hint, warnings)
+    hint = _unit_hint(all_lines + page.out_lines)  # how the page measures is page-wide (Zennova's form is in a modal)
+    ctx = _Ctx(is_rug, hint, warnings, is_bed=category == "bed")
     sz = _Sizes()
     _shopify_sizes(doc, ctx, sz, used)
     _woo_sizes(doc, ctx, sz, used)
     _jsonld_sizes(doc, ctx, sz, used)
     _microdata_sizes(doc, ctx, sz, used)
+    _link_variant(doc, sz, warnings)
     sz.cands += sz.feed
     if not any(r for _, r in sz.variants) and not sz.cands:
         text = _text_readings(all_lines, ctx)
+        if not text and page.out_lines:
+            # a theme that marks its whole product area like a "related" block: its text is all there is
+            text = _text_readings(page.out_lines, ctx)
         if text:
             sz.cands += text
             used.add("text")
+    if sz.variants and not any(r for _, r in sz.variants):
+        labels = ", ".join(lab for lab, _ in sz.variants[:4]) + (", …" if len(sz.variants) > 4 else "")
+        warnings.append(f"the shop's sizes ({labels}) couldn't be read as sizes: pick yours and type it")
     cost, mock = 0.0, False
     have = any(r for _, r in sz.variants) or sz.cands
     if not have:
@@ -1845,7 +2133,7 @@ def _extract(doc: _Doc, raw: str, warnings: list[str], llm: bool, reserve, relea
     # --- candidates: the shop's sizes first, then the layers in order; rugs get their thickness
     seq = [r for _, r in sz.variants if r] + sz.cands
     if is_rug:
-        th = _thickness(all_lines)
+        th = _thickness(all_lines, hint)
         for r in seq:
             if r.h is None:
                 if th:
@@ -1857,8 +2145,15 @@ def _extract(doc: _Doc, raw: str, warnings: list[str], llm: bool, reserve, relea
                     r.notes.append("thickness not on the page: 1 cm assumed")
     cands: list[Reading] = []
     for r in seq:
-        if not any(c.same(r) for c in cands):
+        twin = next((i for i, c in enumerate(cands) if c.same(r)), None)
+        if twin is None:
             cands.append(r)
+            continue
+        c = cands[twin]
+        if c.source == r.source and c.unit in ("in", "ft") and r.unit in ("cm", "mm", "m"):
+            cands[twin] = r  # "6'7\" x 9'10\" (200 x 300 cm)": the metric reading
+        elif c.source == r.source and r.quote and not _INTRO.search(c.quote or "") and _INTRO.search(r.quote):
+            c.quote, c.label = r.quote, r.label
     cands = cands[:MAX_CANDIDATES]
     variants = []
     if len(sz.variants) > 1:
