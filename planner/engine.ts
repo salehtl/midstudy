@@ -963,9 +963,15 @@ function disposeBuilt(b: { obj: THREE.Object3D | null; splat: SplatMesh | null }
   disposeChild(b.obj)
   if (b.splat) { try { b.splat.dispose() } catch { /* ignore */ } }
 }
-// The pieces' own meshes go on DEPTH_LAYER too (engine.passes.ts): a splat pass that draws its own depth draws them.
+// The pieces' meshes that write depth in the furniture pass go on DEPTH_LAYER too (engine.passes.ts), so a splat pass
+// that draws its own depth (the WebGPU swap) draws exactly them: not the placeholder's see-through fill, not the
+// contact shadows, not a splat item's hidden stand-in (invisible) or its shadow-only caster (added after this).
 function onDepthLayer(obj: THREE.Object3D): void {
-  obj.traverse((o) => { if (o instanceof THREE.Mesh) o.layers.enable(DEPTH_LAYER) })
+  obj.traverse((o) => {
+    if (!isMesh(o)) return
+    const mats = Array.isArray(o.material) ? o.material : [o.material]
+    if (mats.some((m) => m.depthWrite)) o.layers.enable(DEPTH_LAYER)
+  })
 }
 // Puts a built child (buildChild) into the item's group, with its contact shadow; detachBuilt takes it out again.
 function attachBuilt(r: ItemRec, b: Built): void {
@@ -974,7 +980,6 @@ function attachBuilt(r: ItemRec, b: Built): void {
   r.splat = b.splat
   r.render = b.render
   r.noGlb = libLogic.hasNoGlb(r.missing, libView(r.lib).glb, r.render)
-  onDepthLayer(b.obj)
   r.group.add(b.obj)
   lights.prepare(b.obj)
   if (r.splat) {
@@ -982,6 +987,7 @@ function attachBuilt(r: ItemRec, b: Built): void {
     r.caster = lights.caster(b.obj) // the hidden GLB or box casts the splat's floor shadow (§4.8)
     r.group.add(r.caster)
   }
+  onDepthLayer(b.obj)
   r.shadow = makeContactShadow(b.box)
   r.group.add(r.shadow)
   syncShadow(r)
