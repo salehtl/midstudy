@@ -150,7 +150,7 @@ function zerosBefore(g: readonly number[], n: number): boolean {
 
 /** The IPv4 address an IPv6 one stands for, as v1 converted them before checking: IPv4-mapped (`::ffff:a.b.c.d`),
  *  IPv4-compatible and `::`/`::1` (below 2^32), NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`); else null. */
-export function embeddedIpv4(g: readonly number[]): number | null {
+function embeddedIpv4(g: readonly number[]): number | null {
   if (zerosBefore(g, 5) && group(g, 5) === 0xffff) return group(g, 6) * 65536 + group(g, 7)
   if (zerosBefore(g, 6)) return group(g, 6) * 65536 + group(g, 7)
   if (group(g, 0) === 0x64 && group(g, 1) === 0xff9b && group(g, 2) === 0 && group(g, 3) === 0 && group(g, 4) === 0 && group(g, 5) === 0) {

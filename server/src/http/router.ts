@@ -25,7 +25,7 @@ export interface ApiRoute {
 }
 
 /** The params of `path` in `apiPath` when it matches the whole of it, else null. */
-export function matchPath(path: RegExp, apiPath: string): readonly string[] | null {
+function matchPath(path: RegExp, apiPath: string): readonly string[] | null {
   const m = path.exec(apiPath)
   if (m?.index !== 0 || m[0].length !== apiPath.length) return null
   // An unmatched group is undefined at run time, whatever lib.d.ts says.

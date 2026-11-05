@@ -198,7 +198,7 @@ function hexValue(c: number): number {
 }
 
 /** UTF-8 bytes to text, each maximal ill-formed subsequence one U+FFFD (Python's and WHATWG's "replace"). */
-export function utf8Decode(bytes: readonly number[]): string {
+function utf8Decode(bytes: readonly number[]): string {
   let out = ''
   let i = 0
   while (i < bytes.length) {

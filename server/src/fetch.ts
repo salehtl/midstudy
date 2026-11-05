@@ -364,7 +364,7 @@ function contentType(headers: Readonly<Record<string, string>>): string {
 }
 
 /** v1's sentence for each way an image download stops. */
-export function imageFetchMessage(f: FetchFailure): string {
+function imageFetchMessage(f: FetchFailure): string {
   switch (f.kind) {
     case 'bad-url': return "that link isn't a valid web address: paste the image's web address"
     case 'scheme': return "only http and https links work: paste the image's web address"

@@ -22,7 +22,7 @@ export interface StaticDirs {
 const NOT_FOUND = 'File not found'
 
 /** The file a static route names, or null for none. */
-export function routeFile(route: StaticRoute, dirs: StaticDirs): string | null {
+function routeFile(route: StaticRoute, dirs: StaticDirs): string | null {
   switch (route.kind) {
     case 'planner': return route.path === '' ? dirs.planner : path.join(dirs.planner, ...route.path.split('/'))
     case 'library-json': return path.join(dirs.library, 'library.json')

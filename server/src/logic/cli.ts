@@ -5,12 +5,12 @@ import { pyRepr } from '../../../common/logic/pyfmt.ts'
 import { pyFloat } from '../../../common/logic/csv.ts'
 
 /** v1's default --calib. */
-export const DEFAULT_CALIB = 'uv run --project calib midstudy-calib'
+const DEFAULT_CALIB = 'uv run --project calib midstudy-calib'
 /** v1's default --midstudy-add. */
-export const DEFAULT_MIDSTUDY_ADD = 'uv run --project pipeline midstudy-add'
+const DEFAULT_MIDSTUDY_ADD = 'uv run --project pipeline midstudy-add'
 
 /** The parsed flags, before paths are resolved. */
-export interface CliOptions {
+interface CliOptions {
   readonly port: number
   readonly host: string
   readonly scenesDir: string

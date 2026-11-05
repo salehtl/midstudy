@@ -3,7 +3,7 @@
 // `20261105-213609`, the spend cap's day `2026-11-05`.
 
 /** A UTC calendar time. */
-export interface UtcParts {
+interface UtcParts {
   readonly year: number
   readonly month: number
   readonly day: number
@@ -14,7 +14,7 @@ export interface UtcParts {
 }
 
 /** The UTC calendar fields of `epochMs` (proleptic Gregorian; H. Hinnant's civil_from_days). */
-export function utcParts(epochMs: number): UtcParts {
+function utcParts(epochMs: number): UtcParts {
   const t = Math.floor(epochMs)
   const days = Math.floor(t / 86400000)
   const msOfDay = t - days * 86400000

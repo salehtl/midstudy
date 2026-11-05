@@ -68,12 +68,12 @@ export function folderLocation(parts: TargetParts): string {
 }
 
 /** Python's `html.escape(s, quote=False)`. */
-export function htmlEscape(s: string): string {
+function htmlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /** http.server's long explanation of a status (`BaseHTTPRequestHandler.responses[code][1]`). */
-export function explainStatus(code: number): string {
+function explainStatus(code: number): string {
   switch (code) {
     case 400: return 'Bad request syntax or unsupported method'
     case 403: return 'Request forbidden -- authorization will not help'

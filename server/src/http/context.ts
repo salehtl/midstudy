@@ -10,13 +10,13 @@ import { queryValue } from '../logic/url.ts'
 import { answerViolation } from '../strict.ts'
 
 /** v1 MAX_BODY: a JSON body may be 32 MiB. */
-export const MAX_BODY = 32 * 1024 * 1024
+const MAX_BODY = 32 * 1024 * 1024
 /** v1 MAX_DRAIN: an early error reads (and drops) a body up to this, so the client sees the answer. */
-export const MAX_DRAIN = 256 * 1024 * 1024
+const MAX_DRAIN = 256 * 1024 * 1024
 /** v1 DRAIN_SECONDS. */
-export const DRAIN_MS = 60 * 1000
+const DRAIN_MS = 60 * 1000
 /** v1 EARLY_DRAIN_SECONDS: after a 411 or 413 that was already sent. */
-export const EARLY_DRAIN_MS = 5 * 1000
+const EARLY_DRAIN_MS = 5 * 1000
 
 /** A handler's way to answer `{"error": message}` with a status (v1 raised ValueError for its 400s). */
 export class HttpError extends Error {
@@ -416,7 +416,7 @@ export class RequestContext {
 
 /** JSON nested deeper than Python's json module reads (its recursion limit, about 1000): v1 answered "it is nested
  *  too deeply". Brackets inside strings don't count. */
-export function jsonTooDeep(text: string, limit = 990): boolean {
+function jsonTooDeep(text: string, limit = 990): boolean {
   let depth = 0
   let inString = false
   for (let i = 0; i < text.length; i++) {

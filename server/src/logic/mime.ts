@@ -46,7 +46,7 @@ const TYPES: ReadonlyMap<string, string> = new Map([
 ])
 
 /** `posixpath.splitext(path)[1]`: the last component's extension, `''` for none or a leading-dot name. */
-export function extension(path: string): string {
+function extension(path: string): string {
   const name = path.slice(path.lastIndexOf('/') + 1)
   const dot = name.lastIndexOf('.')
   if (dot <= 0) return ''

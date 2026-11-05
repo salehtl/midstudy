@@ -3,7 +3,7 @@
 import { fmtCost, pyStrip } from './pyfmt.ts'
 
 /** The header v1 and midstudy-add write. */
-export const COSTS_HEADER: readonly string[] = ['date', 'id', 'engine', 'cost_usd', 'mock', 'input']
+const COSTS_HEADER: readonly string[] = ['date', 'id', 'engine', 'cost_usd', 'mock', 'input']
 
 /** One cost row: what was paid (or mocked) for what. */
 export interface CostRow {
@@ -21,7 +21,7 @@ export interface CostRow {
 
 /** A field as Python's `csv.writer` (QUOTE_MINIMAL) writes it: quoted when it holds `,`, `"`, `\r` or `\n`, quotes
  *  doubled. */
-export function csvField(v: string): string {
+function csvField(v: string): string {
   if (!/[,"\r\n]/.test(v)) return v
   return '"' + v.replace(/"/g, '""') + '"'
 }
@@ -32,7 +32,7 @@ export function csvLine(fields: readonly string[]): string {
 }
 
 /** The fields of a cost row as v1 wrote them: `fmt_cost` for the amount, `true`/`false` for mock. */
-export function costFields(row: CostRow): string[] {
+function costFields(row: CostRow): string[] {
   return [row.date, row.id, row.engine, fmtCost(row.costUsd), row.mock ? 'true' : 'false', row.input]
 }
 

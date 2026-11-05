@@ -3,7 +3,7 @@
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 
-/** `^[a-z0-9][a-z0-9-]{0,63}$` over the whole string (a JS `$` without the m flag never matches before a newline, so
+/** @public `^[a-z0-9][a-z0-9-]{0,63}$` over the whole string (a JS `$` without the m flag never matches before a newline, so
  *  `evil\n` is not a slug, as v1's `\Z`). */
 export function isSlug(s: string): boolean {
   return SLUG.test(s)
@@ -11,7 +11,7 @@ export function isSlug(s: string): boolean {
 
 /** v1's `slugify` after its NFKD step: non-ASCII dropped, lowercased, every run of other characters one `-`, no `-` at
  *  either end, at most 64 characters. */
-export function slugifyDecomposed(nfkd: string): string {
+function slugifyDecomposed(nfkd: string): string {
   const ascii = nfkd.replace(/[^\x00-\x7f]/g, '').toLowerCase()
   const dashed = ascii.replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').replace(/-+$/, '')
   return dashed.slice(0, 64).replace(/-+$/, '')

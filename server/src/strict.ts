@@ -44,7 +44,7 @@ export async function enableStrict(): Promise<void> {
   contract = { validate, routes }
 }
 
-/** Whether answers and files are being checked. */
+/** @public Whether answers and files are being checked. */
 export function strictOn(): boolean {
   return contract !== null
 }
@@ -54,7 +54,7 @@ function report(v: ContractViolation, where: string): void {
 }
 
 /** The violation of `data` against the schema at `uri`, or null (also when strict mode is off). */
-export function violationOf(uri: SchemaUri, data: unknown): ContractViolation | null {
+function violationOf(uri: SchemaUri, data: unknown): ContractViolation | null {
   if (contract === null) return null
   const v = contract.validate.violation(uri, data)
   return v === null ? null : new ContractViolation(v.schema, v.path === '' ? '/' : v.path, v.message)
@@ -88,7 +88,7 @@ export function answerViolation(method: string, target: string, status: number, 
   return v
 }
 
-/** Throws ContractViolation when `data` breaks the schema at `uri` (strict mode), with a stderr line naming `what`. */
+/** @public Throws ContractViolation when `data` breaks the schema at `uri` (strict mode), with a stderr line naming `what`. */
 export function assertConforms(uri: SchemaUri, data: unknown, what: string): void {
   const v = violationOf(uri, data)
   if (v === null) return

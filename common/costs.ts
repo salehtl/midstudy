@@ -5,7 +5,7 @@ import { atomicWrite } from './files.ts'
 import { costsLockDir, withLock } from './lock.ts'
 import { costsText, type CostRow } from './logic/csv.ts'
 
-export { COSTS_HEADER, type CostRow } from './logic/csv.ts'
+export type { CostRow } from './logic/csv.ts'
 
 function readText(file: string): string | null {
   try {

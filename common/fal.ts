@@ -11,10 +11,10 @@ import { dotenvValue, flagOn, mockOn, mockSlug } from './logic/env.ts'
 
 export { mockSlug } from './logic/env.ts'
 
-/** v1's sentence when a paid call needs a key and there is none (503). */
+/** @public v1's sentence when a paid call needs a key and there is none (503). */
 export const NO_KEY = 'FAL_KEY not set: add FAL_KEY=... to midstudy/.env'
 /** v1's FAL_TIMEOUT: a synchronous call may take 300 s. */
-export const FAL_TIMEOUT_MS = 300 * 1000
+const FAL_TIMEOUT_MS = 300 * 1000
 
 /** A failed fal call, with the sentence v1 answered (502). */
 export class FalError extends Error {

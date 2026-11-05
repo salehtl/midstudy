@@ -32,11 +32,11 @@ export class Busy extends Error {
 }
 
 /** The protocol's numbers. */
-export const LOCK_POLL_MS = 50
+const LOCK_POLL_MS = 50
 /** The tool timeout: no holder may hold longer (midstudy-add's 3600 s). */
-export const LOCK_STALE_MS = 3600 * 1000
+const LOCK_STALE_MS = 3600 * 1000
 /** How long a lock folder may have no owner.json before it counts as abandoned. */
-export const LOCK_GRACE_MS = 10 * 1000
+const LOCK_GRACE_MS = 10 * 1000
 
 /** How to take a lock. */
 export interface LockOptions {
