@@ -16,4 +16,6 @@ pub mod half;
 pub mod mask;
 pub mod png;
 pub mod pngenc;
+#[cfg(kani)]
+mod proofs;
 pub mod sh;

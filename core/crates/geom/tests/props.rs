@@ -20,6 +20,16 @@ use midstudy_geom::mat::{mat_mul, rot_x, rot_z};
 use midstudy_geom::{Camera, CameraBlock, DEFAULT_CAMERA};
 use proptest::prelude::*;
 
+/// `cases` cases natively; under Miri (`cargo miri test`, core/miri.txt) 4, since every case is interpreted. No
+/// failure file, as before (and Miri's isolation has no `getcwd`, which proptest needs to find one).
+fn config(cases: u32) -> ProptestConfig {
+    ProptestConfig {
+        cases: if cfg!(miri) { 4 } else { cases },
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    }
+}
+
 fn camera_block() -> impl Strategy<Value = CameraBlock> {
     (
         FOV_RANGE.0..=FOV_RANGE.1,
@@ -61,7 +71,7 @@ fn any_f64() -> impl Strategy<Value = f64> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 4000, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(config(4000))]
 
     /// project ∘ photoToFloor is the identity on pixels at least 1 px below the horizon (and inside a generous frame).
     #[test]

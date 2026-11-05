@@ -33,7 +33,10 @@ pub mod jpeg;
 mod json;
 pub mod meta;
 pub mod path;
+pub mod plan;
 pub mod png;
+#[cfg(kani)]
+mod proofs;
 pub mod slug;
 pub mod sniff;
 pub mod zip;

@@ -21,6 +21,13 @@ pub fn jpeg_strip(bytes: &[u8]) -> Vec<u8> {
     api::jpeg_strip(bytes)
 }
 
+/// See [`api::jpeg_strip_plan`].
+#[wasm_bindgen]
+#[must_use]
+pub fn jpeg_strip_plan(bytes: &[u8]) -> Vec<u8> {
+    api::jpeg_strip_plan(bytes)
+}
+
 /// See [`api::jpeg_frame`].
 #[wasm_bindgen]
 #[must_use]
@@ -47,6 +54,13 @@ pub fn jpeg_passthrough(bytes: &[u8]) -> Vec<u8> {
 #[must_use]
 pub fn png_strip(bytes: &[u8]) -> Vec<u8> {
     api::png_strip(bytes)
+}
+
+/// See [`api::png_strip_plan`].
+#[wasm_bindgen]
+#[must_use]
+pub fn png_strip_plan(bytes: &[u8]) -> Vec<u8> {
+    api::png_strip_plan(bytes)
 }
 
 /// See [`api::png_size`].

@@ -9,8 +9,26 @@
     clippy::cast_possible_truncation
 )]
 
+use midstudy_media::plan::{Piece, Plan};
 use midstudy_media::{base64, datauri, glb, http, jpeg, meta, path, png, slug, sniff, zip};
 use proptest::prelude::*;
+
+/// `cases` cases natively, with proptest's regression file; under Miri (`cargo miri test`, core/miri.txt) 4 cases and
+/// no file: every case is interpreted, and Miri's isolation has no `getcwd`, which proptest needs to find the file.
+fn config(cases: u32) -> ProptestConfig {
+    if cfg!(miri) {
+        ProptestConfig {
+            cases: 4,
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    } else {
+        ProptestConfig {
+            cases,
+            ..ProptestConfig::default()
+        }
+    }
+}
 use regex::Regex;
 
 // --- JPEG ------------------------------------------------------------------------------------------------------------
@@ -149,8 +167,21 @@ fn jpeg_model() -> impl Strategy<Value = (Vec<u8>, Vec<u8>)> {
         })
 }
 
+/// A plan's ranges are inside the input, in increasing order, not touching (adjacent ones are merged).
+fn plan_in_order(plan: &Plan, len: usize) -> bool {
+    let mut last: Option<usize> = None;
+    plan.pieces.iter().all(|p| match p {
+        Piece::Copy { start, end } => {
+            let ok = start < end && *end <= len && last.is_none_or(|l| l < *start);
+            last = Some(*end);
+            ok
+        }
+        Piece::Bytes(b) => !b.is_empty(),
+    })
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
+    #![proptest_config(config(2000))]
 
     /// The model: strip keeps exactly the coding segments, scans (entropy-coded data included), RST/TEM and a plain
     /// JFIF header, in order, and drops everything else.
@@ -165,6 +196,13 @@ proptest! {
         prop_assert_eq!(&again.bytes, &s.bytes);
         prop_assert_eq!(again.removed, jpeg::Removed::default());
         prop_assert!(jpeg::is_clean(&s.bytes));
+        // The plan: ranges of the input in order (and a JFIF header of its own at most), the whole input exactly when
+        // nothing was removed.
+        let (plan, removed) = jpeg::strip_plan(&file).unwrap();
+        prop_assert_eq!(removed, s.removed);
+        prop_assert_eq!(plan.apply(&file), s.bytes.clone());
+        prop_assert_eq!(plan.is_identity(&file), !s.removed.any());
+        prop_assert!(plan_in_order(&plan, file.len()));
     }
 
     /// is_clean is exactly "strip removes nothing but fill bytes".
@@ -247,7 +285,7 @@ fn png_model() -> impl Strategy<Value = (Vec<u8>, Vec<u8>)> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
+    #![proptest_config(config(2000))]
 
     #[test]
     fn png_strip_matches_the_model((file, want) in png_model()) {
@@ -256,6 +294,13 @@ proptest! {
         prop_assert_eq!(s.removed.any(), s.bytes != file);
         prop_assert_eq!(png::strip(&s.bytes).unwrap().bytes, s.bytes.clone());
         prop_assert_eq!(png::size(&s.bytes), Some((7, 5)));
+        let (plan, removed) = png::strip_plan(&file).unwrap();
+        prop_assert_eq!(removed, s.removed);
+        prop_assert_eq!(plan.apply(&file), s.bytes.clone());
+        prop_assert_eq!(plan.is_identity(&file), !s.removed.any());
+        prop_assert!(plan_in_order(&plan, file.len()));
+        let only_copies = plan.pieces.iter().all(|p| matches!(p, Piece::Copy { .. }));
+        prop_assert!(only_copies, "a PNG plan has no bytes of its own");
     }
 
     #[test]
@@ -282,7 +327,7 @@ fn path_text() -> impl Strategy<Value = String> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 4000, ..ProptestConfig::default() })]
+    #![proptest_config(config(4000))]
 
     /// normalize's output starts with `/`, has no `.`, `..` or empty segment (but a final slash), is a fixed point of
     /// resolve, and normalizes to itself when it holds nothing a decoder or the query split would read again.

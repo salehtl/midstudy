@@ -310,14 +310,14 @@ impl core::fmt::Display for GlbError {
 }
 
 /// The chunks of a GLB.
-struct Container<'a> {
-    json: &'a [u8],
-    bin: Option<&'a [u8]>,
-    dropped_chunks: usize,
-    trailing_bytes: usize,
+pub(crate) struct Container<'a> {
+    pub(crate) json: &'a [u8],
+    pub(crate) bin: Option<&'a [u8]>,
+    pub(crate) dropped_chunks: usize,
+    pub(crate) trailing_bytes: usize,
 }
 
-fn read_container(data: &[u8]) -> Result<Container<'_>, GlbError> {
+pub(crate) fn read_container(data: &[u8]) -> Result<Container<'_>, GlbError> {
     if data.len() < 20 || !data.starts_with(MAGIC) {
         return Err(GlbError::NotGlb);
     }
@@ -532,7 +532,7 @@ fn clean_image(bytes: &[u8]) -> Result<(ImageKind, Option<Vec<u8>>), ImageProble
 
 /// `a == b`, as an OR of XORs over 64-byte blocks with no early exit, which vectorizes (in wasm, slice equality is
 /// compiler-builtins' byte-at-a-time `memcmp`).
-fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     const BLOCK: usize = 64;
     if a.len() != b.len() {
         return false;
@@ -722,7 +722,7 @@ fn check_overlaps(edits: &[ViewEdit], views: &[View]) -> Result<(), GlbError> {
 }
 
 /// How a shrinking view's freed bytes are split: `(zero padding kept after the image, bytes removed)`.
-fn split_freed(freed: usize, layout: Layout) -> (usize, usize) {
+pub(crate) fn split_freed(freed: usize, layout: Layout) -> (usize, usize) {
     match layout {
         Layout::InPlace => (freed, 0),
         Layout::Compact => {
@@ -732,7 +732,7 @@ fn split_freed(freed: usize, layout: Layout) -> (usize, usize) {
     }
 }
 
-fn pad4(len: usize) -> usize {
+pub(crate) fn pad4(len: usize) -> usize {
     len.wrapping_neg() & 3
 }
 
@@ -1151,6 +1151,23 @@ pub(crate) mod tests {
 
     use proptest::prelude::*;
 
+    /// `cases` cases natively (with proptest's regression file); 4 and no file under Miri (interpreted, and isolated:
+    /// no `getcwd` to find the file).
+    fn proptest_config(cases: u32) -> ProptestConfig {
+        if cfg!(miri) {
+            ProptestConfig {
+                cases: 4,
+                failure_persistence: None,
+                ..ProptestConfig::default()
+            }
+        } else {
+            ProptestConfig {
+                cases,
+                ..ProptestConfig::default()
+            }
+        }
+    }
+
     /// One bufferView of a generated GLB: an image (a JPEG with `exif` bytes of EXIF, or a PNG with a `text`-byte
     /// tEXt chunk) or plain data, after `gap` bytes of padding.
     #[derive(Clone, Debug)]
@@ -1204,7 +1221,7 @@ pub(crate) mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 500, ..ProptestConfig::default() })]
+        #![proptest_config(proptest_config(500))]
 
         /// Both layouts: every image's bytes become exactly its stripped bytes, every other view keeps its bytes,
         /// every view moves by a multiple of 16 (not at all in place), the output strips to itself, and compact is

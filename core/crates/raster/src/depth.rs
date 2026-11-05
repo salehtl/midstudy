@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn matches_v1s_float32_of_mm_over_1000() {
         // v1: Float32Array element = Number(sample) / 1000, rounded to f32 on store; every 16-bit value.
-        for s in 0..=u16::MAX {
+        for s in (0..=u16::MAX).step_by(if cfg!(miri) { 251 } else { 1 }) {
             #[allow(clippy::cast_possible_truncation)]
             let v1 = (f64::from(s) / 1000.0) as f32;
             assert_eq!(mm_to_m(s, 1.0).to_bits(), v1.to_bits());

@@ -1,4 +1,4 @@
+# cargo-fuzz output; the tracked corpus is fuzz/corpus/<target>/ (seeds: check:fuzz reads it, core/fuzz/minimize.sh writes it)
 target
-corpus
 artifacts
 coverage

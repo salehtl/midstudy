@@ -151,8 +151,10 @@ impl Level<'_> {
         let (x, y) = (s * wf - 0.5, t * hf - 0.5);
         let (x0, y0) = (x.floor(), y.floor());
         let (fx, fy) = (x - x0, y - y0);
-        let ix = |v: f64| v.clamp(0.0, wf - 1.0) as usize;
-        let iy = |v: f64| v.clamp(0.0, hf - 1.0) as usize;
+        // `max` then `min`, not `f64::clamp`: the same texel for every v (NaN gives 0 either way), but no panic path
+        // (clamp asserts its bounds and formats them with `{:?}`, which would link the f64 formatter into the wasm).
+        let ix = |v: f64| v.max(0.0).min(wf - 1.0) as usize;
+        let iy = |v: f64| v.max(0.0).min(hf - 1.0) as usize;
         let (i0, i1, j0, j1) = (ix(x0), ix(x0 + 1.0), iy(y0), iy(y0 + 1.0));
         let texel = |i: usize, j: usize| -> [f64; 3] {
             let k = (j * self.w + i) * 4;
@@ -527,7 +529,17 @@ mod tests {
             env_map(&photo, &spec, &mut [0.0; 3]),
             Err(EnvError::WrongLength)
         );
-        let mut half = vec![0_u16; ENV_WIDTH * ENV_HEIGHT * 4];
+        // v1's full 512 × 256 map natively; a 16 × 8 one under Miri, which interprets every lookup.
+        let spec = if cfg!(miri) {
+            EnvSpec {
+                width: 16,
+                height: 8,
+                ..spec
+            }
+        } else {
+            spec
+        };
+        let mut half = vec![0_u16; spec.width * spec.height * 4];
         assert!(env_map_f16(&photo, &spec, &mut half).is_ok());
     }
 }
