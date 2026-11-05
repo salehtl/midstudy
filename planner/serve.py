@@ -69,13 +69,19 @@ RENDER_MODELS = {
     "kontext": {"endpoint": "fal-ai/flux-pro/kontext", "image_key": "image_url", "cost": lambda mp: 0.04},
     "nano-banana": {"endpoint": "fal-ai/nano-banana/edit", "image_key": "image_urls", "cost": lambda mp: 0.0398},
     "qwen": {"endpoint": "fal-ai/qwen-image-edit", "image_key": "image_url", "cost": lambda mp: round(0.03 * mp, 4)},
+    # OpenAI's model on fal. Billed by tokens, so the price is an estimate: fal's table gives $0.043-0.068 for medium
+    # quality at 1-3.7 MP with one input image; the scene photo is a second one. Reserved and recorded as $0.07.
+    "gpt-image": {"endpoint": "openai/gpt-image-2/edit", "image_key": "image_urls", "cost": lambda mp: 0.07,
+                  "args": {"quality": "medium", "image_size": "auto"}},
 }
+# Models that take the scene photo as image 2 with REFERENCE_RENDER_PROMPT (contract §4.7)
+REFERENCE_MODELS = ("nano-banana", "gpt-image")
 DEFAULT_RENDER_PROMPT = (
     "Turn this 3D planning render into a photorealistic interior photograph. Keep the exact camera angle, "
     "room geometry, and every piece of furniture with its position, size, shape and color. Realistic materials, "
     "soft natural daylight, subtle contact shadows. Do not add, remove or move anything."
 )
-# nano-banana with the scene photo as image 2 (contract §4.7)
+# REFERENCE_MODELS with the scene photo as image 2 (contract §4.7)
 REFERENCE_RENDER_PROMPT = (
     "Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. "
     "Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, "
@@ -2460,7 +2466,7 @@ class Handler(SimpleHTTPRequestHandler):
             if psize and tuple(png_size(mask)) != tuple(psize):
                 w, h = png_size(mask)
                 return self.error_json(HTTPStatus.BAD_REQUEST, f"the mask is {w} x {h}, but it must be the photo's size ({psize[0]} x {psize[1]})")
-        reference = model == "nano-banana" and photo is not None
+        reference = model in REFERENCE_MODELS and photo is not None
         if not prompt or not prompt.strip():
             prompt = REFERENCE_RENDER_PROMPT if reference else DEFAULT_RENDER_PROMPT
         spec = RENDER_MODELS[model]
@@ -2500,7 +2506,7 @@ class Handler(SimpleHTTPRequestHandler):
                 image_arg = [uri(data)] + ([uri(reference)] if reference else [])
             else:
                 image_arg = uri(data)
-            args = {spec["image_key"]: image_arg, "prompt": prompt, "output_format": "jpeg"}
+            args = {spec["image_key"]: image_arg, "prompt": prompt, "output_format": "jpeg", **spec.get("args", {})}
             try:
                 out = fal_call(spec["endpoint"], args, key)
             except FalError as e:

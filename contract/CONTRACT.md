@@ -114,7 +114,7 @@ interface Midstudy {
 
 ### 2.6 Render API (carried; §4.7 adds the scene reference and keep-room)
 
-- `POST /api/render` with `{ "image": "data:image/jpeg;base64,...", "model"?: "kontext" | "nano-banana" | "qwen", "prompt"?: string, "layout"?: string, ...§4.7 }`:
+- `POST /api/render` with `{ "image": "data:image/jpeg;base64,...", "model"?: "kontext" | "nano-banana" | "qwen" | "gpt-image", "prompt"?: string, "layout"?: string, ...§4.7 }`:
   - Calls fal synchronously (`https://fal.run/<endpoint>`, `Authorization: Key $FAL_KEY`) with the image as a data URI. FAL_KEY comes from the environment or `.env`, same rules as the pipeline (§3.3, including `MIDSTUDY_NO_DOTENV`). The key never reaches the browser.
   - The image is used without the metadata it may carry (APP1–APP15, comments, anything after EOI are dropped, and APP0 is kept only as a plain 16-byte JFIF header: a JFIF thumbnail or a JFXX extension, which can hold a whole JPEG with its own EXIF and GPS, is dropped; the image data is not re-encoded): that is what is saved, served and sent to fal. The same holds for `PUT /api/scenes/<name>/thumb` and `PUT /api/library/items/<id>/thumb`.
   - The image's size must be readable from its frame header (fill bytes and the length-less markers TEM and RST0–7 are stepped over): qwen is priced by it, so a composite whose size can't be read is `400`, never guessed.
@@ -130,6 +130,7 @@ interface Midstudy {
 | `kontext` | `fal-ai/flux-pro/kontext` | `image_url`, `prompt`, `output_format: "jpeg"` | $0.04 |
 | `nano-banana` (default) | `fal-ai/nano-banana/edit` | `image_urls`, `prompt`, `output_format: "jpeg"` | $0.0398 |
 | `qwen` | `fal-ai/qwen-image-edit` | `image_url`, `prompt`, `output_format: "jpeg"` | $0.03 × megapixels of the input |
+| `gpt-image` (added 2026-11-05) | `openai/gpt-image-2/edit` | `image_urls`, `prompt`, `output_format: "jpeg"`, `quality: "medium"`, `image_size: "auto"` | $0.07, an estimate: fal bills it by tokens (its table: $0.043–0.068 at medium for 1–3.7 MP with one input image) |
 
 ### 2.7 Layouts (per scene)
 
@@ -517,7 +518,7 @@ Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-
 ### 4.7 Render
 
 - **Capture:** the full photo frame at the photo's resolution (view offset cleared, no UI): photo plus furniture, Look applied to the furniture only, JPEG.
-- `POST /api/render` gains `scene` (required for a reference; `404` unknown) and `layout`. For `nano-banana` with a scene, the server sends `image_urls: [composite, scene photo]` and, unless a prompt is given, the default prompt below. Other models get the composite only, with nook's prompt (§2.6).
+- `POST /api/render` gains `scene` (required for a reference; `404` unknown) and `layout`. For `nano-banana` and `gpt-image` with a scene, the server sends `image_urls: [composite, scene photo]` and, unless a prompt is given, the default prompt below. Other models get the composite only, with nook's prompt (§2.6).
 - **Default prompt (with the reference):** *"Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or move anything."*
 - **Output size:** nano-banana/edit snaps to about 1 MP (measured: 2000 × 1125 in → 1344 × 768 out) and the framing drifts by 1–2 % of the width, so the output is never pixel-aligned with the photo. The render is shown at its own size, not upscaled.
 - **Keep room exact** (render dialog toggle `keep-room`, **default on** since the live check on 2026-11-05, PLAN.md §8; the hook's `renderView()` still defaults `keepRoom` to false): the request also carries `keep_room: true` and `mask`, a PNG data URI at the photo's size (items white on black, dilated by 3 % of the photo width, more below each item for its shadow). After fal returns, the server writes the output as `<name>-raw.jpg` and runs `<calib> align <scene photo.jpg> <name>-raw.jpg <mask> --out <name>.jpg`; when `applied` is false, `<name>.jpg` is a copy of the raw output and the meta says why. Without keep-room there is no `-raw.jpg`.

@@ -2325,12 +2325,15 @@ function dilate(src, w, h, left, right, up, down) {
 }
 
 // --- render (contract §2.6, §4.7) ---------------------------------------------------------------------------------------
-// First entry is the default. Nano Banana takes the scene photo as a reference (image 2).
+// First entry is the default. Nano Banana and GPT Image take the scene photo as a reference (image 2).
+// GPT Image is billed by tokens on fal; $0.07 is the server's estimate (serve.py RENDER_MODELS).
 export const RENDER_MODELS = {
   'nano-banana': { label: 'Nano Banana edit', price: () => 0.0398 },
   kontext: { label: 'FLUX.1 Kontext [pro]', price: () => 0.04 },
   qwen: { label: 'Qwen Image Edit', price: (mp) => 0.03 * mp },
+  'gpt-image': { label: 'GPT Image 2 edit', price: () => 0.07 },
 }
+export const REFERENCE_MODELS = ['nano-banana', 'gpt-image']
 export const fmtUsd = (v) => `$${Math.abs(v * 100 - Math.round(v * 100)) < 1e-6 ? v.toFixed(2) : v.toFixed(4)}`
 export function renderPrice(model, shot) { return RENDER_MODELS[model].price(shot ? (shot.width * shot.height) / 1e6 : 1) }
 let renders = []

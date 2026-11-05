@@ -76,7 +76,7 @@ export function dayDate(v) {
 }
 
 export const money = (v) => `$${(Number(v) || 0).toFixed(2)}`
-const SHORT_MODEL = { 'nano-banana': 'Nano Banana', kontext: 'FLUX Kontext', qwen: 'Qwen' }
+const SHORT_MODEL = { 'nano-banana': 'Nano Banana', kontext: 'FLUX Kontext', qwen: 'Qwen', 'gpt-image': 'GPT Image' }
 export const modelShort = (m) => SHORT_MODEL[m] || RENDER_MODELS[m]?.label || m || ''
 export const VIEW_WORD = { orbit: 'Orbit', seated: 'Seated', standing: 'Standing' }
 
