@@ -63,8 +63,10 @@ def synth(rng):
         elif kind < 0.7:
             parts.append(f + bytes([0xFF, rng.choice([0x01] + list(range(0xD0, 0xD8)))]))
         else:
+            # entropy-coded data from empty to several 64-byte blocks (the Rust scans for FF a block at a time)
+            n = rng.randrange(0, 80) if rng.random() < 0.7 else rng.randrange(60, 700)
             parts.append(f + seg(0xDA, bytes(rng.randrange(256) for _ in range(rng.randrange(1, 12)))) +
-                         ecs(rng, rng.randrange(0, 80)))
+                         ecs(rng, n))
     parts.append(fill() + b"\xff\xd9")
     if rng.random() < 0.3:
         parts.append(bytes(rng.randrange(256) for _ in range(rng.randrange(1, 40))))

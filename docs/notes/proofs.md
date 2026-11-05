@@ -190,13 +190,14 @@ constant-stack scan splitter proved equal to the specification) and a 50-line Ru
 same generated corpus, and every file's outcome (ok or the error kind), JPEG `is_clean`, and the stripped bytes must
 be identical.
 
-Measured (2026-11-05, k-media's crate at `v2-k-media` a30feda, extracted to scratch because the crate is not on `v2`
-yet): JPEG 30,076 files (the 8 JPEG fixtures, each with metadata injected 5 ways and mutated, 20,000 synthetic JPEGs
-with APP0 JFIF/JFXX, APP1–15, COM, fill bytes, TEM/RST, scans with stuffed bytes and restarts, trailing bytes, and
-10,000 mutations): **all identical** (21,929 stripped, 8,147 refused, every error kind hit). Also 45,076 files in an
-earlier run: identical. PNG 30,079 files (15 PNG fixtures with metadata chunks injected, 20,000 synthetic chunk
-streams, 10,000 mutations): **all identical** (21,495 stripped; NoEnd, NotPng, Truncated hit). Lean model speed:
-about 4,000 files a second.
+Measured (2026-11-05, k-media's crate at `v2-k-media` cb444c5, its latest, with the 64-byte-block `find_ff` scan;
+extracted to scratch because the crate is not on `v2` yet): JPEG 30,076 files (the 8 JPEG fixtures, each with
+metadata injected 5 ways and mutated, 20,000 synthetic JPEGs with APP0 JFIF/JFXX, APP1–15, COM, fill bytes, TEM/RST,
+scans of 0–700 bytes with stuffed bytes and restarts, trailing bytes, and 10,000 mutations): **all identical** (22,043
+stripped, 8,033 refused, every error kind hit). PNG 30,079 files (15 PNG fixtures with metadata chunks injected,
+20,000 synthetic chunk streams, 10,000 mutations): **all identical** (21,495 stripped; NoEnd, NotPng, Truncated
+hit). Earlier runs against a30feda (before `find_ff`): 45,076 and 30,076 JPEG, 30,079 PNG, all identical. Lean model
+speed: about 4,000 files a second.
 
 ## Requests to other tracks
 
