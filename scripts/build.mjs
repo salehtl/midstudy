@@ -134,9 +134,11 @@ async function buildWasm() {
   return withLock('wasm', async () => {
     const outputsOf = () => WASM_CRATES.flatMap((c) => walk(c.out).filter((f) => !path.basename(f).startsWith('.')))
     if (stampCurrent('wasm', { key })) return `wasm: up to date (${WASM_CRATES.map((c) => rel(c.out)).join(', ')})`
-    run('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown', '--locked',
+    // --locked once core/Cargo.lock exists (it is shared-append: the kernel tracks commit it with their crates).
+    const locked = fs.existsSync(path.join(CORE, 'Cargo.lock')) ? ['--locked'] : []
+    run('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown', ...locked,
       ...WASM_CRATES.flatMap((c) => ['-p', c.crate])], { cwd: CORE })
-    const meta = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', '--locked'], { cwd: CORE, encoding: 'utf8', maxBuffer: 64 << 20 }))
+    const meta = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', ...locked], { cwd: CORE, encoding: 'utf8', maxBuffer: 64 << 20 }))
     const targetDir = meta.target_directory
     const written = []
     for (const c of WASM_CRATES) {

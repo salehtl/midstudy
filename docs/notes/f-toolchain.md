@@ -95,7 +95,7 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 
 | Check | What it runs | Today, on this branch |
 |---|---|---|
-| types | `tsc -b` over each `tsconfig.<area>.json` that has `.ts` files; builds the wasm first when `core/js` has TS | ok, nothing to check (probe: two areas checked in 1.6 s, `.js` to `.ts` and `.ts` specifiers resolved) |
+| types | `tsc -b` over each `tsconfig.<area>.json` that has `.ts` files; builds the wasm first when `core/js` has TS | ok, nothing to check (probe .ts files in the planner and server areas passed: `.js` specifiers resolved to `.ts` in the planner, `.ts` specifiers in the server, and `node server/src/probe.ts` ran directly) |
 | lint | `eslint . --max-warnings 0`: strict-type-checked + stylistic-type-checked; `no-explicit-any`, `no-non-null-assertion`, `consistent-type-assertions: never` (`as const` allowed), `ban-ts-comment` on ts-ignore/ts-expect-error/ts-nocheck | ok, nothing to check (probe file: all 5 planted violations reported, `as const` not) |
 | dead | `knip --no-config-hints` | ok |
 | gen | `scripts/gen-contract.mjs`, then `git diff` and untracked files in `contract/gen/` | ok, nothing to check (no script yet) |
@@ -103,7 +103,7 @@ lint, dead, tscert, py, rust, fuzz, proofs.
 | py | pyright in strict mode (calib's own `[tool.pyright]` when it has one, else `scripts/pyright/pyrightconfig.json`) and `ruff check` on `calib/`; `uv sync --project calib --frozen` first when there is no venv | **FAIL: 1297 pyright-strict errors, 7 ruff errors on v1 calib** (the calib track is typing it) |
 | rust | `cargo fmt --check`, `clippy --workspace --all-targets -- -D warnings`, `cargo test`; Miri through `.#nightly` on the crates in `core/miri.txt` (sysroot in `build/miri/`); `cargo kani` when a `#[kani::proof]` exists | ok, nothing to check (probe workspace: fmt caught an unformatted file; then fmt, clippy, 1 test, Miri on `media` and Kani all passed in 50 s) |
 | fuzz | for each `fuzz/Cargo.toml` under `core/`: every `cargo fuzz list` target for `MIDSTUDY_FUZZ_SECONDS` (default 60), new corpus and crashes in `build/fuzz/`, the tracked corpus read as seeds | ok, nothing to check (probe target: 10 s, no crash) |
-| proofs | `lake build` in `proofs/`; no `sorry`/`admit` (comments and strings stripped), no `axiom` missing from `proofs/axioms.txt`, no "declaration uses 'sorry'" | ok, nothing to check |
+| proofs | `lake build` in `proofs/`; no `sorry`/`admit` (comments and strings stripped), no `axiom` missing from `proofs/axioms.txt`, no "declaration uses 'sorry'" | ok, nothing to check (probe Lean project with Lean 4.29.1: ok in 1.8 s; a planted `sorry` and `axiom` → FAIL, exit 1) |
 | ownership | `scripts/check-ownership.mjs` for `MIDSTUDY_TRACK`, else the track of a `v2-<track>` branch | ok (f-toolchain) |
 
 ## Go / no-go

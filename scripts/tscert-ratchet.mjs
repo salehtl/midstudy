@@ -100,15 +100,16 @@ const jobsFile = path.join(ROOT, 'build/tscert/jobs.json')
 fs.mkdirSync(path.dirname(jobsFile), { recursive: true })
 fs.writeFileSync(jobsFile, JSON.stringify(jobs.map((j) => ({ ...j, file: rel(j.file), project: rel(j.project) }))))
 const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'flake.lock'), 'utf8')).nodes.nixpkgs.locked
-const inputDirs = ['tscert', 'planner/logic', 'server/src/logic', 'pipeline/src/logic', 'contract/gen', ...new Set(jobs.map((j) => rel(path.dirname(j.file))))]
+// Only what a check reads: a README or a report beside them must not invalidate the cached result.
+const inputDirs = ['planner/logic', 'server/src/logic', 'pipeline/src/logic', 'contract/gen', ...new Set(jobs.map((j) => rel(path.dirname(j.file))))]
 const nixList = (xs) => `[ ${xs.map((x) => JSON.stringify(x)).join(' ')} ]`
 const expr = `
 let
-  root = ${ROOT};
+  root = /. + ${JSON.stringify(ROOT)};
   pkgs = (builtins.getFlake "github:${lock.owner}/${lock.repo}/${lock.rev}").legacyPackages.\${builtins.currentSystem};
   lib = pkgs.lib;
-  t = import ${ROOT}/nix/tscert.nix { inherit pkgs; };
-  files = ${nixList(['package.json', 'tsconfig.base.json', 'tsconfig.planner.json', 'tsconfig.server.json', 'tsconfig.pipeline.json', 'scripts/tscert.mjs', 'build/tscert/jobs.json'])};
+  t = import (root + "/nix/tscert.nix") { inherit pkgs; };
+  files = ${nixList(['package.json', 'tsconfig.base.json', 'tsconfig.planner.json', 'tsconfig.server.json', 'tsconfig.pipeline.json', 'scripts/tscert.mjs', 'build/tscert/jobs.json', ...new Set(jobs.map((j) => rel(j.project)))])};
   dirs = ${nixList(inputDirs)};
   skip = ${nixList(['tscert/report.json', 'tscert/experiments/report.json'])};
   rel = p: lib.removePrefix (toString root + "/") (toString p);

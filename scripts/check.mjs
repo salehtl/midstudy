@@ -20,6 +20,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
+let ts
+try { ts = (await import('typescript')).default } catch { console.error('check: typescript missing: run `nix develop -c npm install`'); process.exit(1) }
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
 const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tscert', 'py', 'rust', 'fuzz', 'proofs']
@@ -70,11 +72,11 @@ const checks = {
   },
 
   types() {
-    const areas = JSON.parse(fs.readFileSync(path.join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '')).references.map((r) => r.path)
+    const areas = readTsconfig('tsconfig.json').references.map((r) => r.path)
     const withTs = []
     const empty = []
     for (const cfgPath of areas) {
-      const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, cfgPath), 'utf8').replace(/^\s*\/\/.*$/gm, ''))
+      const cfg = readTsconfig(cfgPath)
       const res = (cfg.include || []).filter((g) => g.endsWith('.ts')).map((g) => {
         const segs = g.split('/'); const k = segs.findIndex((s) => /[*{]/.test(s))
         return { top: segs.slice(0, k < 0 ? segs.length - 1 : k).join('/'), re: globRe(g) }
@@ -211,6 +213,14 @@ const checks = {
     if (/declaration uses 'sorry'/.test(b.out)) bad.push("lake build: declaration uses 'sorry'")
     return { ok: bad.length === 0, line: bad.length ? `${bad.length} problem(s): ${bad.slice(0, 3).join('; ')}` : `lake build ok, ${files.length} .lean file(s), no sorry/admit, ${allowed.length} allowed axiom(s)`, out: bad.join('\n') }
   },
+}
+
+// A tsconfig as TypeScript reads it (comments, trailing commas), without following `extends`.
+function readTsconfig(rel) {
+  const text = fs.readFileSync(path.join(ROOT, rel), 'utf8')
+  const { config, error } = ts.parseConfigFileTextToJson(rel, text)
+  if (error) throw new Error(`${rel}: ${ts.flattenDiagnosticMessageText(error.messageText, ' ')}`)
+  return config
 }
 
 // glob → RegExp: ** any depth, * one segment, {a,b} alternatives (as scripts/check-ownership.mjs).
