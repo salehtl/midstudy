@@ -13,9 +13,9 @@
 import {
   DepthTexture, DirectionalLight, EquirectangularReflectionMapping, HalfFloatType, LightProbe, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicNodeMaterial, MeshPhysicalNodeMaterial, MeshStandardNodeMaterial, NodeMaterial, OrthographicCamera, PlaneGeometry, QuadMesh,
-  Quaternion, RenderTarget, Vector3, Box3, Sphere, NearestFilter, EnvironmentNode, Node as NodeClass,
+  Quaternion, RenderTarget, Vector3, Box3, Sphere, NearestFilter, EnvironmentNode, Node as NodeClass, FrontSide, BackSide, DoubleSide,
 } from 'three/webgpu'
-import type { NodeBuilder, Scene, Texture, TextureNode, WebGPURenderer } from 'three/webgpu'
+import type { Material, NodeBuilder, Object3D, Scene, Texture, TextureNode, WebGPURenderer } from 'three/webgpu'
 import { Discard, Fn, If, abs, clamp, dot, float, max, mix, positionWorld, sqrt, step, texture, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import type { ShaderNodeObject } from 'three/tsl'
@@ -28,6 +28,17 @@ type SH = V3[]
 
 export const CASTER_LAYER = 3 // objects that cast the floor shadow (meshes, and splat items' hidden stand-ins)
 const SHADOW_SIZE = 2048
+
+/** WebGLRenderer's shadow pass draws a caster's back faces (its shadowSide defaults to the flipped side); three's
+ * WebGPU shadow pass draws its own side. Setting shadowSide explicitly gives both renderers v1's shadows: a box on the
+ * floor doesn't shadow its own footprint (its bottom face is at the floor's depth), as in v1. */
+export function flipSides(root: Object3D): void {
+  root.traverse((o) => {
+    if (!(o instanceof Mesh)) return
+    const mats: Material[] = Array.isArray(o.material) ? o.material : [o.material]
+    for (const m of mats) if (m.shadowSide == null) m.shadowSide = m.side === FrontSide ? BackSide : m.side === BackSide ? FrontSide : DoubleSide
+  })
+}
 
 export interface LightingJson {
   ambient: { sh: number[][] }
@@ -92,16 +103,22 @@ export function maxBandScale(sh: SH): number {
 const asV3 = (a: readonly number[] | undefined): V3 => [a?.[0] ?? 0, a?.[1] ?? 0, a?.[2] ?? 0]
 
 // --- materials: environment for reflections only ------------------------------------------------------------------------------
+/** 1: the environment's diffuse light counts (v1's lights, no lighting.json); 0: it doesn't (the probe is the diffuse
+ * ambient, v1's MIDSTUDY_PROBE_DIFFUSE). A uniform, so switching scenes recompiles nothing. */
+export const iblDiffuse = uniform(1)
 class RadianceEnvironmentNode extends EnvironmentNode {
   override setup(builder: NodeBuilder): void {
-    // EnvironmentNode adds radiance (specular) and irradiance (diffuse); keep the radiance only: the probe is the
-    // diffuse ambient (v1: MIDSTUDY_PROBE_DIFFUSE drops getIBLIrradiance)
+    // EnvironmentNode adds its radiance (specular) to context.radiance and its irradiance (diffuse, also the
+    // multiscattering term) to context.iblIrradiance: catch the latter in a variable and add it back × iblDiffuse
     const ctx: unknown = Reflect.get(builder, 'context')
-    if (!ctx || typeof ctx !== 'object') { super.setup(builder); return }
-    const saved: unknown = Reflect.get(ctx, 'iblIrradiance')
-    Reflect.set(ctx, 'iblIrradiance', vec3(0).toVar())
+    const saved: unknown = ctx && typeof ctx === 'object' ? Reflect.get(ctx, 'iblIrradiance') : null
+    if (!ctx || typeof ctx !== 'object' || !(saved instanceof NodeClass)) { super.setup(builder); return }
+    const sink = vec3(0).toVar()
+    Reflect.set(ctx, 'iblIrradiance', sink)
     super.setup(builder)
     Reflect.set(ctx, 'iblIrradiance', saved)
+    const add: unknown = Reflect.get(saved, 'addAssign')
+    if (typeof add === 'function') Reflect.apply(add, saved, [sink.mul(iblDiffuse)])
   }
 }
 function envFor(builder: NodeBuilder, own: Node | null): Node | null {
@@ -158,6 +175,9 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
   const { renderer, scene, frame } = opts
   const webgpu = Reflect.get(renderer.backend, 'isWebGPUBackend') === true
   renderer.shadowMap.enabled = true
+  // three's library refuses to redefine a material: take its own out first
+  renderer.library.materialNodes.delete('MeshStandardMaterial')
+  renderer.library.materialNodes.delete('MeshPhysicalMaterial')
   renderer.library.addMaterial(ProbeStandardNodeMaterial, 'MeshStandardMaterial')
   renderer.library.addMaterial(ProbePhysicalNodeMaterial, 'MeshPhysicalMaterial')
 
@@ -178,6 +198,9 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
   shadowRT.depthTexture.minFilter = shadowRT.depthTexture.magFilter = NearestFilter
   const depthOnly = new MeshBasicNodeMaterial()
   depthOnly.colorWrite = false
+  // as a shadow-pass material, three gives it each caster's shadowSide (or side) per object: flipSides() below sets
+  // the casters' shadowSide to WebGL's default (front faces cast from their back faces, as v1's shadow map does)
+  Reflect.set(depthOnly, 'isShadowPassMaterial', true)
   const u = {
     keep: uniform(new Vector3(1, 1, 1)), tan: uniform(0.05), range: uniform(10), width: uniform(4), search: uniform(0.02), bias: uniform(0.002),
     view: uniform(new Matrix4()), proj: uniform(new Matrix4()),
@@ -285,6 +308,7 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
       effSH.forEach((c, i) => probe.sh.coefficients[i]?.set(c[0], c[1], c[2]))
       probe.intensity = 1
       probe.visible = true
+      iblDiffuse.value = 0
       key.castShadow = true
       // what a full shadow keeps of the floor's light, per channel (v1 apply())
       const ly = Math.max(0, dir[1])
@@ -304,7 +328,8 @@ export function createLightRig(opts: { renderer: WebGPURenderer, scene: Scene, f
       key.color.set(0xffffff)
       key.intensity = V1.key
       key.castShadow = false
-      scene.environment = null
+      scene.environment = null // v1 uses RoomEnvironment at 0.8 here (not ported in the spike)
+      iblDiffuse.value = 1
     }
     key.updateMatrixWorld()
   }

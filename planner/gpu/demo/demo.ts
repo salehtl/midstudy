@@ -3,7 +3,7 @@
 // through window.gpuDemo. URL: ?backend=webgpu|webgl&sort=gpu|cpu&keyBits=16|24|32
 import {
   Box3, CanvasTexture, Group, HalfFloatType, LinearSRGBColorSpace, Matrix3, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, QuadMesh, RenderTarget,
-  SRGBColorSpace, Scene, Texture, UnsignedByteType, Vector3, WebGPURenderer, BoxGeometry, MeshBasicNodeMaterial,
+  SRGBColorSpace, Scene, Texture, TimestampQuery, UnsignedByteType, Vector3, WebGPURenderer, BoxGeometry, MeshBasicNodeMaterial,
 } from 'three/webgpu'
 import type { Object3D } from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
@@ -13,7 +13,7 @@ import type { SplatData } from '../splat-data.ts'
 import { SplatLayer, isWebGPU } from '../splat-layer.ts'
 import type { SortMode } from '../splat-layer.ts'
 import { BAR, createDepthPrepass, createFrame, createFurnitureComposite, createPhotoPass, createSplatComposite, depthTexture, photoTexture, warmthTint } from '../passes.ts'
-import { CASTER_LAYER, createLightRig } from '../light-rig.ts'
+import { CASTER_LAYER, createLightRig, flipSides } from '../light-rig.ts'
 import type { LightingJson } from '../light-rig.ts'
 import { decodeDepthPng } from './depth-png.ts'
 
@@ -212,6 +212,7 @@ async function addItem(spec: ItemSpec): Promise<{ uid: string, splats: number | 
     caster.traverse((o) => { o.visible = true; o.layers.set(CASTER_LAYER) })
   }
   prepareMeshes(child.obj, !data)
+  flipSides(child.obj) // shared with the caster copy's materials
   group.add(child.obj)
   if (caster) group.add(caster)
   const size = child.box.getSize(new Vector3()), c = child.box.getCenter(new Vector3())
@@ -226,7 +227,8 @@ async function addItem(spec: ItemSpec): Promise<{ uid: string, splats: number | 
   group.updateMatrixWorld(true)
   items.set(spec.uid, { uid: spec.uid, group, child: child.obj, box: child.box, splat: data, caster, shadow })
   if (data) ensureSplats().add(spec.uid, data, group)
-  if (timing) {
+  if (timing && splats) {
+    await splats.settle(camera) // the CPU sort's first order (the GPU sort runs in the draw)
     await draw(null)
     await gpuSync()
     timing.firstFrameMs = performance.now() - t0
@@ -316,19 +318,30 @@ async function capture(): Promise<{ dataUrl: string, width: number, height: numb
 }
 
 // n frames to the canvas; moveSplats nudges every splat item by ±1 mm so each frame re-sorts and redraws.
-async function timeFrames(n: number, opts: { moveSplats?: boolean } = {}): Promise<{ frames: number[], sorts: number[], median: number }> {
-  const frames: number[] = [], sorts: number[] = []
+// GPU timestamps (WebGPU, timestamp-query): what the last frame's compute and render passes took on the device.
+async function gpuTimes(): Promise<{ compute: number | null, render: number | null }> {
+  if (!isWebGPU(renderer)) return { compute: null, render: null }
+  const t = async (type: typeof TimestampQuery.COMPUTE | typeof TimestampQuery.RENDER): Promise<number | null> => { try { const v: unknown = await renderer.resolveTimestampsAsync(type); return typeof v === 'number' ? v : null } catch { return null } }
+  return { compute: await t(TimestampQuery.COMPUTE), render: await t(TimestampQuery.RENDER) }
+}
+const median = (v: number[]): number => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] ?? 0
+
+async function timeFrames(n: number, opts: { moveSplats?: boolean } = {}): Promise<{ frames: number[], sorts: number[], median: number, gpuCompute: number[], gpuRender: number[] }> {
+  const frames: number[] = [], sorts: number[] = [], gpuCompute: number[] = [], gpuRender: number[] = []
+  await gpuTimes() // drop what earlier frames left
   for (let i = 0; i < n; i++) {
     if (opts.moveSplats) for (const r of items.values()) if (r.splat) { r.group.position.x += i % 2 ? -0.001 : 0.001; r.group.updateMatrixWorld(true) }
     const t0 = performance.now()
     await draw(null)
     await gpuSync()
     frames.push(performance.now() - t0)
+    const g = await gpuTimes()
+    if (g.compute != null) gpuCompute.push(g.compute)
+    if (g.render != null) gpuRender.push(g.render)
     const s = splats?.stats()
     if (s?.lastSortMs != null) sorts.push(s.lastSortMs)
   }
-  const sorted = [...frames].sort((a, b) => a - b)
-  return { frames, sorts, median: sorted[Math.floor(sorted.length / 2)] ?? 0 }
+  return { frames, sorts, median: median(frames), gpuCompute, gpuRender }
 }
 
 // GPU sort only: the radix sort against a stable CPU sort of the same keys.
@@ -384,6 +397,24 @@ window.gpuDemo = {
   capture,
   draw: async () => { await draw(null); await gpuSync() },
   timeFrames,
+  // the splat pass alone (sorted already, no depth), n times, synced: comparable with Spark's own draw
+  timeSplatDraw: async (n: number) => {
+    if (!splats) return null
+    const layer = splats
+    const w = renderer.domElement.width, h = renderer.domElement.height
+    await layer.settle(camera)
+    const t: number[] = [], g: number[] = []
+    await gpuTimes()
+    for (let i = 0; i < n; i++) {
+      const t0 = performance.now()
+      layer.render(camera, w, h, () => {})
+      await gpuSync()
+      t.push(performance.now() - t0)
+      const gt = await gpuTimes()
+      if (gt.render != null) g.push(gt.render)
+    }
+    return { median: median(t), all: t, gpuRender: g }
+  },
   debugSort,
   // debug: how much the splat pass drew (alpha > 0 pixels in its target) at the canvas size
   debugSplatTarget: async () => {

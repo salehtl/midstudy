@@ -395,7 +395,11 @@ export class SplatLayer {
     if (!p || m.id !== p.id) return
     this.pending = null
     if (m.type === 'error') { console.warn('[splats] sort failed:', m.message); for (const r of p.resolve) r(); return }
-    if (m.version !== this.version || !this.order || !this.geometry) { for (const r of p.resolve) r(); return }
+    if (m.version !== this.version || !this.order || !this.geometry) {
+      for (const r of p.resolve) r()
+      if (this.wantKey && this.wantKey !== this.sortedKey) this.requestCpuSort(this.wantKey, this.lastRows, this.lastRange) // the set changed meanwhile
+      return
+    }
     const arr = this.order.array
     if (arr instanceof Uint32Array) arr.set(m.order.subarray(0, m.visible))
     this.order.needsUpdate = true
