@@ -16,7 +16,10 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
     }
     (0..s.len())
         .step_by(2)
-        .map(|i| s.get(i..i.checked_add(2)?).and_then(|h| u8::from_str_radix(h, 16).ok()))
+        .map(|i| {
+            s.get(i..i.checked_add(2)?)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+        })
         .collect()
 }
 
@@ -104,7 +107,10 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
             Err(e) => format!(r#"{{"ok":false,"error":"{e:?}"}}"#),
         },
         "jpeg-size" => match jpeg::frame_info(first) {
-            Ok(f) => format!(r#"{{"ok":true,"w":{},"h":{},"c":{}}}"#, f.width, f.height, f.components),
+            Ok(f) => format!(
+                r#"{{"ok":true,"w":{},"h":{},"c":{}}}"#,
+                f.width, f.height, f.components
+            ),
             Err(e) => format!(r#"{{"ok":false,"error":"{e:?}"}}"#),
         },
         "jpeg-clean" => format!(r#"{{"clean":{}}}"#, jpeg::is_clean(first)),
@@ -131,7 +137,11 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
             None => r#"{"ok":false}"#.to_owned(),
         },
         "glb-inplace" | "glb-compact" => {
-            let layout = if op == "glb-inplace" { glb::Layout::InPlace } else { glb::Layout::Compact };
+            let layout = if op == "glb-inplace" {
+                glb::Layout::InPlace
+            } else {
+                glb::Layout::Compact
+            };
             match glb::strip(first, layout) {
                 Ok(s) => {
                     let images: Vec<String> = s
@@ -140,7 +150,9 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
                         .iter()
                         .map(|i| {
                             let source: i64 = match i.source {
-                                glb::ImageSource::BufferView(v) => i64::try_from(v).unwrap_or(i64::MAX),
+                                glb::ImageSource::BufferView(v) => {
+                                    i64::try_from(v).unwrap_or(i64::MAX)
+                                }
                                 glb::ImageSource::DataUri => -1,
                                 glb::ImageSource::Uri => -2,
                             };
@@ -162,7 +174,11 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
                         s.report.changed
                     )
                 }
-                Err(e) => format!(r#"{{"ok":false,"error":"{}","message":"{}"}}"#, glb_error_name(&e), hex(e.to_string().as_bytes())),
+                Err(e) => format!(
+                    r#"{{"ok":false,"error":"{}","message":"{}"}}"#,
+                    glb_error_name(&e),
+                    hex(e.to_string().as_bytes())
+                ),
             }
         }
         "normalize" => match path::normalize(&text(first)?) {
@@ -172,7 +188,10 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
         "route" => {
             let r = match path::static_route(&text(first)?) {
                 path::Route::RedirectToPlanner => "redirect".to_owned(),
-                path::Route::Planner { rel, trailing_slash } => format!("planner:{rel}:{trailing_slash}"),
+                path::Route::Planner {
+                    rel,
+                    trailing_slash,
+                } => format!("planner:{rel}:{trailing_slash}"),
                 path::Route::LibraryJson => "library-json".to_owned(),
                 path::Route::Library { id, file } => format!("library:{id}/{}", file.name()),
                 path::Route::Scene { name, file } => format!("scene:{name}/{}", file.name()),
@@ -197,13 +216,20 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
                 }
             };
             let (x, o, h) = (opt(0)?, opt(1)?, opt(2)?);
-            format!(r#"{{"ok":{}}}"#, http::origin_ok(x.as_deref(), o.as_deref(), h.as_deref()))
+            format!(
+                r#"{{"ok":{}}}"#,
+                http::origin_ok(x.as_deref(), o.as_deref(), h.as_deref())
+            )
         }
         "slug" => format!(r#"{{"slug":{}}}"#, slug::is_slug(&text(first)?)),
         "order" => {
             let name = text(first)?;
             let o = slug::name_order(&name);
-            format!(r#"{{"base":"{}","number":"{}"}}"#, hex(o.base.as_bytes()), o.number)
+            format!(
+                r#"{{"base":"{}","number":"{}"}}"#,
+                hex(o.base.as_bytes()),
+                o.number
+            )
         }
         "b64-strict" | "b64-lenient" => match base64::decode_python(first, op == "b64-strict") {
             Ok(b) => format!(r#"{{"ok":true,"hex":"{}"}}"#, hex(&b)),
@@ -214,18 +240,29 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
             Err(e) => format!(r#"{{"ok":false,"error":"{e:?}"}}"#),
         },
         "datauri-jpeg" | "datauri-png" => {
-            let kind = if op == "datauri-png" { datauri::ImageType::Png } else { datauri::ImageType::Jpeg };
+            let kind = if op == "datauri-png" {
+                datauri::ImageType::Png
+            } else {
+                datauri::ImageType::Jpeg
+            };
             match datauri::decode_image(&text(first)?, kind) {
                 Ok(b) => format!(r#"{{"ok":true,"hex":"{}"}}"#, hex(&b)),
                 Err(e) => format!(r#"{{"ok":false,"error":"{e:?}"}}"#),
             }
         }
-        "cp437" => format!(r#"{{"text":"{}"}}"#, hex(zip::decode_cp437(first).as_bytes())),
+        "cp437" => format!(
+            r#"{{"text":"{}"}}"#,
+            hex(zip::decode_cp437(first).as_bytes())
+        ),
         "zip" => {
             // args: per entry, a hex name; the entry's flags, size and attributes ride in a second arg list,
             // `flags:size:attr` per entry, comma-separated.
             let meta_arg = text(args.get(1).ok_or("no entry fields")?)?;
-            let fields: Vec<&str> = if meta_arg.is_empty() { Vec::new() } else { meta_arg.split(',').collect() };
+            let fields: Vec<&str> = if meta_arg.is_empty() {
+                Vec::new()
+            } else {
+                meta_arg.split(',').collect()
+            };
             let names: Vec<Vec<u8>> = if first.is_empty() {
                 Vec::new()
             } else {
@@ -237,15 +274,28 @@ fn run(op: &str, args: &[Vec<u8>], out_dir: Option<&str>, case: usize) -> Result
             let mut entries = Vec::new();
             for (name, f) in names.iter().zip(&fields) {
                 let mut parts = f.split(':').map(str::parse::<u64>);
-                let (Some(Ok(flags)), Some(Ok(size)), Some(Ok(attr))) = (parts.next(), parts.next(), parts.next()) else {
+                let (Some(Ok(flags)), Some(Ok(size)), Some(Ok(attr))) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
                     return Err(format!("bad entry fields {f}"));
                 };
                 let external_attr = u32::try_from(attr).map_err(|e| e.to_string())?;
-                entries.push(zip::Entry { name, utf8: flags & 0x800 != 0, size, external_attr });
+                entries.push(zip::Entry {
+                    name,
+                    utf8: flags & 0x800 != 0,
+                    size,
+                    external_attr,
+                });
             }
             match zip::plan(&entries) {
-                Ok(p) => format!(r#"{{"ok":true,"extract":{:?},"skip":{:?}}}"#, p.extract, p.skip),
-                Err(e) => format!(r#"{{"ok":false,"message":"{}"}}"#, hex(e.to_string().as_bytes())),
+                Ok(p) => format!(
+                    r#"{{"ok":true,"extract":{:?},"skip":{:?}}}"#,
+                    p.extract, p.skip
+                ),
+                Err(e) => format!(
+                    r#"{{"ok":false,"message":"{}"}}"#,
+                    hex(e.to_string().as_bytes())
+                ),
             }
         }
         _ => return Err(format!("unknown op {op}")),

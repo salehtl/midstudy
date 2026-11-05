@@ -1128,4 +1128,117 @@ pub(crate) mod tests {
         assert!(!out.report.changed);
         assert_eq!(out.bytes, file);
     }
+
+    use proptest::prelude::*;
+
+    /// One bufferView of a generated GLB: an image (a JPEG with `exif` bytes of EXIF, or a PNG with a `text`-byte
+    /// tEXt chunk) or plain data, after `gap` bytes of padding.
+    #[derive(Clone, Debug)]
+    enum Blob {
+        Jpeg { exif: usize },
+        Png { text: usize },
+        Data(Vec<u8>),
+    }
+
+    fn blob() -> impl Strategy<Value = (Blob, usize)> {
+        let b = prop_oneof![
+            (0usize..400).prop_map(|exif| Blob::Jpeg { exif }),
+            (0usize..100).prop_map(|text| Blob::Png { text }),
+            prop::collection::vec(any::<u8>(), 0..64).prop_map(Blob::Data),
+        ];
+        (b, 0usize..3)
+    }
+
+    fn bytes_of(b: &Blob) -> Vec<u8> {
+        match b {
+            Blob::Jpeg { exif } => exif_jpeg(*exif),
+            Blob::Png { text } => {
+                let mut v = png::SIGNATURE.to_vec();
+                let chunk = |kind: &[u8; 4], body: &[u8]| {
+                    let mut c = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+                    c.extend_from_slice(kind);
+                    c.extend_from_slice(body);
+                    c.extend_from_slice(&[0; 4]);
+                    c
+                };
+                v.extend(chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
+                v.extend(chunk(b"tEXt", &vec![b'g'; *text]));
+                v.extend(chunk(b"IDAT", &[1, 2, 3]));
+                v.extend(chunk(b"IEND", &[]));
+                v
+            }
+            Blob::Data(d) => d.clone(),
+        }
+    }
+
+    /// The views of a GLB as (offset, length) and its binary chunk.
+    fn views_of(file: &[u8]) -> (Vec<(usize, usize)>, Vec<u8>) {
+        let c = read_container(file).unwrap();
+        let ix = json::parse(c.json).unwrap();
+        let buffers = read_buffers(c.json, &ix).unwrap();
+        let views = read_views(c.json, &ix, &buffers).unwrap();
+        (
+            views.iter().map(|v| (v.offset, v.length)).collect(),
+            c.bin.unwrap_or_default().to_vec(),
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 500, ..ProptestConfig::default() })]
+
+        /// Both layouts: every image's bytes become exactly its stripped bytes, every other view keeps its bytes,
+        /// every view moves by a multiple of 16 (not at all in place), the output strips to itself, and compact is
+        /// never larger than in place.
+        #[test]
+        fn glb_layouts(parts in prop::collection::vec(blob(), 0..7)) {
+            let mut bin = Vec::new();
+            let mut views = Vec::new();
+            let mut images = Vec::new();
+            for (k, (b, gap)) in parts.iter().enumerate() {
+                bin.resize(bin.len().next_multiple_of(4) + 4 * gap, 0);
+                let bytes = bytes_of(b);
+                views.push(format!(r#"{{"buffer":0,"byteOffset":{},"byteLength":{}}}"#, bin.len(), bytes.len()));
+                if !matches!(b, Blob::Data(_)) {
+                    images.push(format!(r#"{{"bufferView":{k}}}"#));
+                }
+                bin.extend_from_slice(&bytes);
+            }
+            let json = format!(
+                r#"{{"asset":{{"version":"2.0"}},"images":[{}],"bufferViews":[{}],"buffers":[{{"byteLength":{}}}]}}"#,
+                images.join(","), views.join(","), bin.len()
+            );
+            let file = glb(&json, Some(&bin));
+            let (before, old_bin) = views_of(&file);
+            let mut sizes = Vec::new();
+            for layout in [Layout::Compact, Layout::InPlace] {
+                let out = strip(&file, layout).unwrap();
+                prop_assert!(!strip(&out.bytes, layout).unwrap().report.changed);
+                let (after, new_bin) = views_of(&out.bytes);
+                for (k, (b, _)) in parts.iter().enumerate() {
+                    let (o1, l1) = before[k];
+                    let (o2, l2) = after[k];
+                    prop_assert_eq!((o1 - o2) % ALIGN, 0);
+                    if layout == Layout::InPlace {
+                        prop_assert_eq!(o1, o2);
+                    }
+                    let old = &old_bin[o1..o1 + l1];
+                    let want = match b {
+                        Blob::Jpeg { .. } => jpeg::strip(old).unwrap().bytes,
+                        Blob::Png { .. } => png::strip(old).unwrap().bytes,
+                        Blob::Data(_) => old.to_vec(),
+                    };
+                    prop_assert_eq!(&new_bin[o2..o2 + l2], want.as_slice());
+                }
+                sizes.push(out.bytes.len());
+            }
+            prop_assert!(sizes[0] <= sizes[1]);
+        }
+
+        /// Arbitrary JSON-ish text in a GLB never panics the reader or the rewrite.
+        #[test]
+        fn glb_json_never_panics(text in r#"[\[\]{}",:0-9a-zA-Z .\\-]{0,120}"#, bin in prop::collection::vec(any::<u8>(), 0..64)) {
+            let _ = strip(&glb(&text, Some(&bin)), Layout::Compact);
+            let _ = json::parse(text.as_bytes());
+        }
+    }
 }

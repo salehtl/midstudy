@@ -91,20 +91,11 @@ pub fn unquote(s: &str) -> String {
     out
 }
 
-/// The canonical form of a request target's path: the query and fragment cut off, percent-decoded, `.` and `..`
-/// resolved (never above `/`), repeated slashes collapsed, a trailing slash kept (except on `/` itself).
-///
-/// # Errors
-/// [`PathRefusal`]: the decoded path holds a NUL or a backslash.
-pub fn normalize(target: &str) -> Result<String, PathRefusal> {
-    let path = target.split(['?', '#']).next().unwrap_or_default();
-    let decoded = unquote(path);
-    if decoded.contains('\0') {
-        return Err(PathRefusal::Nul);
-    }
-    if decoded.contains('\\') {
-        return Err(PathRefusal::Backslash);
-    }
+/// Resolves `.`, `..` and empty segments of an already decoded path under the root, keeping a trailing slash
+/// (`posixpath.normpath("/" + path.lstrip("/"))` with v1's trailing-slash rule): the second half of [`normalize`].
+/// It decodes nothing, so it is idempotent, and its result never has a `.` or `..` segment or a `//`.
+#[must_use]
+pub fn resolve(decoded: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for part in decoded.split('/') {
         match part {
@@ -123,7 +114,29 @@ pub fn normalize(target: &str) -> Result<String, PathRefusal> {
     if clean.is_empty() || decoded.ends_with('/') {
         clean.push('/');
     }
-    Ok(clean)
+    clean
+}
+
+/// The canonical form of a request target's path: the query and fragment cut off, percent-decoded once
+/// ([`unquote`]), then [`resolve`]d (`.` and `..` never above `/`, repeated slashes collapsed, a trailing slash kept
+/// except on `/` itself).
+///
+/// The result is final: it is a fixed point of [`resolve`], and the allowlist ([`route`]) reads it literally. It may
+/// hold a literal `%`, `?` or `#` (from `%25`, `%3F`, `%23`), so it must never be decoded again: a second decoding
+/// would turn `%252e%252e` into `..` after the check.
+///
+/// # Errors
+/// [`PathRefusal`]: the decoded path holds a NUL or a backslash.
+pub fn normalize(target: &str) -> Result<String, PathRefusal> {
+    let path = target.split(['?', '#']).next().unwrap_or_default();
+    let decoded = unquote(path);
+    if decoded.contains('\0') {
+        return Err(PathRefusal::Nul);
+    }
+    if decoded.contains('\\') {
+        return Err(PathRefusal::Backslash);
+    }
+    Ok(resolve(&decoded))
 }
 
 /// A library item asset `/library/` serves (contract §2.8).

@@ -12,6 +12,7 @@ publish.workspace = true
 
 [dev-dependencies]
 proptest = { version = "1.7", default-features = false, features = ["std"] }
+regex = "1"
 
 [lints]
 workspace = true
