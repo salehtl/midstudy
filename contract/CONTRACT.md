@@ -277,7 +277,6 @@ node pipeline/src/cli.ts ...the same arguments...                               
 ```
 
 - **v2:** `node pipeline/src/cli.ts` takes exactly these arguments (the server also passes `--source-input`, as v1's does) and environment (`FAL_KEY`, `MIDSTUDY_FAL_MOCK`, `MIDSTUDY_FAL_MOCK_COST`, `MIDSTUDY_FAL_MOCK_NO_MASKS`, `MIDSTUDY_NO_DOTENV`), writes the same files and prints the same lines; the server runs it with `--midstudy-add "node pipeline/src/cli.ts"`. With `MIDSTUDY_STRICT=1` it validates `library.json` and its summary line before writing them (§0).
-
 - `INPUT`: a local image or image URL (`idol`, `sam3d`, `trellis2`, `rug`), a `.glb`/`.gltf`, or an OBJ `.zip` (`glb`). `.usdz` fails with "convert to GLB first".
 - `--dims`: centimeters `W x D x H` (`x` or `×`, spaces and decimals allowed). Required for adds.
 - `--id` defaults to a slug of `--name`; re-running an id **replaces** it (upsert) and says so. `--engine` defaults to `idol`.
