@@ -78,6 +78,8 @@ pub struct ImageReport {
     pub bytes_before: usize,
     /// Its size after.
     pub bytes_after: usize,
+    /// Its bytes changed (metadata was removed; a JFIF header can be rewritten at the same size).
+    pub changed: bool,
 }
 
 /// What [`strip`] did.
@@ -98,13 +100,10 @@ pub struct Report {
 }
 
 impl Report {
-    /// How many images lost bytes.
+    /// How many image entries changed (two entries sharing a bufferView both count).
     #[must_use]
     pub fn images_cleaned(&self) -> usize {
-        self.images
-            .iter()
-            .filter(|i| i.bytes_after != i.bytes_before)
-            .count()
+        self.images.iter().filter(|i| i.changed).count()
     }
 }
 
@@ -598,7 +597,8 @@ fn view_image(
     let (kind, clean) =
         clean_image(bytes).map_err(|problem| GlbError::BadImage { image: k, problem })?;
     let bytes_after = clean.as_ref().map_or(bytes.len(), Vec::len);
-    if let Some(clean) = clean.filter(|c| c.as_slice() != bytes) {
+    let changed = clean.as_ref().is_some_and(|c| c.as_slice() != bytes);
+    if let Some(clean) = clean.filter(|_| changed) {
         out.view_edits.push(ViewEdit {
             view: vi,
             offset: view.offset,
@@ -612,6 +612,7 @@ fn view_image(
         kind,
         bytes_before: bytes.len(),
         bytes_after,
+        changed,
     };
     if let Some(slot) = seen.get_mut(vi) {
         *slot = Some(report);
@@ -630,6 +631,7 @@ fn uri_image(text: &[u8], k: usize, u: Value, out: &mut Cleaned) -> Result<Image
             kind: ImageKind::External,
             bytes_before: 0,
             bytes_after: 0,
+            changed: false,
         });
     }
     let data = datauri::parse(&uri).ok_or(GlbError::BadImage {
@@ -639,7 +641,8 @@ fn uri_image(text: &[u8], k: usize, u: Value, out: &mut Cleaned) -> Result<Image
     let (kind, clean) =
         clean_image(&data.body).map_err(|problem| GlbError::BadImage { image: k, problem })?;
     let bytes_after = clean.as_ref().map_or(data.body.len(), Vec::len);
-    if let Some(clean) = clean.filter(|c| *c != data.body) {
+    let changed = clean.as_ref().is_some_and(|c| *c != data.body);
+    if let Some(clean) = clean.filter(|_| changed) {
         let text = json::quote(&datauri::encode(&data.mime, &clean));
         out.text_edits.push(TextEdit {
             start: u.start,
@@ -653,6 +656,7 @@ fn uri_image(text: &[u8], k: usize, u: Value, out: &mut Cleaned) -> Result<Image
         kind,
         bytes_before: data.body.len(),
         bytes_after,
+        changed,
     })
 }
 

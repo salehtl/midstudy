@@ -169,7 +169,7 @@ fn glb_error(e: &glb::GlbError) -> Vec<u8> {
 /// `glb::strip` (`in_place` picks [`glb::Layout::InPlace`], else compact). Ok: `layout` (0 compact, 1 in place),
 /// `dropped_chunks`, `trailing_bytes`, `slack_bytes`, `changed` (0/1), the image count, then per image `image`,
 /// `source` (0 bufferView, 1 data URI, 2 external uri), `view` (0xFFFFFFFF unless a bufferView), `kind` (0 JPEG,
-/// 1 PNG, 2 other, 3 external), `bytes_before`, `bytes_after`; then the GLB.
+/// 1 PNG, 2 other, 3 external), `bytes_before`, `bytes_after`, `changed` (0/1); then the GLB.
 #[must_use]
 pub fn glb_strip(bytes: &[u8], in_place: bool) -> Vec<u8> {
     let layout = if in_place {
@@ -204,7 +204,8 @@ pub fn glb_strip(bytes: &[u8], in_place: bool) -> Vec<u8> {
                     .u32(view)
                     .u32(kind)
                     .size(i.bytes_before)
-                    .size(i.bytes_after);
+                    .size(i.bytes_after)
+                    .flag(i.changed);
             }
             w.rest(&s.bytes).finish()
         }
