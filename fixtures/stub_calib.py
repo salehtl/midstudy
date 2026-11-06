@@ -6,6 +6,7 @@
     stub_calib.py fit <scene-dir> [--model ...] [--device ...] [--no-depth]
     stub_calib.py light <scene-dir> [--model ...] [--device ...]
     stub_calib.py align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>
+    stub_calib.py align-room <scene-dir> <scene-dir> ... --out <room-dir> [--solver auto|<name>] [--device ...]
 
 - ingest: JPEG only (PNG, HEIC and WebP are refused with a clear message: the stub can't decode them). Copies the
   upload to source.jpg and writes photo.jpg with every metadata segment removed (APP1-APP15, COM: EXIF, GPS, XMP, ICC),
@@ -19,6 +20,13 @@
   nothing, leaves an existing lighting.json alone and answers lighting: false. Never touches calib.json, depth.png,
   source.*, photo.jpg or scene.json.
 - align: the stub can't register images: it writes nothing and answers applied: false (exit 0).
+- align-room (contract §4.9 Mock): with MIDSTUDY_CALIB_MOCK=<dir>, the key is the SHA-256 of the members' photo.jpg
+  SHA-256s (lowercase hex, sorted, joined with "\n"); <dir>/rooms/<key>/align.json is the answer: each member renamed
+  to the folder whose photo.jpg has its photo_sha256, in argument order, every pose and scale re-expressed relative to
+  the first argument (which comes out {0, 0, 0}, scale 1, confidence 1, residual null), created now, the rest copied.
+  No match: solver "none", the first argument placed as the frame, every other member unplaced. Writes only
+  <room-dir>/align.json (atomically). The stub has no solver: without the mock --solver auto answers like a miss and a
+  named solver fails. Fewer than two folders, or one without photo.jpg, is a failure. No `serve` (exits 2).
 
 stdout: one JSON line (run/fit: calib.json plus "ok": true; ingest: {ok, photo, source, image}; light: {ok, lighting:
 true, cct_k, confidence, elapsed_s} or {ok, lighting: false, reason}; align: {ok, applied, inliers, residual_px, reason}). Progress goes to stderr. A failure exits 1 with `{"ok": false, "error": ...}` on stdout
@@ -334,6 +342,104 @@ def light(scene: Path) -> dict:
     return {"ok": True, "lighting": False, "reason": "MIDSTUDY_CALIB_MOCK has no lighting for this photo"}
 
 
+def iso_now() -> str:
+    t = time.time()
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t * 1000) % 1000:03d}Z"
+
+
+def norm_yaw(y: float) -> float:
+    """Into (-180, 180] (contract §4.9 Ranges): ((y + 180) mod 360) - 180, then -180 becomes 180."""
+    y = math.fmod(y + 180.0, 360.0)
+    if y < 0:
+        y += 360.0
+    y -= 180.0
+    return 180.0 if y <= -180.0 else y
+
+
+def clamp(v: float, lo: float, hi: float) -> float:
+    return lo if v < lo else hi if v > hi else v
+
+
+def tidy(v: float) -> float:
+    """Rounds away float noise (1e-12) so the answer reads as the fixture's numbers do; -0.0 becomes 0.0."""
+    r = round(v, 9)
+    return 0.0 if r == 0 else r
+
+
+def align_room(dirs: list[Path], out: Path, solver: str) -> dict:
+    """contract §4.9 Mock: with MIDSTUDY_CALIB_MOCK=<dir>, <dir>/rooms/<key>/align.json is the answer, its members
+    renamed to the scene folders whose photo.jpg has their photo_sha256, put in argument order and re-expressed
+    relative to the first argument; no match: solver "none", the first argument the frame, every other unplaced. The
+    stub has no solver, so without the mock it answers like a miss (auto) or fails (a named solver)."""
+    t0 = time.monotonic()
+    if len(dirs) < 2:
+        raise Fail("align-room needs at least two scene folders")
+    names, shas = [], []
+    for d in dirs:
+        photo = d / "photo.jpg"
+        if not photo.is_file():
+            raise Fail(f"{photo} doesn't exist: every scene folder needs its photo.jpg")
+        names.append(d.resolve().name)
+        shas.append(hashlib.sha256(photo.read_bytes()).hexdigest())
+    mock = os.environ.get("MIDSTUDY_CALIB_MOCK")
+    if not mock and solver != "auto":
+        raise Fail(f"solver {solver} isn't installed (the stub has no solvers; set MIDSTUDY_CALIB_MOCK)")
+    key = hashlib.sha256("\n".join(sorted(shas)).encode("utf-8")).hexdigest()
+    answer_file = Path(mock) / "rooms" / key / "align.json" if mock else None
+    if answer_file is not None and answer_file.is_file():
+        log(f"align-room: MIDSTUDY_CALIB_MOCK hit {answer_file.parent}")
+        ans = json.loads(answer_file.read_text())
+        pool = list(ans.get("members") or [])
+        picked = []
+        for name, sha in zip(names, shas):
+            m = next((x for x in pool if x.get("photo_sha256") == sha), None)
+            if m is None:
+                raise Fail(f"the mock's answer {answer_file} has no member for {name}'s photo")
+            pool.remove(m)
+            picked.append((name, sha, m))
+        first = picked[0][2]
+        if first.get("pose") is None or first.get("scale") is None:
+            raise Fail(f"the mock's answer {answer_file} leaves the first photo ({names[0]}) unplaced, so nothing can be relative to it")
+        pa, sa = first["pose"], float(first["scale"])
+        ya = math.radians(pa["yaw_deg"])
+        ca, sn = math.cos(ya), math.sin(ya)
+        members = []
+        for i, (name, sha, m) in enumerate(picked):
+            if i == 0:
+                members.append({"scene": name, "photo_sha256": sha, "pose": {"x_m": 0.0, "z_m": 0.0, "yaw_deg": 0.0}, "scale": 1.0,
+                                "confidence": 1.0, "residual_cm": None})
+                continue
+            if m.get("pose") is None or m.get("scale") is None:
+                members.append({"scene": name, "photo_sha256": sha, "pose": None, "scale": None,
+                                "confidence": m.get("confidence", 0), "residual_cm": m.get("residual_cm")})
+                continue
+            dx, dz = m["pose"]["x_m"] - pa["x_m"], m["pose"]["z_m"] - pa["z_m"]
+            # Ry(-yaw_a) on (dx, 0, dz), then divided by s_a (contract §4.9 Mock)
+            x, z = (ca * dx - sn * dz) / sa, (sn * dx + ca * dz) / sa
+            members.append({"scene": name, "photo_sha256": sha,
+                            "pose": {"x_m": tidy(clamp(x, -50, 50)), "z_m": tidy(clamp(z, -50, 50)), "yaw_deg": tidy(norm_yaw(m["pose"]["yaw_deg"] - pa["yaw_deg"]))},
+                            "scale": tidy(clamp(float(m["scale"]) / sa, 0.25, 4)),
+                            "confidence": m.get("confidence", 0), "residual_cm": m.get("residual_cm")})
+        result = {k: v for k, v in ans.items() if k != "ok"}
+        result.update({"version": 1, "created": iso_now(), "members": members,
+                       "unplaced": [m["scene"] for m in members if m["pose"] is None]})
+    else:
+        if mock:
+            log(f"align-room: no mock answer for these photos in {mock} (key {key}): only {names[0]} is placed")
+        else:
+            log("align-room: the stub has no solver and MIDSTUDY_CALIB_MOCK isn't set: only the first photo is placed")
+        members = [{"scene": names[0], "photo_sha256": shas[0], "pose": {"x_m": 0.0, "z_m": 0.0, "yaw_deg": 0.0}, "scale": 1.0,
+                    "confidence": 1.0, "residual_cm": None}]
+        members += [{"scene": n, "photo_sha256": s, "pose": None, "scale": None, "confidence": 0, "residual_cm": None}
+                    for n, s in zip(names[1:], shas[1:])]
+        result = {"version": 1, "solver": "none", "created": iso_now(), "elapsed_s": round(time.monotonic() - t0, 3), "device": None,
+                  "loop_residual_cm": None, "members": members, "unplaced": names[1:]}
+    out.mkdir(parents=True, exist_ok=True)
+    write_atomic(out / "align.json", (json.dumps(result, indent=2) + "\n").encode())
+    log(f"align-room: wrote {out}/align.json ({len(members) - len(result['unplaced'])} of {len(members)} placed, solver {result.get('solver')})")
+    return {**result, "ok": True}
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="midstudy-calib", description="stand-in for midstudy-calib (fixtures/stub_calib.py)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -348,6 +454,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--model", **model); p.add_argument("--device", **device)
     p = sub.add_parser("align"); p.add_argument("photo", type=Path); p.add_argument("raw", type=Path); p.add_argument("mask", type=Path)
     p.add_argument("--out", type=Path, required=True)
+    p = sub.add_parser("align-room"); p.add_argument("scenes", type=Path, nargs="+"); p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--solver", default="auto", type=str); p.add_argument("--device", **device)
     args = ap.parse_args(argv)
     try:
         if args.cmd == "run":
@@ -361,6 +469,11 @@ def main(argv: list[str]) -> int:
             if not args.scene.is_dir():
                 raise Fail(f"{args.scene} isn't a scene folder")
             result = light(args.scene)
+        elif args.cmd == "align-room":
+            for d in args.scenes:
+                if not d.is_dir():
+                    raise Fail(f"{d} isn't a scene folder")
+            result = align_room(args.scenes, args.out, args.solver)
         else:
             for f in (args.photo, args.raw, args.mask):
                 if not f.is_file():
