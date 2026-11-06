@@ -8,6 +8,7 @@ import type { Camera } from '../logic/camera.js'
 import type * as Icons from './icons.js'
 import type * as Kit from './kit.js'
 import type { Shell } from './shell.js'
+import type { Keymap } from '../keymap.js'
 
 export type { DeletedLayout, Engine, ItemInfo, ItemSnapshot, LightingReport, Shot } from '../engine.js'
 export type { Library } from '../data.js'
@@ -28,7 +29,31 @@ interface WorkspaceApi {
   readonly setAdjust: (on: boolean) => void
 }
 
-/** ctx: what planner/main.ts passes to every area's mount(ctx); the workspace adds its API to it. */
+/** What the Shortcuts sheet adds (ui/shortcuts.ts). */
+interface ShortcutsApi {
+  readonly open: () => void
+  readonly close: () => void
+  readonly toggle: () => void
+  readonly isOpen: () => boolean
+}
+/** What Export adds (ui/export.ts): the sheet, and an export without it (E17). */
+export interface ExportOptions {
+  readonly size?: string
+  readonly format?: string
+  readonly layout?: string
+  readonly quality?: number
+}
+interface ExporterApi {
+  readonly open: () => void
+  readonly exportNow: (opts?: ExportOptions) => Promise<{ blob: Blob; name: string; width: number; height: number }>
+}
+/** What Settings adds (ui/settings.ts). */
+interface SettingsApi {
+  readonly open: () => void
+}
+
+/** ctx: what planner/main.ts passes to every area's mount(ctx); the workspace, the Shortcuts sheet, Export and Settings
+ *  add their APIs to it. keys: the keymap every shortcut registers in (keymap.ts). */
 export interface UiContext {
   readonly engine: Engine
   readonly scenes: Scenes
@@ -36,5 +61,9 @@ export interface UiContext {
   readonly shell: Shell
   readonly icons: typeof Icons
   readonly kit: typeof Kit
+  readonly keys: Keymap
   workspace?: WorkspaceApi
+  shortcuts?: ShortcutsApi
+  exporter?: ExporterApi
+  settings?: SettingsApi
 }

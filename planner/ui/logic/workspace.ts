@@ -161,28 +161,6 @@ export function stageInsets(mode: Mode, chromeLeft: number, safeTop: number, saf
   return { left: 0, top: safeTop + 60, right: 0, bottom }
 }
 
-/** What a key does in the workspace (before the engine's own keys): Delete or Backspace removes the selected piece,
- *  ⌘Z / Ctrl+Z puts the last one back, Esc leaves Adjust floor (when the ruler is off). Nothing while typing. */
-export type WorkspaceKey = 'remove' | 'undo' | 'leave-adjust' | null
-export interface KeyFacts {
-  readonly key: string
-  readonly meta: boolean
-  readonly ctrl: boolean
-  readonly shift: boolean
-  readonly typing: boolean
-  readonly selected: boolean
-  readonly canUndo: boolean
-  readonly adjusting: boolean
-  readonly rulerActive: boolean
-}
-export function workspaceKey(k: KeyFacts): WorkspaceKey {
-  if (k.typing) return null
-  if ((k.key === 'Delete' || k.key === 'Backspace') && k.selected && !k.meta && !k.ctrl) return 'remove'
-  if ((k.meta || k.ctrl) && !k.shift && k.key.toLowerCase() === 'z' && k.canUndo) return 'undo'
-  if (k.key === 'Escape' && k.adjusting && !k.rulerActive) return 'leave-adjust'
-  return null
-}
-
 /** The phone's bottom bar: Adjust floor's card, the selection bar, or none (data-ws-bar). */
 export function bottomBar(phone: boolean, adjusting: boolean, open: boolean, selecting: boolean): string {
   return phone ? (adjusting && open ? 'adjust' : selecting ? 'select' : '') : ''

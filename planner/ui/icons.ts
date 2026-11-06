@@ -41,6 +41,7 @@ const paths: ReadonlyMap<string, string> = new Map([
   ['panel', R(3, 4, 14, 12, 1.5) + S('M8 4v12')],
   ['search', C(9, 9, 5) + S('M13 13l4 4')],
   ['plus', S('M10 4v12M4 10h12')],
+  ['settings', S('M3 6h4.5M11.5 6H17M3 14h8.5M15.5 14H17') + C(9.5, 6, 2) + C(13.5, 14, 2)],
   ['flip', S('M10 3v14M6.5 6.5L10 3l3.5 3.5M6.5 13.5L10 17l3.5-3.5')],
   ['swap', S('M3.5 7h12.5M13 4l3 3-3 3M16.5 13H4M7 10l-3 3 3 3')],
   ['revert', S('M5 8.5h7.5a4 4 0 0 1 0 8H8') + S('M8 5.5l-3 3 3 3')],

@@ -1,6 +1,6 @@
 // What a key, a wheel step or a pointer gesture means (planner/input.ts applies it). v1's input.js decisions: the
 // tap slop per pointer type, the hit pad around the selected piece, when a release is a tap, the wheel's zoom factor
-// and the keyboard map (contract §2.3, §4.5). Pure, for TScert: Math.exp comes in as a parameter.
+// (contract §2.3, §4.5; the keys are the keymap's, planner/input.ts and logic/keymap.ts). Pure, for TScert: Math.exp comes in as a parameter.
 
 /** How far (CSS px) a pointer may move and still tap: mouse 4, pen 6, touch 10, anything else 6. */
 export function tapSlop(pointerType: string): number {
@@ -34,27 +34,6 @@ export function wheelFactor(deltaY: number, deltaMode: number, ctrlKey: boolean,
   const k = deltaMode === 1 ? 16 : deltaMode === 2 ? 400 : 1
   const dy = deltaY * k
   return exp(-dy * (ctrlKey ? 0.01 : 0.0015))
-}
-
-/** The keyboard map (contract §2.3): what a key (lower case) does. */
-export type KeyCommand =
-  | { readonly kind: 'escape' }
-  | { readonly kind: 'remove' }
-  | { readonly kind: 'rotate'; readonly deg: number }
-  | { readonly kind: 'nudge'; readonly dy: number }
-  | { readonly kind: 'fit' }
-  | { readonly kind: 'zoom'; readonly factor: number }
-  | { readonly kind: 'none' }
-
-export function keyCommand(k: string, shift: boolean): KeyCommand {
-  if (k === 'escape') return { kind: 'escape' }
-  if (k === 'delete' || k === 'backspace') return { kind: 'remove' }
-  if (k === 'r') return { kind: 'rotate', deg: shift ? -15 : 15 }
-  if (k === 'pageup' || k === 'pagedown') return { kind: 'nudge', dy: (k === 'pageup' ? 1 : -1) * (shift ? 0.1 : 0.01) }
-  if (k === 'f' || k === '0') return { kind: 'fit' }
-  if (k === '+' || k === '=') return { kind: 'zoom', factor: 1.25 }
-  if (k === '-' || k === '_') return { kind: 'zoom', factor: 0.8 }
-  return { kind: 'none' }
 }
 
 /** Elements a key goes to rather than the planner (v1's typing()). */

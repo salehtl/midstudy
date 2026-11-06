@@ -186,3 +186,10 @@
 .ws-hint-row b { font: 600 var(--text-body-phone)/20px var(--font-text); }
 .ws-hint-row span { font: 400 var(--text-body-phone)/20px var(--font-text); color: var(--color-muted); }
 [data-mode="phone"][data-ws-walk="1"] .ws-hint, [data-mode="phone"][data-ws-bar]:not([data-ws-bar=""]) .ws-hint { display: none; }
+
+/* --- several pieces selected: the others' footprints, the count, the label's "+ n more" ------------------------------ */
+.ws-fp.is-extra { fill: #D9A44114; stroke-dasharray: 5 4; stroke-width: 1.75; }
+.ws-sb-count { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--color-text); font-weight: 600; }
+[data-mode="desktop"] .ws-sb-count { padding: 0 6px 0 8px; font-size: var(--text-body-desktop); line-height: 18px; }
+[data-mode="phone"] .ws-sb-count { padding: 0 6px 0 10px; font-size: 13px; line-height: 16px; max-width: 56px; }
+.ws-label-more { color: var(--color-accent); }

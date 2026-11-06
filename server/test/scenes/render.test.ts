@@ -69,7 +69,7 @@ void test('gpt-image with the scene: both images, quality medium and image_size 
   const out = await r.renders.render(job('gpt-image'))
   assert.equal(out.kind, 'done')
   assert.deepEqual(r.calls, [{ endpoint: 'openai/gpt-image-2/edit', key: 'test-key', args: { image_urls: [uri(LIVING), uri(LIVING)], prompt: 'P', output_format: 'jpeg', quality: 'medium', image_size: 'auto' } }])
-  assert.equal(out.kind === 'done' ? out.meta.cost_usd : null, 0.07)
+  assert.equal(out.meta.cost_usd, 0.07)
 })
 
 void test('nano-banana with the scene: both images as data URIs, the result downloaded, the meta and a billed cost row', async () => {

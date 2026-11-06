@@ -18,7 +18,7 @@ const SEED = Number(process.env.SEED ?? 20261106) >>> 0
 const N = Number(process.env.N ?? 4000)
 
 // --- the logic modules and the kernels' face, bundled (their .js specifiers name .ts files) --------------------------
-const LOGIC = ['num', 'camera', 'look', 'view', 'layout', 'text', 'money', 'messages', 'input', 'library', 'scenes']
+const LOGIC = ['num', 'camera', 'look', 'view', 'layout', 'text', 'money', 'messages', 'input', 'library', 'scenes', 'keymap', 'selection']
 const entry = [
   ...LOGIC.map((m) => `export * as ${m} from './planner/logic/${m}.ts'`),
   "export * as k from './core/js/web.ts'",
@@ -270,17 +270,60 @@ function shadowFitV1(radius, maxY, dy, tan) {
   const range = far - near
   return { reach, back, half, near, far, range, width: 2 * half, search: Math.min(0.25, (tan * (reach + 0.2)) / (2 * half) + 1.5 / 2048), bias: 0.004 / range }
 }
-// input.js:16 (tap slop), 126–145 (the keyboard map, as data)
+// input.js:16 (tap slop)
 const TAP_PX = { mouse: 4, pen: 6, touch: 10 }
-function keyV1(k, shift) {
-  if (k === 'escape') return { kind: 'escape' }
-  else if (k === 'delete' || k === 'backspace') return { kind: 'remove' }
-  else if (k === 'r') return { kind: 'rotate', deg: shift ? -15 : 15 }
-  else if (k === 'pageup' || k === 'pagedown') return { kind: 'nudge', dy: (k === 'pageup' ? 1 : -1) * (shift ? 0.1 : 0.01) }
-  else if (k === 'f' || k === '0') return { kind: 'fit' }
-  else if (k === '+' || k === '=') return { kind: 'zoom', factor: 1.25 }
-  else if (k === '-' || k === '_') return { kind: 'zoom', factor: 0.8 }
-  return { kind: 'none' }
+// main a292ee2 keymap.js (parse, comboOf, format), with IS_MAC as a parameter
+const MOD_ORDER = ['mod', 'ctrl', 'alt', 'shift']
+const CODE_KEY = { Slash: '/', Backslash: '\\', Period: '.', Comma: ',', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']', Minus: '-', Equal: '=', Backquote: '`', NumpadAdd: '+', NumpadSubtract: '-', NumpadMultiply: '*', NumpadDivide: '/', NumpadDecimal: '.', NumpadEnter: 'enter' }
+const ALIAS = { esc: 'escape', del: 'delete', space: ' ', cmd: 'mod', meta: 'mod', option: 'alt', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', pgup: 'pageup', pgdn: 'pagedown', plus: '=' }
+const MAC_MOD = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' }
+const PC_MOD = { mod: 'Ctrl', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
+const KEY_TEXT = { escape: 'Esc', enter: '↵', delete: 'Del', backspace: '⌫', ' ': 'Space', tab: 'Tab', home: 'Home', end: 'End', arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→', pageup: 'PgUp', pagedown: 'PgDn', click: 'Click', drag: 'Drag', scroll: 'Scroll', pinch: 'Pinch', arrows: '← ↑ → ↓' }
+function parseV1(combo) {
+  const parts = String(combo).toLowerCase().split('+')
+  if (parts.at(-1) === '' && parts.length > 1) { parts.pop(); parts[parts.length - 1] = '+' }
+  const key = ALIAS[parts.at(-1)] ?? parts.at(-1)
+  const mods = new Set(parts.slice(0, -1).map((m) => ALIAS[m] || m))
+  return { mods, key, id: [...MOD_ORDER.filter((m) => mods.has(m)), key].join('+') }
+}
+function comboOfV1(e, IS_MAC) {
+  let key
+  if (CODE_KEY[e.code]) key = CODE_KEY[e.code]
+  else if (/^Digit\d$/.test(e.code)) key = e.code.slice(5)
+  else if (/^Numpad\d$/.test(e.code)) key = e.code.slice(6)
+  else if (/^Key[A-Z]$/.test(e.code) && !/^[a-z]$/i.test(e.key)) key = e.code.slice(3).toLowerCase()
+  else key = (e.key === 'Spacebar' ? ' ' : e.key || '').toLowerCase()
+  const mods = []
+  if (IS_MAC ? e.metaKey : e.ctrlKey) mods.push('mod')
+  if (IS_MAC && e.ctrlKey) mods.push('ctrl')
+  if (e.altKey) mods.push('alt')
+  if (e.shiftKey) mods.push('shift')
+  return [...mods, key].join('+')
+}
+function formatV1(combo, IS_MAC) {
+  const { mods, key } = parseV1(combo)
+  let k = key
+  const shown = new Set(mods)
+  if (shown.has('shift') && (k === '/' || k === '=')) { shown.delete('shift'); k = k === '/' ? '?' : '+' }
+  const text = KEY_TEXT[k] || (k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))
+  const ms = MOD_ORDER.filter((m) => shown.has(m)).map((m) => (IS_MAC ? MAC_MOD : PC_MOD)[m])
+  return IS_MAC ? ms.join('') + text : [...ms, text].join('+')
+}
+// main a292ee2 engine.js select(uid, { toggle, add }) on a Set, and turnAbout
+function selectV1(uids, uid, known, how) {
+  const selection = new Set(uids)
+  let selected = uids.at(-1) ?? null
+  const ok = !!uid && known
+  if (how !== 'set') {
+    if (!ok) return { uids: [...selection], primary: selected }
+    if (how === 'toggle' && selection.has(uid)) { selection.delete(uid); if (selected === uid) selected = [...selection].at(-1) ?? null }
+    else { selection.delete(uid); selection.add(uid); selected = uid }
+  } else { selection.clear(); if (ok) selection.add(uid); selected = ok ? uid : null }
+  return { uids: [...selection], primary: selected }
+}
+function turnAboutV1(c, x, z, deg) {
+  const t = deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t), dx = x - c.x, dz = z - c.z
+  return [c.x + dx * cs + dz * sn, c.z - dx * sn + dz * cs]
 }
 
 // --- the comparisons ---------------------------------------------------------------------------------------------------
@@ -437,11 +480,28 @@ run('text and money: dimsText, fmtUsd, fmtBytes, renderPrice, estimateCost', () 
   const kind = pick(['image', 'model'])
   check(name, L.money.estimateCost(meta.engine ? String(meta.engine) : '', Number(meta.resolution), kind), estimateCostV1(meta, kind), { meta, kind })
 })
-run('input: tap slop, grab pad, keyboard map', () => {
+run('input: tap slop, grab pad', () => {
   const type = pick(['mouse', 'pen', 'touch', '', 'unknown'])
-  const k = pick(['escape', 'delete', 'backspace', 'r', 'pageup', 'pagedown', 'f', '0', '+', '=', '-', '_', 'a', 'shift', 'enter'])
-  const shift = rnd() < 0.5
-  check('input: tap slop, grab pad, keyboard map', [L.input.tapSlop(type), L.input.grabPad(type), L.input.keyCommand(k, shift)], [TAP_PX[type] ?? 6, type === 'mouse' ? 6 : 16, keyV1(k, shift)], { type, k, shift })
+  check('input: tap slop, grab pad', [L.input.tapSlop(type), L.input.grabPad(type)], [TAP_PX[type] ?? 6, type === 'mouse' ? 6 : 16], { type })
+})
+run('keymap: combos, keydowns, how they read (main a292ee2)', () => {
+  const isMac = rnd() < 0.5
+  const mods = ['', 'mod+', 'shift+', 'mod+shift+', 'alt+', 'ctrl+', 'cmd+', 'meta+option+'].map((m) => pick([m, m.toUpperCase()]))
+  const combo = pick(mods) + pick(['a', 'z', '/', '=', '-', 'escape', 'esc', 'del', 'space', 'up', 'pgdn', 'plus', 'arrowleft', 'pageup', 'enter', '0', 'click', 'drag', 'arrows', 'scroll', 'home', '+'])
+  check('keymap: combos, keydowns, how they read (main a292ee2)', [L.keymap.parseCombo(combo).id, L.keymap.formatCombo(combo, isMac)], [parseV1(combo).id, formatV1(combo, isMac)], { combo, isMac })
+  const e = { code: pick(['KeyA', 'KeyZ', 'Slash', 'Equal', 'Minus', 'Digit0', 'Numpad5', 'NumpadAdd', 'Escape', 'ArrowUp', 'Space', 'PageDown', 'Comma', 'Backquote']), key: pick(['a', 'Z', 'å', '/', '?', '=', '+', '-', '0', 'Escape', 'ArrowUp', ' ', 'Spacebar', 'PageDown', 'ж']), metaKey: rnd() < 0.3, ctrlKey: rnd() < 0.3, altKey: rnd() < 0.2, shiftKey: rnd() < 0.4 }
+  check('keymap: combos, keydowns, how they read (main a292ee2)', L.keymap.comboOf(e, isMac), comboOfV1(e, isMac), { e, isMac })
+})
+run('selection: select, toggle, add; a group turns about its middle (main a292ee2)', () => {
+  const ids = ['a', 'b', 'c', 'd']
+  const uids = ids.filter(() => rnd() < 0.5)
+  const uid = pick([null, '', ...ids])
+  const known = rnd() < 0.85
+  const how = pick(['set', 'toggle', 'add'])
+  const got = L.selection.selectStep({ uids, primary: uids.at(-1) ?? null }, uid, known, how)
+  check('selection: select, toggle, add; a group turns about its middle (main a292ee2)', { uids: [...got.uids], primary: got.primary }, selectV1(uids, uid, known, how), { uids, uid, known, how })
+  const c = [uni(-5, 5), uni(-5, 5)], x = uni(-5, 5), z = uni(-5, 5), deg = uni(-360, 360)
+  check('selection: select, toggle, add; a group turns about its middle (main a292ee2)', [...L.selection.turnAbout(c, x, z, deg)], turnAboutV1({ x: c[0], z: c[1] }, x, z, deg), { c, x, z, deg })
 })
 
 let failed = 0

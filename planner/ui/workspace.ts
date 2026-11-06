@@ -1,13 +1,16 @@
 // Workspace (area B): the chrome around the photo. Styles: styles/workspace.css (+ the height controls in manage.css).
 //   top bar      the scene switcher (opens the Scenes page) and the rendering chip; desktop: the tools at the right
-//   tools        Adjust floor, Occlusion, Fit (zoom), Render — desktop in the top bar, phone in a row above the dock.
+//   tools        Adjust floor, Occlusion, Fit (zoom), Export, Render — desktop in the top bar, phone in a row above the dock.
 //                Built once per mode, so each test handle (contract §4.6) exists exactly once.
-//   bars         selection bar (−15°, +15°, height, Drop to floor, Remove, Done; phone: the lift column too), the
+//   bars         selection bar (−15°, +15°, height, Drop to floor, Remove, Done; phone: the lift column too; several
+//                pieces selected: "n selected", the turns, Drop to floor, Remove and Done for all of them), the
 //                Adjust floor card (height, field of view, roll, the ruler, Reset, Looks right)
-//   overlay      selection footprint, label and rotate grip; a raised piece's guide line; the horizon line and its handle
+//   overlay      selection footprint (one per selected piece), label and rotate grip; a raised piece's guide line; the horizon line and its handle
 //                (drag it to set the pitch); the ruler's points and distance
 //   cards        opening / calibrating a scene, no scene open, the one-time gesture hint (phone)
 // It also tells the engine which part of the window the photo may use (engine.setStageInsets).
+// Shortcuts (ctx.keys): Delete / Backspace remove the selection (Undo toast), ⌘Z undoes that, Esc leaves Adjust floor,
+// O toggles Occlusion, ⌘E opens Export.
 // ctx.workspace: { setAdjust(on) } (the Scene panel's Adjust floor… button)
 // Shell events it sends (cancelable; preventDefault() to take over): 'render-request' {}, 'open-render' { meta }
 // The decisions, placements and words: logic/workspace.ts.
@@ -20,7 +23,7 @@ import { fixedMinus, readDecimal, readSigned, signed1 } from './logic/text.js'
 import {
   adjustNote, bottomBar, clipInset, elevCm as cmOf, elevMeters, fillPercent, floorSavedText, frontCorner, gripSpot, horizonHandle as handleSpot,
   labelSpot, missingText, renderChip, repeatCm, repeatDelayMs, rulerHint as rulerHintText, scaleText, stageInsets, switcher as switcherOf, switcherLabel, upText,
-  workspaceKey, type Pt, type Rect,
+  type Pt, type Rect,
 } from './logic/workspace.js'
 
 const NS = 'http://www.w3.org/2000/svg'
@@ -47,14 +50,13 @@ const G = {
   ruler: '<rect x="2" y="7" width="16" height="6" rx="1" transform="rotate(-20 10 10)"/><path d="M6.2 8.7l.7 1.9M9.1 7.6l.7 1.9M12 6.6l.7 1.9"/>',
   horizon: '<path d="M2 10h16"/><path d="M10 3.5v4M8 5.5l2-2 2 2M10 16.5v-4M8 14.5l2 2 2-2"/>',
   scenes: '<rect x="2.5" y="4" width="15" height="12" rx="1.5"/><path d="M2.5 13l4-3.5 3 2.5 2.5-2 5.5 4"/>',
+  export: '<path d="M10 3v9.5M6.5 9l3.5 3.5L13.5 9"/><path d="M3.5 13.5v2a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-2"/>',
 }
 const HINT_KEY = 'midstudy.hint.gestures'
 const store = {
   get: (k: string): string | null => { try { return localStorage.getItem(k) } catch { return null } },
   set: (k: string, v: string): void => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
 }
-// eslint-disable-next-line @typescript-eslint/no-deprecated -- v1 reads navigator.platform first to tell a Mac (⌘Z, not Ctrl Z)
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 function cameraPatch(key: CameraKey, v: number): CameraPatch {
   switch (key) {
@@ -67,12 +69,12 @@ function cameraPatch(key: CameraKey, v: number): CameraPatch {
 
 /** @public planner/main.ts mounts every area: mod.mount(ctx) (knip does not follow the areas list). */
 export function mount(ctx: UiContext): void {
-  const { engine, scenes, shell, kit } = ctx
+  const { engine, scenes, shell, kit, keys } = ctx
   const { h, kbd } = kit
   const root = document.documentElement
   const phone = (): boolean => shell.isPhone()
   let rendering: { readonly t0: number } | null = null    // while a render runs
-  let lastRemoved: { readonly snap: ItemSnapshot; readonly toast: ToastHandle; readonly undo: () => void } | null = null  // for Undo / ⌘Z
+  let lastRemoved: { readonly snaps: readonly ItemSnapshot[]; readonly toast: ToastHandle; readonly undo: () => void } | null = null  // for Undo / ⌘Z
 
   // --- top bar ---------------------------------------------------------------------------------------------------
   const switcher = h('button.ws-switcher', { type: 'button', 'aria-label': 'Scenes', dataset: { tip: 'All scenes' }, onclick: () => { shell.openPage('scenes') } })
@@ -97,11 +99,14 @@ export function mount(ctx: UiContext): void {
     const adjust = mk('adjust-floor', G.floor, 'Adjust floor', 'Line the grid up with the floor', () => { setAdjust(!engine.getAdjustFloor()) })
     const occl = mk('occlusion', G.occl, 'Occlusion', 'Hide furniture behind things in the photo', () => { toggleOcclusion() })
     const fit = mk('zoom-fit', G.fit, 'Fit', 'Fit the photo (pinch or scroll to zoom)', () => { engine.fitView() })
+    const exp = mk('export', G.export, 'Export', 'Save the view as an image (free, no AI)', () => { ctx.exporter?.open() })
     const render = mk('render', '<path d="M9 3l1.5 4.5L15 9l-4.5 1.5L9 15l-1.5-4.5L3 9l4.5-1.5z"/><path d="M15.5 13v4M13.5 15h4"/>', 'Render', 'Render a photoreal image (paid)', () => { requestRender() }, '.is-strong')
     fill(right)
     fill(toolRow)
-    if (desk) fill(right, adjust, occl, h('span.ws-divider'), fit, h('span.ws-divider'), render)
-    else fill(toolRow, adjust, occl, fit, render)
+    if (desk) {
+      for (const [b, id] of [[occl, 'tool.occlusion'], [fit, 'view.fit'], [exp, 'tool.export']] as const) { const k = keys.lookup(id); if (k) b.dataset['kbd'] = k }
+      fill(right, adjust, occl, h('span.ws-divider'), fit, h('span.ws-divider'), exp, render)
+    } else fill(toolRow, adjust, occl, fit, exp, render)
     syncTools()
   }
   function syncTools(): void {
@@ -211,7 +216,8 @@ export function mount(ctx: UiContext): void {
   const horizonLine = mk('line', { class: 'ws-horizon' })
   const rulerShadow = mk('line', { class: 'ws-mline-shadow' })
   const rulerLine = mk('line', { class: 'ws-mline' })
-  svg.append(guide, guideDot, fpPoly, fpStem, horizonShadow, horizonLine, rulerShadow, rulerLine)
+  const fpExtra = document.createElementNS(NS, 'g') // the other selected pieces' footprints
+  svg.append(guide, guideDot, fpExtra, fpPoly, fpStem, horizonShadow, horizonLine, rulerShadow, rulerLine)
   const label = h('div.ws-label', { 'aria-hidden': 'true' })
   const grip = h('button.ws-grip', { type: 'button', 'aria-label': 'Rotate (drag)', dataset: { tip: 'Drag to rotate', kbd: 'R' } }, h('span', glyph(G.grip, 16, 16, 1.7)))
   const horizonHandle = h('div.ws-horizon-handle', { role: 'slider', 'aria-label': 'Horizon: drag up or down to tilt the camera', dataset: { midstudy: 'horizon' } }, h('span', glyph(G.horizon, 18, 20, 1.7)))
@@ -225,15 +231,16 @@ export function mount(ctx: UiContext): void {
   const busy = (): boolean => engine.getSceneLoad().loading || !engine.getSceneName()
 
   // --- selection bar + height (§2.10) ------------------------------------------------------------------------------
+  // Removes every selected piece; one toast, and Undo (or ⌘Z) puts them all back, selected.
   function removeSelected(): void {
-    const uid = engine.getSelected()
-    if (!uid) return
-    const snap = engine.removeItemWithUndo(uid)
-    if (!snap) return
-    const undo = (): void => { if (lastRemoved?.snap === snap) lastRemoved = null; quiet(engine.restoreItem(snap)) }
-    const t = shell.toast(`${snap.name} removed`, { id: `removed:${uid}`, icon: 'trash', ms: 6000, action: { label: 'Undo', onClick: undo } })
-    if (!phone()) t.el.querySelector('.toast-action')?.append(kbd(isMac ? '⌘Z' : 'Ctrl Z'))
-    lastRemoved = { snap, toast: t, undo }
+    const snaps = engine.getSelection().flatMap((u) => { const sn = engine.removeItemWithUndo(u); return sn ? [sn] : [] })
+    const first = snaps[0]
+    if (!first) return
+    const undo = (): void => { if (lastRemoved?.snaps === snaps) lastRemoved = null; quiet(snaps.length === 1 ? engine.restoreItem(first) : engine.restoreItems(snaps)) }
+    const text = snaps.length === 1 ? `${first.name} removed` : `${String(snaps.length)} pieces removed`
+    const t = shell.toast(text, { id: `removed:${first.uid}`, icon: 'trash', ms: 6000, action: { label: 'Undo', onClick: undo } })
+    if (!phone()) t.el.querySelector('.toast-action')?.append(kbd(keys.lookup('edit.undo')))
+    lastRemoved = { snaps, toast: t, undo }
   }
   function explainMissing(): void {
     const it = engine.getItem(engine.getSelected())
@@ -243,8 +250,9 @@ export function mount(ctx: UiContext): void {
   const elevCm = (): number => { const u = selUid(); return cmOf(u ? engine.getElevation(u) : 0) }
   const setElevCm = (v: number): void => { const u = selUid(); if (u) engine.setElevation(u, elevMeters(v)) }
   const nudge = (cm: number): void => { const u = selUid(); if (u) engine.nudgeElevation(u, cm / 100) }
-  const raised = (): boolean => { const it = engine.getItem(selUid()); return !!it && it.position[1] > 0.0005 }
-  function drop(): void { const u = selUid(); if (u) engine.dropToFloor(u) }
+  const many = (): boolean => engine.getSelection().length > 1
+  const raised = (): boolean => engine.getSelection().some((u) => { const it = engine.getItem(u); return !!it && it.position[1] > 0.0005 })
+  function drop(): void { for (const u of engine.getSelection()) engine.dropToFloor(u) }
   // + / − : one cm a press (on pointer down, so a quick tap counts once), held repeats faster
   function holdBtn(cls: string, dir: 1 | -1, labelText: string, midstudyName: string, size: number): HTMLButtonElement {
     let t: ReturnType<typeof setTimeout> | undefined
@@ -314,6 +322,8 @@ export function mount(ctx: UiContext): void {
     dropBtns.clear()
     const sel = engine.getItem(selUid())
     const missing = !!sel?.missing || !!sel?.noGlb
+    const n = engine.getSelection().length
+    if (n > 1) { buildGroupBar(n); return }
     if (phone()) {
       const it = (g: Element, text: string, onclick: () => void, cls = '', ds: Readonly<Record<string, string>> | null = null): HTMLButtonElement =>
         h(`button.ws-sb-item${cls}`, { type: 'button', onclick, dataset: ds }, g, h('span', text))
@@ -335,8 +345,8 @@ export function mount(ctx: UiContext): void {
       fill(selBar,
         missing ? h('button.ws-missing', { type: 'button', dataset: { midstudy: 'missing-item', tip: sel.noGlb ? 'No GLB model: shown as a box at its size' : 'Removed from the library: shown as a box at its size' }, onclick: explainMissing }, icon('warning', { size: 16, stroke: 1.75 }), h('span', sel.noGlb ? 'No GLB' : 'Missing item')) : null,
         missing ? h('span.ws-divider') : null,
-        it(glyph(G.rotL, 16, 20, 1.6), '−15°', '⇧R', 'Rotate back 15°', () => { engine.rotateSelected(-15) }),
-        it(glyph(G.rotR, 16, 20, 1.6), '+15°', 'R', 'Rotate 15°', () => { engine.rotateSelected(15) }),
+        it(glyph(G.rotL, 16, 20, 1.6), '−15°', keys.lookup('item.rotate-back') || null, 'Rotate back 15°', () => { engine.rotateSelected(-15) }),
+        it(glyph(G.rotR, 16, 20, 1.6), '+15°', keys.lookup('item.rotate') || null, 'Rotate 15°', () => { engine.rotateSelected(15) }),
         h('span.ws-divider'),
         h('div.ws-elev', { role: 'group', 'aria-label': 'Height above the floor', dataset: { tip: 'Height above the floor · Shift+drag, PageUp / PageDown' } },
           h('span.ws-elev-cap', 'Height'),
@@ -345,10 +355,41 @@ export function mount(ctx: UiContext): void {
           holdBtn('ws-elev-btn', 1, 'Up 1 cm', 'elev-up', 16)),
         dropB,
         h('span.ws-divider'),
-        it(glyph(G.trash, 16, 20, 1.6), 'Remove', 'Del', 'Remove from the scene', removeSelected, '.is-danger'),
-        h('button.ws-done', { type: 'button', onclick: () => { engine.select(null) }, dataset: { tip: 'Deselect' } }, h('span', 'Done'), h('kbd.kbd.is-ink', 'Esc')))
+        it(glyph(G.trash, 16, 20, 1.6), 'Remove', keys.lookup('item.remove') || null, 'Remove from the scene', removeSelected, '.is-danger'),
+        h('button.ws-done', { type: 'button', onclick: () => { engine.select(null) }, dataset: { tip: 'Deselect' } }, h('span', 'Done'), h('kbd.kbd.is-ink', keys.lookup('select.none') || 'Esc')))
       lift.replaceChildren()
     }
+    syncElev()
+  }
+
+  // Several pieces selected: what applies to all of them (turn as a group, drop, remove), no height field.
+  function buildGroupBar(n: number): void {
+    const count = h('span.ws-sb-count.tnum', { dataset: { midstudy: 'selection-count' } }, `${String(n)} selected`)
+    if (phone()) {
+      // the phone's bar is narrower: the turns, Remove and Done (no Drop to floor for a group)
+      const it = (g: Element, text: string, onclick: () => void, cls = ''): HTMLButtonElement => h(`button.ws-sb-item.is-narrow${cls}`, { type: 'button', onclick }, g, h('span', text))
+      fill(selBar, count,
+        it(glyph(G.rotL), '−15°', () => { engine.rotateSelected(-15) }),
+        it(glyph(G.rotR), '+15°', () => { engine.rotateSelected(15) }),
+        it(glyph(G.trash), 'Remove', removeSelected, '.is-danger'),
+        h('span.ws-spacer'),
+        h('button.ws-done', { type: 'button', onclick: () => { engine.select(null) } }, 'Done'))
+    } else {
+      const it = (g: Element, text: string, id: string | null, tip: string, onclick: () => void, cls = ''): HTMLButtonElement => {
+        const k = id ? keys.lookup(id) : ''
+        return h(`button.ws-sb-item${cls}`, { type: 'button', onclick, dataset: { tip, kbd: k || null } }, g, text ? h('span', text) : null, k ? kbd(k) : null)
+      }
+      const dropB = it(icon('drop', { size: 16, stroke: 1.75 }), 'Drop to floor', null, 'Drop all to the floor', drop)
+      dropB.dataset['midstudy'] = 'drop'
+      dropBtns.add(dropB)
+      fill(selBar, count, h('span.ws-divider'),
+        it(glyph(G.rotL, 16, 20, 1.6), '−15°', 'item.rotate-back', 'Turn the group back 15°', () => { engine.rotateSelected(-15) }),
+        it(glyph(G.rotR, 16, 20, 1.6), '+15°', 'item.rotate', 'Turn the group 15°', () => { engine.rotateSelected(15) }),
+        h('span.ws-divider'), dropB, h('span.ws-divider'),
+        it(glyph(G.trash, 16, 20, 1.6), `Remove ${String(n)}`, 'item.remove', 'Remove them from the scene', removeSelected, '.is-danger'),
+        h('button.ws-done', { type: 'button', onclick: () => { engine.select(null) }, dataset: { tip: 'Deselect' } }, h('span', 'Done'), h('kbd.kbd.is-ink', keys.lookup('select.none') || 'Esc')))
+    }
+    lift.replaceChildren()
     syncElev()
   }
 
@@ -499,10 +540,10 @@ export function mount(ctx: UiContext): void {
     syncTools()
     const showSel = !!sel && open && !adj && !busy()
     const it = sel ? engine.getItem(sel) : null
-    const selSig = `${String(sel)}|${it?.missing ? '1' : '0'}|${it?.noGlb ? '1' : '0'}|${shell.mode}`
+    const selSig = `${String(sel)}|${String(engine.getSelection().length)}|${it?.missing ? '1' : '0'}|${it?.noGlb ? '1' : '0'}|${shell.mode}`
     if (set(selBar, showSel) && (!selBar.childElementCount || selBar.dataset['sig'] !== selSig)) { selBar.dataset['sig'] = selSig; buildSelBar() }
     if (!showSel) { selBar.dataset['sig'] = ''; lift.replaceChildren(); elevInputs.clear(); dropBtns.clear() }
-    set(lift, showSel && phone())
+    set(lift, showSel && phone() && !many())
     if (showSel) syncElev()
     const wasAdj = !adjustCard.hidden
     if (set(adjustCard, adj && open && !busy())) {
@@ -518,7 +559,7 @@ export function mount(ctx: UiContext): void {
   const rebuild = (): void => { buildTools(); selBar.replaceChildren(); lift.replaceChildren(); adjustCard.replaceChildren(); hint.replaceChildren(); emptyCard.replaceChildren(); sync(); syncStage() }
 
   for (const ev of ['scene', 'dirty', 'selection', 'adjust', 'occlusion', 'grid', 'look', 'layouts'] as const) engine.events.addEventListener(ev, sync)
-  engine.events.addEventListener('items', (e) => { if (e.detail.change !== 'move') sync(); else if (e.detail.uid === engine.getSelected()) syncElev() })
+  engine.events.addEventListener('items', (e) => { if (e.detail.change !== 'move') sync(); else if (engine.isSelected(e.detail.uid)) syncElev() })
   engine.events.addEventListener('camera', () => { if (!adjustCard.hidden) adjustSync?.(); renderSwitcher() })
   engine.events.addEventListener('ruler', () => { if (!adjustCard.hidden) adjustSync?.() })
   engine.events.addEventListener('view', syncTools)
@@ -529,19 +570,13 @@ export function mount(ctx: UiContext): void {
   shell.events.addEventListener('layout', () => { syncStage() })
   shell.events.addEventListener('panel', () => { sync(); syncStage() })
 
-  // --- keys: Del with Undo, ⌘Z, Esc leaves Adjust floor -------------------------------------------------------------------
-  shell.addKeyFilter((e) => {
-    const t = e.target
-    const typing = t instanceof Element && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t instanceof HTMLElement && t.isContentEditable))
-    const act = workspaceKey({
-      key: e.key, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey, typing, selected: !!engine.getSelected(),
-      canUndo: !!lastRemoved, adjusting: engine.getAdjustFloor(), rulerActive: engine.getRuler().active,
-    })
-    if (act === 'remove') { e.preventDefault(); removeSelected(); return true }
-    if (act === 'undo' && lastRemoved) { e.preventDefault(); const l = lastRemoved; lastRemoved = null; l.toast.close(); l.undo(); return true }
-    if (act === 'leave-adjust') { e.preventDefault(); setAdjust(false); return true }
-    return false
-  })
+  // --- keys: Del with Undo, ⌘Z, Esc leaves Adjust floor, O, ⌘E (the keymap; the engine's own are in input.ts) ------------
+  const sceneOpen = (): boolean => !busy()
+  keys.register({ id: 'item.remove', group: 'Move and turn', label: 'Remove (with Undo)', keys: ['delete', 'backspace'], repeat: false, when: () => sceneOpen() && engine.getSelection().length > 0 && !engine.getAdjustFloor(), run: () => { removeSelected() } })
+  keys.register({ id: 'edit.undo', group: 'Move and turn', label: 'Undo a remove', keys: ['mod+z'], repeat: false, when: () => !!lastRemoved, run: () => { const l = lastRemoved; lastRemoved = null; l?.toast.close(); l?.undo() } })
+  keys.register({ id: 'adjust.leave', group: 'Tools', label: 'Leave Adjust floor', keys: ['escape'], priority: 10, repeat: false, hidden: true, when: () => engine.getAdjustFloor() && !engine.getRuler().active, run: () => { setAdjust(false) } })
+  keys.register({ id: 'tool.occlusion', group: 'Tools', label: 'Occlusion on or off', keys: ['o'], repeat: false, when: sceneOpen, run: () => { toggleOcclusion() } })
+  keys.register({ id: 'tool.export', group: 'Tools', label: 'Export an image (free, no AI)', keys: ['mod+e'], repeat: false, when: sceneOpen, run: () => { ctx.exporter?.open() } })
 
   // --- the grip: drag around the item's center to rotate it (15° steps on touch, Shift on desktop) -------------------------
   grip.addEventListener('pointerdown', (e) => {
@@ -615,6 +650,15 @@ export function mount(ctx: UiContext): void {
       const key = clipInset(engine.getVisiblePhotoRect(), vw(), vh())
       if (key !== clipKey) { clipKey = key; svg.style.clipPath = key }
     }
+    // the other selected pieces: their footprints only (the label, grip and guide follow the primary)
+    const others = showSel ? engine.getSelection().filter((u) => u !== sel) : []
+    while (fpExtra.childElementCount < others.length) fpExtra.append(mk('polygon', { class: 'ws-fp is-extra' }))
+    ;[...fpExtra.children].forEach((poly, i) => {
+      const u = others[i]
+      const fo = u === undefined ? null : engine.getFootprint(u)
+      const so = fo ? fo.corners.map((c) => engine.worldToScreen(c)) : null
+      if (so?.every((p) => p.visible) && poly instanceof SVGElement) { poly.setAttribute('points', so.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')); poly.style.display = '' } else if (poly instanceof SVGElement) poly.style.display = 'none'
+    })
     // selection footprint, label, grip
     const f = showSel ? engine.getFootprint(sel) : null
     const s = f ? f.corners.map((c) => engine.worldToScreen(c)) : null
@@ -629,10 +673,11 @@ export function mount(ctx: UiContext): void {
       const g = gripSpot(front, engine.getVisiblePhotoRect(), vw(), vh(), selBar.hidden ? vh() : selBar.getBoundingClientRect().top, liftLeft)
       px(grip, g.x, g.y)
       const where = upText(it.position[1])
-      const text = `${it.name}|${dimsText(it.lib.dims_cm)}|${where}|${it.missing ? '1' : '0'}`
+      const more = others.length ? `+ ${String(others.length)} more` : ''
+      const text = `${it.name}|${dimsText(it.lib.dims_cm)}|${where}|${it.missing ? '1' : '0'}|${more}`
       if (label.dataset['text'] !== text) {
         label.dataset['text'] = text
-        fill(label, h('b', it.missing ? `${it.name} · missing` : it.name), it.lib.dims_cm ? h('span', dimsText(it.lib.dims_cm)) : null, where ? h('span.ws-label-up', where) : null)
+        fill(label, h('b', it.missing ? `${it.name} · missing` : it.name), it.lib.dims_cm ? h('span', dimsText(it.lib.dims_cm)) : null, where ? h('span.ws-label-up', where) : null, more ? h('span.ws-label-more', more) : null)
       }
       if (it.position[1] > 0.02) {
         const top = engine.worldToScreen([f.center[0], it.position[1], f.center[2]])

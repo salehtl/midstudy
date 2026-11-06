@@ -48,7 +48,9 @@
 //   getPhotoRect(), getVisiblePhotoRect()   the photo's rectangle in client px (beyond the window when zoomed), cut to
 //                       the stage; getPhotoSize() { w, h, has }
 //   isSceneDirty() / isLayoutDirty()
-//   getItems() / getItem(uid) / getSelected() / getDrag() / getFootprint(uid) / getElevation(uid) / getScreenRect(uid)
+//   getSelection() (every selected piece, the primary last) / isSelected(uid) / selectMany(uids) / selectAll() /
+//   nudgeSelected([dx, dy, dz]) / duplicateSelected() / restoreItems(snaps) / exportImage({ longEdge, type, quality, encode })
+//   getItems() / getItem(uid) / getSelected() (the primary) / getDrag() / getFootprint(uid) / getElevation(uid) / getScreenRect(uid)
 //   hitItemAt(uid, x, y, pad), itemAt(x, y)   the placed piece under a client point
 //   getLibrary(), assetUrl(rel), getLayoutDetails(), getLayoutName(), layoutDisplayName(slug), getRenders(), isRenderMock()
 //   getScenesTrash()    deleted scenes the server keeps
@@ -75,7 +77,7 @@
 // Events (engine.events: a typed Bus, planner/bus.ts; e.detail is EngineEvents[name])
 //   'scene'  { phase: 'loading'|'calibrating'|'opened'|'failed'|'closed'|'saved'|'title'|'deleted', name }
 //   'scenes' { scenes }   'camera' { camera, source }   'adjust' { on }   'occlusion' { on }   'grid' { visible }
-//   'view' getView()      'dirty' { scene, layout }     'items' { change, uid }   'selection' { uid }   'drag' { mode, uid, phase }
+//   'view' getView()      'dirty' { scene, layout }     'items' { change, uid }   'selection' { uid, uids }   'drag' { mode, uid, phase }
 //   'look' { exposure, warmth, contactShadows }   'library' { items }   'layouts' { names?, details?, name? }   'renders' { renders }
 //   'render' { phase: 'start'|'done'|'failed', model, meta? }   'compare' { a, b }   'ruler' getRuler()
 //   'error' { text }      'toast' { text, kind, ms }   'lighting' { status, error }
@@ -114,6 +116,7 @@ import * as msg from './logic/messages.js'
 import * as money from './logic/money.js'
 import type { RenderModel } from './logic/money.js'
 import * as num from './logic/num.js'
+import * as selLogic from './logic/selection.js'
 import type { JsonObject, Kernels } from './logic/num.js'
 import * as sceneLogic from './logic/scenes.js'
 import * as text from './logic/text.js'
@@ -232,7 +235,7 @@ interface EngineEvents {
   view: ViewReport
   dirty: { scene: boolean; layout: boolean }
   items: { change: 'add' | 'move' | 'remove' | 'render'; uid: string }
-  selection: { uid: string | null }
+  selection: { uid: string | null; uids: string[] }
   drag: { mode: DragMode; uid: string; phase: 'start' | 'end' }
   look: LookView
   library: { items: LibraryEntry[] }
@@ -1045,14 +1048,46 @@ function dropToFloor(uid: string): void {
   const r = items.get(uid)
   if (r) moveItemInternal(uid, { position: [r.group.position.x, 0, r.group.position.z] })
 }
+const floorXZ = (r: ItemRec): readonly [number, number] => [r.group.position.x, r.group.position.z]
+// Several selected pieces turn as one group, around the middle of their positions (each turns by the same angle).
 function rotateSelected(deg: number): void {
-  const r = selected ? items.get(selected) : undefined
-  if (r) moveItemInternal(r.uid, { rotation_y_deg: rotateBy(r.rotationDeg, deg) })
+  const recs = selRecs()
+  if (!recs.length || !isNum(deg)) return
+  const c = recs.length > 1 ? selLogic.centreOf(recs.map(floorXZ)) : null
+  for (const r of recs) {
+    const p = r.group.position
+    const [x, z] = c ? selLogic.turnAbout(c, p.x, p.z, deg) : [p.x, p.z]
+    moveItemInternal(r.uid, { position: [roundTo(x, 6), p.y, roundTo(z, 6)], rotation_y_deg: rotateBy(r.rotationDeg, deg) })
+  }
+}
+// Move every selected piece by [dx, dy, dz] m (dy: its elevation, clamped 0–4 m, to the millimetre).
+function nudgeSelected(d: readonly number[]): void {
+  const [dx = 0, dy = 0, dz = 0] = d.map((v) => (isNum(v) ? v : 0))
+  for (const r of selRecs()) {
+    const p = r.group.position
+    moveItemInternal(r.uid, { position: [roundTo(p.x + dx, 6), clampElevation(num.nudged(p.y, dy)), roundTo(p.z + dz, 6)] })
+  }
+}
+// A copy of each selected piece, 30 cm to the right (+X), same turn and height; the copies become the selection.
+async function duplicateSelected(): Promise<string[]> {
+  const recs = selRecs()
+  if (!recs.length) return []
+  const uids = await Promise.all(recs.map((r) => {
+    const p = r.group.position
+    return addItemInternal(r.id, { position: [p.x + 0.3, p.y, p.z], rotation_y_deg: r.rotationDeg, missing: r.missing ? { ...(r.lib.dims_cm ?? {}) } : undefined })
+  }))
+  selectMany(uids)
+  return uids
 }
 function removeItemInternal(uid: unknown): void {
   const r = typeof uid === 'string' ? items.get(uid) : undefined
   if (!r) return
-  if (selected === r.uid) select(null)
+  if (sel.uids.includes(r.uid)) {
+    sel = selLogic.without(sel, r.uid)
+    selected = sel.primary
+    if (drag.mode && drag.uid === r.uid) endItemDrag()
+    emit('selection', selectionDetail())
+  }
   scene.remove(r.group)
   r.build++ // a rebuild in flight (reloadLibrary) drops its result
   detachBuilt(r)
@@ -1098,15 +1133,35 @@ function getScreenRect(uid: unknown): Rect | null {
 
 // --- selection: drag the item itself on the floor, a grip on its footprint rotates it (contract §2.3) -----------------
 type DragMode = 'move' | 'lift' | 'rotate'
+// The selection is a set (logic/selection.ts); `selected` is its primary (picked last), which the label, the grip and
+// the height controls follow. One piece selected is the common case and behaves exactly as before.
+let sel: selLogic.Selection = selLogic.NO_SELECTION
 let selected: string | null = null
 let snap = false // Shift on desktop: lift drags, 15° grip
-const drag: { mode: DragMode | null; uid: string | null; off: Vec3; a0: number; rot0: number; plane: Plane } = { mode: null, uid: null, off: [0, 0, 0], a0: 0, rot0: 0, plane: { normal: [0, 1, 0], constant: 0 } }
-function select(uid: unknown): void {
-  const next = typeof uid === 'string' && uid && items.has(uid) ? uid : null
-  if (drag.mode && drag.uid !== next) endItemDrag()
-  selected = next
-  emit('selection', { uid: selected })
+/** A selected piece as it was when a drag began. */
+interface DragStart { readonly uid: string; readonly pos: Vec3; readonly rot: number }
+// group: the selection when the drag began; centre: what a rotate drag turns around
+const drag: { mode: DragMode | null; uid: string | null; off: Vec3; a0: number; rot0: number; plane: Plane; group: DragStart[]; centre: readonly [number, number] } = { mode: null, uid: null, off: [0, 0, 0], a0: 0, rot0: 0, plane: { normal: [0, 1, 0], constant: 0 }, group: [], centre: [0, 0] }
+const selectionDetail = (): { uid: string | null; uids: string[] } => ({ uid: selected, uids: [...sel.uids] })
+const selRecs = (): ItemRec[] => sel.uids.flatMap((u) => { const r = items.get(u); return r ? [r] : [] })
+function setSelection(next: selLogic.Selection): void {
+  sel = next
+  selected = next.primary
+  if (drag.mode && (drag.uid === null || !sel.uids.includes(drag.uid))) endItemDrag()
+  emit('selection', selectionDetail())
 }
+/** select(uid | null, { toggle, add }): toggle (Shift+click) puts a piece in or out of the selection; add keeps the
+ *  others and makes it the primary. */
+function select(uid: unknown, opts: { toggle?: boolean; add?: boolean } = {}): void {
+  const u = typeof uid === 'string' ? uid : null
+  const how = opts.toggle ? 'toggle' : opts.add ? 'add' : 'set'
+  const next = selLogic.selectStep(sel, u, u !== null && items.has(u), how)
+  if (how !== 'set' && next === sel) return
+  setSelection(next)
+}
+function selectMany(uids: readonly string[]): void { setSelection(selLogic.selectMany(uids, (u) => items.has(u))) }
+function selectAll(): void { selectMany([...items.keys()]) }
+const groupStart = (): DragStart[] => selRecs().map((r) => ({ uid: r.uid, pos: [r.group.position.x, r.group.position.y, r.group.position.z], rot: r.rotationDeg }))
 function setSnap(on: unknown): void { snap = !!on }
 /** Footprint corners [front-left, front-right, back-right, back-left] on the floor (front faces +Z), centre, box, height.
  */
@@ -1160,11 +1215,13 @@ function beginItemDrag(uid: string, clientX: number, clientY: number, opts: { li
   const plane: Plane = lift ? liftPlane(pos) : { normal: [0, 1, 0], constant: -dragHeight(r, clientX, clientY) }
   const p = planePointAt(plane, clientX, clientY)
   if (!p) return false
-  if (selected !== uid) select(uid)
+  if (!sel.uids.includes(uid)) select(uid)
+  else if (selected !== uid) select(uid, { add: true }) // grabbing one piece of a group: the group moves, it leads
   drag.mode = mode
   drag.uid = uid
   drag.off = [pos[0] - p[0], pos[1] - p[1], pos[2] - p[2]]
   drag.plane = plane
+  drag.group = groupStart()
   emit('drag', { mode, uid, phase: 'start' })
   return true
 }
@@ -1174,7 +1231,11 @@ function beginRotateDrag(uid: string, clientX: number, clientY: number): boolean
   const plane: Plane = { normal: [0, 1, 0], constant: -r.group.position.y }
   const p = planePointAt(plane, clientX, clientY)
   if (!p) return false
-  const c: Vec3 = [r.group.position.x, r.group.position.y, r.group.position.z]
+  if (!sel.uids.includes(uid)) select(uid)
+  drag.group = groupStart()
+  const [cx, cz] = drag.group.length > 1 ? selLogic.centreOf(selRecs().map(floorXZ)) : [r.group.position.x, r.group.position.z]
+  const c: Vec3 = [cx, r.group.position.y, cz]
+  drag.centre = [cx, cz]
   drag.mode = 'rotate'
   drag.uid = uid
   drag.a0 = gripAngle(p, c)
@@ -1189,13 +1250,28 @@ function dragTo(clientX: number, clientY: number, opts: { snapTo?: boolean } = {
   const p = planePointAt(drag.plane, clientX, clientY)
   if (!p) return
   const g = r.group.position
+  const lead = drag.group.find((s) => s.uid === r.uid)
+  const others = drag.group.filter((s) => s !== lead && items.has(s.uid))
+  if (!lead) return
   if (drag.mode === 'move') {
     const [x, z] = dragMove(p, drag.off)
+    const dx = x - lead.pos[0], dz = z - lead.pos[2]
     moveItemInternal(r.uid, { position: [x, g.y, z] })
+    for (const s of others) moveItemInternal(s.uid, { position: [roundTo(s.pos[0] + dx, 6), s.pos[1], roundTo(s.pos[2] + dz, 6)] })
   } else if (drag.mode === 'lift') {
-    moveItemInternal(r.uid, { position: [g.x, dragLift(p[1], drag.off[1], snap), g.z] })
+    const y = dragLift(p[1], drag.off[1], snap)
+    const dy = y - lead.pos[1]
+    moveItemInternal(r.uid, { position: [lead.pos[0], y, lead.pos[2]] })
+    for (const s of others) moveItemInternal(s.uid, { position: [s.pos[0], roundTo(clampElevation(s.pos[1] + dy), 6), s.pos[2]] })
   } else {
-    moveItemInternal(r.uid, { rotation_y_deg: dragRotate(drag.rot0, gripAngle(p, [g.x, g.y, g.z]), drag.a0, !!opts.snapTo || snap) })
+    const c = drag.centre
+    const deg = dragRotate(drag.rot0, gripAngle(p, [c[0], g.y, c[1]]), drag.a0, !!opts.snapTo || snap)
+    const d = deg - drag.rot0
+    if (!others.length) { moveItemInternal(r.uid, { rotation_y_deg: deg }); return }
+    for (const s of [lead, ...others]) {
+      const [x, z] = selLogic.turnAbout(c, s.pos[0], s.pos[2], d)
+      moveItemInternal(s.uid, { position: [roundTo(x, 6), s.pos[1], roundTo(z, 6)], rotation_y_deg: rotateBy(s.rot, d) })
+    }
   }
 }
 function endItemDrag(): void {
@@ -1203,6 +1279,7 @@ function endItemDrag(): void {
   const d = { mode: drag.mode, uid: drag.uid }
   drag.mode = null
   drag.uid = null
+  drag.group = []
   emit('drag', { ...d, phase: 'end' })
 }
 /** What Undo puts back (removeItemWithUndo → restoreItem). */
@@ -1225,6 +1302,12 @@ async function restoreItem(s: ItemSnapshot): Promise<string> {
   const uid = await addItemInternal(s.id, { uid: s.uid, position: s.position, rotation_y_deg: s.rotation_y_deg, missing: s.missing })
   select(uid)
   return uid
+}
+// Undo of removing several pieces: all of them back, selected together.
+async function restoreItems(snaps: readonly ItemSnapshot[]): Promise<string[]> {
+  const uids = await Promise.all(snaps.map((s) => addItemInternal(s.id, { uid: s.uid, position: s.position, rotation_y_deg: s.rotation_y_deg, missing: s.missing })))
+  selectMany(uids)
+  return uids
 }
 
 // --- the ruler (Adjust floor): two taps on the floor, the distance between them -------------------------------------
@@ -2064,10 +2147,9 @@ async function holding<T>(fn: () => Promise<T>): Promise<T> {
 
 // The full photo frame at the photo's resolution (or scaled to maxPx): photo + furniture + splats, no view offset, no
 // grid; the splats sorted for it first.
-function captureShot(maxPx: number | null, quality: number): Promise<Shot> {
+// The view as a 2D canvas: the photo's own size times k (no view offset, no grid, no UI).
+function captureCanvas(k: number): Promise<HTMLCanvasElement> {
   if (!photo.has) return Promise.reject(new Error('no photo is open'))
-  const t0 = performance.now()
-  const k = maxPx ? Math.min(1, maxPx / Math.max(photo.w, photo.h)) : 1
   const w = Math.max(1, Math.round(photo.w * k)), h = Math.max(1, Math.round(photo.h * k))
   return holding(async () => {
     const pixels = await withFullFrame(P, camera, photo.w / photo.h, w, h, async () => {
@@ -2082,10 +2164,40 @@ function captureShot(maxPx: number | null, quality: number): Promise<Shot> {
     const ctx2 = c.getContext('2d')
     if (!ctx2) throw new Error('no 2D canvas')
     ctx2.putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer), w, h), 0, 0)
-    const shot = { dataUrl: c.toDataURL('image/jpeg', quality), width: w, height: h }
-    measure('render-capture', t0)
-    return shot
+    return c
   })
+}
+async function captureShot(maxPx: number | null, quality: number): Promise<Shot> {
+  const t0 = performance.now()
+  const c = await captureCanvas(maxPx ? Math.min(1, maxPx / Math.max(photo.w, photo.h)) : 1)
+  const shot = { dataUrl: c.toDataURL('image/jpeg', quality), width: c.width, height: c.height }
+  measure('render-capture', t0)
+  return shot
+}
+/** exportImage's result: the image (null with encode: false), the canvas it came from, its size and type. */
+interface ExportShot {
+  readonly blob: Blob | null
+  readonly canvas: HTMLCanvasElement
+  readonly width: number
+  readonly height: number
+  readonly type: string
+}
+// Export (no AI, free, nothing leaves the device): the scene as drawn, at `longEdge` px on its longer side (default the
+// photo's own size; up to 2× it), as a JPEG or PNG blob, and the canvas. encode: false skips the blob (the caller
+// composes the canvas itself, as Before and after does).
+async function exportImage(opts: { longEdge?: number | null; type?: string; quality?: number; encode?: boolean } = {}): Promise<ExportShot> {
+  const type = opts.type ?? 'image/jpeg'
+  if (!sceneName || !photo.has) throw reportError('Open a scene first, then export it')
+  if (type !== 'image/jpeg' && type !== 'image/png') throw reportError(`Can't export as ${type} (JPEG or PNG)`)
+  const long = Math.max(photo.w, photo.h)
+  const le = opts.longEdge
+  const k = isNum(le) && le > 0 ? Math.min(2, le / long) : 1
+  let canvas: HTMLCanvasElement
+  try { canvas = await captureCanvas(k) } catch (e) { throw reportError('Could not capture the view', e) }
+  if (opts.encode === false) return { blob: null, canvas, width: canvas.width, height: canvas.height, type }
+  const blob = await new Promise<Blob | null>((res) => { canvas.toBlob(res, type, type === 'image/jpeg' ? (opts.quality ?? 0.92) : undefined) })
+  if (!blob) throw reportError('Could not encode the image')
+  return { blob, canvas, width: canvas.width, height: canvas.height, type }
 }
 // A Promise: the read-back is asynchronous on both backends; a capture that can't be made rejects.
 function captureComposite(opts: { maxPx?: number | null; quality?: number } = {}): Promise<Shot> {
@@ -2385,6 +2497,9 @@ export const engine = {
   getItems: (): ItemInfo[] => [...items.values()].map(itemInfo),
   getItem: (uid: string | null): ItemInfo | null => { const r = uid === null ? undefined : items.get(uid); return r ? itemInfo(r) : null },
   getSelected: (): string | null => selected,
+  /** every selected piece, in the order picked (the primary last) */
+  getSelection: (): string[] => [...sel.uids],
+  isSelected: (uid: string): boolean => sel.uids.includes(uid),
   getDrag: (): { mode: DragMode; uid: string } | null => (drag.mode && drag.uid ? { mode: drag.mode, uid: drag.uid } : null),
   getFootprint, hitItemAt, itemAt, getScreenRect, getElevation,
   getLibrary: (): LibraryEntry[] => library.slice(), assetUrl,
@@ -2398,8 +2513,9 @@ export const engine = {
   // view
   zoomAt, zoomBy, panBy, fitView,
   // items + selection
-  addItemInternal, moveItemInternal, removeItemInternal, clearItemsInternal, select, rotateSelected, setSnap,
-  beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem,
+  addItemInternal, moveItemInternal, removeItemInternal, clearItemsInternal, select, selectMany, selectAll, rotateSelected,
+  nudgeSelected, duplicateSelected, setSnap,
+  beginItemDrag, beginRotateDrag, dragTo, endItemDrag, removeItemWithUndo, restoreItem, restoreItems,
   setElevation, nudgeElevation, dropToFloor, reloadLibrary: (): Promise<void> => loadLibrary(),
   tap, setRulerActive, setRulerPointAt, setRulerTrueLength,
   // look and lighting (§4.8)
@@ -2407,7 +2523,7 @@ export const engine = {
   // layouts
   saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal,
   // renders
-  captureComposite, postRender, renderViewInternal, listRendersInternal, compare,
+  captureComposite, postRender, renderViewInternal, listRendersInternal, compare, exportImage,
   // errors + overlays + projection
   reportError, onFrame, worldToScreen, photoToFloor, floorToPhoto, photoToClient,
 }
