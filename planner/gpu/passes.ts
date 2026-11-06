@@ -2,8 +2,9 @@
 // compiles to WGSL on its WebGPU backend and to GLSL on its WebGL2 fallback. No frame logic here: planner/engine.passes.ts
 // orders the passes, planner/lighting.ts drives the light's two (the environment bake and the floor catcher).
 //
-//   frame             uniforms every screen pass shares: the photo's rectangle in the target (x, y, w, h, top-left
-//                     origin, the target's pixels) and the target's size. photoUv(): the fragment's photo uv (v down).
+//   frame             the uniform every screen pass shares: the photo's rectangle in the target (x, y, w, h, top-left
+//                     origin, the target's pixels). photoUv(): the fragment's photo uv (v down), from TSL's
+//                     screenCoordinate (top-left on both backends; v1 flipped gl_FragCoord with the target's height).
 //   photo             the photo exactly as its bytes are (a NoColorSpace texture, no tone mapping or colour conversion:
 //                     the renderer's output colour space is linear, so nothing converts it), letterbox bars outside it.
 //   depth pre-pass    the photo's depth (depth.png, × the height scale, + 3 cm) into the depth buffer, colour writes
@@ -17,7 +18,7 @@
 // clearTarget() is the one place a target is cleared (three 0.180's WebGL2 backend needs two workarounds there).
 import {
   AlwaysDepth, Color, CustomBlending, DataTexture, FloatType, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, NearestFilter,
-  NodeMaterial, NoColorSpace, NormalBlending, OneFactor, OneMinusSrcAlphaFactor, RedFormat, Texture, Vector2, Vector3, Vector4,
+  NodeMaterial, NoColorSpace, NormalBlending, OneFactor, OneMinusSrcAlphaFactor, RedFormat, Texture, Vector3, Vector4,
 } from 'three/webgpu'
 import type { Camera, Node, Object3D, TextureNode, UniformNode, WebGPURenderer } from 'three/webgpu'
 import {
@@ -49,8 +50,6 @@ export function render(r: WebGPURenderer, scene: Object3D, camera: Camera): void
 export interface Frame {
   /** the photo's rectangle in the target: x, y, w, h (target px, top-left origin) */
   readonly rect: U<Vector4>
-  /** the target's size (px) */
-  readonly target: U<Vector2>
   /** the fragment's photo uv (v down; 0–1 inside the photo) */
   photoUv(): N
   inPhoto(uv: N): N
@@ -58,18 +57,16 @@ export interface Frame {
 
 export function createFrame(): Frame {
   const rect = uniform(new Vector4(0, 0, 1, 1))
-  const target = uniform(new Vector2(1, 1))
   return {
-    rect, target,
+    rect,
     photoUv: () => screenCoordinate.sub(rect.xy).div(rect.zw),
     inPhoto: (p: N) => p.x.greaterThanEqual(0).and(p.y.greaterThanEqual(0)).and(p.x.lessThanEqual(1)).and(p.y.lessThanEqual(1)),
   }
 }
 
-/** Sets a frame to the photo's rectangle `rect` (x, y, w, h) in a target of `size`. */
-export function setFrame(f: Frame, rect: readonly [number, number, number, number], size: Vector2): void {
+/** Sets a frame to the photo's rectangle `rect` (x, y, w, h, target px). */
+export function setFrame(f: Frame, rect: readonly [number, number, number, number]): void {
   f.rect.value.set(rect[0], rect[1], rect[2], rect[3])
-  f.target.value.copy(size)
 }
 
 // --- colour ----------------------------------------------------------------------------------------------------------

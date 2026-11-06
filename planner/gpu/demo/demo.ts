@@ -92,7 +92,7 @@ function updateView(): void {
   camera.aspect = photo.w / photo.h
   camera.setViewOffset(s * photo.w, s * photo.h, -ox, -oy, w, h)
   camera.updateProjectionMatrix()
-  setScreen(P, [ox, oy, s * photo.w, s * photo.h], new THREE.Vector2(w, h))
+  setScreen(P, [ox, oy, s * photo.w, s * photo.h])
   sizeTargets(P, w, h)
 }
 
@@ -205,7 +205,7 @@ function removeItem(uid: string): void {
 }
 
 function shadowBox(): THREE.Box3 | null {
-  if (!lights.key.castShadow) return null
+  if (!lights.castsShadow()) return null
   const b = new THREE.Box3()
   for (const r of items.values()) b.union(r.box.clone().applyMatrix4(r.group.matrixWorld))
   return b.isEmpty() ? null : b

@@ -412,7 +412,7 @@ function updateView(): void {
   const off = viewLogic.viewOffset(t, photo, r)
   camera.setViewOffset(off.fullWidth, off.fullHeight, off.x, off.y, off.width, off.height)
   camera.updateProjectionMatrix()
-  setScreen(P, viewLogic.bufferRect(t, photo, r, k), drawSize)
+  setScreen(P, viewLogic.bufferRect(t, photo, r, k))
   wake()
 }
 // depth.png is metric in the calibration's frame, where the camera stood calib.json's height_m above the floor it found.
@@ -736,7 +736,7 @@ function thumbTargets(size: number): NonNullable<typeof thumbPass> {
   const model = new THREE.RenderTarget(size, size, { type: THREE.HalfFloatType, samples: 4, depthBuffer: true })
   const out = new THREE.RenderTarget(size, size, { type: THREE.UnsignedByteType, depthBuffer: false })
   const frame = createFrame()
-  setFrame(frame, [0, 0, size, size], new THREE.Vector2(size, size))
+  setFrame(frame, [0, 0, size, size])
   thumbPass = { size, model, out, quad: new THREE.QuadMesh(createFurnitureComposite(frame, model.texture).material) }
   return thumbPass
 }
@@ -2035,7 +2035,7 @@ async function inferLighting(): Promise<LightingReport | null> {
 // --- drawing ------------------------------------------------------------------------------------------------------------
 // The pieces that cast the key's shadow, as one world box (null without any): the shadow camera is fitted to it.
 function shadowBox(): THREE.Box3 | null {
-  if (!lights.key.castShadow || !items.size) return null
+  if (!lights.castsShadow() || !items.size) return null
   const b = new THREE.Box3()
   for (const r of items.values()) if (r.child && !r.missing) b.union(worldBounds(r))
   return b.isEmpty() ? null : b

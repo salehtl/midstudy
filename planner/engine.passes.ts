@@ -15,7 +15,7 @@
 //      composited over it (Look, ACES, sRGB), then the splats over that (a plain multiplier, sRGB).
 import {
   BackSide, CanvasTexture, DoubleSide, FrontSide, HalfFloatType, Mesh, MeshBasicMaterial, MeshBasicNodeMaterial, PlaneGeometry, QuadMesh, RenderTarget,
-  SRGBColorSpace, Scene, UnsignedByteType, Vector2, Vector3,
+  SRGBColorSpace, Scene, UnsignedByteType, Vector3,
 } from 'three/webgpu'
 import type { Box3, Material, Object3D, PerspectiveCamera, Texture, WebGPURenderer } from 'three/webgpu'
 import { uniform } from 'three/tsl'
@@ -88,7 +88,7 @@ function depthOnly(side: typeof FrontSide | typeof BackSide | typeof DoubleSide)
 /** The planner's passes and the targets they share. */
 export interface Passes {
   readonly renderer: WebGPURenderer
-  /** the photo's rectangle and the target's size, for every screen pass (the furniture target is the screen's size) */
+  /** the photo's rectangle in the target, for every screen pass (the furniture target is the screen's size) */
   readonly frame: Frame
   /** 1. the photo, as its bytes are */
   readonly photo: PhotoPass & { readonly quad: QuadMesh }
@@ -157,9 +157,9 @@ export function setSplatSource(p: Passes, t: Texture): void {
   p.splat.quad = new QuadMesh(createSplatComposite(p.frame, t, p.splatGain))
 }
 
-/** The photo's rectangle (target px, top-left origin) and the target's size, into every pass that reads them. */
-export function setScreen(p: Passes, rect: readonly [number, number, number, number], size: Vector2): void {
-  setFrame(p.frame, rect, size)
+/** The photo's rectangle (target px, top-left origin), into every pass that reads it. */
+export function setScreen(p: Passes, rect: readonly [number, number, number, number]): void {
+  setFrame(p.frame, rect)
 }
 
 /** The furniture target follows the drawing buffer (the splat target follows it on its next draw). */
@@ -229,7 +229,7 @@ export async function withFullFrame<T>(p: Passes, camera: PerspectiveCamera, asp
   camera.clearViewOffset()
   camera.aspect = aspect
   camera.updateProjectionMatrix()
-  setFrame(p.frame, [0, 0, w, h], new Vector2(w, h))
+  setFrame(p.frame, [0, 0, w, h])
   sizeTargets(p, w, h)
   try {
     return await fn()

@@ -9,7 +9,11 @@
 //     ProbeStandardNodeMaterial / ProbePhysicalNodeMaterial three makes for every MeshStandardMaterial and
 //     MeshPhysicalMaterial), so the probe alone gives the diffuse light and nothing is counted twice;
 //   - one key DirectionalLight from the key's world direction, its colour and intensity × light_strength, with three's
-//     shadow on the pieces;
+//     shadow on the pieces. The light always casts (castShadow stays true): the Look's floor shadow switch sets the
+//     shadow's intensity (0 or 1) and stops its map's updates instead. three 0.180 disposes a light's shadow node when
+//     a material builds while castShadow is false, but builds made while it was true keep using that node, so switching
+//     castShadow off and on made the next frame read a disposed (null) shadow map: an exception in every frame after
+//     (seen on the WebGL2 backend with E16's controls: the furniture gone until a reload);
 //   - its shadow on an invisible floor at y = 0 (the catcher): soft (PCSS, the penumbra growing with the distance to
 //     the piece that casts it) and black with an alpha, so the photo is only darkened where a piece's shadow falls.
 //     The catcher reads its OWN shadow map of the casters (CASTER_LAYER): three's WebGPU renderer draws a light's map
@@ -223,7 +227,10 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
   key.shadow.mapSize.set(SHADOW_SIZE, SHADOW_SIZE)
   key.shadow.bias = -0.0004
   key.shadow.normalBias = 0.01
-  key.castShadow = false
+  key.castShadow = true // always: the floor shadow switch is shadowsOn below (see the header)
+  key.shadow.intensity = 0
+  key.shadow.autoUpdate = false
+  let shadowsOn = false
   const hemi = new HemisphereLight(0xffffff, 0x8a7a66, V1.hemi)
   const probe = new LightProbe()
   probe.visible = false
@@ -389,7 +396,9 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
       scene.environmentIntensity = V1.env * a
     }
     const shadows = look.cast_shadows && s > 0
-    key.castShadow = shadows
+    shadowsOn = shadows
+    key.shadow.intensity = shadows ? 1 : 0
+    key.shadow.autoUpdate = shadows
     key.shadow.radius = 1 + 3 * look.light_softness
     if (!shadows) catcherMesh.visible = false // fitShadow turns it on before a frame with pieces
     // What a full shadow keeps of the floor's light, per channel: ambient / (ambient + key) on an up-facing floor (with
@@ -416,7 +425,7 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
   const tmp = new Vector3()
   function fitShadow(box: Box3 | null): void {
     syncEnv() // every frame: cheap unless the photo or the camera changed
-    catcherMesh.visible = key.castShadow && !!box && !box.isEmpty() // no pieces: no shadow map to read
+    catcherMesh.visible = shadowsOn && !!box && !box.isEmpty() // no pieces: no shadow map to read
     if (!catcherMesh.visible || !box) return
     const c = box.getCenter(new Vector3())
     const radius = box.getBoundingSphere(new Sphere()).radius
@@ -459,6 +468,8 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
   return {
     key, probe, hemi, catcher: catcherMesh,
     mode, inferred, inUse, prepare, fitShadow,
+    /** Whether the key casts its shadow now (the Look's cast_shadows, and a light that isn't off). */
+    castsShadow: (): boolean => shadowsOn,
     /** RoomEnvironment's map (the default mode's environment), for the pieces' thumbnails. */
     roomEnvironment: roomEnv,
     /** Runs fn with the environment's diffuse light counted (a thumbnail is lit by RoomEnvironment, whatever the scene). */
