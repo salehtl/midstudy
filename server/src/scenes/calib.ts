@@ -26,6 +26,8 @@ export type CalibOutcome =
   | { readonly kind: 'not-found'; readonly command: string }
   | { readonly kind: 'timeout' }
   | { readonly kind: 'spawn-error'; readonly message: string }
+  /** The server is stopping: the worker was closed under the job, and nothing new is started. */
+  | { readonly kind: 'stopped' }
 
 /** One job's step: `<calib> <cmd> <args>` one-shot, or `{"id", "cmd", "args"}` to the worker. */
 export interface CalibRequest {
@@ -305,6 +307,7 @@ export class CalibRunner {
     }
     if (this.#worker === worker) this.#worker = null
     await worker.kill()
+    if (this.#closing) return { kind: 'stopped' } // no one-shot run that would outlive the server
     if (answer.kind === 'timeout') {
       this.#failures = failuresAfter(this.#failures, 'timeout')
       return { kind: 'timeout' }

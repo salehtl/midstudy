@@ -112,7 +112,7 @@ export function readHead(file: string, max: number): Buffer | null {
     return null
   }
   try {
-    const buf = Buffer.alloc(max)
+    const buf = Buffer.allocUnsafe(max)
     let got = 0
     while (got < max) {
       const n = fs.readSync(fd, buf, got, max - got, got)

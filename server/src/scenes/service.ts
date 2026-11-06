@@ -508,6 +508,9 @@ export class SceneService {
       case 'spawn-error':
         this.#jobs.update(id, { status: 'failed', finished: isoUtc(this.#now()), message: serverFailed('OSError', outcome.message) })
         return
+      case 'stopped':
+        this.#finish(id, false, 'the server stopped')
+        return
       case 'result':
         break
     }
