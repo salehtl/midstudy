@@ -6,13 +6,13 @@ import { checkDims, sameNumber, type Checked, type CheckedDims } from './meta.ts
 import { inNumbers, numberOf, pySorted, pyTruthy, type PyValue } from './pyvalue.ts'
 
 /** The keys a PATCH may carry. */
-export const PATCH_KEYS: readonly string[] = ['name', 'category', 'mount', 'yaw', 'default_render', 'dims_cm']
-export const PATCH_SHAPE = 'the body must be a JSON object with any of name, category, mount, yaw, default_render, dims_cm'
+const PATCH_KEYS: readonly string[] = ['name', 'category', 'mount', 'yaw', 'default_render', 'dims_cm']
+const PATCH_SHAPE = 'the body must be a JSON object with any of name, category, mount, yaw, default_render, dims_cm'
 const YAW_RELATIVE = 'yaw must be 0, 90, 180 or 270 (degrees, relative to now)'
 const YAWS: readonly number[] = [0, 90, 180, 270]
 
 /** The keys set in place, in v1's order. */
-export type PatchKey = 'name' | 'category' | 'mount' | 'default_render'
+type PatchKey = 'name' | 'category' | 'mount' | 'default_render'
 const SET_KEYS: readonly PatchKey[] = ['name', 'category', 'mount', 'default_render']
 
 /** What the item has, as v1 tested it (Python truthiness of `assets.get(…)`, `source.get("engine") == "idol"`). */
@@ -26,7 +26,7 @@ export interface ItemFacts {
 }
 
 /** One key set in place: the value as v1 stored it (text stripped). */
-export interface PatchSet {
+interface PatchSet {
   readonly key: PatchKey
   readonly value: string | null
 }

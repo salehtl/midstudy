@@ -99,7 +99,7 @@ function readText(file: string): string | null {
 }
 
 /** A JSON file parsed with JSON.parse (for answers), or null. */
-export function readJson(file: string): unknown {
+function readJson(file: string): unknown {
   const text = readText(file)
   if (text === null) return null
   try {

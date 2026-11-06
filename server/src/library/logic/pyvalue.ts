@@ -14,17 +14,9 @@ export type PyValue =
   | { readonly kind: 'list'; readonly items: readonly PyValue[] }
   | { readonly kind: 'dict'; readonly entries: ReadonlyMap<string, PyValue> }
 
-/** Python's `None`. */
-export const NONE: PyValue = { kind: 'none' }
-
 /** A Python int (from a JS integer). */
 export function pyInt(value: number): PyValue {
   return { kind: 'int', value, digits: value >= 1e21 || value <= -1e21 ? BigInt(value).toString() : String(value) }
-}
-
-/** A Python str. */
-export function pyStr(value: string): PyValue {
-  return { kind: 'str', value }
 }
 
 /** `repr()` of the items of a list, joined as Python joins them. */
@@ -85,12 +77,6 @@ export function inNumbers(v: PyValue, allowed: readonly number[]): boolean {
 export function noneOrEmpty(v: PyValue | undefined): boolean {
   if (v === undefined) return true
   return v.kind === 'none' || (v.kind === 'str' && v.value === '')
-}
-
-/** The text of a str, else null. */
-export function textOf(v: PyValue | undefined): string | null {
-  if (v?.kind !== 'str') return null
-  return v.value
 }
 
 /** `dict.get(key)` (undefined when missing) of a dict; undefined for anything else. */

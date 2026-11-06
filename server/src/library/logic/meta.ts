@@ -9,9 +9,9 @@ import { dictGet, inNumbers, noneOrEmpty, numberOf, pyTruthy, pyValueRepr, type 
 export type Checked<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string }
 
 /** The image engines (§3.2), idol the default. */
-export type ImageEngine = 'idol' | 'sam3d' | 'trellis2' | 'rug'
+type ImageEngine = 'idol' | 'sam3d' | 'trellis2' | 'rug'
 /** Every engine a job can name: a model upload is `glb`. */
-export type Engine = ImageEngine | 'glb'
+export type Engine = 'idol' | 'sam3d' | 'trellis2' | 'rug' | 'glb'
 /** What an upload is (X-Midstudy-Kind). */
 export type UploadKind = 'model' | 'image'
 
@@ -43,7 +43,7 @@ export interface AddMeta {
 }
 
 /** v1's `check_dims` sentence. */
-export const DIMS_REQUIRED = 'dims_cm is required: {"w": ..., "d": ..., "h": ...} in cm, all greater than 0'
+const DIMS_REQUIRED = 'dims_cm is required: {"w": ..., "d": ..., "h": ...} in cm, all greater than 0'
 const NAME_REQUIRED = 'name is required, e.g. "Reading chair"'
 const META_OBJECT = 'the meta must be a JSON object with at least name and dims_cm'
 const YAWS: readonly number[] = [0, 90, 180, 270]
@@ -80,12 +80,12 @@ export function checkDims(dims: PyValue | undefined): Checked<CheckedDims> {
 }
 
 /** Whether a text names an image engine. */
-export function isImageEngine(s: string): s is ImageEngine {
+function isImageEngine(s: string): s is ImageEngine {
   return s === 'idol' || s === 'sam3d' || s === 'trellis2' || s === 'rug'
 }
 
 /** v1 `ENGINE_PRICE`: idol $0.10, sam3d $0.02, trellis2 $0.25/$0.30/$0.35 by resolution, glb and rug $0. */
-export function enginePrice(engine: Engine, resolution: number): number {
+function enginePrice(engine: Engine, resolution: number): number {
   switch (engine) {
     case 'idol': return 0.1
     case 'sam3d': return 0.02
