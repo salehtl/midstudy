@@ -179,8 +179,11 @@ export function checkRoomLayout(body: unknown, name: string, room: string, updat
   const c = checkLayout(body, name, room, updated)
   if (!c.ok) return { ok: false, error: c.error }
   const l = c.layout
-  const base = { version: l.version, name: l.name, title: l.title, room_name: room, library: l.library, updated: l.updated, items: l.items }
-  return { ok: true, layout: l.notes === undefined ? base : { ...base, notes: l.notes } }
+  const notes = l.notes
+  const layout: StoredRoomLayout = notes === undefined
+    ? { version: 1, name: l.name, title: l.title, room_name: room, library: l.library, updated: l.updated, items: l.items }
+    : { version: 1, name: l.name, title: l.title, room_name: room, library: l.library, updated: l.updated, items: l.items, notes }
+  return { ok: true, layout }
 }
 
 /** The layouts routes' `?scene=` / `?room=` (§2.7, §4.9): exactly one of the two. Each is the query value, null when

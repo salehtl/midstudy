@@ -188,11 +188,13 @@ export class RenderService {
     }
     const final = fs.readFileSync(path.join(this.dir, name + '.jpg'))
     const out = jpegFrame(final)
-    const meta = renderMeta({
-      name, model: job.model, cost, mock, prompt: job.prompt, created: isoUtcMs(now), scene: job.scene, layout: job.layout, room: job.room ?? null,
+    const base = renderMeta({
+      name, model: job.model, cost, mock, prompt: job.prompt, created: isoUtcMs(now), scene: job.scene, layout: job.layout,
       reference: job.reference !== null, keepRoom: job.keepRoom, aligned, width: job.width, height: job.height,
       outW: out.ok ? out.value.width : null, outH: out.ok ? out.value.height : null,
     })
+    const room = job.room ?? null
+    const meta: RenderMeta = room === null ? base : { ...base, room }
     writeJsonSync(path.join(this.dir, name + '.json'), meta, 'midstudy/api/render-meta.schema.json')
     if (mock) await appendCost(this.#options.costsFile, { date: stamp, id: name, engine, costUsd: cost, mock: true, input }, 'midstudy server')
     this.#reserved.delete(name) // the files now hold the name; after a failure it stays reserved

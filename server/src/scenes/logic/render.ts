@@ -187,7 +187,7 @@ export interface RenderMeta {
   readonly height: number
   readonly out_w: number | null
   readonly out_h: number | null
-  /** The room it was made in (contract §4.9): present exactly when the request named one. */
+  /** The room it was made in (contract §4.9): present exactly when the request named one (the shell adds it). */
   readonly room?: string
 }
 
@@ -211,13 +211,11 @@ export interface RenderFacts {
   /** The result's size, null when its frame header can't be read. */
   readonly outW: number | null
   readonly outH: number | null
-  /** The room the request named (§4.9), or null/absent. */
-  readonly room?: string | null
 }
 
 /** v1 `render`'s metadata: what renders/<name>.json holds and POST /api/render answers. */
 export function renderMeta(f: RenderFacts): RenderMeta {
-  const meta: RenderMeta = {
+  return {
     name: f.name,
     url: '/renders/' + f.name + '.jpg',
     input_url: '/renders/' + f.name + '-input.jpg',
@@ -238,6 +236,4 @@ export function renderMeta(f: RenderFacts): RenderMeta {
     out_w: f.outW,
     out_h: f.outH,
   }
-  const room = f.room ?? null
-  return room === null ? meta : { ...meta, room }
 }
