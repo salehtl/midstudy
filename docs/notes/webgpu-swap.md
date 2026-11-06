@@ -19,7 +19,7 @@ renderer is kept alive (the thumbnails' second `WebGLRenderer` is gone too), no 
 | Passes (`planner/gpu/passes.ts`, new home of every material) | GLSL `ShaderMaterial`s in `engine.passes.ts` | TSL `NodeMaterial`s from the spike, finished: photo, depth pre-pass (`depthNode` = `viewZToPerspectiveDepth`, a clip-space `vertexNode`), furniture composite (ACES + sRGB), splat composite, grid, the environment bake, the PCSS floor catcher (now also v1's mask rule: white without the alpha test), `clearTarget` with the spike's two WebGL2 workarounds; photo and depth textures made here |
 | Frame (`planner/engine.passes.ts`) | furniture MSAA pass → Spark pass sharing its depth texture → screen | furniture MSAA pass → `SplatLayer.render` into its own target over a depth of its own (the pre-pass twin + the pieces' meshes depth-only, each with a depth material of its own side, via `setRenderObjectFunction`) → screen. The splat pass keeps v1's redraw key. Contact shadows and `onDepthLayer` moved here (the demo shares them) |
 | Splats | Spark 2.4 `SplatMesh` + `SparkRenderer` (2.8 MB lazy chunk), `settleSplats` polling Spark's state | `planner/gpu/splat-layer.ts` (the spike's): GPU radix sort on WebGPU, `sort.worker.ts` on WebGL2; decoded files shared by placed copies; `onChange` (a landed worker sort) bumps the splat key and wakes the loop; `settle(camera)` before captures |
-| Lighting (`planner/lighting.ts`) | `ShaderChunk` patch + `MIDSTUDY_PROBE_DIFFUSE` define; catcher read three's shadow map | `ProbeStandardNodeMaterial` / `ProbePhysicalNodeMaterial` registered in `renderer.library` + one `iblDiffuse` uniform (0 with lighting.json, 1 without: no recompiles); the catcher renders its own shadow map of `CASTER_LAYER` (casters' layer follows `castShadow`; splat items' caster copies are on it); every caster's `shadowSide` set to WebGL's flipped default (v1's shadows); RoomEnvironment and the photo environment through three/webgpu's `PMREMGenerator` (the photo env's PMREM target reused); everything else (the SH turn, strength, ambient, keep, softness, the mode switch) unchanged, on the kernels |
+| Lighting (`planner/lighting.ts`) | `ShaderChunk` patch + `MIDSTUDY_PROBE_DIFFUSE` define; catcher read three's shadow map | `ProbeStandardNodeMaterial` / `ProbePhysicalNodeMaterial` registered in `renderer.library` + one `iblDiffuse` uniform (0 with lighting.json, 1 without: no recompiles); the catcher renders its own shadow map of `CASTER_LAYER` (casters' layer follows `castShadow`; splat items' caster copies are on it); the key always casts, its shadow's intensity being the floor-shadow switch (Decisions 9); every caster's `shadowSide` set to WebGL's flipped default (v1's shadows); RoomEnvironment and the photo environment through three/webgpu's `PMREMGenerator` (the photo env's PMREM target reused); everything else (the SH turn, strength, ambient, keep, softness, the mode switch) unchanged, on the kernels |
 | Captures | sync read-back inside a Promise | `readRgba`: `readRenderTargetPixelsAsync`, tight top-down rows on both backends (WebGL reads bottom-up; WebGPU pads rows to 256 bytes, so a 1200 px wide portrait comes back with 4,864-byte rows); `captureShot` and `captureMask` hold the view (`holdFrames`) across their awaits (a frame drawn mid-capture would see the capture's camera, targets, or the mask's white materials); one capture target and one mask target, kept and resized |
 | Thumbnails | a second `WebGLRenderer` per piece, ACES + sRGB output, `forceContextLoss` | the main renderer: the model into a 256² half-float MSAA target (RoomEnvironment's map from the lights, its diffuse light on for the thumbnail whatever the scene), the furniture composite (ACES + sRGB) over 0xe7e4df written as is, `readRgba` → JPEG |
 | Build | three.module.js for 'three'; Spark chunk; `.glsl` loader | `three` resolved to `three.webgpu.js` for the addons (three's own import map for WebGPU does this; three.module.js, i.e. WebGLRenderer, leaves the bundle: 143 kB); `planner/gpu/sort.worker.ts` is a worker entry (renamed from `sort-worker.ts` so the build's `*.worker.ts` rule picks it up: `planner/dist/sort.worker.js`); `@sparkjsdev/spark` removed from package.json |
@@ -27,7 +27,7 @@ renderer is kept alive (the thumbnails' second `WebGLRenderer` is gone too), no 
 
 ## Checks (static)
 
-Run on the final tree (each `nix develop -c npm run check -- <name>`):
+Run on the final tree (planner as in `f21bee0`, every later commit docs only), each `nix develop -c npm run check -- <name>`:
 
 | Check | Result |
 |---|---|
@@ -38,7 +38,7 @@ Run on the final tree (each `nix develop -c npm run check -- <name>`):
 | `check:planner` | ok: engine logic vs v1 11/11 groups; UI logic vs v1 204,019 checks; bus 5 cases |
 | `check:gen` | ok: contract/gen and the contract crate's schema are what the schemas generate (CONTRACT.md's splat paragraph changed: prose only) |
 | `node planner/gpu/demo/unit.mjs` | all passed (SPZ vs PLY decode, Σ = R S² Rᵀ, the CPU sort's order, stability and culling; 262,144 splats sorted in 6.6 ms in Node) |
-| `npm run build` | `planner/dist/app.js` 1,179,936 B + a 21 kB chunk, `engine.worker.js`, `sort.worker.js` (1.4 kB); no CDN URL. v2-int-planner: 378,295 B + a 535 kB chunk loaded at start (three's WebGL build, shared with Spark) + 21 kB, and Spark's 2.8 MB chunk on the first splat item. Start-up JavaScript 1,201 kB against 934 kB (+29 %: three's WebGPU build with its node system and both backends, 538 kB of it); no lazy 2.8 MB any more |
+| `npm run build` | `planner/dist/app.js` 1,178,951 B + a 21 kB chunk, `engine.worker.js`, `sort.worker.js` (1.4 kB); no CDN URL. v2-int-planner: 378,295 B + a 535 kB chunk loaded at start (three's WebGL build, shared with Spark) + 21 kB, and Spark's 2.8 MB chunk on the first splat item. Start-up JavaScript 1,200 kB against 934 kB (+28 %: three's WebGPU build with its node system and both backends, 538 kB of it); no lazy 2.8 MB any more |
 
 ## The gate: every browser eval twice per backend
 
@@ -88,9 +88,9 @@ every run; the 1-minute load was 5–14 during the rounds.
 
 `nix develop -c node scripts/eval-lock.mjs -- node planner/gpu/demo/check.mjs`, twice: on `f21bee0` **WG 72/72** in
 359 s, and after round C on `c5a445d` **WG 72/72** in 342 s (the same planner tree; `evals/out/webgpu-swap/wg-try1.log`,
-`wg-try2.log`; the spike's own final run was 69/69 with 2 skipped). Its reference column ("v1") is now the planner itself on the harness's
-default browser (WebGPU): the same renderer as the demo, so its `order` case no longer loses Spark's sort race and
-nothing is skipped.
+`wg-try2.log`; the spike's own final run was 69/69 with 2 skipped). Its reference column ("v1") is now the planner
+itself on the harness's default browser (WebGPU): the same renderer as the demo, so its `order` case no longer loses
+Spark's sort race and nothing is skipped. Both runs gave the same numbers (below).
 
 | What | WebGPU (GPU sort) | WebGL2 (worker sort) |
 |---|---|---|
@@ -99,7 +99,7 @@ nothing is skipped.
 | Idol chair (262,144 splats) where its splat.spz points project | ≤ 3 px | ≤ 3 px |
 | near splat in front of a far one right after placing | 100 % | 100 % |
 | the sofa hides a splat behind it / occlusion off shows it | 100 % / 100 % | 100 % / 100 % |
-| lit box faces vs lighting.json (±12 %) / floor shadow away from the light | +2.3…+2.6 % / yes | +2.3…+2.6 % / yes |
+| lit box faces vs lighting.json (±12 %) / floor shadow away from the light | +2.3…+2.9 % / yes | +2.3…+2.9 % / yes |
 | region diffs against the planner's own composite (JPEG q92), every case | items mean 1.30–1.97, floor 0.71–1.79, photo 0.03 | the same ±0.04 |
 | splat.spz and splat.ply of one probe | mean 0.99 | mean 0.99 |
 | GPU radix sort = a stable CPU sort of its keys (302,350 splats) | 16, 24 and 32-bit: 0 mismatches | — |
@@ -108,7 +108,80 @@ nothing is skipped.
 | the two backends, every case, whole frame | mean ≤ 0.018, p99 0 | |
 | page or console errors | none | none |
 
-## Numbers
+## Numbers (SwiftShader: compare relatively)
+
+### E17, A/B/C interleaved
+
+`node scripts/eval-lock.mjs --exclusive -- node evals/perf.mjs --only load,scene,edit --target
+v2gl:evals/out/ab/v2gl --target webgpu:. --target webgl2:.:MIDSTUDY_WEBGPU=0` (5 runs + 1 warm-up per target, ABC/CBA
+interleaved, 1,222 s, 1-minute load 7.6 → 13.2). `v2gl` is an export (`git archive`, not a worktree) of
+`v2-int-planner` (`60dba50`: WebGLRenderer + Spark) inside this worktree's ignored `evals/out/ab/`, built with this
+branch's dev shell; `webgpu` and `webgl2` are this branch (planner `f21bee0`) on each backend. E17's own verdict
+(worse = more than 10 % + the metric's noise): results `evals/out/webgpu-swap/perf-ab.json`, table
+`perf-ab-table.txt`.
+
+| Metric | v2 on WebGL | WebGPU | ratio | WebGL2 fallback | ratio |
+|---|---:|---:|---:|---:|---:|
+| planner_load_desktop | 1.46 s | 2.07 s | 1.42 WORSE | 1.75 s | 1.20 WORSE |
+| planner_load_desktop_warm | 1.48 s | 2.08 s | 1.41 WORSE | 1.77 s | 1.20 WORSE |
+| planner_load_phone | 1.51 s | 1.31 s | 0.87 same | 1.78 s | 1.18 same |
+| scene_open | 114.8 ms | 889.6 ms | 7.75 WORSE | 198.7 ms | 1.73 WORSE |
+| add_item_glb / _textured | 4.8 / 22.7 ms | 4.9 / 22.1 ms | same | 4.9 / 22.1 ms | same |
+| drag_frames_p50 / p95 | 66.6 / 67.1 ms | 101 / 108.4 ms | 1.52 / 1.61 WORSE | 83.3 / 103.3 ms | 1.25 / 1.54 WORSE |
+| render_capture (client) | 403.2 (395.8) ms | 520 (512.7) ms | 1.29 WORSE | 409.5 (401.9) ms | 1.02 same |
+| render_keep_room (client) | 763.8 (719.8) ms | 1.73 (1.68) s | 2.26 WORSE | 1.6 (1.56) s | 2.10 WORSE |
+| add_item_splat (Idol, 262,144 splats) | 81.8 ms | 57.7 ms | 0.71 **better** | 57.5 ms | 0.70 **better** |
+| splat_first_frame | 323.4 ms | 12.04 s | (see below) | 5.44 s | (see below) |
+| drag_splat (per move, the splat pass every frame) | 3.02 s | 3.01 s | 1.00 same | 2.96 s | 0.98 same |
+| render_capture_splat (sort + capture) | 11.52 s | 9.77 s | 0.85 **better** | 9.84 s | 0.85 **better** |
+
+Server-side shares (render_*_server) are the same everywhere. E17 counts 10 regressions for WebGPU and 8 for the
+WebGL2 fallback against v2 on WebGL. What they are, from scratch profiles of single pages
+(`evals/out/webgpu-swap/profile-open.mjs`, `profile-capture.mjs`, logs beside them):
+
+- **First use in a page pays node-material building (JavaScript) and pipeline creation (the GPU process).** Warm, the
+  captures are close: in one page, the 2nd and 3rd `renderView` take 480–580 ms on WebGPU and 375–385 ms on WebGL2,
+  and keep-room's mask 78 ms / 56 ms; the first keep-room's mask takes 1,051 / 1,113 ms (every piece's mask material
+  is a new render object: a node build and a program). E17 runs each edit in a fresh page, so it measures the first
+  use every time. On WebGPU a pipeline also depends on the target's format, so the first composite capture (8-bit
+  RGBA, against the canvas's BGRA) builds the screen passes again (2.4 s in a fresh browser; E17's 520 ms is with the
+  GPU process's shader cache warm from earlier pages). `scene_open` is the same effect (the furniture pass, the
+  environment bake and PMREM's pipelines on the first open): 135 ms to 1.66 s for the same open depending on what the
+  browser's GPU process had already compiled; on WebGL2 the environment map's first bake is ~300 ms.
+- **Load:** the bundle is 28 % bigger (three's WebGPU build), and `ready` waits for `renderer.init()` and the first
+  scene's pipelines (ready at 2.03 s against 0.88 s on desktop; the phone context, later in the run, at 1.30 s).
+- **Drag frames: most likely structural** (not isolated by a measurement): with the floor shadow on (E17's
+  living-wide has lighting.json), every frame now draws two 2048² shadow passes, three's for the pieces and the
+  catcher's own (v1's catcher read three's), which fits the +17 ms a frame on WebGL2; WebGPU's frame on SwiftShader
+  adds more (Dawn's per-pass cost in software). Reusing three's map when a lit piece is in view, and skipping the
+  catcher's pass when only the view moved, would take most of it back.
+- **splat_first_frame isn't comparable:** E17 stops when frames are fast again. Spark's frames stay fast while its
+  workers generate and sort (it draws nothing until its sort lands, so the view looks idle at 323 ms); the SplatLayer
+  draws the chair in the first frame after the add: on WebGPU that frame first compiles the GPU sort's 7 compute
+  pipelines (the spike: ~6.7 s in software) and then draws 262,144 splats (~5 s on SwiftShader); on WebGL2 the worker
+  sorts in milliseconds and the draw is the 5 s. The spike measured Spark's real time to its first splat frame at 31.5 s.
+- **Splats themselves:** adding the chair is 30 % faster (the spz decode, no Spark module to load), a capture with it
+  15 % faster (no Spark depth read-back and worker round trip before the capture), a drag with it the same (the
+  draw of 524,288 triangles bounds both on SwiftShader).
+
+### The demo's splat frame and sort times
+
+`node scripts/eval-lock.mjs --exclusive -- node planner/gpu/demo/check.mjs --perf --only=perf` (WG 9/9; the Idol
+chair, 262,144 splats, 1280 × 800, on the planner's own render modules; `evals/out/webgpu-swap/wg-perf-summary.json`).
+Spark's column is the spike's measurement on v1 (2026-11-06; this tree has no Spark left to measure, E17's splat rows
+above are the planner-level comparison with v2 on WebGL):
+
+| | WebGPU, GPU sort | WebGPU, worker sort | WebGL2 fallback, worker sort | Spark 2.4 on WebGL (spike) |
+|---|---|---|---|---|
+| sort | 84.6 ms of GPU time (timestamps: keys + 2 radix passes) | 1.6 ms (worker) | 3.4 ms (worker) | 3.9–4.1 s per re-sort |
+| splat pass alone | 4.78 s (GPU 4.77 s) | 4.74 s | (not synced on WebGL2) | 4.0 s |
+| whole frame (photo, furniture, shadows, splats) | 4.93 s with a sort, 4.83 s without | 4.80 s | 4.79 s | — |
+| first splat frame (fetch, decode, upload, sort, draw) | 13.5 s (≈ 6.7 s of it the 7 compute pipelines) | 6.8 s | 6.7 s | 31.5 s |
+| decode splat.spz | 43 ms | 40 ms | 42 ms | (inside Spark's add) |
+| splat memory on the GPU | 17.1 MB | 13.6 MB | 13.6 MB | 5.2 MB |
+
+The same as the spike's run within a few per cent: the frame is SwiftShader's triangle cost (524,288 small
+triangles), not the sort; on a real GPU both are milliseconds and unmeasured here.
 
 ## Decisions
 
@@ -158,6 +231,16 @@ nothing is skipped.
 
 ## Open issues
 
+- **E17 on SwiftShader: WebGPU is slower than v2 on WebGL in 10 metrics** (load +42 %, scene open 7.75×, drag frames
+  +52 %, render capture +29 %, keep-room 2.26×, the first splat frame) and better in 2 (adding a splat item −29 %, a
+  capture with one −15 %); the WebGL2 fallback is between (8 worse, 2 better). Most of it is first use in a fresh page
+  (node building and pipeline creation, which a software GPU makes slow) and one structural cost (a second 2048²
+  shadow pass a frame while the floor shadow is on); see Numbers. Not part of this gate (the evals all pass), but
+  REFACTOR §4.2's final A/B against v1 (no metric worse by more than 10 % + noise) would flag these if WebGPU lands
+  as is: v1's baseline has render_keep_room 745.7 ms and drag_frames_p50 66.6 ms. Ways back, untried here: warm the
+  pipelines after `ready` (`renderer.compileAsync` on a scene of the pass materials, so the first open and capture
+  don't build them), reuse three's shadow map for the catcher when a lit piece is in view and skip the catcher's pass
+  when only the view moved, keep the GPU sort's compute pipelines warm (or start with the worker sort and switch).
 - **three.js 0.180 bugs worked around, so the pin matters** (re-run WG and E16 on both backends on any upgrade): the
   spike's two WebGL2 clear bugs (`clearTarget`), and the shadow-node lifecycle bug above (the key light now always
   casts; its shadow's intensity is the switch). The cost of the latter: three allocates the key's 2048² shadow map as
@@ -167,7 +250,7 @@ nothing is skipped.
   `PMREMGenerator.fromEquirectangular` (present in 0.180's three/webgpu, missing from @types/three 0.180).
 - **One WGSL string remains**: the GPU radix sort's popcount (`wgslFn`, `countOneBits`): TSL 0.180 has no bit-count
   node. It is WebGPU-only compute (the WebGL2 fallback sorts in the worker); no GLSL remains anywhere.
-- **Start-up JavaScript +29 %** (1,201 kB against 934 kB): three's WebGPU build carries the node system and both
+- **Start-up JavaScript +28 %** (1,200 kB against 934 kB): three's WebGPU build carries the node system and both
   backends. Spark's 2.8 MB lazy chunk is gone. E17's load metrics below say what it costs on SwiftShader.
 - **window.midstudy before the planner has loaded** holds `ready` and `errors` only (planner/ready.ts); v1's held every
   method at once. Every eval waits for `ready` before calling methods (the harness and E11 do; E12 reads only `ready`).
@@ -193,3 +276,19 @@ nothing is skipped.
   `planner/dist/sort.worker.js`.
 - The engine's API and the `window.midstudy` hook are unchanged (`getState().items[].splats` is the decoded count, as
   Spark's `numSplats` was). URL: `?webgpu=0`.
+
+## Requests
+
+- **Phase 4 (merging `v2-webgpu` into `v2`):** re-run the gate as here: the ten browser evals twice with WebGPU and
+  twice with `MIDSTUDY_WEBGPU=0` (never the same eval twice at once in one worktree: its `evals/out/<slug>/` is shared),
+  `planner/gpu/demo/check.mjs`, and the static checks. `npm run check:ownership` derives the track `webgpu` from the
+  branch name, which isn't one: run it with `MIDSTUDY_TRACK=webgpu-swap`. Shared files this branch touches:
+  `package.json` and `package-lock.json` (`@sparkjsdev/spark` removed), `knip.json` (the demo's entries),
+  `scripts/build.mjs` (the `three` → `three.webgpu.js` rule, comments), `contract/CONTRACT.md` (§4.5 Splats, prose),
+  `planner/**`, `docs/notes/webgpu-spike.md` (a pointer). The backend half's merge may touch `package.json` and
+  `knip.json` too.
+- **Phase 4 (deciding to land it):** weigh the E17 numbers above (SwiftShader) against WebGPU's purpose (real GPUs,
+  the GPU sort); if the final A/B against v1 must hold, the open issue's three fixes come first.
+- **verify-rigor-perf / finish:** a real-device run (a phone with WebGPU and one without; a desktop GPU) of
+  `planner/gpu/demo/check.mjs --perf` and E17's edit suite would replace the SwiftShader caveats with numbers.
+
