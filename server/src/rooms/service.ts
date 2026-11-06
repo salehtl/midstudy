@@ -31,7 +31,7 @@ import {
 } from './logic/members.ts'
 import { effectiveCamera, type Turn } from './logic/pose.ts'
 import {
-  ALIGN_BUSY, ALIGN_NEEDS_PHOTOS, ALIGN_NO_RESULT, ALIGN_QUEUED, ALIGN_RUNNING, ALIGN_TOO_FEW, RESET_WITHOUT_ALIGN, ROOM_DELETED, alignStatus, alignTimedOut,
+  ALIGN_NEEDS_PHOTOS, ALIGN_NO_RESULT, ALIGN_QUEUED, ALIGN_TOO_FEW, alignBusy, alignRunning, RESET_WITHOUT_ALIGN, ROOM_DELETED, alignStatus, alignTimedOut,
   alignedMessage, inAnotherRoom, noRoom, notAMember, readAnswer, readMember, readRoom, roomBase, waitingMessage, type AlignRequest, type AlignStatus, type RoomData,
   type RoomPut,
 } from './logic/room.ts'
@@ -479,7 +479,7 @@ export class RoomService {
     const r = this.read(name)
     if (r === null) return { status: 404, error: noRoom(name) }
     const last = this.#lastJob(name)
-    if (last !== null && (last.status === 'queued' || last.status === 'running')) return { status: 409, error: ALIGN_BUSY }
+    if (last !== null && (last.status === 'queued' || last.status === 'running')) return { status: 409, error: alignBusy(name) }
     // A member still calibrating counts: its photo.jpg comes with its calibration, which the job waits for (New room
     // asks for the alignment right after the uploads, §4.9 Planner).
     if (r.members.filter((m) => isFile(this.#photo(m.scene)) || this.#scenes.busy(m.scene)).length < 2) return { status: 409, error: ALIGN_NEEDS_PHOTOS }
@@ -536,7 +536,7 @@ export class RoomService {
       return true
     }
     const order = alignOrder(r.members, hasPhoto, anchorIndex(r.members, hasPhoto, req.overwriteManual))
-    this.#jobs.update(id, { status: 'running', started: isoUtc(this.#now()), message: ALIGN_RUNNING, waiting_for: [] })
+    this.#jobs.update(id, { status: 'running', started: isoUtc(this.#now()), message: alignRunning(order.length), waiting_for: [] })
     const args = [...order.map((s) => resolvePath(this.#scenes.path(s))), '--out', resolvePath(path.join(this.dir, job.room))]
     if (req.solver !== null) args.push('--solver', req.solver)
     const outcome = await this.#scenes.runCalib({ id, cmd: 'align-room', args })

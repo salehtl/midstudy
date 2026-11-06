@@ -37,7 +37,7 @@ function sceneList(v: unknown, what: string, min: number): Checked<string[]> {
   const out: string[] = []
   for (const s of v) {
     if (typeof s !== 'string' || !isSlug(s)) return refuse(what + ': ' + (typeof s === 'string' ? pyRepr(s) : 'every entry') + " isn't a scene name (a slug: a-z, 0-9, -)")
-    if (out.includes(s)) return refuse(what + ' names ' + pyRepr(s) + ' twice')
+    if (out.includes(s)) return refuse(pyRepr(s) + ' is listed twice')
     out.push(s)
   }
   return { ok: true, value: out }
@@ -135,7 +135,7 @@ export function checkRoomPut(entries: readonly (readonly [string, unknown])[] | 
     for (const e of mv) {
       const c = memberPutOf(e)
       if (!c.ok) return refuse(c.error)
-      if (list.some((x) => x.scene === c.value.scene)) return refuse('members names ' + pyRepr(c.value.scene) + ' twice')
+      if (list.some((x) => x.scene === c.value.scene)) return refuse(pyRepr(c.value.scene) + ' is listed twice')
       list.push(c.value)
     }
     members = list
@@ -182,18 +182,18 @@ export function checkAlignRequest(entries: readonly (readonly [string, unknown])
 
 /** 404 for a name that isn't a room. */
 export function noRoom(name: string): string {
-  if (!isSlug(name)) return 'no room named ' + pyRepr(name) + ' (room names are slugs: a-z, 0-9, -)'
-  return 'no room named ' + pyRepr(name) + ': GET /api/rooms lists them'
+  if (!isSlug(name)) return "there's no room " + pyRepr(name) + ' (room names are slugs: a-z, 0-9, -)'
+  return "there's no room " + pyRepr(name)
 }
 
 /** 404 for an unknown align job. */
 export function noAlignJob(id: string): string {
-  return 'no align job ' + pyRepr(id) + ': GET /api/rooms/jobs lists them'
+  return "there's no align job " + pyRepr(id)
 }
 
 /** 409: the scene is a member of another room (a scene is in at most one). */
 export function inAnotherRoom(scene: string, room: string): string {
-  return 'scene ' + pyRepr(scene) + ' is already in room ' + pyRepr(room) + ': remove it there first'
+  return pyRepr(scene) + ' is already in room ' + pyRepr(room)
 }
 
 /** 400: `reset` names a scene that isn't a member. */
@@ -208,15 +208,17 @@ export function roomNotInTrash(name: string): string {
 
 /** 409 for POST …/restore when the name is taken again. */
 export function roomExistsAgain(name: string): string {
-  return 'a room ' + pyRepr(name) + ' (or its layouts) exists again: delete it first'
+  return 'a room ' + pyRepr(name) + ' exists already'
 }
 
 /** 409 for an align while one is queued or running for the room. */
-export const ALIGN_BUSY = 'this room is already being aligned: wait for it to finish'
+export function alignBusy(room: string): string {
+  return 'room ' + pyRepr(room) + ' is already being aligned'
+}
 /** 409 for an align with fewer than two members that have a photo. */
 export const ALIGN_NEEDS_PHOTOS = 'aligning needs at least two photos in the room'
 /** 409 for `reset` before any align.json. */
-export const RESET_WITHOUT_ALIGN = "this room hasn't been aligned yet: there is no answer to go back to"
+export const RESET_WITHOUT_ALIGN = 'this room has no alignment to reset to yet'
 /** 400 for render's `room` without `scene`. */
 export const RENDER_ROOM_NEEDS_SCENE = 'a render in a room needs scene: the photo it was made in'
 
@@ -230,7 +232,9 @@ export function renderSceneNotMember(scene: string, room: string): string {
 /** A queued align job's message. */
 export const ALIGN_QUEUED = 'waiting for the calibration queue'
 /** A running align job's message. */
-export const ALIGN_RUNNING = 'aligning the photos'
+export function alignRunning(photos: number): string {
+  return 'aligning ' + String(photos) + ' photos'
+}
 /** The message of an align job whose room was deleted while it was queued or running. */
 export const ROOM_DELETED = 'the room was deleted'
 /** An align job that found fewer than two photos when its turn came. */
@@ -246,7 +250,8 @@ export function waitingMessage(scenes: readonly string[]): string {
 
 /** A finished align job's message: the solver, and how many photos it placed. */
 export function alignedMessage(solver: string, placed: number, total: number): string {
-  return 'aligned (' + solver + '): ' + String(placed) + ' of ' + String(total) + ' photos placed'
+  const left = total - placed
+  return 'aligned ' + String(placed) + ' of ' + String(total) + ' photos (' + solver + ')' + (left > 0 ? '; ' + String(left) + ' left to place by hand' : '')
 }
 
 /** An align job that ran past its timeout. */
