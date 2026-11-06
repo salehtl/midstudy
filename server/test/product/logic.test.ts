@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { pyFloatRepr } from '../../../common/logic/pyfmt.ts'
 import { unescape } from '../../src/product/doc.ts'
+import { pageText } from '../../src/product/extract.ts'
 import { SYSTEM_PROMPT } from '../../src/product/llm.ts'
 import { isDict, isList } from '../../src/product/logic/py.ts'
 import { PyJsonError, loadsLenient, pyLoads, type PyValue } from '../../src/product/logic/pyjson.ts'
@@ -65,6 +66,20 @@ void test('the TypeScript parts read as v1 read', { skip: !oracleAvailable() }, 
   reqs.push({ op: 'loads', text: '['.repeat(9000) + ']'.repeat(9000), strict: true, deep: true }, { op: 'loads', text: '{"a":'.repeat(9000) + '1' + '}'.repeat(9000), strict: true, deep: true },
     { op: 'loads', text: '['.repeat(10100) + ']'.repeat(10100), strict: true, deep: true }, { op: 'loads', text: '['.repeat(200000) + ']'.repeat(200000), strict: false, deep: true })
   reqs.push({ op: 'system_prompt' })
+  // page bytes in the charsets shops declare (header or <meta>), as v1 decoded them (errors="replace")
+  const CTYPES = ['text/html; charset=utf-8', 'text/html; charset=UTF8', 'text/html;charset="iso-8859-1"', 'text/html; charset=latin1', 'text/html; charset=windows-1252',
+    'text/html; charset=ascii', 'text/html; charset=us-ascii', 'text/html; charset=koi8-r', 'text/html; charset=cp1251', 'text/html; charset=iso-8859-2', 'text/html; charset=mac-roman',
+    'text/html; charset=utf-16', 'text/html; charset=utf-16le', 'text/html; charset=utf-8-sig', 'text/html; charset=x-unknown', 'text/html; charset=base64', 'text/html; charset=idna',
+    'text/html', '']
+  const METAS = ['', '<meta charset="windows-1252">', "<meta http-equiv='Content-Type' content='text/html; charset=iso-8859-15'>", '<META CHARSET=utf-8>', '<meta charset="nope">']
+  for (let i = 0; i < CASES / 3; i++) {
+    const bytes: number[] = []
+    const meta = pick(r, METAS)
+    for (const ch of meta) bytes.push(ch.charCodeAt(0))
+    const n = Math.floor(r() * 40)
+    for (let k = 0; k < n; k++) bytes.push(r() < 0.5 ? Math.floor(r() * 256) : pick(r, [0x41, 0x20, 0xc3, 0xa9, 0xe2, 0x80, 0x9d, 0xef, 0xbb, 0xbf, 0xff, 0xfe, 0x81, 0x8d, 0xed, 0xa0]))
+    reqs.push({ op: 'decode', hex: Buffer.from(bytes).toString('hex'), ctype: pick(r, CTYPES) })
+  }
   const want = await askV1(reqs)
   const diffs: string[] = []
   reqs.forEach((req, i) => {
@@ -85,6 +100,7 @@ void test('the TypeScript parts read as v1 read', { skip: !oracleAvailable() }, 
       case 'literals': got = { ok: literals(text) }; break
       case 'js_unescape': got = { ok: jsUnescape(text) }; break
       case 'system_prompt': got = { ok: SYSTEM_PROMPT }; break
+      case 'decode': got = { ok: pageText(Buffer.from(String(req['hex']), 'hex'), String(req['ctype'])) }; break
       default: got = null
     }
     const exp = want[i]

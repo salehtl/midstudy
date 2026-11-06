@@ -121,6 +121,9 @@ def run(req):
         return pp._js_unescape(req["text"])
     if op == "system_prompt":
         return pp.SYSTEM_PROMPT
+    if op == "decode":
+        body = bytes.fromhex(req["hex"])
+        return pp._decode(body, pp._charset(req["ctype"], body))
     if op == "squash":
         return pp._squash(req["text"])
     raise ValueError(f"unknown op {op}")
