@@ -46,7 +46,7 @@ async function startRealFalServer() {
   for (const k of ['MIDSTUDY_FAL_MOCK', 'NOOK_FAL_MOCK', 'MIDSTUDY_NO_DOTENV', 'NOOK_NO_DOTENV', 'MIDSTUDY_FAL_MOCK_COST', 'MIDSTUDY_FAL_MOCK_LOG', 'MIDSTUDY_FETCH_ALLOW']) delete env[k]
   // the server's command (the harness's)
   const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
-    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--calib', STUB_CALIB, '--daily-spend-usd', '0.02'])
+    '--renders-dir', dirs.renders, '--rooms-dir', path.join(dirs.renders, '..', 'rooms'), '--library-dir', dirs.library, '--calib', STUB_CALIB, '--daily-spend-usd', '0.02'])
   let log = ''
   const proc = spawn(cmd, argv, { cwd: REPO, env, stdio: ['ignore', 'pipe', 'pipe'] })
   proc.stdout.on('data', (d) => { log += d })

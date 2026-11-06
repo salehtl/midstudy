@@ -4,7 +4,7 @@
 // What it gives every eval:
 // - createEval(): one "PASS|FAIL <id> <name> — <measured>" line per check, a summary, exit code 1 on any FAIL, a
 //   watchdog, and cleanup (servers and browsers are always stopped, also on a crash or Ctrl-C).
-// - startServer(): the server on a free port with its own scenes/layouts/renders/library dirs and costs file under
+// - startServer(): the server on a free port with its own scenes/layouts/renders/library/rooms dirs and costs file under
 //   evals/out/<eval>/, fal mocked (MIDSTUDY_FAL_MOCK=fixtures/fal, MIDSTUDY_NO_DOTENV=1, no FAL_KEY,
 //   --daily-spend-usd 0 unless an eval tests the cap with mock costs) and the calib stub with MIDSTUDY_CALIB_MOCK.
 // - the server is `node server/src/main.ts` and the furniture CLI it gets through --midstudy-add is
@@ -12,7 +12,7 @@
 //   schema, contract §0). Before the first server, node scripts/build.mjs runs once. Every eval's first line says what
 //   it runs against. MIDSTUDY_RECORD_API=<dir> records every /api call raw() makes (one JSON line each) for
 //   contract/tools/check-recordings.mjs.
-// - a guard that the repo's own scenes/, layouts/, renders/ and library/ are left untouched.
+// - a guard that the repo's own scenes/, layouts/, renders/, library/ and rooms/ are left untouched.
 // - the §4.1 projection (and its inverse) in plain JS, to compute expectations independently of the planner.
 // - headless Chrome + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
 //   missing ("hook missing: getScreenRect"), find the photo on screen, touch drags, 44 px target checks.
@@ -43,7 +43,7 @@ export const SERVER_NAME = 'server/src/main.ts'
 export const serverCommand = (flags) => ({ cmd: SERVER_CMD[0], args: [...SERVER_CMD.slice(1), ...flags] })
 export const RECORD_DIR = process.env.MIDSTUDY_RECORD_API ? path.resolve(process.env.MIDSTUDY_RECORD_API) : ''
 let recordTag = 'harness'
-export const REAL_CALIB = 'uv run --project calib midstudy-calib'
+export const REAL_CALIB = 'uv run --project calib --extra rooms midstudy-calib'
 export const GOLDEN = ['living-wide', 'steep-roll', 'portrait']
 export const DEFAULT_CAMERA = { fov_y_deg: 55, height_m: 1.4, pitch_deg: -10, roll_deg: 0 }
 export const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
@@ -97,7 +97,7 @@ export function createEval(id, slug, { timeoutS = 600 } = {}) {
       clearTimeout(watchdog)
       for (const fn of cleanups.reverse()) { try { await fn() } catch { /* best effort */ } }
       const touched = guard()
-      ev.check("the repo's own scenes/, layouts/, renders/ and library/ were not touched", touched.length === 0, touched.length ? touched.slice(0, 8).join(', ') : 'unchanged')
+      ev.check("the repo's own scenes/, layouts/, renders/, library/ and rooms/ were not touched", touched.length === 0, touched.length ? touched.slice(0, 8).join(', ') : 'unchanged')
       const failed = results.filter((r) => !r.ok)
       console.log(`\n${id}: ${results.length - failed.length}/${results.length} checks passed in ${ev.secs()} s` + (failed.length ? ` (failed: ${failed.map((f) => f.n).join(' ')})` : ''))
       fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify({ id, results }, null, 2))
@@ -113,7 +113,7 @@ export function createEval(id, slug, { timeoutS = 600 } = {}) {
 
 // The repo's own user data must never be written by an eval (each server gets its own dirs).
 function repoGuard() {
-  const roots = ['scenes', 'layouts', 'renders', 'library'].map((d) => path.join(REPO, d))
+  const roots = ['scenes', 'layouts', 'renders', 'library', 'rooms'].map((d) => path.join(REPO, d))
   const snap = () => {
     const m = new Map()
     const walk = (p) => {
@@ -256,7 +256,7 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   ensureBuilt(ev)
   const n = ++serverCount
   const data = path.join(ev.out, `server-${n}`)
-  const dirs = { data, scenes: path.join(data, 'scenes'), layouts: path.join(data, 'layouts'), renders: path.join(data, 'renders'), library: path.join(data, 'library') }
+  const dirs = { data, scenes: path.join(data, 'scenes'), layouts: path.join(data, 'layouts'), renders: path.join(data, 'renders'), library: path.join(data, 'library'), rooms: path.join(data, 'rooms') }
   for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true })
   dirs.costs = path.join(dirs.library, 'costs.csv')
   fs.writeFileSync(dirs.costs, 'date,id,engine,cost_usd,mock,input\n')
@@ -275,7 +275,7 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   if (!childEnv.MIDSTUDY_FAL_MOCK || (spendUsd == null && !appBudget)) throw new Error(`refusing to start ${SERVER_NAME} without the fal mock and a spend cap`)
   const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
     '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, '--midstudy-add', ADD_CMD,
-    ...(appBudget ? [] : ['--daily-spend-usd', String(spendUsd)]), ...args])
+    ...(appBudget ? [] : ['--daily-spend-usd', String(spendUsd)]), ...(args.includes('--rooms-dir') ? [] : ['--rooms-dir', dirs.rooms]), ...args])
   const logPath = path.join(data, 'server.log')
   let log = `$ ${cmd} ${argv.join(' ')}\n`
   const proc = spawn(cmd, argv, { cwd: REPO, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })

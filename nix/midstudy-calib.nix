@@ -84,6 +84,16 @@ let
     "midstudy_calib.contract_types"
     "midstudy_calib.records"
     "midstudy_calib.util"
+    # align-room (contract §4.9): the command and Manhattan (numpy, scipy). MASt3R isn't packaged (roma, einops and a
+    # git checkout of naver/mast3r), so the package's align-room answers `manhattan` (`--solver auto`'s fallback).
+    "midstudy_calib.rooms.command"
+    "midstudy_calib.rooms.photos"
+    "midstudy_calib.rooms.geometry"
+    "midstudy_calib.rooms.solver"
+    "midstudy_calib.rooms.score"
+    "midstudy_calib.rooms.manhattan"
+    "midstudy_calib.rooms.mock"
+    "scipy.spatial"
     "moge.model.v2"
     "torch"
     "cv2"

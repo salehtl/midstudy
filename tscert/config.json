@@ -26,6 +26,10 @@
       "project": "tscert/tsconfig.server.json"
     },
     {
+      "glob": "server/src/rooms/logic/**/*.ts",
+      "project": "tscert/tsconfig.server.json"
+    },
+    {
       "glob": "pipeline/src/logic/**/*.ts",
       "project": "tscert/tsconfig.pipeline.json"
     },

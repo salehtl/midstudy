@@ -129,7 +129,7 @@ SERVER_PID=""
 start_server() {  # start_server [server args...]
   env -u FAL_KEY MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 MIDSTUDY_FAL_MOCK=fixtures/fal MIDSTUDY_FETCH_ALLOW="127.0.0.1:$IMGPORT" ${MIDSTUDY_FAL_MOCK_COST:+MIDSTUDY_FAL_MOCK_COST=1} \
     MIDSTUDY_STRICT=1 "${SERVER_CMD[@]}" --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --scenes-dir "$OUT/scenes" \
-    --layouts-dir "$OUT/layouts" --renders-dir "$OUT/renders" --midstudy-add "$ADD_CMD" "$@" >>"$OUT/server.log" 2>&1 &
+    --layouts-dir "$OUT/layouts" --renders-dir "$OUT/renders" --rooms-dir "$OUT/rooms" --midstudy-add "$ADD_CMD" "$@" >>"$OUT/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 50); do curl -sf "$BASE/api/library" >/dev/null && return 0; sleep 0.2; done
   return 1

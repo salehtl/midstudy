@@ -171,7 +171,7 @@ export function mount(ctx: UiContext): void {
       if (names.length >= 2) {
         roomMaking = { text: newRoomStep('align', 0, files.length), n: files.length }
         render()
-        try { await engine.alignRoomWhenReady(info.name) } catch { /* reported; the room is there, align it later */ }
+        try { await engine.alignRoom(info.name) } catch { /* reported; the room is there, align it later */ }
       }
       shell.toast(`${roomTitleText(info.title, friendlyDate(info.created ?? null), info.name)}: ${String(names.length)} photos uploaded. It opens when they're ready.`, { kind: 'ok', id: `room-made:${info.name}` })
       roomMaking = null

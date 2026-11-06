@@ -2370,7 +2370,8 @@ async function followAlign(name: string): Promise<void> {
   } finally { following.delete(name) }
 }
 /** New room (§4.9 hook createRoom): each photo uploaded (POST /api/scenes), the room made in that order, then an
- *  alignment asked for; resolves when all three are accepted. */
+ *  alignment asked for at once (members still calibrating count toward the align's two photos; the job waits for
+ *  them); resolves when all three are accepted. */
 async function createRoom(files: unknown, meta: unknown = {}): Promise<{ room: string; scenes: string[]; job: AlignJobInfo | null }> {
   const list: unknown[] = Array.isArray(files) ? files : []
   if (!list.length || !list.every((f) => f instanceof Blob)) throw reportError('createRoom needs a list of photo files')
@@ -2383,20 +2384,8 @@ async function createRoom(files: unknown, meta: unknown = {}): Promise<{ room: s
     scenes.push(res.scene)
   }
   const info = await createRoomFromScenes(scenes, title)
-  const job = scenes.length >= 2 ? await alignRoomWhenReady(info.name) : null
+  const job = scenes.length >= 2 ? await alignRoom(info.name) : null
   return { room: info.name, scenes, job }
-}
-/** POST …/align right after New room: the server refuses an alignment while fewer than two members have a photo.jpg
- *  (§4.9: 409), and a just-uploaded photo has none until its calibration job has started (ingest). So wait until two
- *  members show a photo (photo_url), then ask (docs/notes/rooms-app.md: the contract's createRoom expects 202 at once). */
-async function alignRoomWhenReady(name: string): Promise<AlignJobInfo | null> {
-  for (let i = 0; i < 600; i++) {
-    let info: RoomInfo | null = null
-    try { info = await getRoomInternal(name) } catch { /* try again */ }
-    if (info && info.members.filter((m) => !!m.scene_object?.photo_url).length >= 2) return alignRoom(name)
-    await sleep(i < 20 ? 250 : 1000)
-  }
-  throw reportError('Could not start the alignment: the photos never arrived')
 }
 /** Resolves when every member has finished calibrating and the alignment isn't pending or running (§4.9 hook). */
 async function waitForRoom(name: unknown): Promise<RoomInfo> {
@@ -3185,7 +3174,7 @@ export const engine = {
   getRoomState: (): { name: string; title: string | null; photo: string | null; members: readonly RoomMember[]; info: RoomInfo; alignPhotos: boolean; floorPlan: boolean; unplaced: boolean } | null =>
     (room ? { name: room.name, title: room.title, photo: sceneName, members: room.members.map((m) => ({ ...m })), info: room.info, alignPhotos, floorPlan: floorPlanShown, unplaced: roomUnplaced() } : null),
   getRooms: (): RoomInfo[] => roomsList.slice(), getRoomsTrash: (): TrashedRoom[] => roomsTrash.map((t) => ({ ...t })),
-  getRoom, listRoomsInternal, serverHasRooms, getRoomInternal, createRoom, createRoomFromScenes, alignRoom, alignRoomWhenReady, waitForRoom, openRoom, setRoomPhoto,
+  getRoom, listRoomsInternal, serverHasRooms, getRoomInternal, createRoom, createRoomFromScenes, alignRoom, waitForRoom, openRoom, setRoomPhoto,
   setPose, previewPose, resetPose, setRoomScale, renameRoom, addSceneToRoom, removeSceneFromRoom, deleteRoom, restoreRoom,
   setAlignPhotos, setFloorPlanShown, roomToSceneHook, sceneToRoomHook, addItemHook, moveItemHook, photoToFloorHook, floorToPhotoHook,
   loadDepthMap: (url: string): Promise<DepthMap> => loadDepth(url), depthScaleFor,

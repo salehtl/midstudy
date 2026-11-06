@@ -9,6 +9,7 @@
     "../server/src/scenes/logic/**/*.ts",
     "../server/src/library/logic/**/*.ts",
     "../server/src/product/logic/**/*.ts",
+    "../server/src/rooms/logic/**/*.ts",
     "../common/logic/**/*.ts"
   ]
 }

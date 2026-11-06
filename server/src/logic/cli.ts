@@ -6,7 +6,7 @@ import { pyFloat } from '../../../common/logic/csv.ts'
 import { MAX_CAP_USD } from './spend.ts'
 
 /** The default --calib: calib/'s midstudy-calib (its warm worker, `midstudy-calib serve`, is tried first; contract §4.3). */
-const DEFAULT_CALIB = 'uv run --project calib midstudy-calib'
+const DEFAULT_CALIB = 'uv run --project calib --extra rooms midstudy-calib'
 /** The default --midstudy-add: the furniture CLI (contract §3.1), run by Node from the repository. */
 const DEFAULT_MIDSTUDY_ADD = 'node pipeline/src/cli.ts'
 

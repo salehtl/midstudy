@@ -7,7 +7,7 @@ Written from the spec only (it never reads calib/ source). Run through evals/py 
                                                  Display P3, the 25 MB limit, a non-image, EXIF FOV, metadata, the
                                                  MIDSTUDY_CALIB_MOCK lookup (fit and light) and the file rules
     evals/py evals/calib_eval.py --self-test     the comparator and checks themselves, against fixtures (no CLI)
-    options: --cli "CMD" (default "uv run --project calib midstudy-calib"; e.g. "python3 fixtures/stub_calib.py"),
+    options: --cli "CMD" (default "uv run --project calib --extra rooms midstudy-calib"; e.g. "python3 fixtures/stub_calib.py"),
              --calib-mock DIR (real mode: set MIDSTUDY_CALIB_MOCK, to exercise the harness without MoGe),
              --only living-wide,portrait (golden subset), --no-real-photos,
              --no-align (real mode without E20: align-room's real solver, evals/align_eval.mjs, which runs last otherwise)
@@ -50,7 +50,7 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "evals/out/calib"
 GOLDEN = ["living-wide", "steep-roll", "portrait"]
 REAL_PHOTOS = ["upper-lounge-camera.jpeg", "upper-lounge.jpg", "upper-lounge-empty-ai.png"]  # fixtures/photos/notes.md
-DEFAULT_CLI = "uv run --project calib midstudy-calib"
+DEFAULT_CLI = "uv run --project calib --extra rooms midstudy-calib"
 DEFAULT_CAMERA = {"fov_y_deg": 55.0, "height_m": 1.40, "pitch_deg": -10.0, "roll_deg": 0.0}
 TOL = {"fov_y_deg": 5.0, "height_rel": 0.10, "pitch_deg": 3.0, "roll_deg": 2.0, "depth_rel": 0.10, "exif_fov": 8.0, "depth_shape_rel": 0.03}
 # Golden photos without EXIF: MoGe-2's own FOV and metric scale, which run wide and short on CG renders (measured

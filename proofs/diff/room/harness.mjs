@@ -16,10 +16,10 @@ import { build } from 'esbuild'
 
 const ROOT = path.resolve(import.meta.dirname, '../../..')
 
-// The module under test. Integration (Phase C): switch this one line to 'planner/logic/room.ts', the app track's file
-// (same names and signatures: sceneToRoom, roomToScene, rotationToScene, rotationToRoom). MIDSTUDY_ROOM_MODULE or
+// The module under test: the app's planner/logic/room.ts since Phase C (proofs/diff/room/room_ref.mjs is §4.9 literally,
+// with the same names and signatures: sceneToRoom, roomToScene, rotationToScene, rotationToRoom). MIDSTUDY_ROOM_MODULE or
 // --module overrides it for one run.
-const ROOM_MODULE = 'proofs/diff/room/room_ref.mjs'
+const ROOM_MODULE = 'planner/logic/room.ts'
 
 const args = process.argv.slice(2)
 const opt = (name, dflt) => {

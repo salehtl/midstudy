@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/api/align-request.schema.json",
   "title": "AlignRequest",
-  "description": "POST /api/rooms/<room>/align (contract §4.9 Align): no body, or this object. 409 while an align job for the room is queued or running, or when fewer than two members have a photo.",
+  "description": "POST /api/rooms/<room>/align (contract §4.9 Align): no body, or this object. 409 while an align job for the room is queued or running, or when fewer than two members have a photo.jpg or a calibration queued or running (a just-uploaded photo counts; the job waits for it).",
   "type": "object",
   "additionalProperties": false,
   "properties": {

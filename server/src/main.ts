@@ -3,7 +3,7 @@
 //
 //   node server/src/main.ts [--port 8765] [--host 127.0.0.1] [--scenes-dir scenes] [--layouts-dir layouts]
 //                           [--renders-dir renders] [--rooms-dir rooms] [--library-dir library] [--costs-file <library-dir>/costs.csv]
-//                           [--calib "uv run --project calib midstudy-calib"]
+//                           [--calib "uv run --project calib --extra rooms midstudy-calib"]
 //                           [--midstudy-add "node pipeline/src/cli.ts"] [--daily-spend-usd N]
 //                           [--allowed-host NAME ...]
 //

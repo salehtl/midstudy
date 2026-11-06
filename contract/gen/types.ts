@@ -90,7 +90,7 @@ export type AlignMember = {
   readonly residual_cm: number | null
 }
 
-/** POST /api/rooms/<room>/align (contract §4.9 Align): no body, or this object. 409 while an align job for the room is queued or running, or when fewer than two members have a photo. */
+/** POST /api/rooms/<room>/align (contract §4.9 Align): no body, or this object. 409 while an align job for the room is queued or running, or when fewer than two members have a photo.jpg or a calibration queued or running (a just-uploaded photo counts; the job waits for it). */
 export type AlignRequest = {
   /** align-room's --solver (default auto). */
   readonly solver?: string

@@ -27,7 +27,7 @@ const argv = process.argv.slice(2)
 const MOCK_MODE = argv.includes('--mock')
 const opt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt }
 const STUB = 'python3 fixtures/stub_calib.py'
-const REAL = 'uv run --project calib midstudy-calib'
+const REAL = 'uv run --project calib --extra rooms midstudy-calib'
 const CLI = opt('--cli', MOCK_MODE ? STUB : REAL)
 const IS_STUB = /stub_calib\.py/.test(CLI)
 const SOLVER = opt('--solver', 'auto')
