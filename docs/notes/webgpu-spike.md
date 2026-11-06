@@ -1,5 +1,11 @@
 # webgpu-spike notes (v2 phase 1x, branch `v2-webgpu-spike`)
 
+> Phase 4 (webgpu-swap, branch `v2-webgpu`) put this into the planner: see docs/notes/webgpu-swap.md. Since then
+> `light-rig.ts` is folded into `planner/lighting.ts` (on the kernels' SH maths), the TSL passes are
+> `planner/gpu/passes.ts` (with the catcher and the environment bake), `sort-worker.ts` is `sort.worker.ts`, and the
+> demo draws with the engine's own modules (`demo/depth-png.ts`, `demo/probe.*` and the gpu tsconfigs are gone). The
+> rest of this file is the spike as it was.
+
 Question: can midstudy's renderer move to WebGPU (three.js `WebGPURenderer` + TSL, WebGL2 fallback built in), and
 can we draw Gaussian splats without Spark (WebGL2-only)? Answer, with working code and numbers below: **go for
 Phase 4**, with the conditions in "Go/no-go".

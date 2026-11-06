@@ -932,7 +932,6 @@ function detachBuilt(r: ItemRec): void {
   splatEpoch++
   for (const o of [r.child, r.shadow, r.caster]) if (o) r.group.remove(o)
   if (r.splat) splatLayer?.remove(r.uid)
-  if (r.child) lights.forget(r.child)
   r.caster = null
   disposeChild(r.child)
   r.child = null

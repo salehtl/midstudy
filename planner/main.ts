@@ -1,7 +1,9 @@
 // midstudy planner entry: the engine (engine.ts) and its input (input.ts), the scenes and library stores (data.ts), the
 // shell (ui/shell.ts) and the area modules that fill it, plus the window.midstudy test hook. Spec: contract/CONTRACT.md
 // §2.4 and §4.6. Every UI module exports mount(ctx), ctx: UiContext = { engine, scenes, lib, shell, icons, kit }
-// (ui/seam.ts).
+// (ui/seam.ts). ready.ts comes first: it puts the hook's `ready` on window.midstudy before the engine's modules wait
+// for the renderer and the kernels.
+import { ready, settleReady } from './ready.js'
 import { engine } from './engine.js'
 import type { PlannerState, RenderSettings } from './engine.js'
 import { installInput } from './input.js'
@@ -30,8 +32,6 @@ declare global {
   interface Window {
     /** for manual checks from the console; evals use window.midstudy only (and read the photo rect from here) */
     midstudyCtx: UiContext
-    /** the test hook (contract §2.4, §4.6) */
-    midstudy: typeof hook
   }
 }
 window.midstudyCtx = ctx
@@ -58,8 +58,6 @@ window.addEventListener('beforeunload', (e) => {
   Reflect.set(e, 'returnValue', '') // v1 set it too (the legacy way some browsers still ask with)
 })
 
-let readyResolve: () => void = () => undefined
-const ready = new Promise<void>((r) => { readyResolve = r })
 const nextFrame = (): Promise<void> => new Promise((r) => { requestAnimationFrame(() => { r() }) })
 const isObject = (x: unknown): x is Readonly<Record<string, unknown>> => typeof x === 'object' && x !== null
 
@@ -134,12 +132,12 @@ function pointOf(p: unknown): readonly number[] | { x: number; y: number; z: num
   }
   return [Number.NaN, Number.NaN, Number.NaN]
 }
-window.midstudy = hook
+window.midstudy = hook // the test hook (contract §2.4, §4.6), its `ready` the one ready.ts put there first
 
 // First state (§4.5): ?scene=<name>, else the scene last opened on this device, else the Scenes page.
 engine.init()
   .then((opened) => { if (!opened) shell.openPage('scenes') })
   .catch((e: unknown) => engine.reportError('Startup failed', e))
-  .finally(async () => { await nextFrame(); readyResolve() })
+  .finally(async () => { await nextFrame(); settleReady() })
 scenes.start().catch(() => undefined)
 lib.start().catch(() => undefined)

@@ -28,7 +28,7 @@
 //
 // API: createLighting({ renderer, scene, photo }) → {
 //   setData(lightingJson | null), setCamera(R: Matrix3 camera→world, fovY), setLook(resolved), prepare(object3d),
-//   forget(object3d), fitShadow(box3 | null) (renders the catcher's shadow map), inferred() → the key in the world frame
+//   fitShadow(box3 | null) (renders the catcher's shadow map), inferred() → the key in the world frame
 //   or null, inUse() → the key in use, mode() 'photo' | 'default', splatGain() → [r, g, b] (colour-matching splats),
 //   caster(object3d) → a shadow-only copy, maskMode(on), roomEnvironment (the default mode's map, for thumbnails),
 //   withDiffuseIbl(fn) (fn with the environment's diffuse light on, whatever the mode) }
@@ -311,7 +311,6 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
   }
 
   let look: LightLook = { light_strength: 1, ambient: 1, cast_shadows: false, light_softness: V1.softness, dir: V1_KEY_DIR }
-  const prepared = new Set<Object3D>() // the items' roots, to switch their materials when the mode changes
   const mode = (): 'photo' | 'default' => (data ? 'photo' : 'default')
 
   // lighting.json's key turned to the world frame (R · direction, normalized).
@@ -332,8 +331,9 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
     return { azimuth_deg: ae.azimuth_deg, elevation_deg: ae.elevation_deg, direction: [look.dir[0], look.dir[1], look.dir[2]], color, intensity: base * look.light_strength, softness: look.light_softness }
   }
 
-  // Which meshes cast and receive (v1's rule): every visible mesh casts but a placeholder's; lit meshes receive.
-  function setMaterials(root: Object3D): void {
+  // Which meshes cast and receive (v1's rule): every visible mesh casts but a placeholder's; lit meshes receive. The
+  // mode needs nothing here (iblDiffuse is a uniform), so a piece is prepared once, when it is built.
+  function prepare(root: Object3D): void {
     const placeholder = root.name === 'missing-item' // a layout's piece the library lacks: outlined, casts nothing
     root.traverse((o) => {
       if (!(o instanceof Mesh) || o.name === 'contact-shadow') return
@@ -347,8 +347,6 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
       flipSides(mats.filter((m): m is Material => m instanceof Material))
     })
   }
-  function prepare(root: Object3D): void { prepared.add(root); setMaterials(root) }
-  function forget(root: Object3D): void { prepared.delete(root) }
 
   function apply(): void {
     const s = look.light_strength
@@ -460,7 +458,7 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
 
   return {
     key, probe, hemi, catcher: catcherMesh,
-    mode, inferred, inUse, prepare, forget, fitShadow,
+    mode, inferred, inUse, prepare, fitShadow,
     /** RoomEnvironment's map (the default mode's environment), for the pieces' thumbnails. */
     roomEnvironment: roomEnv,
     /** Runs fn with the environment's diffuse light counted (a thumbnail is lit by RoomEnvironment, whatever the scene). */
@@ -477,7 +475,6 @@ export function createLighting({ renderer, scene, photo }: { renderer: WebGPURen
       turned = null
       dropShEnv()
       photoEnvKey = ''
-      for (const r of prepared) setMaterials(r)
       apply()
     },
     setCamera(m: Matrix3, fovYDeg: number): void {

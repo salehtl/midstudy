@@ -59,8 +59,6 @@ export interface SplatLayerOptions {
   workerUrl?: string | URL
   /** called when a worker sort lands (the drawn order changed: draw again) */
   onChange?: () => void
-  /** debug draws: 'center' (fixed 4 px quads at the centers), 'grid' (one quad per instance on a grid) */
-  debug?: string
 }
 
 export interface SplatStats {
@@ -72,7 +70,7 @@ interface Item { uid: string, data: SplatData, object: Object3D, slot: number, s
 
 // The 2D-covariance math and its inputs, one vertex per quad corner.
 function makeMaterial(tex: { center: DataTexture, cov: DataTexture, cov2: DataTexture, items: DataTexture }, order: InstancedBufferAttribute | StorageInstancedBufferAttribute,
-  u: { renderSize: ShaderNodeObject<UniformNode<Vector2>>, focal: ShaderNodeObject<UniformNode<Vector2>>, near: ShaderNodeObject<UniformNode<number>>, far: ShaderNodeObject<UniformNode<number>> }, debug = ''): NodeMaterial {
+  u: { renderSize: ShaderNodeObject<UniformNode<Vector2>>, focal: ShaderNodeObject<UniformNode<Vector2>>, near: ShaderNodeObject<UniformNode<number>>, far: ShaderNodeObject<UniformNode<number>> }): NodeMaterial {
   const vUv = varyingProperty('vec2', 'vSplatUv')
   const vRgba = varyingProperty('vec4', 'vSplatRgba')
   const vertex = Fn(() => {
@@ -94,20 +92,6 @@ function makeMaterial(tex: { center: DataTexture, cov: DataTexture, cov2: DataTe
     const clip = cameraProjectionMatrix.mul(view).toVar()
     const ok = view.z.lessThan(u.near.negate()).and(view.z.greaterThan(u.far.negate()))
       .and(clip.x.abs().lessThanEqual(clip.w.mul(CLIP_XY))).and(clip.y.abs().lessThanEqual(clip.w.mul(CLIP_XY)))
-    if (debug === 'center') {
-      If(ok, () => {
-        out.assign(vec4(clip.xy.div(clip.w).add(positionGeometry.xy.mul(4).div(u.renderSize)).mul(clip.w), clip.z, clip.w))
-        vUv.assign(vec2(0, 0))
-        vRgba.assign(vec4(1, 0, 1, 1))
-      })
-      return out
-    }
-    if (debug === 'grid') {
-      const g = float(instanceIndex.mod(uint(200))).div(100).sub(1)
-      out.assign(vec4(positionGeometry.xy.mul(0.004).add(vec2(g, float(j.mod(uint(97))).div(48).sub(1))), 0.5, 1))
-      vRgba.assign(vec4(1, 1, 0, 1))
-      return out
-    }
     If(ok, () => {
       // the item's and the camera's rotation, column by column: T = R_view · R_item
       const t0 = cameraViewMatrix.mul(vec4(m0, 0)).xyz
@@ -128,12 +112,6 @@ function makeMaterial(tex: { center: DataTexture, cov: DataTexture, cov2: DataTe
       a.addAssign(BLUR)
       d.addAssign(BLUR)
       const det = a.mul(d).sub(b.mul(b))
-      if (debug === 'cov' || debug === 'tex') {
-        out.assign(vec4(clip.xy.div(clip.w).add(positionGeometry.xy.mul(4).div(u.renderSize)).mul(clip.w), clip.z, clip.w))
-        vUv.assign(vec2(0, 0))
-        vRgba.assign(debug === 'cov' ? vec4(a, b, d, 1) : vec4(cb.z.div(256), cb.w, detOrig.div(det), 1))
-        return
-      }
       // colour: rgb packed as r + 256 g + 65536 b (exact in a float), alpha 0–255
       const packed = cb.z
       const cB = floor(packed.div(65536))
@@ -216,7 +194,6 @@ export class SplatLayer {
   private worker: Worker | null = null
   private workerUrl: string | URL | undefined
   private onChange: (() => void) | undefined
-  private debug: string
   private sortId = 0
   private pending: { id: number, key: string, resolve: (() => void)[] } | null = null
   private sortedKey = ''      // what the drawn order was sorted for
@@ -243,7 +220,6 @@ export class SplatLayer {
     this.keyBits = opts.keyBits ?? 16
     this.workerUrl = opts.workerUrl
     this.onChange = opts.onChange
-    this.debug = opts.debug ?? ''
     this.target = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true })
     this.target.texture.name = 'splat-target'
     for (let s = MAX_ITEMS - 1; s >= 0; s--) this.slotFree.push(s)
@@ -333,7 +309,7 @@ export class SplatLayer {
     geo.setIndex([0, 1, 2, 0, 2, 3])
     geo.instanceCount = 0
     this.geometry = geo
-    const material = makeMaterial(this.tex, this.order, { renderSize: this.uRenderSize, focal: this.uFocal, near: this.uNear, far: this.uFar }, this.debug)
+    const material = makeMaterial(this.tex, this.order, { renderSize: this.uRenderSize, focal: this.uFocal, near: this.uNear, far: this.uFar })
     const mesh = new Mesh(geo, material)
     mesh.frustumCulled = false
     mesh.name = 'splat-layer'
@@ -520,17 +496,6 @@ export class SplatLayer {
       render(r, this.scene, camera)
     }
     r.setRenderTarget(prevTarget)
-  }
-
-  /** Debug: the generated shaders of the splat draw (WGSL or GLSL). */
-  async debugShaders(camera: PerspectiveCamera): Promise<{ vertex: string, fragment: string } | null> {
-    if (!this.mesh) return null
-    const dbg: unknown = Reflect.get(this.renderer, 'debug')
-    const fn: unknown = dbg && typeof dbg === 'object' ? Reflect.get(dbg, 'getShaderAsync') : null
-    if (typeof fn !== 'function') return null
-    const r: unknown = await Reflect.apply(fn, dbg, [this.scene, camera, this.mesh])
-    if (!r || typeof r !== 'object') return null
-    return { vertex: String(Reflect.get(r, 'vertexShader')), fragment: String(Reflect.get(r, 'fragmentShader')) }
   }
 
   stats(): SplatStats {
