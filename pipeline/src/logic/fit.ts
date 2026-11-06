@@ -4,7 +4,8 @@
 
 import type { PyValue } from './pyjson.ts'
 import { dict, entry, float } from './pyjson.ts'
-import { fixed, general, percent, pyRound, thousands } from './pyformat.ts'
+import { pyFixed as fixed, pyFormatG as general, pyRound } from '../../../common/logic/pyfmt.ts'
+import { percent, thousands } from './pyformat.ts'
 import type { Vec3 } from './frames.ts'
 
 /** §1 tolerances (the same as evals/validate_library.py). */

@@ -119,7 +119,7 @@ void describe('static: an allowlist, whatever the spelling (§2.1, §2.8, §2.9 
       assert.equal(await statusOf(p), 404, p)
     }
   })
-  void test('a library serves library.json and item assets; never costs.csv, .trash/, raw/, .lock or source.* (library_api.sh W4)', async () => {
+  void test('a library serves library.json and item assets; never costs.csv, .trash/, raw/, .lock, the .lock.d folders or source.* (library_api.sh W4)', async () => {
     assert.equal(await statusOf('/library/library.json'), 200)
     assert.deepEqual((await request(srv.base, 'GET', '/library/library.json')).json, { version: 1, items: [] })
     for (const f of ['model.glb', 'splat.ply', 'splat.spz', 'thumb.jpg']) assert.equal(await statusOf('/library/chair/' + f), 200, f)
@@ -131,6 +131,20 @@ void describe('static: an allowlist, whatever the spelling (§2.1, §2.8, §2.9 
       '/%2e/library/costs.csv', '/library/./costs.csv', '/./library/chair/raw/out.json', '/./library/', '/library/', '/library/chair/source.jpg', '/library/chair/SOURCE.JPG',
       '/Library/chair/source.jpg', '/Library/costs.csv', '/LIBRARY/library.json/../costs.csv', '/library/chair/SPLAT.SPZ', '/library/chair', '/library/chair/']) {
       assert.equal(await statusOf(p), 404, p)
+    }
+    // the v2 lock folders (contract §2.8 One writer) while they are held: never served either
+    for (const d of ['.lock.d', 'costs.csv.lock.d']) {
+      fs.mkdirSync(path.join(srv.library, d), { recursive: true })
+      fs.writeFileSync(path.join(srv.library, d, 'owner.json'), '{"pid": 1, "host": "h", "cmd": "midstudy-add x", "started": "2026-11-06T00:00:00.000Z"}\n')
+    }
+    fs.writeFileSync(path.join(srv.library, 'costs.csv.lock'), '')
+    try {
+      for (const p of ['/library/.lock.d/owner.json', '/library/.lock.d/', '/library/.lock.d', '/library/costs.csv.lock', '/library/costs.csv.lock.d/owner.json',
+        '/library/%2elock.d/owner.json', '/library/chair/../.lock.d/owner.json']) {
+        assert.equal(await statusOf(p), 404, p)
+      }
+    } finally {
+      for (const d of ['.lock.d', 'costs.csv.lock.d', 'costs.csv.lock']) fs.rmSync(path.join(srv.library, d), { recursive: true, force: true })
     }
     fs.writeFileSync(path.join(srv.library, 'library.json'), '{"version": 1, "items": [{"id": "x"}]}')
     const served = await request(srv.base, 'GET', '/library/library.json')

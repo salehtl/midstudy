@@ -118,9 +118,10 @@ export function pyFormatG(x: number): string {
   return sign + mant + expText(exp)
 }
 
-/** v1's `num_text`: an integral value without a decimal point (`80`), else Python's repr (`80.5`). */
+/** v1's `num_text` (midstudy-add's `str(num(v))`): an integral value without a decimal point (`80`, every digit of
+ *  a large one as Python's `str(int(x))` prints it), else Python's repr (`80.5`). */
 export function numText(v: number): string {
-  if (Number.isInteger(v)) return v >= 1e21 || v <= -1e21 ? BigInt(v).toString() : String(v)
+  if (Number.isInteger(v)) return v >= 2 ** 53 || v <= -(2 ** 53) ? BigInt(v).toString() : String(v === 0 ? 0 : v)
   return pyFloatRepr(v)
 }
 

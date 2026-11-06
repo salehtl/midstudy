@@ -11,6 +11,7 @@ import path from 'node:path'
 
 import { download as fetchBytes, falQueueUrl, logFal, mockSlug, uploadRecord } from '../../common/fal.ts'
 import { isFile } from '../../common/files.ts'
+import { pyRepr as repr } from '../../common/logic/pyfmt.ts'
 import { decodeUtf8 } from '../../common/utf8.ts'
 import { MidstudyError, NoMasks, UnexpectedError } from './errors.ts'
 import { copy2 } from './fsx.ts'
@@ -21,7 +22,7 @@ import { IDENTITY, sam3dSplatToGlb } from './logic/frames.ts'
 import type { Mat3 } from './logic/frames.ts'
 import { dumps, get, parse, plain, truthy } from './logic/pyjson.ts'
 import type { PyValue } from './logic/pyjson.ts'
-import { pyStr, pyTypeName, repr } from './logic/pyformat.ts'
+import { pyStr, pyTypeName } from './logic/pyformat.ts'
 import { join, name as pathName } from './logic/pypath.ts'
 
 export interface Fal {

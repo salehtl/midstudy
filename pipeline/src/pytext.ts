@@ -1,6 +1,6 @@
 // How v1's Python words an OSError that ends up in midstudy-add's messages (`[Errno 21] Is a directory: '…'`). The
 // strict UTF-8 decode with Python's UnicodeDecodeError message is shared with the server: common/utf8.ts.
-import { repr } from './logic/pyformat.ts'
+import { pyRepr as repr } from '../../common/logic/pyfmt.ts'
 
 // macOS's errno values and strerror texts, as Python prints them
 const ERRNO: ReadonlyMap<string, readonly [number, string, string]> = new Map([

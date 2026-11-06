@@ -3,6 +3,7 @@
 // (`0` vs `0.0`) and a JS number doesn't, so values are a tagged tree: an int keeps its digits, a float its value
 // (printed with Python's repr), a dict its key order. Pure (functional core, tscert/README.md).
 import type { JsonLineValue } from '../../../common/logic/jsonline.ts'
+import { pyFloatRepr } from '../../../common/logic/pyfmt.ts'
 
 export type PyValue =
   | { readonly kind: 'null' }
@@ -362,48 +363,6 @@ export function parse(text: string): Parsed {
 
 // --- writing (json.dumps) ----------------------------------------------------------------------------------------
 
-/** Python's `repr(float)` for a finite value: the shortest round-trip digits, `1e-05`/`1e+16` past 1e-4 and 1e16,
- *  and always a `.0` on a whole number. */
-export function floatRepr(x: number): string {
-  if (x === 0) return Object.is(x, -0) ? '-0.0' : '0.0'
-  const sign = x < 0 ? '-' : ''
-  const s = String(x < 0 ? -x : x)
-  // digits and the decimal point's position (value = 0.d1d2… × 10^decpt)
-  let digits: string
-  let decpt: number
-  const e = s.indexOf('e')
-  if (e >= 0) {
-    const mant = s.slice(0, e)
-    const exp = Number(s.slice(e + 1))
-    digits = mant.replace('.', '')
-    decpt = exp + 1
-  } else {
-    const dot = s.indexOf('.')
-    const intPart = dot < 0 ? s : s.slice(0, dot)
-    const frac = dot < 0 ? '' : s.slice(dot + 1)
-    if (intPart === '0') {
-      let z = 0
-      while (z < frac.length && frac.charAt(z) === '0') z++
-      digits = frac.slice(z)
-      decpt = -z
-    } else {
-      digits = intPart + frac
-      decpt = intPart.length
-    }
-  }
-  digits = digits.replace(/0+$/, '')
-  if (digits === '') digits = '0'
-  if (decpt <= -4 || decpt > 16) {
-    const exp = decpt - 1
-    const mant = digits.length > 1 ? `${digits.charAt(0)}.${digits.slice(1)}` : digits
-    const abs = exp < 0 ? -exp : exp
-    return `${sign}${mant}e${exp < 0 ? '-' : '+'}${abs < 10 ? '0' : ''}${String(abs)}`
-  }
-  if (decpt <= 0) return `${sign}0.${'0'.repeat(-decpt)}${digits}`
-  if (digits.length <= decpt) return `${sign}${digits}${'0'.repeat(decpt - digits.length)}.0`
-  return `${sign}${digits.slice(0, decpt)}.${digits.slice(decpt)}`
-}
-
 export interface DumpOptions {
   /** `indent=` (null: one line). */
   readonly indent: number | null
@@ -459,7 +418,7 @@ function dumpInto(v: PyValue, o: DumpOptions, level: number, parts: string[]): s
         const r = Number.isNaN(v.value) ? 'nan' : v.value > 0 ? 'inf' : '-inf'
         return `Out of range float values are not JSON compliant: ${r}`
       }
-      parts.push(floatRepr(v.value))
+      parts.push(pyFloatRepr(v.value))
       return null
     case 'str':
       parts.push(quote(v.value, o.ensureAscii))

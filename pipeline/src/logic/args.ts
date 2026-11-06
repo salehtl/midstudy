@@ -3,7 +3,7 @@
 // wins, and argparse's messages ("argument --yaw: invalid choice: '45' (choose from 0, 90, 180, 270)", "unrecognized
 // arguments: …", "ambiguous option: …"). Pure (functional core).
 
-import { repr, strip } from './pyformat.ts'
+import { pyRepr as repr, pyStrip as strip } from '../../../common/logic/pyfmt.ts'
 
 const ENGINES = ['idol', 'sam3d', 'trellis2', 'glb', 'rug'] as const
 export type Engine = (typeof ENGINES)[number]

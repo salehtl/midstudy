@@ -125,12 +125,13 @@ export function resolvePath(p: string): string {
   }
 }
 
-/** `shutil.rmtree(p, ignore_errors=True)`. */
-export function removeTree(p: string): void {
+/** `shutil.rmtree(p, ignore_errors=True)`; with `ignoreErrors` false a failure to remove what is there is thrown, as
+ *  `shutil.rmtree(p)` raised (a path that isn't there is no error either way). */
+export function removeTree(p: string, ignoreErrors = true): void {
   try {
     fs.rmSync(p, { recursive: true, force: true })
-  } catch {
-    // ignore_errors
+  } catch (e) {
+    if (!ignoreErrors) throw e
   }
 }
 

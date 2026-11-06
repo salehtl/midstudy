@@ -11,7 +11,7 @@ import { imageRug } from '../../core/js/pipeline.ts'
 import { MidstudyError, UnexpectedError } from './errors.ts'
 import { io } from './glb.ts'
 import type { Vec3 } from './logic/frames.ts'
-import { fixed, general, pyRound } from './logic/pyformat.ts'
+import { pyFixed as fixed, pyFormatG as general, pyRound } from '../../common/logic/pyfmt.ts'
 
 const ASPECT_NOTE = 0.08
 

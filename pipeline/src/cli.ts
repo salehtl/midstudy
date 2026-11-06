@@ -7,6 +7,8 @@ import path from 'node:path'
 import { falKey as loadFalKey, falMockDir, mockCost } from '../../common/fal.ts'
 import { exists, isDir, isFile, move, removeTree as rmtree, replace, resolvePath as resolve } from '../../common/files.ts'
 import { releaseAllSync } from '../../common/lock.ts'
+import { pyFloat } from '../../common/logic/csv.ts'
+import { numText, pyFixed as fixed, pyRepr as repr, pyStrip as strip } from '../../common/logic/pyfmt.ts'
 import { isSlug, slugify } from '../../common/logic/slug.ts'
 import { isoUtc } from '../../common/logic/time.ts'
 import { MidstudyError, UnexpectedError, describe } from './errors.ts'
@@ -21,7 +23,7 @@ import { dimsCm, fitValue, itemEntry, summary } from './logic/entry.ts'
 import { dimsMetres, spzLine } from './logic/fit.ts'
 import { IDENTITY, type Mat3, mul3, orientation, yawRotation } from './logic/frames.ts'
 import { MESSAGES, MODEL_EXT, USD_EXT, costUsd, isFalEngine, isUrl, parseDims, pilExt, urlPath } from './logic/inputs.ts'
-import { fixed, numText, oneLine, pyFloat, pyStr, pyTypeName, repr, strip } from './logic/pyformat.ts'
+import { oneLine, pyStr, pyTypeName } from './logic/pyformat.ts'
 import { NULL, dict, dumps, entry, get, numeric, plain, set, str, truthy } from './logic/pyjson.ts'
 import type { PyValue } from './logic/pyjson.ts'
 import { join, name as pathName, normalize as pathNormalize, parent, suffix, withName } from './logic/pypath.ts'
@@ -91,7 +93,7 @@ function fitText(fit: PyValue): string {
 function rmtreeChecked(p: string): void {
   if (fs.lstatSync(p).isSymbolicLink()) throw new UnexpectedError('OSError', 'Cannot call rmtree on a symbolic link')
   if (!isDir(p)) throw new UnexpectedError('NotADirectoryError', `[Errno 20] Not a directory: ${repr(p)}`)
-  rmtree(p)
+  rmtree(p, false)
 }
 
 interface AddPlan {
@@ -282,7 +284,8 @@ async function add(p: AddPlan): Promise<void> {
     }
     if (p.imageInput) makeThumb(thumbSrc, path.join(staging, 'thumb.jpg'))
     await tick()
-    for (const s of ['download', 'unzipped', 'converted.glb', 'converted.jpg']) rmtree(path.join(staging, s))
+    // v1: shutil.rmtree / unlink, which raise (the staging folder's own scratch: an error here is a real one)
+    for (const s of ['download', 'unzipped', 'converted.glb', 'converted.jpg']) rmtree(path.join(staging, s), false)
 
     // commit: the item folder, then library.json, then costs.csv
     const created = utcStamp()

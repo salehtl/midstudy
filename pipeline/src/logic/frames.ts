@@ -5,7 +5,7 @@
 
 import type { PyValue } from './pyjson.ts'
 import { get, numeric } from './pyjson.ts'
-import { pyRound } from './pyformat.ts'
+import { pyRound } from '../../../common/logic/pyfmt.ts'
 
 export type Vec3 = readonly [number, number, number]
 export type Mat3 = readonly [Vec3, Vec3, Vec3]
