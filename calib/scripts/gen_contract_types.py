@@ -2,15 +2,15 @@
 
     uv run --project calib python calib/scripts/gen_contract_types.py [--check]
 
-Reads contract/calib.schema.json and contract/lighting.schema.json (the contract's) and
-src/midstudy_calib/schemas/calib-cli.schema.json (calib's own: the stdout results and the worker protocol), and writes
+Reads contract/calib.schema.json, contract/lighting.schema.json and contract/calib-cli.schema.json (the stdout results
+and the worker protocol, which the server checks too), and writes
 
 - src/midstudy_calib/contract_types.py: one TypedDict per object schema (keys in `required` plain, the others
   NotRequired), Literal for const and enum, `X | None` for nullable types, list[...] for arrays, Mapping[str, object]
   for free-form objects. Schemas allow other keys where they say so (additionalProperties true); a TypedDict can't say
   that, so code that writes extra keys subclasses these types (types.py).
-- src/midstudy_calib/schemas/{calib,lighting}.schema.json: byte copies of contract/, which validate.py loads at run
-  time (the Nix package carries calib/src only).
+- src/midstudy_calib/schemas/{calib,lighting,calib-cli}.schema.json: byte copies of contract/, which validate.py loads
+  at run time (the Nix package carries calib/src only).
 
 --check writes nothing and exits 1 when a generated file differs from what is on disk (tests/test_contract_types.py).
 The generator handles the subset of JSON Schema these files use; anything else is an error, not a silent `object`.
@@ -38,7 +38,7 @@ type Json = dict[str, object]
 @dataclass(frozen=True)
 class Source:
     path: Path                      # where the schema is read from
-    copy_to: Path | None            # contract/ schemas are copied next to calib's own, for validate.py
+    copy_to: Path | None            # contract/ schemas are copied into src/midstudy_calib/schemas/, for validate.py
     root: str | None                # the TypedDict for the whole document, or None (a file of $defs only)
     defs: dict[str, str | None]     # $defs name -> class or alias name; None: inlined where referenced, not emitted
     prefix: str                     # nested object properties become <prefix or parent><Property>
@@ -47,7 +47,7 @@ class Source:
 SOURCES = [
     Source(REPO / "contract/calib.schema.json", SCHEMAS / "calib.schema.json", "Calib", {"size": "ImageSize", "camera": "Camera"}, "Calib"),
     Source(REPO / "contract/lighting.schema.json", SCHEMAS / "lighting.schema.json", "Lighting", {"rgb": "Rgb", "unit": "UnitVector"}, "Lighting"),
-    Source(SCHEMAS / "calib-cli.schema.json", None, None,
+    Source(REPO / "contract/calib-cli.schema.json", SCHEMAS / "calib-cli.schema.json", None,
            {"id": None, "error": "ErrorResult", "run": None, "ingest": "IngestResult", "light_done": "LightDone", "light_none": "LightNone",
             "light": "LightResult", "align": "AlignResult", "request": "WorkerRequest"}, ""),
 ]

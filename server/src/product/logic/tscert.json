@@ -1,9 +1,0 @@
-{
-  // What TScert reads server/src/product/logic/ with (as tscert/tsconfig.server.json reads server/src/logic/): the
-  // server's strict options, the logic modules only, no Node types. Until tscert/config.json names this area, run:
-  //   nix develop -c node scripts/tscert-ratchet.mjs --project server/src/product/logic/tscert.json \
-  //     --files server/src/product/logic/text.ts,server/src/product/logic/pyjson.ts,server/src/product/logic/py.ts,server/src/product/logic/unescape.ts,common/logic/pyfmt.ts
-  "extends": "../../../../tsconfig.server.json",
-  "compilerOptions": { "lib": ["ES2024"], "types": [], "composite": false },
-  "include": ["./**/*.ts", "../../../../common/logic/**/*.ts", "../../../logic/**/*.ts"]
-}

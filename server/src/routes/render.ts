@@ -7,7 +7,7 @@ import { falMock } from '../../../common/fal.ts'
 import { decodeImageDataUri, jpegFrame, pngSize, stripJpeg } from '../../../core/js/node.ts'
 import type { RequestContext } from '../http/context.ts'
 import type { RouteModule } from '../http/router.ts'
-import { isFile } from '../scenes/files.ts'
+import { isFile } from '../../../common/files.ts'
 import type { RenderService } from '../scenes/render.ts'
 import {
   KEEP_ROOM_NEEDS_MASK, KEEP_ROOM_NEEDS_SCENE, NOT_JPEG_URI, NO_FRAME, NO_PHOTO_YET, maskSizeProblem, modelChoice, renderLayout, renderPrice,

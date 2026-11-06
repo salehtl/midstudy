@@ -10,6 +10,7 @@
 //   FAKE_CALIB_SERVE=hang        never answers
 //   FAKE_CALIB_SERVE=fail        answers {ok: false, error: "the photo is unreadable"}
 //   FAKE_CALIB_SERVE=second-crash   answers the first request, exits 3 on the second
+//   FAKE_CALIB_OFF_CONTRACT=1    run/fit results (one-shot and served) lack `camera`: they break calib-cli.schema.json
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -30,7 +31,9 @@ function result(cmd: string, args: readonly string[]): Record<string, unknown> {
     floor: { found: true, inlier_ratio: 0.3, rmse_m: 0.01 }, depth: null, exif: { make: 'FakeCam', model: 'Fake 1' }, device: 'cpu', elapsed_s: 0.01,
   }
   if (out !== '' && fs.existsSync(out)) fs.writeFileSync(path.join(out, 'calib.json'), JSON.stringify(calib, null, 2) + '\n')
-  return { ...calib, ok: true }
+  const line: Record<string, unknown> = { ...calib, ok: true }
+  if (process.env['FAKE_CALIB_OFF_CONTRACT'] === '1') Reflect.deleteProperty(line, 'camera')
+  return line
 }
 
 const [cmd = '', ...args] = process.argv.slice(2)

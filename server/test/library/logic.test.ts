@@ -10,7 +10,7 @@ import { trashName, trashOrder } from '../../src/library/logic/messages.ts'
 import { checkPatch, needsRefit, patchShape } from '../../src/library/logic/patch.ts'
 import { pyCompare, pyValueRepr } from '../../src/library/logic/pyvalue.ts'
 import { extProblem, suffixOf, tooLarge, uploadFilename, uploadKind } from '../../src/library/logic/upload.ts'
-import { resolved } from '../../src/library/service.ts'
+import { resolvePath as resolved } from '../../../common/files.ts'
 import { oracle, skipV1, type OracleAnswer, type OracleCase } from './oracle.ts'
 
 const base = '{"name": "Reading Chair", "dims_cm": {"w": 80, "d": 85, "h": 95}'

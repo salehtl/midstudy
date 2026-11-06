@@ -1,6 +1,7 @@
 // The fal client (pipeline/src/fal.ts) without the network: LiveFal against a scripted fetch speaks fal-client
 // 1.0.3's protocol (what v1's upload_file and subscribe sent), retries what it retried and words failures as v1 did;
-// MockFal replays fixtures/fal and logs every request as v1's pipeline/test/v1_mock_log.py does.
+// MockFal replays fixtures/fal and logs every request (common/fal.ts's request log) as v1's
+// pipeline/test/v1_mock_log.py does; the key is common/fal.ts's.
 //
 //   nix develop -c node --test pipeline/test/fal.test.ts
 import assert from 'node:assert/strict'
@@ -9,8 +10,9 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { falKey as loadFalKey } from '../../common/fal.ts'
 import { NoMasks } from '../src/errors.ts'
-import { LiveFal, MockFal, download, loadFalKey, run } from '../src/fal.ts'
+import { LiveFal, MockFal, download, run } from '../src/fal.ts'
 import { parse } from '../src/logic/pyjson.ts'
 import type { PyValue } from '../src/logic/pyjson.ts'
 
@@ -182,8 +184,8 @@ void test('MockFal replays fixtures/fal and logs the requests as v1_mock_log.py 
       return isRecord(v) ? v : {}
     })
     assert.deepEqual(lines.map((l) => l['op']), ['upload', 'call', 'call', 'fetch', 'fetch'])
-    assert.equal(fs.readFileSync(log, 'utf8').split('\n')[1], '{"op": "call", "endpoint": "fal-ai/sam-3/3d-objects", "url": "https://queue.fal.run/fal-ai/sam-3/3d-objects", "arguments": {"image_url": "https://mock.fal.invalid/uploads/engine-input.jpg", "prompt": "chair", "export_textured_glb": true}}')
-    const second = lines[2]?.['arguments']
+    assert.equal(fs.readFileSync(log, 'utf8').split('\n')[1], '{"op": "call", "endpoint": "fal-ai/sam-3/3d-objects", "url": "https://queue.fal.run/fal-ai/sam-3/3d-objects", "args": {"image_url": "https://mock.fal.invalid/uploads/engine-input.jpg", "prompt": "chair", "export_textured_glb": true}}')
+    const second = lines[2]?.['args']
     assert.ok(isRecord(second) && second['detection_threshold'] === 0.2)
     assert.equal(lines[0]?.['bytes'], fs.statSync(image).size)
     process.env['MIDSTUDY_FAL_MOCK_NO_MASKS'] = 'x1'

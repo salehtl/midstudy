@@ -1,6 +1,7 @@
-// The v2 library lock (pipeline/src/lock.ts): one holder at a time across processes, stale locks reclaimed (a dead
-// owner on this host, or older than the tool timeout), a live or foreign owner waited for, and the CLI letting go of
-// it (and of its staging folder) when interrupted.
+// The v2 library lock as midstudy-add uses it (common/lock.ts, contract §2.8 One writer; the server's own tests are
+// server/test/lock.test.ts): one holder at a time across processes, stale locks reclaimed (a dead owner on this host,
+// or older than the tool timeout), a live or foreign owner waited for (said once), and the CLI letting go of it (and of
+// its staging folder) when interrupted.
 //
 //   nix develop -c node --test pipeline/test/lock.test.ts
 import assert from 'node:assert/strict'
@@ -11,11 +12,12 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { acquire, release, releaseAll, withLock } from '../src/lock.ts'
+import { acquireLock, Busy, releaseAllSync, withLock } from '../../common/lock.ts'
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url))
-const LOCK_TS = path.join(REPO, 'pipeline/src/lock.ts')
+const LOCK_TS = path.join(REPO, 'common/lock.ts')
 const SCRATCH = path.join(REPO, 'evals/out/pipeline-lock-test')
+const CMD = 'midstudy-add test'
 
 function fresh(name: string): string {
   const dir = path.join(SCRATCH, name)
@@ -41,7 +43,7 @@ void test('one holder at a time across six processes', async () => {
   const child = `
     const { withLock } = await import(${JSON.stringify(LOCK_TS)})
     const fs = await import('node:fs')
-    await withLock(${JSON.stringify(lock)}, {}, async () => {
+    await withLock(${JSON.stringify(lock)}, { waitMs: null, cmd: 'midstudy-add child' }, async () => {
       fs.appendFileSync(${JSON.stringify(log)}, 'S' + process.argv[1] + '\\n')
       await new Promise((r) => setTimeout(r, 40))
       fs.appendFileSync(${JSON.stringify(log)}, 'E' + process.argv[1] + '\\n')
@@ -60,19 +62,19 @@ void test('one holder at a time across six processes', async () => {
   assert.equal(fs.existsSync(lock), false)
 })
 
-void test('a lock whose owner died on this host is reclaimed at once', async () => {
+void test('a lock whose owner died on this host is reclaimed at once (v1\'s flock file kept beside it)', async () => {
   const lock = path.join(fresh('dead'), '.lock.d')
   writeOwner(lock, { pid: deadPid(), host: os.hostname(), cmd: 'midstudy-add old', started: new Date().toISOString() })
   let waited = false
   const t = Date.now()
-  const me = await acquire(lock, { onWait: () => { waited = true }, deadline: Date.now() + 2000 })
+  const me = await acquireLock(lock, { waitMs: 2000, cmd: CMD, onWait: () => { waited = true } })
   assert.equal(waited, false)
   assert.ok(Date.now() - t < 1000)
   const written: unknown = JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'))
-  assert.ok(typeof written === 'object' && written !== null && 'pid' in written && written.pid === process.pid)
-  release(lock, me)
+  assert.ok(typeof written === 'object' && written !== null && 'pid' in written && written.pid === process.pid && 'cmd' in written && written.cmd === CMD)
+  await me.release()
   assert.equal(fs.existsSync(lock), false)
-  assert.deepEqual(fs.readdirSync(path.dirname(lock)), [])
+  assert.deepEqual(fs.readdirSync(path.dirname(lock)), ['.lock'])
 })
 
 void test('a live owner is waited for (said once), an hour-old lock is reclaimed whoever holds it', async () => {
@@ -80,36 +82,38 @@ void test('a live owner is waited for (said once), an hour-old lock is reclaimed
   const lock = path.join(dir, '.lock.d')
   writeOwner(lock, { pid: process.pid, host: os.hostname(), cmd: 'midstudy-add other', started: new Date().toISOString() })
   let waits = 0
-  await assert.rejects(acquire(lock, { onWait: () => { waits++ }, deadline: Date.now() + 300 }), /is held by pid/)
+  await assert.rejects(acquireLock(lock, { waitMs: 300, cmd: CMD, onWait: () => { waits++ } }), Busy)
   assert.equal(waits, 1)
   fs.rmSync(lock, { recursive: true })
   writeOwner(lock, { pid: process.pid, host: os.hostname(), cmd: 'midstudy-add other', started: new Date(Date.now() - 3601 * 1000).toISOString() })
-  const me = await acquire(lock, { deadline: Date.now() + 2000 })
-  release(lock, me)
+  const me = await acquireLock(lock, { waitMs: 2000, cmd: CMD })
+  await me.release()
   // another host's owner can't be checked: only its age makes it stale
   writeOwner(lock, { pid: deadPid(), host: 'elsewhere.invalid', cmd: 'midstudy-add far', started: new Date().toISOString() })
-  await assert.rejects(acquire(lock, { deadline: Date.now() + 200 }), /is held by pid/)
+  await assert.rejects(acquireLock(lock, { waitMs: 200, cmd: CMD }), Busy)
   fs.rmSync(lock, { recursive: true })
-  // a lock being created (no owner.json yet) is fresh by its folder's time
+  // a lock being created (no owner.json yet) is held for its grace period
   fs.mkdirSync(lock)
-  await assert.rejects(acquire(lock, { deadline: Date.now() + 200 }), /is held by pid \?/)
+  await assert.rejects(acquireLock(lock, { waitMs: 200, cmd: CMD }), Busy)
   fs.rmSync(lock, { recursive: true })
 })
 
-void test('withLock lets go on a throw; releaseAll lets go of everything; a lock that changed hands is left alone', async () => {
+void test('withLock lets go on a throw; releaseAllSync lets go of everything; a lock that changed hands is left alone', async () => {
   const dir = fresh('release')
   const a = path.join(dir, 'a.lock.d')
-  await assert.rejects(withLock(a, {}, () => Promise.reject(new Error('boom'))), /boom/)
+  await assert.rejects(withLock(a, { waitMs: null, cmd: CMD }, () => Promise.reject(new Error('boom'))), /boom/)
   assert.equal(fs.existsSync(a), false)
   const b = path.join(dir, 'b.lock.d')
   const c = path.join(dir, 'c.lock.d')
-  await acquire(b)
-  await acquire(c)
-  releaseAll()
+  await acquireLock(b, { waitMs: null, cmd: CMD })
+  await acquireLock(c, { waitMs: null, cmd: CMD })
+  releaseAllSync()
   assert.equal(fs.existsSync(b) || fs.existsSync(c), false)
-  const me = await acquire(a)
+  const me = await acquireLock(a, { waitMs: null, cmd: CMD })
   fs.writeFileSync(path.join(a, 'owner.json'), JSON.stringify({ pid: 1, host: 'h', cmd: 'x', started: 'y' }))
-  release(a, me)
+  await me.release()
+  assert.equal(fs.existsSync(a), true)
+  releaseAllSync()
   assert.equal(fs.existsSync(a), true)
   fs.rmSync(a, { recursive: true })
 })

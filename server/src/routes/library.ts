@@ -9,7 +9,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { decodeImageDataUri, decodeMeta, jpegFrame, photoExt, sniff, stripJpeg } from '../../../core/js/node.ts'
 import { countsAgainstCap } from '../../../common/fal.ts'
-import { atomicWrite, makeTempDir } from '../../../common/files.ts'
+import { atomicWrite, isDir, makeTempDir, move, removeTree, resolvePath } from '../../../common/files.ts'
 import { pyStrip } from '../../../common/logic/pyfmt.ts'
 import { isSlug } from '../../../common/logic/slug.ts'
 import { isoUtc } from '../../../common/logic/time.ts'
@@ -26,7 +26,7 @@ import {
   EMPTY_FILE, extProblem, FILENAME_REQUIRED, FROM_URL_SHAPE, KIND_REQUIRED, LENGTH_REQUIRED, LINK_NOT_IMAGE, META_REQUIRED, NOT_GLB, NOT_IMAGE, sizeLimit, STOPPED,
   suffixOf, tooLarge, uploadFilename, uploadKind,
 } from '../library/logic/upload.ts'
-import { currentDims, findItem, getOr, isDir, itemFacts, itemsOf, LibraryService, move, PyError, readDocument, resolved, rmTree } from '../library/service.ts'
+import { currentDims, findItem, getOr, itemFacts, itemsOf, LibraryService, PyError, readDocument } from '../library/service.ts'
 import { zipProblem } from '../library/zip.ts'
 
 /** v1 MAX_THUMB: a thumbnail JPEG may be 2 MiB. */
@@ -79,10 +79,10 @@ async function queueAdd(ctx: RequestContext, library: LibraryService, deps: Serv
   const exists = findItem(itemsOf(library.readPlain()), meta.id) !== null
   const reserve = countsAgainstCap() ? meta.estimate : 0
   if (reservedKey !== null) deps.spend.release(reservedKey)
-  const argv = addArgv(deps.config.midstudyAdd, resolved(src), library.libraryArg(), label, meta)
+  const argv = addArgv(deps.config.midstudyAdd, resolvePath(src), library.libraryArg(), label, meta)
   const queued = library.newJob('add', meta.id, meta.engine, meta.estimate, argv, tmp, reserve, queuedMessage(exists, meta.id))
   if ('refused' in queued) {
-    await rmTree(tmp)
+    removeTree(tmp)
     await ctx.send(402, queued.refused)
     return
   }
@@ -121,7 +121,7 @@ async function postUpload(ctx: RequestContext, library: LibraryService, deps: Se
       if (problem !== null) throw new UploadRefused(problem)
     }
   } catch (e) {
-    await rmTree(tmp)
+    removeTree(tmp)
     if (e instanceof UploadRefused) return ctx.error(400, e.message)
     throw e
   }
@@ -149,7 +149,7 @@ async function postFromUrl(ctx: RequestContext, library: LibraryService, deps: S
     if (!isPhoto(await head(src))) throw new FetchError(LINK_NOT_IMAGE)
   } catch (e) {
     deps.spend.release(key)
-    await rmTree(tmp)
+    removeTree(tmp)
     if (e instanceof FetchError) return ctx.error(400, e.message)
     throw e
   }
@@ -228,7 +228,7 @@ async function deleteItem(ctx: RequestContext, library: LibraryService, id: stri
     await fsp.mkdir(root, { recursive: true })
     await fsp.mkdir(trash)
     const folder = path.join(library.dir, id)
-    if (isDir(folder)) await move(folder, path.join(trash, id))
+    if (isDir(folder)) move(folder, path.join(trash, id))
     await library.writeFile(path.join(trash, 'entry.json'), { deleted: isoUtc(now), entry: item }, 'midstudy/trash.schema.json#/$defs/item', 'ascii')
     doc['items'] = items.filter((i) => !(isRecord(i) && i['id'] === id))
     await library.write(doc)
@@ -252,10 +252,10 @@ async function restoreItem(ctx: RequestContext, library: LibraryService, id: str
     if (!Object.hasOwn(meta, 'entry')) throw new PyError('KeyError', "'entry'")
     const entry = meta['entry']
     const folder = path.join(copy.dir, id)
-    if (isDir(folder)) await move(folder, path.join(library.dir, id))
+    if (isDir(folder)) move(folder, path.join(library.dir, id))
     doc['items'] = [...items, entry]
     await library.write(doc)
-    await rmTree(copy.dir)
+    removeTree(copy.dir)
     return { status: 200, body: plain(entry) }
   })
   await ctx.send(outcome.status, outcome.body)

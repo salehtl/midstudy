@@ -10,9 +10,10 @@ import { isSlug } from '../../../common/logic/slug.ts'
 import { jpegFrame } from '../../../core/js/node.ts'
 import type { Camera } from '../../../contract/gen/types.ts'
 import { JobStore, SerialQueue, newJobId } from '../jobs.ts'
-import { toolError } from '../tools.ts'
+import { toolError } from '../../../common/tools.ts'
 import { CalibRunner, type CalibOutcome } from './calib.ts'
-import { exists, isDir, isFile, listDir, makeDir, makeDirs, move, mtimeOf, readHead, readJson, readRecord, removeTree, resolvePath, writeBytesSync, writeJsonSync } from './files.ts'
+import { listDir, makeDir, makeDirs, mtimeOf, readHead, readJson, readRecord, writeBytesSync, writeJsonSync } from './files.ts'
+import { exists, isDir, isFile, move, removeTree, resolvePath } from '../../../common/files.ts'
 import { DEFAULT_CAMERA, clampCamera, mergeCamera } from './logic/camera.ts'
 import {
   ALREADY_CALIBRATING, LIGHT_WHILE_CALIBRATING, LIGHT_WITHOUT_PHOTO, NO_PHOTO_TO_CALIBRATE, NO_RESULT_LINE, QUEUED, SCENE_DELETED,
@@ -510,6 +511,9 @@ export class SceneService {
         return
       case 'stopped':
         this.#finish(id, false, 'the server stopped')
+        return
+      case 'violation':
+        this.#finish(id, false, outcome.message)
         return
       case 'result':
         break

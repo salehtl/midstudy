@@ -1,6 +1,6 @@
 // Python's formatting of numbers and strings, as v1's messages, cost rows and library entries use it: `%.Nf` and
-// `:.N%` (correctly rounded, ties to even), `:g`, `:,`, `round(x, n)`, `str.strip()`, `repr(str)`, v1's `num()` and
-// `fmt_cost()`, and a `csv.writer` row. Pure (functional core).
+// `:.N%` (correctly rounded, ties to even), `:g`, `:,`, `round(x, n)`, `str.strip()`, `repr(str)` and v1's `num()`
+// (cost rows and their `fmt_cost` are common/logic/csv.ts). Pure (functional core).
 
 import type { PyValue } from './pyjson.ts'
 import { floatRepr } from './pyjson.ts'
@@ -106,12 +106,6 @@ export function numText(v: number): string {
   return n.kind === 'int' ? n.text : pyRepr(n)
 }
 
-/** v1's `fmt_cost`: the shortest plain decimal to 4 places (0.1, 0.02, 0.0398, 0). */
-export function costText(cost: number): string {
-  const s = fixed(cost, 4).replace(/0+$/, '').replace(/\.$/, '')
-  return s === '' ? '0' : s
-}
-
 /** Python's `str.isspace()` characters. */
 export function isPySpace(c: number): boolean {
   return (c >= 9 && c <= 13) || (c >= 0x1c && c <= 0x20) || c === 0x85 || c === 0xa0 || c === 0x1680
@@ -178,13 +172,6 @@ export function repr(s: string): string {
     else out += `\\U${hex(c, 8)}`
   }
   return out + q
-}
-
-/** One `csv.writer(…, lineterminator="\n")` row: fields with `,` `"` `\r` `\n` quoted, quotes doubled. */
-export function csvRow(fields: readonly string[]): string {
-  const cells = fields.map((f) => (/[",\r\n]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f))
-  if (fields.length === 1 && fields[0] === '') return '""\n'
-  return `${cells.join(',')}\n`
 }
 
 /** Python's `float(s)` of a string (`--dims` numbers, a library's `dims_cm` given as text), or null. */

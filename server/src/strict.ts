@@ -88,12 +88,18 @@ export function answerViolation(method: string, target: string, status: number, 
   return v
 }
 
+/** The violation of `data` against the schema at `uri` (strict mode), with a stderr line naming `what`; null when it
+ *  conforms or strict mode is off. For what the server reads from its tools (midstudy-calib's results). */
+export function conformance(uri: SchemaUri, data: unknown, what: string): ContractViolation | null {
+  const v = violationOf(uri, data)
+  if (v !== null) report(v, what)
+  return v
+}
+
 /** @public Throws ContractViolation when `data` breaks the schema at `uri` (strict mode), with a stderr line naming `what`. */
 export function assertConforms(uri: SchemaUri, data: unknown, what: string): void {
-  const v = violationOf(uri, data)
-  if (v === null) return
-  report(v, what)
-  throw v
+  const v = conformance(uri, data, what)
+  if (v !== null) throw v
 }
 
 /** Writes a JSON file the server owns, in v1's layout, atomically; in strict mode only after it passes its schema

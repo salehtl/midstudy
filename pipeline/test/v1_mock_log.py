@@ -1,5 +1,6 @@
-"""v1's midstudy-add with MIDSTUDY_FAL_MOCK_LOG: the same JSON lines the v2 CLI writes (pipeline/src/fal.ts), so a
-mocked v1 run and a mocked v2 run on the same inputs can be diffed (endpoint, arguments, the uploaded image's bytes).
+"""v1's midstudy-add with MIDSTUDY_FAL_MOCK_LOG: the same JSON lines the v2 tools write (common/fal.ts's request log:
+upload, call with its args, fetch), so a mocked v1 run and a mocked v2 run on the same inputs can be diffed (endpoint,
+arguments, the uploaded image's bytes).
 
     uv run --project pipeline python pipeline/test/v1_mock_log.py <midstudy-add arguments>
 
@@ -40,7 +41,7 @@ def upload(self, path: Path) -> str:
 
 
 def call(self, endpoint: str, args: dict) -> dict:
-    _log({"op": "call", "endpoint": endpoint, "url": _queue_url(endpoint), "arguments": args})
+    _log({"op": "call", "endpoint": endpoint, "url": _queue_url(endpoint), "args": args})
     return _call(self, endpoint, args)
 
 

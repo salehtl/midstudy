@@ -1,8 +1,9 @@
 {
   // midstudy-add on Node 22, run directly (`node pipeline/src/cli.ts`, type stripping): `.ts` import specifiers. Its
-  // wasm face (core/js/pipeline.ts) is checked here; core/js/node.ts (the media kernels) is core-node's, listed here
-  // too because a composite project must list every file it imports. ESNext.Float16 only types glTF-Transform's
-  // TypedArray union (Float16Array is in it); nothing here uses a Float16Array.
+  // wasm face (core/js/pipeline.ts) is checked here; core/js/node.ts (the media kernels) is core-node's and common/
+  // (the lock, fal, costs and files it shares with the server) the server's, listed here too because a composite
+  // project must list every file it imports. ESNext.Float16 only types glTF-Transform's TypedArray union
+  // (Float16Array is in it); nothing here uses a Float16Array.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2024", "ESNext.Float16"],
@@ -12,5 +13,5 @@
     "types": ["node"],
     "tsBuildInfoFile": "build/tsc/pipeline.tsbuildinfo"
   },
-  "include": ["pipeline/**/*.ts", "core/js/pipeline.ts", "core/js/node.ts"]
+  "include": ["pipeline/**/*.ts", "common/**/*.ts", "core/js/pipeline.ts", "core/js/node.ts"]
 }

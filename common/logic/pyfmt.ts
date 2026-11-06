@@ -52,9 +52,17 @@ export function pyRound(x: number, n: number): number {
   return parseFloat(pyFixed(x, n))
 }
 
-/** v1's `fmt_cost`: two decimals when that is exact to six, else four (`0.02`, `0.0398`). */
+/** v1's `fmt_cost` (planner/serve.py: its cost rows and sentences): two decimals when that is exact to six, else four
+ *  (`0.02`, `0.0398`). */
 export function fmtCost(cost: number): string {
   return pyRound(cost, 2) === pyRound(cost, 6) ? pyFixed(cost, 2) : pyFixed(cost, 4)
+}
+
+/** v1 midstudy-add's `fmt_cost` (its cost rows): `f"{cost:.4f}".rstrip("0").rstrip(".") or "0"`, the shortest plain
+ *  decimal to four places (`0.1`, `0.02`, `0.0398`, `0`). */
+export function fmtCostShort(cost: number): string {
+  const s = pyFixed(cost, 4).replace(/0+$/, '').replace(/\.$/, '')
+  return s === '' ? '0' : s
 }
 
 /** The shortest round-trip digits and the decimal exponent of a finite, non-zero |x| (`1.5e-7` → "15", -7). */

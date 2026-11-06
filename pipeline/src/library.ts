@@ -1,19 +1,22 @@
 // library.json upserts and costs.csv rows (contract §1, §3.4; v1's library.py), written exactly as v1 writes them
-// (Python's json.dumps(indent=2, ensure_ascii=False), csv rows), atomically, under the v2 locks (lock.ts). With
-// MIDSTUDY_STRICT=1 library.json is validated against library.schema.json before it is written (contract §0).
+// (Python's json.dumps(indent=2, ensure_ascii=False); cost rows in midstudy-add's format), atomically, under the v2
+// locks the server takes too (common/lock.ts, common/costs.ts: contract §2.8 One writer). With MIDSTUDY_STRICT=1
+// library.json is validated against library.schema.json before it is written (contract §0).
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { appendCost as appendCostRow } from '../../common/costs.ts'
+import { atomicWriteSync, exists } from '../../common/files.ts'
+import { withLibraryLock } from '../../common/lock.ts'
+import { decodeUtf8 } from '../../common/utf8.ts'
 import { MidstudyError, UnexpectedError } from './errors.ts'
-import { atomicWrite, exists } from './fsx.ts'
 import { out } from './io.ts'
-import { withLock } from './lock.ts'
-import { costText, csvRow, strip } from './logic/pyformat.ts'
 import { dict, dumps, entry, equal, get, int, list, numeric, parse, plain, str } from './logic/pyjson.ts'
 import type { PyValue } from './logic/pyjson.ts'
-import { decodeUtf8, osError } from './pytext.ts'
+import { osError } from './pytext.ts'
 
-const COSTS_HEADER = 'date,id,engine,cost_usd,mock,input'
+/** Who holds a lock, in its owner.json: this run's command line. */
+const LOCK_CMD = ['midstudy-add', ...process.argv.slice(2)].join(' ').slice(0, 300)
 
 function strict(): boolean {
   const v = process.env['MIDSTUDY_STRICT']
@@ -28,10 +31,13 @@ export async function validate(schema: 'midstudy/library.schema.json' | 'midstud
   if (v !== null) throw new MidstudyError(`contract violation: ${v.schema} ${v.path}`)
 }
 
-/** The library lock (`<library>/.lock.d`) around `fn`, saying so when another write holds it. */
+/** The library lock (`<library>/.lock.d`) around `fn`, waiting as long as it takes (v1's flock did) and saying so
+ *  once when another write holds it. */
 export async function locked<T>(libDir: string, fn: () => Promise<T>): Promise<T> {
   fs.mkdirSync(libDir, { recursive: true })
-  return withLock(path.join(libDir, '.lock.d'), {
+  return withLibraryLock(libDir, {
+    waitMs: null,
+    cmd: LOCK_CMD,
     onWait: () => {
       out('midstudy-add: waiting for another library write to finish (<library>/.lock)')
     },
@@ -83,25 +89,12 @@ export async function upsert(libDir: string, data: PyValue, item: PyValue): Prom
     ? dict(data.entries.map((e) => (e.key === 'items' ? entry('items', list(next)) : e)))
     : data
   await validate('midstudy/library.schema.json', plain(out))
-  atomicWrite(path.join(libDir, 'library.json'), libraryText(out))
+  atomicWriteSync(path.join(libDir, 'library.json'), libraryText(out))
   return { data: out, replaced: first !== undefined }
 }
 
-/** v1's `append_cost`: one row (`date,id,engine,cost_usd,mock,input`) under `costs.csv.lock.d`; a missing or blank
- *  file gets the header first. */
+/** v1's `append_cost`: one row (`date,id,engine,cost_usd,mock,input`, the amount as midstudy-add wrote it) under
+ *  `costs.csv.lock.d`; a missing or blank file gets the header first. */
 export async function appendCost(libDir: string, date: string, id: string, engine: string, cost: number, mock: boolean, source: string): Promise<void> {
-  fs.mkdirSync(libDir, { recursive: true })
-  const file = path.join(libDir, 'costs.csv')
-  await withLock(`${file}.lock.d`, {}, () => {
-    let text = ''
-    if (exists(file)) {
-      const d = decodeUtf8(fs.readFileSync(file))
-      if (!d.ok) throw new UnexpectedError('UnicodeDecodeError', d.error)
-      text = d.text
-    }
-    if (strip(text) === '') text = `${COSTS_HEADER}\n`
-    else if (!text.endsWith('\n')) text += '\n'
-    atomicWrite(file, text + csvRow([date, id, engine, costText(cost), mock ? 'true' : 'false', source]))
-    return Promise.resolve()
-  })
+  await appendCostRow(path.join(libDir, 'costs.csv'), { date, id, engine, costUsd: cost, format: 'add', mock, input: source }, LOCK_CMD)
 }

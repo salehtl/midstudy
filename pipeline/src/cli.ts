@@ -4,19 +4,23 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { falKey as loadFalKey, falMockDir, mockCost } from '../../common/fal.ts'
+import { exists, isDir, isFile, move, removeTree as rmtree, replace, resolvePath as resolve } from '../../common/files.ts'
+import { releaseAllSync } from '../../common/lock.ts'
+import { isSlug, slugify } from '../../common/logic/slug.ts'
+import { isoUtc } from '../../common/logic/time.ts'
 import { MidstudyError, UnexpectedError, describe } from './errors.ts'
-import { type Fal, LiveFal, MockFal, download, loadFalKey, run as runEngine, urlBasename } from './fal.ts'
-import { copy2, exists, expanduser, isDir, isFile, mkdtemp, move, replace, resolve, rmtree } from './fsx.ts'
+import { type Fal, LiveFal, MockFal, download, run as runEngine, urlBasename } from './fal.ts'
+import { copy2, expanduser, mkdtemp } from './fsx.ts'
 import { normalize as normalizeGlb, standInBox } from './glb.ts'
 import { checkImage, engineInput, makeThumb } from './images.ts'
 import { err, out, outRaw } from './io.ts'
 import { appendCost, load, locked, upsert, validate } from './library.ts'
-import { releaseAll } from './lock.ts'
 import { HELP, type Options, parseArgs } from './logic/args.ts'
 import { dimsCm, fitValue, itemEntry, summary } from './logic/entry.ts'
 import { dimsMetres, spzLine } from './logic/fit.ts'
 import { IDENTITY, type Mat3, mul3, orientation, yawRotation } from './logic/frames.ts'
-import { MESSAGES, MODEL_EXT, USD_EXT, costUsd, isFalEngine, isSlug, isUrl, parseDims, pilExt, slugify, urlPath } from './logic/inputs.ts'
+import { MESSAGES, MODEL_EXT, USD_EXT, costUsd, isFalEngine, isUrl, parseDims, pilExt, urlPath } from './logic/inputs.ts'
 import { fixed, numText, oneLine, pyFloat, pyStr, pyTypeName, repr, strip } from './logic/pyformat.ts'
 import { NULL, dict, dumps, entry, get, numeric, plain, set, str, truthy } from './logic/pyjson.ts'
 import type { PyValue } from './logic/pyjson.ts'
@@ -47,23 +51,17 @@ function say(msg: string): void {
 
 /** `datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")`. */
 function utcStamp(): string {
-  return `${new Date().toISOString().slice(0, 19)}Z`
+  return isoUtc(Date.now())
 }
 
 /** v1's `resolve_mock_dir`: MIDSTUDY_FAL_MOCK as a folder (relative to the working directory, then the repo). */
 function resolveMockDir(): string | null {
-  const value = process.env['MIDSTUDY_FAL_MOCK'] ?? ''
-  if (value === '') return null
+  const value = falMockDir()
+  if (value === null) return null
   const p = pathNormalize(expanduser(value))
   const candidates = p.startsWith('/') ? [p] : [join(process.cwd(), p), join(REPO, p)]
   for (const c of candidates) if (isDir(c)) return c
   throw new MidstudyError(MESSAGES.mockNotDir(value))
-}
-
-/** MIDSTUDY_FAL_MOCK_COST=1 (evals only): mock runs record the engine's real price, to test the spend cap. */
-function mockCost(): boolean {
-  const v = process.env['MIDSTUDY_FAL_MOCK_COST'] ?? ''
-  return v !== '' && v !== '0'
 }
 
 /** v1's `library_dir`: --library (`~` expanded), else <repo>/library; refused when it is something else. */
@@ -138,7 +136,7 @@ async function run(argv: readonly string[]): Promise<void> {
     id = o.id
     if (!isSlug(id)) throw new MidstudyError(MESSAGES.badId(id))
   } else {
-    id = slugify(name, (s) => s.normalize('NFKD'))
+    id = slugify(name)
     if (!isSlug(id)) throw new MidstudyError(MESSAGES.noId(name))
   }
   const engine = o.engine
@@ -482,7 +480,7 @@ async function refit(o: Options, id: string, libDir: string, newDims: Dims | nul
 
 /** Releases the locks and removes the staging folders (an interrupt). */
 function cleanUp(): void {
-  releaseAll()
+  releaseAllSync()
   for (const s of scratch) rmtree(s)
   scratch.clear()
 }

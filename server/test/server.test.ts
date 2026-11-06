@@ -6,7 +6,7 @@ import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { utcDay } from '../../common/logic/time.ts'
-import { api, errorOf, mockEnv, REPO, request, SCRATCH, startServer, type Running } from './helpers.ts'
+import { api, mockEnv, REPO, request, SCRATCH, startServer, type Running } from './helpers.ts'
 
 const run = (args: readonly string[], env: Readonly<Record<string, string>> = {}): { readonly status: number | null; readonly stdout: string; readonly stderr: string } => {
   const r = spawnSync(process.execPath, ['server/src/main.ts', ...args], { cwd: REPO, env: mockEnv(env), encoding: 'utf8', timeout: 20000 })

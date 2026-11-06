@@ -1,9 +1,9 @@
 // The file operations of the scenes, layouts and renders routes, synchronous on purpose: each route's work on the scene
 // folders happens in one turn of the event loop, so it is atomic for this server as v1's SceneService lock made it
 // (another request can't run between a read and the write that depends on it). The files are small (scene.json,
-// layouts, calib.json; a thumbnail ≤ 2 MB; a render ≤ a few MB). Reads are tolerant as v1's `read_json_file`.
+// layouts, calib.json; a thumbnail ≤ 2 MB; a render ≤ a few MB). Reads are tolerant as v1's `read_json_file`. The
+// pathlib / shutil helpers the CLI uses too (is_file, resolve, move, rmtree, replace) are common/files.ts.
 import fs from 'node:fs'
-import path from 'node:path'
 import { atomicWriteSync, jsonText } from '../../../common/files.ts'
 import type { SchemaUri } from '../../../contract/gen/validate.js'
 import { assertConforms } from '../strict.ts'
@@ -12,34 +12,6 @@ import { isRecord } from './logic/values.ts'
 
 function errorCode(e: unknown): string {
   return e instanceof Error && 'code' in e && typeof e.code === 'string' ? e.code : ''
-}
-
-/** `Path.is_file()`: a regular file (symlinks followed); false on any error. */
-export function isFile(p: string): boolean {
-  try {
-    return fs.statSync(p).isFile()
-  } catch {
-    return false
-  }
-}
-
-/** `Path.is_dir()`: a folder (symlinks followed); false on any error. */
-export function isDir(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory()
-  } catch {
-    return false
-  }
-}
-
-/** `Path.exists()`: anything there (symlinks followed, so a dangling link is not). */
-export function exists(p: string): boolean {
-  try {
-    fs.statSync(p)
-    return true
-  } catch {
-    return false
-  }
 }
 
 /** CPython's `st_mtime` of `p` (a float in seconds), or null when it can't be read. */
@@ -125,50 +97,6 @@ export function readHead(file: string, max: number): Buffer | null {
   } finally {
     fs.closeSync(fd)
   }
-}
-
-/** `shutil.rmtree(p, ignore_errors=True)`. */
-export function removeTree(p: string): void {
-  try {
-    fs.rmSync(p, { recursive: true, force: true })
-  } catch {
-    // ignore_errors
-  }
-}
-
-/** `shutil.move(src, dst)`: a rename (into `dst` when it is an existing folder), or a copy and a removal across file
- *  systems. Returns where it went. */
-export function move(src: string, dst: string): string {
-  const target = isDir(dst) ? path.join(dst, path.basename(src)) : dst
-  try {
-    fs.renameSync(src, target)
-  } catch (e) {
-    if (errorCode(e) !== 'EXDEV') throw e
-    fs.cpSync(src, target, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true })
-    fs.rmSync(src, { recursive: true, force: true })
-  }
-  return target
-}
-
-/** Python's `Path.resolve()` (not strict): symlinks resolved as far as the path exists, the rest appended. */
-export function resolvePath(p: string): string {
-  const rest: string[] = []
-  let at = path.resolve(p)
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(at), ...rest.reverse())
-    } catch {
-      const parent = path.dirname(at)
-      if (parent === at) return path.join(at, ...rest.reverse())
-      rest.push(path.basename(at))
-      at = parent
-    }
-  }
-}
-
-/** `os.replace(src, dst)`. */
-export function replace(src: string, dst: string): void {
-  fs.renameSync(src, dst)
 }
 
 /** Makes a folder and its parents (`mkdir(parents=True, exist_ok=True)`). */

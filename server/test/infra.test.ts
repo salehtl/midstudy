@@ -6,12 +6,12 @@ import http from 'node:http'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countsAgainstCap, download, falCall, FalError, falKey, falMock, falMockDir, logMockCall, mockCost, mockFilePath, mockSlug, readMockAnswer } from '../../common/fal.ts'
+import { countsAgainstCap, download, falCall, FalError, falKey, falMock, falMockDir, falQueueUrl, falRunUrl, logFal, mockCost, mockSlug, uploadRecord } from '../../common/fal.ts'
 import { atomicWrite, jsonText, makeTempDir, readJsonFile } from '../../common/files.ts'
 import { utcDay } from '../../common/logic/time.ts'
 import { JobStore, newJobId, SerialQueue } from '../src/jobs.ts'
 import { SpendCap } from '../src/spend.ts'
-import { addError, addMessage, lastJsonLine, outputLines, runTool, splitCommand, summaryOf, toolError } from '../src/tools.ts'
+import { addError, addMessage, lastJsonLine, outputLines, runTool, splitCommand, summaryOf, toolError } from '../../common/tools.ts'
 import { REPO, SCRATCH } from './helpers.ts'
 
 const DIR = path.join(SCRATCH, 'infra-' + String(process.pid))
@@ -183,20 +183,32 @@ void describe('fal', () => {
       fs.rmSync(repo, { recursive: true, force: true })
     }
   })
-  void test('mock answers come from <dir>/<slug>/; the mock log records each call', () => {
-    const env = { MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), MIDSTUDY_FAL_MOCK_LOG: path.join(DIR, 'mock.jsonl') }
-    const answer = readMockAnswer('fal-ai/sam-3/3d-objects', 'response.json', env)
-    assert.equal(typeof answer, 'object')
-    assert.equal(readMockAnswer('fal-ai/sam-3/3d-objects', 'nope.json', env), null)
-    const files = path.join(REPO, 'fixtures/fal/sam-3-3d-objects/files')
-    const one = fs.readdirSync(files)[0] ?? ''
-    assert.equal(mockFilePath('fal-ai/sam-3/3d-objects', 'https://v3.fal.media/files/x/' + encodeURIComponent(one), env), path.join(files, one))
-    assert.equal(mockFilePath('fal-ai/sam-3/3d-objects', 'https://v3.fal.media/files/x/nothing.glb', env), null)
-    logMockCall('openrouter/router', { prompt: 'é', n: 1 }, env)
-    logMockCall('openrouter/router', { prompt: 'second' }, env)
-    const lines = fs.readFileSync(env.MIDSTUDY_FAL_MOCK_LOG, 'utf8').trim().split('\n').map((l): unknown => JSON.parse(l))
-    assert.deepEqual(lines[0], { endpoint: 'openrouter/router', args: { prompt: 'é', n: 1 } })
-    assert.equal(lines.length, 2)
+  void test('the request log: one line per upload, call and fetch, as Python\'s json.dumps writes it; falCall logs its call', async () => {
+    const log = path.join(DIR, 'mock.jsonl')
+    const env = { MIDSTUDY_FAL_MOCK_LOG: log }
+    logFal({ op: 'call', endpoint: 'openrouter/router', url: falRunUrl('openrouter/router'), args: { prompt: 'é ‹/page› 😀', n: 1, t: 0.2, ok: true, none: null, list: [1, 'x'] } }, env)
+    logFal(uploadRecord('/tmp/x/engine-input.jpg', Buffer.from('abc'), 'image/jpeg', 'https://mock.fal.invalid/uploads/engine-input.jpg'), env)
+    logFal({ op: 'fetch', url: 'https://v3.fal.media/files/a/model.glb', file: 'model.glb' }, env)
+    logFal({ op: 'fetch', url: 'u', file: 'f' }, {})
+    const text = fs.readFileSync(log, 'utf8')
+    assert.equal(text, [
+      '{"op": "call", "endpoint": "openrouter/router", "url": "https://fal.run/openrouter/router", "args": {"prompt": "\\u00e9 \\u2039/page\\u203a \\ud83d\\ude00", "n": 1, "t": 0.2, "ok": true, "none": null, "list": [1, "x"]}}',
+      '{"op": "upload", "file": "engine-input.jpg", "content_type": "image/jpeg", "bytes": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "url": "https://mock.fal.invalid/uploads/engine-input.jpg"}',
+      '{"op": "fetch", "url": "https://v3.fal.media/files/a/model.glb", "file": "model.glb"}',
+      '',
+    ].join('\n'))
+    assert.equal(falQueueUrl('fal-ai/sam-3/3d-objects', {}), 'https://queue.fal.run/fal-ai/sam-3/3d-objects')
+    assert.equal(falQueueUrl('speridlabs/idol', { FAL_RUN_HOST: 'example.invalid' }), 'https://queue.example.invalid/speridlabs/idol')
+    // a live call is logged too (before it is sent)
+    process.env['MIDSTUDY_FAL_MOCK_LOG'] = log
+    try {
+      await falCall('fal-ai/ok', { prompt: 'p' }, 'test-not-a-key', { baseUrl: base })
+    } finally {
+      delete process.env['MIDSTUDY_FAL_MOCK_LOG']
+    }
+    const last: unknown = JSON.parse(fs.readFileSync(log, 'utf8').trim().split('\n').at(-1) ?? '')
+    assert.deepEqual(last, { op: 'call', endpoint: 'fal-ai/ok', url: base + '/fal-ai/ok', args: { prompt: 'p' } })
+    assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /test-not-a-key/)
   })
   void test('falCall: POST <base>/<endpoint>, Key auth, the JSON arguments; v1\'s FalError sentences', async () => {
     assert.deepEqual(await falCall('fal-ai/ok', { image_url: 'data:x', prompt: 'p' }, 'test-not-a-key', { baseUrl: base }), { images: [{ url: 'x' }] })
@@ -217,7 +229,7 @@ void describe('fal', () => {
   void test('download: a data: URI or a GET', async () => {
     assert.equal(Buffer.from(await download('data:image/jpeg;base64,' + Buffer.from('abc').toString('base64'))).toString(), 'abc')
     assert.equal(Buffer.from(await download(base + '/file.jpg')).toString(), 'jpegbytes')
-    await assert.rejects(download(base + '/missing'), /HTTP Error 404: Not Found/)
+    await assert.rejects(download(base + '/missing'), { name: 'HTTPError', message: 'HTTP Error 404: Not Found' })
   })
 })
 

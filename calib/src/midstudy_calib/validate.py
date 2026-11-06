@@ -2,9 +2,9 @@
 result and the worker's responses. One that doesn't match is a bug in midstudy-calib: it is not written, and the
 command fails with the contract's error output instead (contract §4.3).
 
-The schemas are the copies in schemas/ (calib.schema.json and lighting.schema.json from contract/, written by
-scripts/gen_contract_types.py; calib-cli.schema.json is calib's own), so the Nix package, which carries src/ only,
-validates exactly as the repo does.
+The schemas are the copies in schemas/ of contract/'s calib.schema.json, lighting.schema.json and calib-cli.schema.json
+(written by scripts/gen_contract_types.py; the server checks calib's results against the same calib-cli.schema.json),
+so the Nix package, which carries src/ only, validates exactly as the repo does.
 """
 from __future__ import annotations
 

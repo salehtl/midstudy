@@ -4,7 +4,9 @@
 // A request is one JSON line `{"id", "cmd", "args"}`; the response is `{"id": <the request's>, …}`, the rest being
 // exactly the one-shot command's last stdout line. Anything else (not JSON, not an object, another id) means the
 // worker is broken: it is killed and that job runs one-shot. After 3 such failures in a row the server uses the
-// one-shot command for the rest of its life. An `ok: false` answer is the job's failure, not the worker's.
+// one-shot command for the rest of its life. An `ok: false` answer is the job's failure, not the worker's. Every
+// result, one-shot or from the worker, is also checked against contract/calib-cli.schema.json in strict mode.
+import type { SchemaUri } from '../../../../contract/gen/validate.js'
 import { isRecord } from './values.ts'
 
 /** What one stdout line of the worker says about the request in flight. */
@@ -47,4 +49,19 @@ export function failuresAfter(failures: number, event: 'failed' | 'answered' | '
 /** Whether the server should still use the worker after `failures` failures in a row. */
 export function workerUsable(failures: number): boolean {
   return failures < MAX_WORKER_FAILURES
+}
+
+/** The schema of contract/calib-cli.schema.json a result line (one-shot) or worker answer of `cmd` must match: the
+ *  error result when it says `ok: false` (or anything but true), else the command's own result. */
+export function calibResultSchema(cmd: 'run' | 'fit' | 'light' | 'align', ok: boolean): SchemaUri {
+  if (!ok) return 'midstudy/calib-cli.schema.json#/$defs/error'
+  switch (cmd) {
+    case 'run':
+    case 'fit':
+      return 'midstudy/calib-cli.schema.json#/$defs/run'
+    case 'light':
+      return 'midstudy/calib-cli.schema.json#/$defs/light'
+    case 'align':
+      return 'midstudy/calib-cli.schema.json#/$defs/align'
+  }
 }

@@ -9,9 +9,12 @@ import { HELP, parseArgs } from '../src/logic/args.ts'
 import { itemEntry, summary } from '../src/logic/entry.ts'
 import { errorsPct, glbSelfCheck, itemFrame, spzLine, splatSelfCheck } from '../src/logic/fit.ts'
 import { IDENTITY, mul3, orientation, quatXyzw, sam3dSplatToGlb, yawRotation } from '../src/logic/frames.ts'
-import { costUsd, engineArguments, isSlug, mockSlug, parseDims, quote, slugify, urlPath, withMask, withThreshold } from '../src/logic/inputs.ts'
-import { isStale, ownerFrom, sameOwner } from '../src/logic/lock.ts'
-import { costText, csvRow, fixed, general, oneLine, percent, pyFloat, pyRound, repr, strip, thousands } from '../src/logic/pyformat.ts'
+import { csvLine } from '../../common/logic/csv.ts'
+import { mockSlug } from '../../common/logic/env.ts'
+import { fmtCostShort } from '../../common/logic/pyfmt.ts'
+import { isSlug, slugify } from '../../common/logic/slug.ts'
+import { costUsd, engineArguments, parseDims, quote, urlPath, withMask, withThreshold } from '../src/logic/inputs.ts'
+import { fixed, general, oneLine, percent, pyFloat, pyRound, repr, strip, thousands } from '../src/logic/pyformat.ts'
 import { NULL, dumps, float, floatRepr, parse, str } from '../src/logic/pyjson.ts'
 import type { PyValue } from '../src/logic/pyjson.ts'
 import { join, name, normalize, parent, suffix, withName } from '../src/logic/pypath.ts'
@@ -46,16 +49,16 @@ void test('%.Nf, :.N%, :g, round(), :, and str.strip() as Python', () => {
   assert.deepEqual([0, 999, 1000, 262144, 1234567].map(thousands), ['0', '999', '1,000', '262,144', '1,234,567'])
   assert.deepEqual(['  x  ', '\x1c y \x1f', ' ​ z'].map(strip), ['x', 'y', '​ z'])
   assert.equal(oneLine('a b  c\n d'), 'a b c d')
-  assert.deepEqual([0.1, 0.02, 0.0398, 0, 0.25].map(costText), ['0.1', '0.02', '0.0398', '0', '0.25'])
+  assert.deepEqual([0.1, 0.02, 0.0398, 0, 0.25].map(fmtCostShort), ['0.1', '0.02', '0.0398', '0', '0.25'])
   assert.deepEqual(['1_000', ' 12 ', 'inf', '-Infinity', '1e3', '1__0', '_1', 'x'].map(pyFloat), [1000, 12, Infinity, -Infinity, 1000, null, null, null])
 })
 
 void test('repr(str) and csv rows as Python', () => {
   assert.deepEqual(["it's", 'say "hi"', 'both \' and "', 'tab\there', 'nl\n', 'é', '\x7f', '​', '😀'].map(repr),
     ['"it\'s"', '\'say "hi"\'', '\'both \\\' and "\'', "'tab\\there'", "'nl\\n'", "'é'", "'\\x7f'", "'\\u200b'", "'😀'"])
-  assert.equal(csvRow(['2026-01-01T00:00:00Z', 'id', 'idol', '0.1', 'true', 'a,b']), '2026-01-01T00:00:00Z,id,idol,0.1,true,"a,b"\n')
-  assert.equal(csvRow(['x', 'q"uote', 'line\nbreak']), 'x,"q""uote","line\nbreak"\n')
-  assert.equal(csvRow(['']), '""\n')
+  assert.equal(csvLine(['2026-01-01T00:00:00Z', 'id', 'idol', '0.1', 'true', 'a,b']), '2026-01-01T00:00:00Z,id,idol,0.1,true,"a,b"\n')
+  assert.equal(csvLine(['x', 'q"uote', 'line\nbreak']), 'x,"q""uote","line\nbreak"\n')
+  assert.equal(csvLine(['']), '""\n')
 })
 
 void test('json.dumps and json.loads as Python (ints, floats, key order, escapes, errors)', () => {
@@ -137,11 +140,11 @@ void test('--dims, slugs, URLs and the engine tables', () => {
   assert.deepEqual(parseDims('0x80x90'), { ok: false, error: "--dims values must all be greater than 0 cm, got '0x80x90'" })
   assert.deepEqual(parseDims('1.x2x3'), { ok: false, error: "--dims must look like 75x80x95 (cm), got '1.x2x3'" })
   assert.deepEqual(parseDims(null), { ok: false, error: '--dims is required: W x D x H in cm, e.g. --dims 75x80x95' })
-  const nfkd = (s: string): string => s.normalize('NFKD')
-  assert.equal(slugify('Strandmon Wing-Chair (Ikea)', nfkd), 'strandmon-wing-chair-ikea')
-  assert.equal(slugify('Café Ñandú', nfkd), 'cafe-nandu')
-  assert.equal(slugify('!!!', nfkd), '')
-  assert.equal(slugify('a'.repeat(63) + ' bcd', nfkd), 'a'.repeat(63))
+  // the slugs and the mock folder names are common/logic's (the server's too)
+  assert.equal(slugify('Strandmon Wing-Chair (Ikea)'), 'strandmon-wing-chair-ikea')
+  assert.equal(slugify('Café Ñandú'), 'cafe-nandu')
+  assert.equal(slugify('!!!'), '')
+  assert.equal(slugify('a'.repeat(63) + ' bcd'), 'a'.repeat(63))
   assert.ok(isSlug('reading-chair') && !isSlug('Bad_Id') && !isSlug('-x') && !isSlug('x\n') && !isSlug('a'.repeat(65)))
   assert.equal(urlPath('https://ex.com/a/b.JPG?x=1#y'), '/a/b.JPG')
   assert.equal(urlPath('https://ex.com/p;params/q;r'), '/p;params/q')
@@ -210,17 +213,4 @@ void test('the library entry and the summary line, key for key', () => {
   const s = summary('c', 'rescale', 'int-zero', false, { library: 'l', item: 'i', glb: 'g', splat: null, spz: null, thumb: null, source: null, raw: null, costs: 'k' }, NULL)
   assert.equal(text(s), '{"id": "c", "engine": "rescale", "cost_usd": 0, "mock": false, "paths": {"library": "l", "item": "i", "glb": "g", "splat": null, "spz": null, "thumb": null, "source": null, "raw": null, "costs": "k"}, "fit": null}')
   assert.equal(text(str('é')), '"\\u00e9"')
-})
-
-void test('the lock\'s rules: a dead owner or an old lock is stale, a fresh unreadable one is not', () => {
-  const owner = ownerFrom({ pid: 12, host: 'h', cmd: 'midstudy-add x', started: '2026-11-06T00:00:00.000Z' })
-  assert.ok(owner !== null)
-  assert.equal(ownerFrom({ pid: 0, host: 'h', cmd: '', started: '' }), null)
-  assert.equal(ownerFrom({ pid: 1.5, host: 'h', cmd: '', started: '' }), null)
-  assert.equal(isStale({ owner, alive: false, ageMs: 10 }), true)
-  assert.equal(isStale({ owner, alive: true, ageMs: 10 }), false)
-  assert.equal(isStale({ owner, alive: null, ageMs: 3600 * 1000 + 1 }), true)
-  assert.equal(isStale({ owner: null, alive: null, ageMs: 5 }), false)
-  assert.equal(isStale({ owner: null, alive: null, ageMs: null }), false)
-  assert.ok(sameOwner(owner, { ...owner }) && !sameOwner(owner, null) && sameOwner(null, null))
 })

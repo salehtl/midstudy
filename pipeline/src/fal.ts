@@ -1,25 +1,28 @@
 // The fal engines (contract §3.2) and the MIDSTUDY_FAL_MOCK replay (§3.3), as v1's engines.py ran them. The live
 // client speaks fal-client 1.0.3's protocol exactly (what v1's `fal_client.upload_file` and `fal_client.subscribe`
 // send: the CDN v3 upload with its storage fallback, the queue's submit, status polls with logs, the result, retries
-// and backup domains). With MIDSTUDY_FAL_MOCK_LOG=<file>, every upload, call and fetch is appended there as one JSON
-// line, the same lines v1 writes through pipeline/test/v1_mock_log.py, so the two can be diffed.
-import { createHash, randomInt } from 'node:crypto'
+// and backup domains). The key, the mock switches, the request log (MIDSTUDY_FAL_MOCK_LOG: every upload, call and fetch
+// as one JSON line, the same lines v1 writes through pipeline/test/v1_mock_log.py) and downloads are the server's too:
+// common/fal.ts.
+import { randomInt } from 'node:crypto'
 import fs from 'node:fs'
 import { STATUS_CODES } from 'node:http'
 import path from 'node:path'
 
+import { download as fetchBytes, falQueueUrl, logFal, mockSlug, uploadRecord } from '../../common/fal.ts'
+import { isFile } from '../../common/files.ts'
+import { decodeUtf8 } from '../../common/utf8.ts'
 import { MidstudyError, NoMasks, UnexpectedError } from './errors.ts'
-import { copy2, isFile } from './fsx.ts'
+import { copy2 } from './fsx.ts'
 import { out } from './io.ts'
 import { foregroundMask } from './images.ts'
-import { type FalEngine, endpoint, engineArguments, mockSlug, quote, urlPath, withMask, withThreshold } from './logic/inputs.ts'
+import { type FalEngine, endpoint, engineArguments, quote, urlPath, withMask, withThreshold } from './logic/inputs.ts'
 import { IDENTITY, sam3dSplatToGlb } from './logic/frames.ts'
 import type { Mat3 } from './logic/frames.ts'
-import { dict, dumps, entry, get, int, parse, plain, str, truthy } from './logic/pyjson.ts'
+import { dumps, get, parse, plain, truthy } from './logic/pyjson.ts'
 import type { PyValue } from './logic/pyjson.ts'
-import { pyStr, pyTypeName, repr, strip } from './logic/pyformat.ts'
+import { pyStr, pyTypeName, repr } from './logic/pyformat.ts'
 import { join, name as pathName } from './logic/pypath.ts'
-import { decodeUtf8 } from './pytext.ts'
 
 export interface Fal {
   readonly mock: boolean
@@ -49,29 +52,15 @@ export function urlBasename(url: string): string {
   return pathName(unquote(urlPath(url))) || 'download'
 }
 
-function log(record: PyValue): void {
-  const file = process.env['MIDSTUDY_FAL_MOCK_LOG']
-  if (file === undefined || file === '') return
-  const d = dumps(record, { indent: null, ensureAscii: true, allowNan: true })
-  if (d.ok) fs.appendFileSync(file, `${d.text}\n`)
+/** The upload's request-log line (MIDSTUDY_FAL_MOCK_LOG): the file's name, type, size and digest. */
+function logUpload(file: string, url: string): void {
+  if ((process.env['MIDSTUDY_FAL_MOCK_LOG'] ?? '') === '') return
+  logFal(uploadRecord(pathName(file), fs.readFileSync(file), guessType(file) ?? 'application/octet-stream', url))
 }
 
-function uploadRecord(file: string, url: string): PyValue {
-  const data = fs.readFileSync(file)
-  return dict([
-    entry('op', str('upload')),
-    entry('file', str(pathName(file))),
-    entry('content_type', str(guessType(file) ?? 'application/octet-stream')),
-    entry('bytes', int(data.length)),
-    entry('sha256', str(createHash('sha256').update(data).digest('hex'))),
-    entry('url', str(url)),
-  ])
-}
-
-/** The queue URL fal-client submits to (FAL_RUN_HOST / FAL_QUEUE_RUN_HOST as it reads them). */
-function queueUrl(ep: string): string {
-  const run = process.env['FAL_RUN_HOST'] ?? 'fal.run'
-  return `https://${process.env['FAL_QUEUE_RUN_HOST'] ?? `queue.${run}`}/${ep}`
+/** The call's request-log line: the queue URL fal-client submits to and the exact arguments. */
+function logCall(ep: string, args: PyValue): void {
+  logFal({ op: 'call', endpoint: ep, url: falQueueUrl(ep), args: plain(args) })
 }
 
 // --- the mock --------------------------------------------------------------------------------------------------------
@@ -97,13 +86,13 @@ export class MockFal implements Fal {
 
   upload(file: string): Promise<string> {
     const url = `https://mock.fal.invalid/uploads/${quote(pathName(file))}`
-    log(uploadRecord(file, url))
+    logUpload(file, url)
     return Promise.resolve(url)
   }
 
   call(ep: string, args: PyValue): Promise<PyValue> {
     this.#slug = mockSlug(ep)
-    log(dict([entry('op', str('call')), entry('endpoint', str(ep)), entry('url', str(queueUrl(ep))), entry('arguments', args)]))
+    logCall(ep, args)
     // evals: MIDSTUDY_FAL_MOCK_NO_MASKS=N makes the first N sam3d calls answer "no masks", as live fal does
     if (ep === endpoint('sam3d') && this.#noMasks > 0) {
       this.#noMasks -= 1
@@ -125,7 +114,7 @@ export class MockFal implements Fal {
     if (!isFile(src)) return Promise.reject(new MidstudyError(`MIDSTUDY_FAL_MOCK: the response links ${url}, but ${src} doesn't exist`))
     const out = path.join(destDir, pathName(src))
     copy2(src, out)
-    log(dict([entry('op', str('fetch')), entry('url', str(url)), entry('file', str(pathName(src)))]))
+    logFal({ op: 'fetch', url, file: pathName(src) })
     return Promise.resolve(out)
   }
 }
@@ -286,7 +275,7 @@ export class LiveFal implements Fal {
         await this.#request(pyStr(uploadUrl), { method: 'PUT', headers: { ...this.#authHeaders(), 'Content-Type': mime }, body: data }, null)
         url = pyStr(fileUrl)
       }
-      log(uploadRecord(file, url))
+      logUpload(file, url)
       return url
     } catch (e) {
       const what = e instanceof UnexpectedError ? `${e.pyType}: ${e.message}` : e instanceof Error ? `${e.name}: ${e.message}` : String(e)
@@ -295,9 +284,9 @@ export class LiveFal implements Fal {
   }
 
   async call(ep: string, args: PyValue): Promise<PyValue> {
-    log(dict([entry('op', str('call')), entry('endpoint', str(ep)), entry('url', str(queueUrl(ep))), entry('arguments', args)]))
+    logCall(ep, args)
     try {
-      const submitted = await this.#json(await this.#request(queueUrl(ep), {
+      const submitted = await this.#json(await this.#request(falQueueUrl(ep), {
         method: 'POST',
         headers: { ...this.#authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(plain(args)),
@@ -335,17 +324,16 @@ export class LiveFal implements Fal {
 
   async fetch(url: string, destDir: string): Promise<string> {
     const out = await download(url, path.join(destDir, urlBasename(url)), this.#fetch)
-    log(dict([entry('op', str('fetch')), entry('url', str(url)), entry('file', str(pathName(out)))]))
+    logFal({ op: 'fetch', url, file: pathName(out) })
     return out
   }
 }
 
-/** v1's `download`: a plain HTTP(S) download (live mode only), redirects followed. */
+/** v1's `download`: a plain HTTP(S) download (a URL input; a result in live mode), redirects followed, with
+ *  midstudy-add's User-Agent and 300 s (common/fal.ts); its failure sentence. */
 export async function download(url: string, dest: string, fetchFn: FetchFn = fetch): Promise<string> {
   try {
-    const res = await fetchFn(url, { headers: { 'User-Agent': 'midstudy-add/0.1' }, redirect: 'follow', signal: AbortSignal.timeout(300_000) })
-    if (!res.ok) throw new UnexpectedError('HTTPError', `HTTP Error ${String(res.status)}: ${res.statusText}`)
-    fs.writeFileSync(dest, new Uint8Array(await res.arrayBuffer()))
+    fs.writeFileSync(dest, await fetchBytes(url, { userAgent: 'midstudy-add/0.1', timeoutMs: 300_000, fetchFn }))
   } catch (e) {
     const what = e instanceof UnexpectedError ? `${e.pyType}: ${e.message}` : e instanceof Error ? `${e.name}: ${e.message}` : String(e)
     throw new MidstudyError(`download failed for ${url} (${what})`)
@@ -435,28 +423,4 @@ export async function run(fal: Fal, engine: FalEngine, image: string, prompt: st
   }
   if (engine === 'sam3d') say('midstudy-add: warning: sam3d returned no gaussian_splat; the item will be GLB only')
   return { glb, splat: null, splatToGlb: IDENTITY }
-}
-
-/** v1's `load_fal_key`: FAL_KEY from the environment, else from <repo>/.env (unless MIDSTUDY_NO_DOTENV=1); null when
- *  there's none. Never printed, and never written to the environment: the caller hands it to LiveFal. */
-export function loadFalKey(repo: string): string | null {
-  const env = process.env['FAL_KEY']
-  if (env !== undefined && env !== '') return env
-  const no = process.env['MIDSTUDY_NO_DOTENV'] ?? ''
-  if (no !== '' && no !== '0') return null
-  let text: string
-  try {
-    text = fs.readFileSync(path.join(repo, '.env'), 'utf8')
-  } catch {
-    return null
-  }
-  for (const raw of text.split(/\r\n|\r|\n/)) {
-    let line = strip(raw)
-    if (line.startsWith('export ')) line = strip(line.slice(7))
-    const eq = line.indexOf('=')
-    if (eq < 0 || strip(line.slice(0, eq)) !== 'FAL_KEY') continue
-    const value = strip(line.slice(eq + 1)).replace(/^['"]+|['"]+$/g, '')
-    if (value !== '') return value
-  }
-  return null
 }

@@ -402,6 +402,237 @@
         }
       }
     },
+    "CalibCliAlign": {
+      "type": "object",
+      "required": [
+        "ok",
+        "applied",
+        "inliers",
+        "residual_px"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/CalibCliId"
+        },
+        "ok": {
+          "const": true
+        },
+        "applied": {
+          "type": "boolean"
+        },
+        "inliers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "residual_px": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reason": {
+          "description": "Why it wasn't applied.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CalibCliError": {
+      "description": "Any command that failed: exit 1 (one-shot), the same sentence as the last stderr line after `midstudy-calib: `.",
+      "type": "object",
+      "required": [
+        "ok",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/CalibCliId"
+        },
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "description": "One sentence the server shows as it is.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CalibCliId": {
+      "description": "Worker responses only: the request's id (null when the request had no usable id).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "CalibCliIngest": {
+      "type": "object",
+      "required": [
+        "ok",
+        "photo",
+        "source",
+        "image"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/CalibCliId"
+        },
+        "ok": {
+          "const": true
+        },
+        "photo": {
+          "const": "photo.jpg"
+        },
+        "source": {
+          "enum": [
+            "source.jpg",
+            "source.png",
+            "source.heic",
+            "source.webp"
+          ]
+        },
+        "image": {
+          "$ref": "#/definitions/ImageSize"
+        }
+      }
+    },
+    "CalibCliLight": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/CalibCliLightDone"
+        },
+        {
+          "$ref": "#/definitions/CalibCliLightNone"
+        }
+      ]
+    },
+    "CalibCliLightDone": {
+      "description": "`light` wrote lighting.json.",
+      "type": "object",
+      "required": [
+        "ok",
+        "lighting",
+        "cct_k",
+        "confidence",
+        "elapsed_s"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/CalibCliId"
+        },
+        "ok": {
+          "const": true
+        },
+        "lighting": {
+          "const": true
+        },
+        "cct_k": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1000,
+          "maximum": 40000
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "elapsed_s": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "CalibCliLightNone": {
+      "description": "`light` found too little to go on and wrote nothing.",
+      "type": "object",
+      "required": [
+        "ok",
+        "lighting",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/CalibCliId"
+        },
+        "ok": {
+          "const": true
+        },
+        "lighting": {
+          "const": false
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CalibCliRequest": {
+      "description": "One line on the worker's stdin.",
+      "type": "object",
+      "required": [
+        "id",
+        "cmd",
+        "args"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Echoed in the response.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cmd": {
+          "enum": [
+            "run",
+            "fit",
+            "light",
+            "align",
+            "ingest"
+          ]
+        },
+        "args": {
+          "description": "The one-shot command's arguments after its name, as an argument list.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "CalibCliRun": {
+      "description": "`run` and `fit`: calib.json's contents plus \"ok\": true.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Calib"
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "id": {
+              "$ref": "#/definitions/CalibCliId"
+            }
+          },
+          "additionalProperties": {}
+        }
+      ]
+    },
     "CalibrateAccepted": {
       "description": "202 of POST /api/scenes/<name>/calibrate (contract §4.4): fit on photo.jpg, or run on source.<ext> when photo.jpg is missing. 409 while one is queued or running for that scene.",
       "type": "object",

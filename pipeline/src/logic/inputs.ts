@@ -1,18 +1,11 @@
 // What midstudy-add checks before any work, and its tables (contract §3.1–§3.3; v1's cli.py and engines.py): --dims,
-// slugs, the INPUT's kind, the engines' endpoints, prices and arguments, the mock folder names, and the sentences v1
-// prints for each refusal. Pure (functional core).
+// the INPUT's kind, the engines' endpoints, prices and arguments, and the sentences v1 prints for each refusal (slugs
+// and the mock folder names are common/logic's). Pure (functional core).
 
 import type { PyValue } from './pyjson.ts'
 import { bool, dict, entry, int, list, str } from './pyjson.ts'
 import { isPySpace } from './pyformat.ts'
 import type { Engine } from './args.ts'
-
-const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
-
-/** `SLUG.fullmatch(s)` (no trailing newline slips through). */
-export function isSlug(s: string): boolean {
-  return SLUG.test(s) && !s.endsWith('\n')
-}
 
 export type DimsResult = { readonly ok: true; readonly w: number; readonly d: number; readonly h: number } | { readonly ok: false; readonly error: string }
 
@@ -75,17 +68,6 @@ export function parseDims(text: string | null): DimsResult {
   return { ok: true, w, d, h }
 }
 
-/** v1's `slugify`: NFKD, ASCII only, lower case, runs of anything else as `-`, at most 64 characters. */
-export function slugify(text: string, nfkd: (s: string) => string): string {
-  let ascii = ''
-  for (const ch of nfkd(text)) {
-    const c = ch.charCodeAt(0)
-    if (c < 128) ascii += ch
-  }
-  const dashed = ascii.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  return dashed.slice(0, 64).replace(/-+$/, '')
-}
-
 export const MODEL_EXT = ['.glb', '.gltf', '.zip'] as const
 export const USD_EXT = ['.usdz', '.usd', '.usda', '.usdc'] as const
 
@@ -141,11 +123,6 @@ export function withThreshold(args: PyValue): PyValue {
 export function withMask(args: PyValue, maskUrl: string): PyValue {
   if (args.kind !== 'dict') return args
   return dict([...args.entries.filter((e) => e.key !== 'detection_threshold' && e.key !== 'mask_urls'), entry('mask_urls', list([str(maskUrl)]))])
-}
-
-/** The mock folder of an endpoint: `fal-ai/` dropped, `/` → `-` (contract §3.3). */
-export function mockSlug(ep: string): string {
-  return (ep.startsWith('fal-ai/') ? ep.slice(7) : ep).replace(/\//g, '-')
 }
 
 /** Pillow's format names to the extension a URL input without one is stored with. */

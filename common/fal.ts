@@ -1,13 +1,16 @@
-// fal (contract §2.6, §3.3): the key, mock mode, and the one synchronous call `https://fal.run/<endpoint>`, as v1's
-// serve.py (`fal_key`, `fal_mock`, `mock_cost`, `counts_against_cap`, `fal_call`, `download`) and midstudy-add read
-// them. Shared by the server and midstudy-add.
+// fal (contract §2.6, §3.3), shared by the server and midstudy-add: the key, mock mode and its flags, the request log,
+// the server's one synchronous call `https://fal.run/<endpoint>` (v1 serve.py's `fal_call`) and the download of a
+// result URL. midstudy-add's queue client (fal-client's protocol: uploads, submit, status polls) and its mock replay
+// are pipeline/src/fal.ts, on top of these.
 //
 // Money and secrets: FAL_KEY comes from the environment, else from `<repo>/.env` unless MIDSTUDY_NO_DOTENV is set;
-// it is never logged or answered. With MIDSTUDY_FAL_MOCK=<dir> nothing reaches the network: a mock answer is a file
-// under <dir> (or, for a render, the input itself), and MIDSTUDY_FAL_MOCK_LOG=<file> records each call's arguments.
+// it is never logged or answered. With MIDSTUDY_FAL_MOCK=<dir> nothing reaches the network. MIDSTUDY_FAL_MOCK_LOG=<file>
+// (evals) records every upload, call and fetch either tool makes or, under the mock, would make: one JSON line each.
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { dotenvValue, flagOn, mockOn, mockSlug } from './logic/env.ts'
+import { dotenvValue, flagOn, mockOn } from './logic/env.ts'
+import { jsonLine, type JsonLineValue } from './logic/jsonline.ts'
 
 export { mockSlug } from './logic/env.ts'
 
@@ -60,58 +63,38 @@ export function falKey(repo: string, env: NodeJS.ProcessEnv = process.env): stri
   return dotenvValue(text, 'FAL_KEY')
 }
 
-/** MIDSTUDY_FAL_MOCK_LOG=<file> (evals only): in mock mode, one JSON line per call with the endpoint and the exact
- *  arguments that would have been sent (v1's product reader wrote `{"endpoint", "args"}`). */
-export function logMockCall(endpoint: string, args: unknown, env: NodeJS.ProcessEnv = process.env): void {
+/** One line of the request log (MIDSTUDY_FAL_MOCK_LOG): what was (or, under the mock, would have been) sent, in the
+ *  layout v1's tools wrote (Python's `json.dumps`), so a v1 run and a v2 run on the same inputs can be diffed. */
+export type FalLogRecord =
+  /** A file sent to fal's storage (midstudy-add's engine input or mask): its name, type, size and digest. */
+  | { readonly op: 'upload'; readonly file: string; readonly content_type: string; readonly bytes: number; readonly sha256: string; readonly url: string }
+  /** An endpoint called (the queue for midstudy-add, fal.run for the server) with its exact arguments. */
+  | { readonly op: 'call'; readonly endpoint: string; readonly url: string; readonly args: JsonLineValue }
+  /** A result file fetched, and the name it was saved as. */
+  | { readonly op: 'fetch'; readonly url: string; readonly file: string }
+
+/** Appends `record` to MIDSTUDY_FAL_MOCK_LOG when it is set (evals only; never holds the key). */
+export function logFal(record: FalLogRecord, env: NodeJS.ProcessEnv = process.env): void {
   const log = env['MIDSTUDY_FAL_MOCK_LOG']
   if (log === undefined || log === '') return
-  fs.appendFileSync(log, JSON.stringify({ endpoint, args }) + '\n', 'utf8')
+  fs.appendFileSync(log, jsonLine(record) + '\n', 'utf8')
 }
 
-/** A mock answer file: `<mock dir>/<endpoint slug>/<name>` parsed as JSON (contract §3.3: `response.json`; the product
- *  reader's `<page slug>.json`). Null when the file is missing; throws FalError when it isn't JSON. */
-export function readMockAnswer(endpoint: string, name = 'response.json', env: NodeJS.ProcessEnv = process.env): unknown {
-  const dir = falMockDir(env)
-  if (dir === null) throw new FalError('MIDSTUDY_FAL_MOCK is not set')
-  const file = path.join(dir, mockSlug(endpoint), name)
-  let text: string
-  try {
-    text = fs.readFileSync(file, 'utf8')
-  } catch {
-    return null
-  }
-  try {
-    const value: unknown = JSON.parse(text)
-    return value
-  } catch (e) {
-    throw new FalError('fal ' + endpoint + " mock answer isn't JSON (" + (e instanceof Error ? e.message : String(e)) + ')')
-  }
+/** The upload record of `bytes` sent as `file` (its base name is logged). */
+export function uploadRecord(file: string, bytes: Uint8Array, contentType: string, url: string): FalLogRecord {
+  return { op: 'upload', file: path.basename(file), content_type: contentType, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), url }
 }
 
-/** @public The mock copy of a file a mock answer links (contract §3.3): `<mock dir>/<endpoint slug>/files/<name>`, the
- *  name being the URL path's last segment as fixtures/capture_fal.py saved it, else its percent-decoded spelling (v1
- *  midstudy-add's MockFal.fetch); null when neither exists. */
-export function mockFilePath(endpoint: string, url: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  const dir = falMockDir(env)
-  if (dir === null) return null
-  let raw: string
-  try {
-    raw = path.posix.basename(new URL(url).pathname)
-  } catch {
-    return null
-  }
-  let decoded = raw
-  try {
-    decoded = decodeURIComponent(raw)
-  } catch {
-    // keep the spelling as sent
-  }
-  const files = path.join(dir, mockSlug(endpoint), 'files')
-  for (const name of [raw, decoded === '' ? 'download' : decoded]) {
-    const candidate = path.join(files, name)
-    if (name !== '' && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
-  }
-  return null
+/** v1's synchronous endpoint URL (`https://fal.run/<endpoint>`, serve.py's `fal_call`). */
+export function falRunUrl(endpoint: string): string {
+  return 'https://fal.run/' + endpoint
+}
+
+/** The queue URL fal-client submits to (`https://queue.fal.run/<endpoint>`; FAL_RUN_HOST and FAL_QUEUE_RUN_HOST as
+ *  fal-client reads them), midstudy-add's. */
+export function falQueueUrl(endpoint: string, env: NodeJS.ProcessEnv = process.env): string {
+  const run = env['FAL_RUN_HOST'] ?? 'fal.run'
+  return 'https://' + (env['FAL_QUEUE_RUN_HOST'] ?? 'queue.' + run) + '/' + endpoint
 }
 
 /** How falCall reaches fal (tests point it at a local server; nothing in the environment can). */
@@ -131,9 +114,11 @@ function causeText(e: unknown): string {
 
 /** v1 `fal_call`: POST `https://fal.run/<endpoint>` with the JSON arguments and `Authorization: Key <key>`; the JSON
  *  answer, or FalError with v1's sentences (an HTTP error with the first 400 bytes of its body; nano-banana's
- *  occasional 422 "did not generate the expected output" as "returned no image this time"; unreachable; not JSON). */
-export async function falCall(endpoint: string, args: unknown, key: string, options: FalCallOptions = {}): Promise<unknown> {
+ *  occasional 422 "did not generate the expected output" as "returned no image this time"; unreachable; not JSON).
+ *  The call goes to the request log first. */
+export async function falCall(endpoint: string, args: JsonLineValue, key: string, options: FalCallOptions = {}): Promise<unknown> {
   const url = (options.baseUrl ?? 'https://fal.run') + '/' + endpoint
+  logFal({ op: 'call', endpoint, url, args })
   let res: Response
   try {
     res = await fetch(url, {
@@ -166,14 +151,35 @@ export async function falCall(endpoint: string, args: unknown, key: string, opti
   }
 }
 
-/** v1 `download`: a `data:` URI's base64, else a GET (`User-Agent: midstudy`, 120 s); an HTTP error throws. For a
- *  result URL fal itself returned. */
-export async function download(url: string, timeoutMs = 120 * 1000): Promise<Uint8Array> {
+/** How a download is made: v1's server sent `User-Agent: midstudy` with 120 s, midstudy-add `midstudy-add/0.1` with
+ *  300 s. Tests pass a fetch of their own. */
+export interface DownloadOptions {
+  readonly userAgent?: string
+  readonly timeoutMs?: number
+  readonly fetchFn?: (url: string, init: RequestInit) => Promise<Response>
+}
+
+/** urllib's HTTPError for a download that wasn't 2xx (`HTTP Error 404: Not Found`). */
+class HTTPError extends Error {
+  constructor(status: number, reason: string) {
+    super('HTTP Error ' + String(status) + ': ' + reason)
+    this.name = 'HTTPError'
+  }
+}
+
+/** v1 `download` (both tools): a `data:` URI's base64, else a GET following redirects; a status that isn't 2xx throws
+ *  HTTPError. For a result URL fal itself returned (and midstudy-add's URL input). */
+export async function download(url: string, options: DownloadOptions = {}): Promise<Uint8Array> {
   if (url.startsWith('data:')) {
     const comma = url.indexOf(',')
     return new Uint8Array(Buffer.from(url.slice(comma + 1), 'base64'))
   }
-  const res = await fetch(url, { headers: { 'User-Agent': 'midstudy' }, signal: AbortSignal.timeout(timeoutMs) })
-  if (!res.ok) throw new Error('HTTP Error ' + String(res.status) + ': ' + res.statusText)
+  const fetchFn = options.fetchFn ?? fetch
+  const res = await fetchFn(url, {
+    headers: { 'User-Agent': options.userAgent ?? 'midstudy' },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(options.timeoutMs ?? 120 * 1000),
+  })
+  if (!res.ok) throw new HTTPError(res.status, res.statusText)
   return new Uint8Array(await res.arrayBuffer())
 }

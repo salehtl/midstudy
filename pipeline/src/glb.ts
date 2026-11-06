@@ -14,7 +14,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 
 import { stripGlb } from '../../core/js/node.ts'
 import { MidstudyError } from './errors.ts'
-import { isFile } from './fsx.ts'
+import { isFile } from '../../common/files.ts'
 import { errorsPct, glbFlat, glbSelfCheck, itemFrame } from './logic/fit.ts'
 import type { Bounds } from './logic/fit.ts'
 import { quatXyzw } from './logic/frames.ts'
@@ -22,7 +22,7 @@ import type { Mat3, Vec3 } from './logic/frames.ts'
 import { dict, dumps, entry, float, int, list, parse, plain, str } from './logic/pyjson.ts'
 import type { PyValue } from './logic/pyjson.ts'
 import { suffix } from './logic/pypath.ts'
-import { decodeUtf8 } from './pytext.ts'
+import { decodeUtf8 } from '../../common/utf8.ts'
 
 let ioInstance: NodeIO | null = null
 

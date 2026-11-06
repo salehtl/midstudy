@@ -2,6 +2,7 @@
 // raw/response.json and the summary line come out byte for byte as v1 wrote them. Python keeps ints and floats apart
 // (`0` vs `0.0`) and a JS number doesn't, so values are a tagged tree: an int keeps its digits, a float its value
 // (printed with Python's repr), a dict its key order. Pure (functional core, tscert/README.md).
+import type { JsonLineValue } from '../../../common/logic/jsonline.ts'
 
 export type PyValue =
   | { readonly kind: 'null' }
@@ -510,8 +511,8 @@ export function dumps(v: PyValue, o: DumpOptions): Dumped {
   return err === null ? { ok: true, text: parts.join('') } : { ok: false, error: err }
 }
 
-/** The plain JSON value (for the schema validators): ints and floats become numbers. */
-export function plain(v: PyValue): unknown {
+/** The plain JSON value (for the schema validators and the fal request log): ints and floats become numbers. */
+export function plain(v: PyValue): JsonLineValue {
   switch (v.kind) {
     case 'null': return null
     case 'bool': return v.value
@@ -520,7 +521,7 @@ export function plain(v: PyValue): unknown {
     case 'str': return v.value
     case 'list': return v.items.map(plain)
     case 'dict': {
-      const out = new Map<string, unknown>()
+      const out = new Map<string, JsonLineValue>()
       for (const e of v.entries) out.set(e.key, plain(e.value))
       return Object.fromEntries(out)
     }

@@ -8,7 +8,8 @@ import { compareNames, decodeImageDataUri, decodeMeta, photoExt, sniff, stripJpe
 import { isSlug } from '../../../common/logic/slug.ts'
 import { HttpError, type RequestContext } from '../http/context.ts'
 import type { RouteModule } from '../http/router.ts'
-import { readHead, removeTree } from '../scenes/files.ts'
+import { readHead } from '../scenes/files.ts'
+import { removeTree } from '../../../common/files.ts'
 import { NOT_JPEG_URI } from '../scenes/logic/render.ts'
 import {
   FILENAME_REQUIRED, LENGTH_REQUIRED, MAX_SCENE_UPLOAD, MAX_THUMB, NOT_IMAGE, THUMB_TOO_BIG, UPLOAD_STOPPED, existsAgain, metaTitle, noDeletedScene,

@@ -9,11 +9,13 @@
 //   reclaim  rename the stale folder aside (<lock>.d.stale-<pid>-<random>): one reclaimer wins the rename, the others
 //            get ENOENT and try again. The winner checks that what it moved is the owner it judged stale (else it
 //            moves it back) and removes it.
-//   release  the holder checks owner.json is still its own, renames the folder aside and removes it.
+//   release  the holder checks owner.json is still its own, renames the folder aside and removes it. A process keeps
+//            a list of the locks it holds, so an interrupt (midstudy-add's Ctrl-C or SIGTERM) gives them all back at
+//            once (releaseAllSync).
 //
 // v1's lock files (`<library>/.lock`, `<costs file>.lock`, flocked by v1 tools) are created when missing and never
 // removed, so a v1 tool finds what it expects; v2 never flocks them, so a v1 tool and a v2 tool don't exclude each
-// other: switch the server and the CLI together.
+// other: the server and the CLI switch together.
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -44,6 +46,8 @@ export interface LockOptions {
   readonly waitMs: number | null
   /** What holds it, for owner.json. */
   readonly cmd: string
+  /** Called once, the first time the lock is found held by someone else (midstudy-add says it is waiting). */
+  readonly onWait?: () => void
   readonly staleMs?: number
   readonly graceMs?: number
   readonly pollMs?: number
@@ -57,6 +61,9 @@ export interface HeldLock {
   /** Gives it back (only if owner.json is still this holder's). Safe to call twice. */
   release(): Promise<void>
 }
+
+/** The locks this process holds, by folder (given back by releaseAllSync on an interrupt). */
+const heldHere = new Map<string, LockOwner>()
 
 /** The lock folder of a library (`<library>/.lock.d`). */
 export function libraryLockDir(libraryDir: string): string {
@@ -157,6 +164,7 @@ export async function acquireLock(dir: string, options: LockOptions): Promise<He
   } catch {
     // v1's file is only a courtesy
   }
+  let waited = false
   for (;;) {
     try {
       await fsp.mkdir(dir)
@@ -167,6 +175,7 @@ export async function acquireLock(dir: string, options: LockOptions): Promise<He
         await fsp.rm(dir, { recursive: true, force: true })
         throw e
       }
+      heldHere.set(dir, owner)
       return held(dir, owner)
     } catch (e) {
       if (errorCode(e) !== 'EEXIST') throw e
@@ -176,9 +185,29 @@ export async function acquireLock(dir: string, options: LockOptions): Promise<He
     if (seen.verdict !== 'held') {
       if (await reclaim(dir, seen.owner)) continue
     }
+    if (!waited) {
+      waited = true
+      options.onWait?.()
+    }
     if (Date.now() >= deadline) throw new Busy(dir)
     await sleep(Math.max(1, Math.min(pollMs, deadline - Date.now())))
   }
+}
+
+/** Gives back `dir` if owner.json is still `owner`'s (a lock that changed hands is left alone), synchronously: also
+ *  safe in a signal handler. */
+function releaseSync(dir: string, owner: LockOwner): void {
+  const mine = heldHere.get(dir)
+  if (mine !== undefined && sameOwner(mine, owner)) heldHere.delete(dir)
+  const now = readOwner(dir)
+  if (now === null || !sameOwner(now, owner)) return
+  const aside = asideName(dir, 'released')
+  try {
+    fs.renameSync(dir, aside)
+  } catch {
+    return
+  }
+  fs.rmSync(aside, { recursive: true, force: true })
 }
 
 function held(dir: string, owner: LockOwner): HeldLock {
@@ -186,20 +215,19 @@ function held(dir: string, owner: LockOwner): HeldLock {
   return {
     dir,
     owner,
-    async release(): Promise<void> {
-      if (released) return
-      released = true
-      const now = readOwner(dir)
-      if (now === null || !sameOwner(now, owner)) return
-      const aside = asideName(dir, 'released')
-      try {
-        await fsp.rename(dir, aside)
-      } catch {
-        return
+    release(): Promise<void> {
+      if (!released) {
+        released = true
+        releaseSync(dir, owner)
       }
-      await fsp.rm(aside, { recursive: true, force: true })
+      return Promise.resolve()
     },
   }
+}
+
+/** Gives back every lock this process holds (midstudy-add on Ctrl-C or SIGTERM, before it exits). */
+export function releaseAllSync(): void {
+  for (const [dir, owner] of [...heldHere]) releaseSync(dir, owner)
 }
 
 /** Runs `fn` holding the lock folder `dir`, and gives it back whatever happens. */

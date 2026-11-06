@@ -3,20 +3,20 @@
 // midstudy-add jobs (in memory, one at a time, newest first; a restart forgets them). The spend cap is the server's
 // (deps.spend); a paid add reserves its estimate under its job id until the job ends.
 import fs from 'node:fs'
-import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { falMock } from '../../../common/fal.ts'
-import { atomicWrite, jsonText, type JsonStyle } from '../../../common/files.ts'
+import { atomicWrite, isDir, jsonText, removeTree, resolvePath, type JsonStyle } from '../../../common/files.ts'
 import { withLibraryLock } from '../../../common/lock.ts'
 import { pyFloat } from '../../../common/logic/csv.ts'
 import { pyRepr } from '../../../common/logic/pyfmt.ts'
 import { isoUtc } from '../../../common/logic/time.ts'
+import { addError, addMessage, outputLines, runTool, summaryOf } from '../../../common/tools.ts'
+import { decodeUtf8 } from '../../../common/utf8.ts'
 import type { SchemaUri } from '../../../contract/gen/validate.js'
 import type { ServerDeps } from '../deps.ts'
 import { JobStore, newJobId, SerialQueue } from '../jobs.ts'
 import type { SpendRefusal } from '../spend.ts'
 import { assertConforms } from '../strict.ts'
-import { addError, addMessage, outputLines, runTool, summaryOf } from '../tools.ts'
 import { isRecord, parseDocument, plain, pyStrOf, pyTypeName, truthy } from './json.ts'
 import type { Engine } from './logic/meta.ts'
 import { NO_SUMMARY, notInstalled, runningMessage, serverFailed, timedOut, trashOrder } from './logic/messages.ts'
@@ -26,7 +26,6 @@ import type { ItemFacts } from './logic/patch.ts'
 const ADD_TIMEOUT_S = 3600
 /** v1 LOCK_WAIT: a library edit waits this long for a running midstudy-add, then answers 503. */
 const LOCK_WAIT_MS = 60 * 1000
-const strictUtf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
 /** A library job (contract §2.8 Jobs; api/library-job.schema.json), in v1's key order. `cost_usd` and `item` are what
  *  midstudy-add's summary and library.json say, passed on as they are. */
@@ -63,39 +62,17 @@ export class PyError extends Error {
   }
 }
 
-/** A folder (following links, as Python's `Path.is_dir()`). */
-export function isDir(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory()
-  } catch {
-    return false
-  }
-}
-
-/** Python's `Path.resolve()` (strict off): links resolved as far as the path exists, the rest appended. */
-export function resolved(p: string): string {
-  const rest: string[] = []
-  let at = path.resolve(p)
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(at), ...rest.reverse())
-    } catch {
-      const parent = path.dirname(at)
-      if (parent === at) return path.join(at, ...rest.reverse())
-      rest.push(path.basename(at))
-      at = parent
-    }
-  }
-}
-
 /** v1 `read_json_file` as text: the file decoded as strict UTF-8 (a BOM kept, so JSON refuses it as Python did), or
  *  null when it is missing or unreadable. */
 function readText(file: string): string | null {
+  let bytes: Uint8Array
   try {
-    return strictUtf8.decode(fs.readFileSync(file))
+    bytes = fs.readFileSync(file)
   } catch {
     return null
   }
+  const d = decodeUtf8(bytes)
+  return d.ok ? d.text : null
 }
 
 /** A JSON file parsed with JSON.parse (for answers), or null. */
@@ -172,26 +149,6 @@ export function currentDims(item: Readonly<Record<string, unknown>>): { readonly
   return { w: at('w'), d: at('d'), h: at('h') }
 }
 
-/** Removes a folder and everything in it, ignoring errors (v1 `shutil.rmtree(…, ignore_errors=True)`). */
-export async function rmTree(dir: string): Promise<void> {
-  try {
-    await fsp.rm(dir, { recursive: true, force: true })
-  } catch {
-    // as v1: ignored
-  }
-}
-
-/** v1 `shutil.move`: a rename, or a copy and a removal across file systems. */
-export async function move(from: string, to: string): Promise<void> {
-  try {
-    await fsp.rename(from, to)
-  } catch (e) {
-    if (!(e instanceof Error && 'code' in e && e.code === 'EXDEV')) throw e
-    await fsp.cp(from, to, { recursive: true, verbatimSymlinks: true })
-    await fsp.rm(from, { recursive: true, force: true })
-  }
-}
-
 /** The library (one per server). */
 export class LibraryService {
   /** --library-dir, absolute. */
@@ -211,7 +168,7 @@ export class LibraryService {
 
   /** The library folder as midstudy-add's `--library=` gets it (v1 `self.library_dir.resolve()`). */
   libraryArg(): string {
-    return resolved(this.dir)
+    return resolvePath(this.dir)
   }
 
   /** Runs `fn` holding `<library>/.lock.d`; Busy (503) after 60 s while midstudy-add holds it. */
@@ -341,10 +298,11 @@ export class LibraryService {
   }
 
   /** After every job: its reservation released, its upload folder removed. */
-  async #after(id: string): Promise<void> {
+  #after(id: string): Promise<void> {
     this.#deps.spend.release(id)
     const run = this.#runs.get(id)
     this.#runs.delete(id)
-    if (run !== undefined && run.cleanup !== null) await rmTree(run.cleanup)
+    if (run !== undefined && run.cleanup !== null) removeTree(run.cleanup)
+    return Promise.resolve()
   }
 }

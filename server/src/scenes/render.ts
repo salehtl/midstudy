@@ -7,11 +7,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { appendCost } from '../../../common/costs.ts'
 import { FalError, NO_KEY, download, falCall, falKey, falMock, mockCost } from '../../../common/fal.ts'
+import type { JsonLineValue } from '../../../common/logic/jsonline.ts'
 import { isoUtc, isoUtcMs } from '../../../common/logic/time.ts'
 import { isRenderName, jpegFrame } from '../../../core/js/node.ts'
 import type { SpendCap, SpendRefusal } from '../spend.ts'
-import { lastJsonLine, runTool, toolError } from '../tools.ts'
-import { exists, isFile, listDir, readJson, removeTree, replace, resolvePath, writeBytesSync, writeJsonSync } from './files.ts'
+import { conformance } from '../strict.ts'
+import { lastJsonLine, runTool, toolError } from '../../../common/tools.ts'
+import { listDir, readJson, writeBytesSync, writeJsonSync } from './files.ts'
+import { exists, isFile, removeTree, replace, resolvePath } from '../../../common/files.ts'
 import { notInstalled } from './logic/jobs.ts'
 import { compareRenders, numbered, renderBase } from './logic/names.ts'
 import {
@@ -19,6 +22,7 @@ import {
   type RenderModel,
 } from './logic/render.ts'
 import { isRecord, pyStr } from './logic/values.ts'
+import { calibResultSchema } from './logic/worker.ts'
 
 /** v1 ALIGN_TIMEOUT: one keep-room align, 180 s. */
 const ALIGN_TIMEOUT_SECONDS = 180
@@ -56,7 +60,7 @@ export interface FalAccess {
   readonly mockCost: () => boolean
   /** The key for a live call, or null (503). */
   readonly key: () => string | null
-  readonly call: (endpoint: string, args: unknown, key: string) => Promise<unknown>
+  readonly call: (endpoint: string, args: JsonLineValue, key: string) => Promise<unknown>
   readonly download: (url: string) => Promise<Uint8Array>
 }
 
@@ -208,6 +212,10 @@ export class RenderService {
       if (run.kind === 'timeout') return alignFailed(alignTimedOut(ALIGN_TIMEOUT_SECONDS))
       if (run.kind === 'spawn-error') throw new Error(run.message)
       const res = lastJsonLine(run.stdout)
+      if (isRecord(res)) {
+        const v = conformance(calibResultSchema('align', res['ok'] === true), res, 'midstudy-calib align result (' + name + ')')
+        if (v !== null) return alignFailed(v.message + ' (' + v.detail + ')')
+      }
       if (run.returnCode !== 0 || !isRecord(res) || res['ok'] !== true) {
         return alignFailed(toolError(isRecord(res) ? res['error'] : undefined, run.stderr, run.returnCode, 'midstudy-calib align'))
       }

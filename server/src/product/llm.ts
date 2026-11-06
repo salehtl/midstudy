@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { appendCost } from '../../../common/costs.ts'
-import { FalError, countsAgainstCap, falCall, falKey, falMock, falMockDir, logMockCall, mockCost } from '../../../common/fal.ts'
+import { FalError, countsAgainstCap, falCall, falKey, falMock, falMockDir, falRunUrl, logFal, mockCost } from '../../../common/fal.ts'
 import { pyStrip } from '../../../common/logic/pyfmt.ts'
 import { slugify } from '../../../common/logic/slug.ts'
 import { isoUtc } from '../../../common/logic/time.ts'
@@ -173,7 +173,7 @@ export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, de
     let output: unknown
     let cost: number
     if (mock) {
-      logMockCall(LLM_ENDPOINT, args)
+      logFal({ op: 'call', endpoint: LLM_ENDPOINT, url: falRunUrl(LLM_ENDPOINT), args })
       const answer = mockAnswer(url, falMockDir() ?? '')
       output = isDict(answer) ? answer.get('output') : undefined
       cost = mockCost() ? LLM_MOCK_COST : 0

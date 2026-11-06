@@ -1,14 +1,15 @@
-// The tools the server runs (midstudy-calib, midstudy-add; contract §2.8, §4.3, §4.4): --calib and --midstudy-add are
-// split once at startup like a shell would (shlex), and always run as an argument list, never through a shell;
-// nothing a client sends becomes part of a command except paths the server made and values passed as `--opt=<v>`.
-// As v1's `subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=…, stdin=DEVNULL)`, with the
-// timeout killing the tool's whole process group (v1 killed only the direct child).
+// Running a tool (the server runs midstudy-calib and midstudy-add; contract §2.8, §4.3, §4.4): a command line is split
+// once like a shell would (shlex), and always run as an argument list, never through a shell; nothing a client sends
+// becomes part of a command except paths the server made and values passed as `--opt=<v>`. As v1's
+// `subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=…, stdin=DEVNULL)`, with the timeout killing
+// the tool's whole process group (v1 killed only the direct child). The calibration worker (server/src/scenes/calib.ts)
+// keeps its own long-lived process and uses this for its one-shot fallback.
 import { spawn } from 'node:child_process'
 import os from 'node:os'
-import { shlexSplit } from '../../common/logic/shlex.ts'
-import { pyReturnCode } from '../../common/logic/tool.ts'
+import { shlexSplit } from './logic/shlex.ts'
+import { pyReturnCode } from './logic/tool.ts'
 
-export { addError, addMessage, lastJsonLine, outputLines, summaryOf, toolError } from '../../common/logic/tool.ts'
+export { addError, addMessage, lastJsonLine, outputLines, summaryOf, toolError } from './logic/tool.ts'
 
 /** A command line split as v1's `shlex.split`, or the sentence Python's ValueError said. */
 export function splitCommand(text: string): { readonly ok: true; readonly argv: readonly string[] } | { readonly ok: false; readonly error: string } {

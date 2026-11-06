@@ -11,9 +11,9 @@ import { Inflate } from 'fflate'
 
 import { zipPlan } from '../../core/js/node.ts'
 import { MidstudyError, UnexpectedError } from './errors.ts'
-import { resolve } from './fsx.ts'
+import { resolvePath as resolve } from '../../common/files.ts'
 import { fixed, repr } from './logic/pyformat.ts'
-import { decodeUtf8 } from './pytext.ts'
+import { decodeUtf8 } from '../../common/utf8.ts'
 import { name as pathName, suffix } from './logic/pypath.ts'
 
 /** One central-directory entry. */

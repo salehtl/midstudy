@@ -1,6 +1,6 @@
 // costs.csv (contract §1, §2.9): v1's exact header and rows (Python's csv module, excel dialect, `\n` line ends), and
 // the day's total the spend cap reads back (csv.DictReader). Pure (TScert).
-import { fmtCost, pyStrip } from './pyfmt.ts'
+import { fmtCost, fmtCostShort, pyStrip } from './pyfmt.ts'
 
 /** The header v1 and midstudy-add write. */
 const COSTS_HEADER: readonly string[] = ['date', 'id', 'engine', 'cost_usd', 'mock', 'input']
@@ -14,6 +14,9 @@ export interface CostRow {
   /** `idol`, `render:<model>`, `product:llm`, … */
   readonly engine: string
   readonly costUsd: number
+  /** How the amount is written: each v1 writer had its own `fmt_cost`, the server's (`0.10`; the default) and
+   *  midstudy-add's (`0.1`, `add`). The rows stay as v1 wrote them. */
+  readonly format?: 'server' | 'add'
   readonly mock: boolean
   /** What was sent (a scene name, a URL without its query, a file name). */
   readonly input: string
@@ -26,14 +29,17 @@ function csvField(v: string): string {
   return '"' + v.replace(/"/g, '""') + '"'
 }
 
-/** One record, `\n`-terminated (`csv.writer(..., lineterminator="\n").writerow`). */
+/** One record, `\n`-terminated (`csv.writer(..., lineterminator="\n").writerow`; a lone empty field is `""`, so the
+ *  line isn't read back as an empty row). */
 export function csvLine(fields: readonly string[]): string {
+  if (fields.length === 1 && fields[0] === '') return '""\n'
   return fields.map((f) => csvField(f)).join(',') + '\n'
 }
 
-/** The fields of a cost row as v1 wrote them: `fmt_cost` for the amount, `true`/`false` for mock. */
+/** The fields of a cost row as v1 wrote them: the writer's `fmt_cost` for the amount, `true`/`false` for mock. */
 function costFields(row: CostRow): string[] {
-  return [row.date, row.id, row.engine, fmtCost(row.costUsd), row.mock ? 'true' : 'false', row.input]
+  const amount = row.format === 'add' ? fmtCostShort(row.costUsd) : fmtCost(row.costUsd)
+  return [row.date, row.id, row.engine, amount, row.mock ? 'true' : 'false', row.input]
 }
 
 /** costs.csv after appending `row` (v1 `_append_cost`): a missing or blank file gets the header first, and a file

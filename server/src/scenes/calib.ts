@@ -13,10 +13,14 @@
 //   - An idle worker's stdin is closed after 10 minutes (MoGe-2 gives its memory back); on shutdown its stdin is closed,
 //     then it is killed after 5 s.
 //   - `align` (renders) never goes through the worker: a render never waits behind a calibration.
+//   - In strict mode every result line and worker answer is checked against contract/calib-cli.schema.json (the command's
+//     result, or the error result for `ok: false`); one that breaks it fails its job with `contract violation: …`.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { lastJsonLine, runTool } from '../tools.ts'
+import { lastJsonLine, runTool } from '../../../common/tools.ts'
+import { conformance } from '../strict.ts'
 import type { CalibCommand } from './logic/jobs.ts'
-import { failuresAfter, readWorkerLine, requestLine, workerUsable } from './logic/worker.ts'
+import { isRecord } from './logic/values.ts'
+import { calibResultSchema, failuresAfter, readWorkerLine, requestLine, workerUsable } from './logic/worker.ts'
 
 /** What a calibration step came to, as the one-shot command reports it. */
 export type CalibOutcome =
@@ -28,6 +32,8 @@ export type CalibOutcome =
   | { readonly kind: 'spawn-error'; readonly message: string }
   /** The server is stopping: the worker was closed under the job, and nothing new is started. */
   | { readonly kind: 'stopped' }
+  /** Strict mode: the result (or the worker's answer) breaks contract/calib-cli.schema.json; the job fails with this. */
+  | { readonly kind: 'violation'; readonly message: string }
 
 /** One job's step: `<calib> <cmd> <args>` one-shot, or `{"id", "cmd", "args"}` to the worker. */
 export interface CalibRequest {
@@ -55,7 +61,7 @@ const STDERR_KEEP = 1024 * 1024
 const MAX_LINE = 64 * 1024 * 1024
 
 type Answer =
-  | { readonly kind: 'answer'; readonly ok: boolean; readonly line: Readonly<Record<string, unknown>>; readonly stderr: string }
+  | { readonly kind: 'answer'; readonly ok: boolean; readonly line: Readonly<Record<string, unknown>>; readonly raw: Readonly<Record<string, unknown>>; readonly stderr: string }
   | { readonly kind: 'broken'; readonly why: string }
   | { readonly kind: 'timeout' }
 
@@ -169,7 +175,8 @@ class Worker {
       this.#broke(read.why)
       return
     }
-    this.#settle({ kind: 'answer', ok: read.ok, line: Object.fromEntries(read.result), stderr: this.#stderr })
+    const result = Object.fromEntries(read.result)
+    this.#settle({ kind: 'answer', ok: read.ok, line: result, raw: { id: p.id, ...result }, stderr: this.#stderr })
     this.#armIdle()
   }
 
@@ -263,6 +270,15 @@ class Worker {
   }
 }
 
+/** Strict mode: `outcome` unless the JSON object `checkedLine` (the one-shot result line, or the worker's answer with
+ *  its id) breaks contract/calib-cli.schema.json; a line that is no object is left to the job's own rules (v1's "no
+ *  result line" and tool_error sentences). */
+function checked(req: CalibRequest, checkedLine: unknown, outcome: CalibOutcome): CalibOutcome {
+  if (!isRecord(checkedLine)) return outcome
+  const v = conformance(calibResultSchema(req.cmd, checkedLine['ok'] === true), checkedLine, 'midstudy-calib ' + req.cmd + ' result (job ' + req.id + ')')
+  return v === null ? outcome : { kind: 'violation', message: v.message + ' (' + v.detail + ')' }
+}
+
 /** Runs the calibration queue's steps: through the worker while it works, else one-shot. */
 export class CalibRunner {
   readonly #options: CalibRunnerOptions
@@ -283,7 +299,10 @@ export class CalibRunner {
   async oneShot(req: CalibRequest): Promise<CalibOutcome> {
     const run = await runTool([...this.#options.calib, req.cmd, ...req.args], { cwd: this.#options.cwd, timeoutMs: this.#options.timeoutMs })
     switch (run.kind) {
-      case 'exited': return { kind: 'result', returnCode: run.returnCode, line: lastJsonLine(run.stdout), stderr: run.stderr }
+      case 'exited': {
+        const line = lastJsonLine(run.stdout)
+        return checked(req, line, { kind: 'result', returnCode: run.returnCode, line, stderr: run.stderr })
+      }
       case 'not-found': return { kind: 'not-found', command: run.command }
       case 'timeout': return { kind: 'timeout' }
       case 'spawn-error': return { kind: 'spawn-error', message: run.message }
@@ -303,7 +322,7 @@ export class CalibRunner {
     const answer = await worker.ask(req, this.#options.timeoutMs)
     if (answer.kind === 'answer') {
       this.#failures = failuresAfter(this.#failures, 'answered')
-      return { kind: 'result', returnCode: answer.ok ? 0 : 1, line: answer.line, stderr: answer.stderr }
+      return checked(req, answer.raw, { kind: 'result', returnCode: answer.ok ? 0 : 1, line: answer.line, stderr: answer.stderr })
     }
     if (this.#worker === worker) this.#worker = null
     await worker.kill()
