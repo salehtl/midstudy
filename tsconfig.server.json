@@ -1,5 +1,7 @@
 {
   // The HTTP server on Node 22, run directly (`node server/src/main.ts`, type stripping): `.ts` import specifiers.
+  // common/ is the code the server shares with midstudy-add (the library lock, costs.csv, fal, files); the server
+  // also checks the faces and generated files it imports (core/js/node.ts, contract/gen/), as their own areas do.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2024"],
@@ -9,5 +11,5 @@
     "types": ["node"],
     "tsBuildInfoFile": "build/tsc/server.tsbuildinfo"
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts", "common/**/*.ts", "core/js/node.ts", "contract/gen/**/*.ts"]
 }

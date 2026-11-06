@@ -1,5 +1,5 @@
 {
-  "doc": "Which paths each v2 track may change (docs/REFACTOR.md §6). Globs: ** any depth, * one segment, {a,b}; a leading ! excludes. shared_append files may gain entries from any track. docs/notes/<track>.md is always allowed.",
+  "doc": "Which paths each track may change (docs/REFACTOR.md §6; CLAUDE.md has the table for after the refactor). Globs: ** any depth, * one segment, {a,b}; a leading ! excludes. shared_append files may gain entries from any track. docs/notes/<track>.md is always allowed. The v2 build tracks (f-* to finish) are kept for their branches; app, server, kernels, evals, foundation, toolchain and integration (with calib, pipeline, proofs and packaging) are the tracks after the refactor.",
   "shared_append": [
     "package.json",
     "package-lock.json",
@@ -159,6 +159,71 @@
       "**"
     ],
     "finish": [
+      "**"
+    ],
+    "app": [
+      "planner/**",
+      "tsconfig.planner.json"
+    ],
+    "server": [
+      "server/**",
+      "common/**",
+      "core/crates/product/**",
+      "core/crates/wasm-product/**",
+      "tsconfig.server.json"
+    ],
+    "kernels": [
+      "core/crates/{media,geom,raster,wasm-web,wasm-node}/**",
+      "core/js/web.ts",
+      "core/js/node.ts",
+      "core/fuzz/**",
+      "core/miri.txt"
+    ],
+    "evals": [
+      "evals/**",
+      "fixtures/**",
+      "!fixtures/scenes/**",
+      "!fixtures/calib/**",
+      "!evals/lib/harness.mjs"
+    ],
+    "foundation": [
+      "contract/**",
+      "core/crates/contract/**",
+      "scripts/gen-contract.mjs",
+      "CLAUDE.md",
+      "PLAN.md",
+      "README.md",
+      "docs/REFACTOR.md",
+      "fixtures/scenes/**",
+      "fixtures/calib/**",
+      "evals/lib/harness.mjs",
+      "scripts/ownership.json",
+      "scripts/check-ownership.mjs",
+      "scripts/eval-lock.mjs"
+    ],
+    "toolchain": [
+      "scripts/**",
+      "!scripts/ownership.json",
+      "!scripts/check-ownership.mjs",
+      "!scripts/eval-lock.mjs",
+      "!scripts/gen-contract.mjs",
+      "tsconfig.json",
+      "tsconfig.base.json",
+      "tsconfig.contract.json",
+      "tsconfig.core-*.json",
+      "tscert/**",
+      "eslint.config.*",
+      "knip.*",
+      ".npmrc",
+      ".gitignore",
+      "core/Cargo.toml",
+      "core/.cargo/**",
+      "core/rust-toolchain*",
+      "core/deny.toml",
+      "core/clippy.toml",
+      "core/rustfmt.toml"
+    ],
+    "integration": [
       "**"
     ]
   }

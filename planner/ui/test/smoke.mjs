@@ -2,7 +2,7 @@
 // Undo / Recently removed / Edit (the size fields as properties), Layouts save / Save as new / the name check / Load with
 // changes, Del + Ctrl+Z, the Scene panel's camera card, Look and toggles, Renders' Compare with fewer than two, Scenes
 // rename, card flags and meta; and resize events while the page starts, before the kernels have loaded. Each expected text
-// is v1's. Through the evals' harness (legacy server, fal mocked, $0).
+// is v1's. Through the evals' harness (the server in strict mode, fal mocked, $0).
 // Usage (repo root): nix develop -c node scripts/eval-lock.mjs -- npm run eval:ui-smoke   (output: evals/out/ui-smoke/)
 import { createEval, startServer, launchBrowser, openPlanner, hook, seedScene, ensureScene, sleep, waitFor } from '../../../evals/lib/harness.mjs'
 

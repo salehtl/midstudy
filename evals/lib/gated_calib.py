@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A `--calib` command for evals: logs each call, optionally waits on a gate file, then runs the real target.
 
-    serve.py --calib "python3 evals/lib/gated_calib.py"
+    node server/src/main.ts --calib "python3 evals/lib/gated_calib.py"
 
 Environment (the server passes its environment to calibration jobs, contract §4.4):
 - MIDSTUDY_EVAL_CALIB_TARGET  the command to run (default "python3 fixtures/stub_calib.py")

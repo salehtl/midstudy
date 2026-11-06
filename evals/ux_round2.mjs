@@ -34,7 +34,7 @@ const nullNodes = (page, sel) => page.evaluate((sel) => {
 }, sel)
 
 const srv = await startServer(ev)
-ev.check('serve.py starts (stub calibration + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (stub calibration + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const browser = await launchBrowser(ev)
 

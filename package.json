@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "serve": "python3 planner/serve.py",
+    "serve": "node server/src/main.ts",
     "preserve": "node scripts/build.mjs",
     "eval:scenes-api": "node evals/scenes_api.mjs",
     "eval:calib": "evals/py evals/calib_eval.py",
@@ -41,8 +41,13 @@
     "check:proofs": "node scripts/check.mjs proofs",
     "check:py": "node scripts/check.mjs py",
     "check:ownership": "node scripts/check.mjs ownership",
+    "check:tests": "node scripts/check.mjs tests",
     "gen:contract": "node scripts/gen-contract.mjs",
     "test:contract": "node --test contract/test/contract.test.mjs && node contract/test/typecheck.mjs",
+    "test:server": "node --test --test-concurrency=1 server/test/*.test.ts",
+    "test:scenes": "node --test --test-concurrency=1 server/test/scenes/*.test.ts",
+    "test:library": "node --test --test-concurrency=1 server/test/library/*.test.ts",
+    "test:pipeline": "node --test --test-concurrency=1 pipeline/test/*.test.ts",
     "test:engine": "node planner/engine.test.mjs",
     "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
@@ -50,7 +55,6 @@
   "dependencies": {
     "@gltf-transform/core": "4.5.1",
     "@gltf-transform/extensions": "4.5.1",
-    "@gltf-transform/functions": "4.5.1",
     "fflate": "0.8.3",
     "libheif-js": "1.23.5",
     "obj2gltf": "3.2.0",

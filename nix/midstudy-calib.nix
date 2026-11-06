@@ -63,10 +63,13 @@ let
     ps.opencv-python-headless
     ps.huggingface-hub
     ps.scipy
+    # v2 calib checks every file and result line against the contract's schemas at run time (validate.py, which the
+    # CLI imports at start: without it even --help fails)
+    ps.jsonschema
   ]);
-  # Every module the CLI imports lazily (ingest, fit, the MoGe runner, align) plus what they load, so a missing
-  # dependency fails the build instead of the first calibration.
-  imports = "midstudy_calib.cli, midstudy_calib.ingest, midstudy_calib.fit, midstudy_calib.floor, midstudy_calib.moge_runner, midstudy_calib.align, moge.model.v2, torch, cv2, pillow_heif, numpy, PIL.ImageCms";
+  # Every module the CLI imports lazily (ingest, fit, the MoGe runner, align, the worker) plus what they load, so a
+  # missing dependency fails the build instead of the first calibration.
+  imports = "midstudy_calib.cli, midstudy_calib.ingest, midstudy_calib.fit, midstudy_calib.floor, midstudy_calib.moge_runner, midstudy_calib.align, midstudy_calib.worker, midstudy_calib.validate, midstudy_calib.contract_types, moge.model.v2, torch, cv2, pillow_heif, numpy, PIL.ImageCms, jsonschema";
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "midstudy-calib";

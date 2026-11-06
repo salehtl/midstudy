@@ -7,12 +7,11 @@
 // - startServer(): the server on a free port with its own scenes/layouts/renders/library dirs and costs file under
 //   evals/out/<eval>/, fal mocked (MIDSTUDY_FAL_MOCK=fixtures/fal, MIDSTUDY_NO_DOTENV=1, no FAL_KEY,
 //   --daily-spend-usd 0 unless an eval tests the cap with mock costs) and the calib stub with MIDSTUDY_CALIB_MOCK.
-// - v2 switches (docs/REFACTOR.md §1): MIDSTUDY_SERVER=legacy|next picks the server (planner/serve.py, or
-//   node server/src/main.ts with the same flags), MIDSTUDY_ADD=legacy|next the furniture CLI it gets through
-//   --midstudy-add (uv run --project pipeline midstudy-add, or node pipeline/src/cli.ts); either next sets
-//   MIDSTUDY_STRICT=1. Before the first server, node scripts/build.mjs runs once when it exists. Every eval's first
-//   line says what it runs against. MIDSTUDY_RECORD_API=<dir> records every /api call raw() makes (one JSON line
-//   each) for contract/tools/check-recordings.mjs.
+// - the server is `node server/src/main.ts` and the furniture CLI it gets through --midstudy-add is
+//   `node pipeline/src/cli.ts`, both in strict mode (MIDSTUDY_STRICT=1: every answer and file is checked against its
+//   schema, contract §0). Before the first server, node scripts/build.mjs runs once. Every eval's first line says what
+//   it runs against. MIDSTUDY_RECORD_API=<dir> records every /api call raw() makes (one JSON line each) for
+//   contract/tools/check-recordings.mjs.
 // - a guard that the repo's own scenes/, layouts/, renders/ and library/ are left untouched.
 // - the §4.1 projection (and its inverse) in plain JS, to compute expectations independently of the planner.
 // - headless Chrome + playwright-core helpers: open the planner, call window.midstudy methods without crashing when one is
@@ -36,20 +35,10 @@ if (!BROWSER) console.error('harness: no headless browser: set PUPPETEER_EXECUTA
 export const BROWSER_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
   ...(process.env.MIDSTUDY_WEBGPU === '0' ? [] : ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'])]
 export const STUB_CALIB = 'python3 fixtures/stub_calib.py'
-// v2 switches (contract §0): the server and the furniture CLI the evals run, legacy (v1) by default.
-const pick = (name, choices) => {
-  const v = process.env[name] || 'legacy'
-  if (!(v in choices)) throw new Error(`${name} must be ${Object.keys(choices).join(' or ')}, not ${JSON.stringify(v)}`)
-  return { which: v, cmd: choices[v] }
-}
-const SERVER_SWITCH = pick('MIDSTUDY_SERVER', { legacy: ['python3', 'planner/serve.py'], next: ['node', 'server/src/main.ts'] })
-const ADD_SWITCH = pick('MIDSTUDY_ADD', { legacy: 'uv run --project pipeline midstudy-add', next: 'node pipeline/src/cli.ts' })
-export const SERVER = SERVER_SWITCH.which          // 'legacy' | 'next'
-export const SERVER_CMD = SERVER_SWITCH.cmd        // argv prefix, run from the repo root
-export const ADD = ADD_SWITCH.which                // 'legacy' | 'next'
-export const ADD_CMD = ADD_SWITCH.cmd              // what the server gets as --midstudy-add
-export const STRICT = SERVER === 'next' || ADD === 'next'  // MIDSTUDY_STRICT=1 for the v2 server and CLI (contract §0)
-export const SERVER_NAME = SERVER === 'next' ? 'server/src/main.ts' : 'serve.py'
+// The server and the furniture CLI the evals run (contract §0), from the repo root, always in strict mode.
+export const SERVER_CMD = ['node', 'server/src/main.ts']  // argv prefix
+export const ADD_CMD = 'node pipeline/src/cli.ts'              // what the server gets as --midstudy-add
+export const SERVER_NAME = 'server/src/main.ts'
 // The server's argv for these flags: {cmd, args}, for an eval that spawns the server itself.
 export const serverCommand = (flags) => ({ cmd: SERVER_CMD[0], args: [...SERVER_CMD.slice(1), ...flags] })
 export const RECORD_DIR = process.env.MIDSTUDY_RECORD_API ? path.resolve(process.env.MIDSTUDY_RECORD_API) : ''
@@ -78,7 +67,7 @@ export const golden = (id) => ({
 
 // --- results ---------------------------------------------------------------------------------------------------------------
 export function createEval(id, slug, { timeoutS = 600 } = {}) {
-  console.log(`${id} ${slug}: server ${SERVER} (${SERVER_CMD.join(' ')}), furniture CLI ${ADD} (${ADD_CMD})${STRICT ? ', MIDSTUDY_STRICT=1' : ''}${RECORD_DIR ? `, recording /api calls to ${path.relative(REPO, RECORD_DIR) || '.'}` : ''}`)
+  console.log(`${id} ${slug}: server ${SERVER_CMD.join(' ')}, furniture CLI ${ADD_CMD}, MIDSTUDY_STRICT=1${RECORD_DIR ? `, recording /api calls to ${path.relative(REPO, RECORD_DIR) || '.'}` : ''}`)
   recordTag = slug
   const out = path.join(REPO, 'evals/out', slug)
   fs.rmSync(out, { recursive: true, force: true })
@@ -240,12 +229,12 @@ export async function waitScene(base, name, timeoutMs = 60000) {
 
 // --- the server ---------------------------------------------------------------------------------------------------------------
 let serverCount = 0
-// v2 (docs/REFACTOR.md §5): when scripts/build.mjs exists, it builds the planner (planner/dist/, the wasm kernels) once
-// per eval process, before the first server starts. Reported as a check, so a broken build is a FAIL, not a mystery.
+// scripts/build.mjs builds the planner (planner/dist/) and the wasm kernels once per eval process, before the first
+// server starts. Reported as a check, so a broken build is a FAIL, not a mystery.
 let built = null
 export function ensureBuilt(ev) {
   const script = path.join(REPO, 'scripts/build.mjs')
-  if (built || !fs.existsSync(script)) return built
+  if (built) return built
   const t0 = Date.now()
   try {
     execFileSync(process.execPath, [script], { cwd: REPO, encoding: 'utf8', timeout: 900000, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
@@ -260,7 +249,7 @@ export function ensureBuilt(ev) {
   else if (!built.ok) console.error(`harness: ${what}: FAILED: ${built.why}`)
   return built
 }
-// Starts the server (MIDSTUDY_SERVER: planner/serve.py, or node server/src/main.ts) with scratch dirs. Returns {base,
+// Starts the server (node server/src/main.ts, strict mode) with scratch dirs. Returns {base,
 // port, dirs, log(), stop(), exited}. Never throws: when the server doesn't come up, `up` is false and `why` says what
 // happened (e.g. an unknown flag before the feature exists).
 export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
@@ -280,7 +269,7 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   delete childEnv.FAL_KEY
   if (mockCost) childEnv.MIDSTUDY_FAL_MOCK_COST = '1'
   else delete childEnv.MIDSTUDY_FAL_MOCK_COST
-  if (STRICT) childEnv.MIDSTUDY_STRICT = '1'
+  childEnv.MIDSTUDY_STRICT = '1'
   // Hard limits (CLAUDE.md): never without the fal mock, never without a spend cap flag.
   if (!childEnv.MIDSTUDY_FAL_MOCK || spendUsd == null) throw new Error(`refusing to start ${SERVER_NAME} without the fal mock and a spend cap`)
   const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,

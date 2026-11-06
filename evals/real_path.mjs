@@ -1,4 +1,4 @@
-// The real path, end to end on this Mac (integration check, not part of eval:all): serve.py with the default --calib
+// The real path, end to end on this Mac (integration check, not part of eval:all): the server with the default --calib
 // (real MoGe-2, no MIDSTUDY_CALIB_MOCK), the user's own photo from fixtures/photos/ uploaded through the UI (New scene →
 // POST /api/scenes), calibration, the planner, SheenChair.glb through the library API (the real midstudy-add, GLB,
 // $0), place, drag, save a layout, two renders in fal mock mode (the second with Keep room exact: align must apply),
@@ -40,7 +40,7 @@ const CHAIR = path.join(REPO, 'fixtures/models/SheenChair.glb')
 if (!fs.existsSync(MAIN)) { ev.skip('real path', `${path.relative(REPO, MAIN)} is missing (fixtures/photos/ is local only)`); await ev.finish(1) }
 
 const srv = await startServer(ev, { calib: REAL_CALIB, calibMock: false, library: 'empty' })
-ev.check('serve.py starts with the default --calib (real midstudy-calib, no calib mock), fal mocked, $0 cap', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts with the default --calib (real midstudy-calib, no calib mock), fal mocked, $0 cap', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const browser = await launchBrowser(ev)
 const P = await openPlanner(browser, srv.base)

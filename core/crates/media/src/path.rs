@@ -311,16 +311,54 @@ pub fn reduce_leading_slashes(target: &str) -> &str {
         .unwrap_or(target)
 }
 
-/// The route for a request target as it arrived: leading slashes reduced ([`reduce_leading_slashes`]), then a path
-/// of exactly `/` (before any query or fragment) redirects, and everything else is normalized and routed (a refused
-/// path is not found). API paths (`/api`, `/api/…`) are the server's own and never reach this.
+/// The route for a request target as it arrived: leading slashes reduced ([`reduce_leading_slashes`]), then a target
+/// whose path is exactly `/` ([`path_is_root`], v1's `urlsplit(self.path).path == "/"`) redirects, and everything else
+/// is normalized and routed (a refused path is not found). API paths (`/api`, `/api/…`) are the server's own and never
+/// reach this.
 #[must_use]
 pub fn static_route(target: &str) -> Route {
     let target = reduce_leading_slashes(target);
-    if target.split(['?', '#']).next() == Some("/") {
+    if path_is_root(target) {
         return Route::RedirectToPlanner;
     }
     normalize(target).map_or(Route::NotFound, |clean| route(&clean))
+}
+
+/// `urllib.parse.urlsplit(target).path == "/"` as `CPython` 3.12 computes it, the test v1's `do_GET` redirects on:
+/// leading C0 controls and spaces stripped, tabs and line breaks removed, a `scheme:` and a `//netloc` split off,
+/// then the fragment and the query. So besides `/`, `/?x` and `/#y`, an absolute-form target such as
+/// `http://127.0.0.1:8765/` (RFC 9112 §3.2.2) and `x:/` redirect, as in v1. (Where `urlsplit` raises, on a netloc with
+/// unbalanced or invalid brackets or non-ASCII that NFKC changes, v1's handler crashed; this answers as if it hadn't.)
+#[must_use]
+pub fn path_is_root(target: &str) -> bool {
+    let trimmed = target.trim_start_matches(|c: char| c <= ' ');
+    let cleaned: String;
+    let mut rest = if trimmed.contains(['\t', '\r', '\n']) {
+        cleaned = trimmed
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\r' | '\n'))
+            .collect();
+        cleaned.as_str()
+    } else {
+        trimmed
+    };
+    if let Some((scheme, after)) = rest.split_once(':')
+        && scheme
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic())
+        && scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+    {
+        rest = after;
+    }
+    if let Some(after) = rest.strip_prefix("//") {
+        rest = after
+            .find(['/', '?', '#'])
+            .map_or("", |k| after.get(k..).unwrap_or_default());
+    }
+    rest.split('#').next().and_then(|r| r.split('?').next()) == Some("/")
 }
 
 #[cfg(test)]
@@ -356,6 +394,37 @@ mod tests {
         assert_eq!(normalize("/a%00b"), Err(PathRefusal::Nul));
         assert_eq!(normalize("/a%5Cb"), Err(PathRefusal::Backslash));
         assert_eq!(normalize("/a\\b"), Err(PathRefusal::Backslash));
+    }
+
+    /// The `/` redirect follows v1's `urlsplit(self.path).path == "/"`: leading C0 controls and spaces stripped,
+    /// tabs and line breaks removed, a scheme and a netloc split off (found by the differential fuzzing).
+    #[test]
+    fn redirects_like_v1s_urlsplit() {
+        for root in [
+            "\0/",
+            " /",
+            "/\t",
+            "\t/\n?x",
+            "http://127.0.0.1:8765/",
+            "http://h/?q",
+            "x:/",
+            "a+b-c.d:/#f",
+            "\x01//h/",
+        ] {
+            assert_eq!(static_route(root), Route::RedirectToPlanner, "{root:?}");
+        }
+        for not_root in [
+            "1:/",
+            "a b:/",
+            "http://h",
+            "http://h//",
+            "//h/x",
+            ":/",
+            "/./",
+            "/%2f",
+        ] {
+            assert!(!path_is_root(not_root), "{not_root:?}");
+        }
     }
 
     #[test]

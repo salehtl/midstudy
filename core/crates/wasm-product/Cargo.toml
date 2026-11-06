@@ -1,0 +1,19 @@
+# The product page size reader (crates/product) for Node, through wasm-bindgen: strings in, strings and booleans out,
+# JSON for anything structured. Built to build/wasm/product/ (Node ESM, scripts/build.mjs); core/js/product.ts is its
+# typed TypeScript face.
+[package]
+name = "midstudy-wasm-product"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+midstudy-product = { path = "../product" }
+wasm-bindgen = "=0.2.121"
+
+[lints]
+workspace = true

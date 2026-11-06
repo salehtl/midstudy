@@ -7,7 +7,7 @@
 // size in px, the SH's largest coefficient), integers, masks and decoded depth exactly. Known, explained differences
 // (v1 accepting malformed PNGs; photoToFloor's null within rounding of its −1e-9 threshold) are counted, not failed.
 //
-// Usage (repo root): core/crates/wasm-web/build-web.sh && nix develop -c node core/crates/wasm-web/tests/diff.mjs
+// Usage (repo root): nix develop -c npm run build && nix develop -c node core/crates/wasm-web/tests/diff.mjs
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'

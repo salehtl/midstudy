@@ -1,5 +1,6 @@
-//! GLB rewrite on arbitrary bytes behind a valid header (or as they come): both layouts; a successful rewrite is a
-//! GLB that rewrites to itself, never larger in compact than in place.
+//! GLB rewrite on arbitrary bytes behind a valid header (or as they come): both layouts accept and refuse the same
+//! files; a successful rewrite is a GLB that rewrites to itself, never larger in compact than in place, `changed`
+//! says exactly whether the bytes changed, and the in-place layout keeps the file's length when nothing was dropped.
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use midstudy_media::glb::{self, Layout};
@@ -19,9 +20,17 @@ fuzz_target!(|data: &[u8]| {
     assert_eq!(compact.is_ok(), in_place.is_ok());
     if let (Ok(c), Ok(p)) = (&compact, &in_place) {
         assert!(c.bytes.len() <= p.bytes.len());
+        assert_eq!(c.report.images.len(), p.report.images.len());
         for (out, layout) in [(c, Layout::Compact), (p, Layout::InPlace)] {
+            assert_eq!(
+                out.report.changed,
+                out.bytes != input,
+                "changed must say whether the bytes changed"
+            );
             let again = glb::strip(&out.bytes, layout).expect("a rewritten GLB rewrites again");
             assert!(!again.report.changed);
+            assert_eq!(again.bytes, out.bytes);
+            assert_eq!(again.report.images_cleaned(), 0);
         }
     }
 });

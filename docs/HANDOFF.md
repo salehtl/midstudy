@@ -294,7 +294,11 @@ These spend real money and need the user's go-ahead in chat each time:
 
 ## 13. Requests for code changes (collected by the packaging agent)
 
-None of these block hosting; the packaging works around each one.
+None of these block hosting; the packaging works around each one. **Updated at the v2 cutover (2026-11-06):** v1's
+server (`planner/serve.py`) and Python `midstudy-add` are gone; the server is `node server/src/main.ts` and the CLI
+`node pipeline/src/cli.ts` (TypeScript on Node 22, with wasm kernels from `npm run build`), so this file's packaging
+sections (§3–§5, §9, §11) describe v1 until the packaging is redone for v2. R1–R3 are unchanged (calib is still
+Python and has none of them yet); R4 and R5 now name v2's files.
 
 - **R1 (calib):** let `midstudy-calib` take the device from the environment (e.g. `MIDSTUDY_CALIB_DEVICE`, used when
   `--device` isn't given). Then the module can set an environment variable instead of passing the shim in
@@ -304,13 +308,15 @@ None of these block hosting; the packaging works around each one.
   building a Hugging Face cache layout that relies on huggingface_hub's offline behaviour.
 - **R3 (calib):** `calib/pyproject.toml` says `requires-python = ">=3.12,<3.13"`, while the Nix package runs it on 3.13.
   Widen it to `<3.14` once the calib tests have run on 3.13 (the Nix build ran the CLI on 3.13 on the Mac, §5).
-- **R4 (planner/serve.py):** relative `--scenes-dir`/`--library-dir`/`--layouts-dir`/`--renders-dir` resolve against
-  the repo, which is read-only in the package; resolve them against the working directory when the server isn't
-  running from a checkout (or say so in `--help`). The module passes absolute paths, so this only affects people
-  running `midstudy-web` by hand.
+- **R4 (server, `server/src/main.ts`; was `planner/serve.py`):** relative `--scenes-dir`/`--library-dir`/`--layouts-dir`/
+  `--renders-dir` resolve against the repo (v2 kept v1's rule), which is read-only in the package; resolve them against
+  the working directory when the server isn't running from a checkout (or say so in `--help`). The module passes
+  absolute paths, so this only affects people running `midstudy-web` by hand. Also new with v2: the default
+  `--midstudy-add` is `node pipeline/src/cli.ts`, relative to the repo (the package must pass its own).
 - **R5 (evals):** E2 `--mock` makes its HEIC with macOS `sips`; on Linux use pillow-heif to write it, or skip that
   case with a reason. And a way to run `eval:all` against the packaged server (e.g. `MIDSTUDY_EVAL_SERVE="<cmd>"` in
-  `evals/lib/harness.mjs` instead of `python3 planner/serve.py`), so homeserver can test what it deploys.
+  `evals/lib/harness.mjs` instead of `node server/src/main.ts`, and the same for `evals/library_api.sh`), so homeserver can
+  test what it deploys.
 
 ## 14. Risks to watch
 

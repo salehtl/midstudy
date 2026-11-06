@@ -1,6 +1,7 @@
 //! The media API with plain types (the `exports` module hands each function to JS under the same name). Each
 //! function's doc gives its envelope payload; error codes are kebab-case names, the message is the error's sentence.
 
+use midstudy_media::plan::{Piece, Plan};
 use midstudy_media::{datauri, glb, http, jpeg, meta, path, png, slug, sniff, zip};
 
 use crate::wire::{Reader, Writer, error};
@@ -39,6 +40,42 @@ pub fn jpeg_strip(bytes: &[u8]) -> Vec<u8> {
                 .size(r.trailing_bytes)
                 .rest(&s.bytes)
                 .finish()
+        }
+        Err(e) => jpeg_error(e),
+    }
+}
+
+/// A plan's pieces after the counts: their number, then each piece as `start`, `end` (a range of the input) or
+/// `0xFFFFFFFF`, `len`, then `len` bytes of its own.
+fn pieces(w: &mut Writer, plan: &Plan) {
+    w.size(plan.pieces.len());
+    for p in &plan.pieces {
+        match p {
+            Piece::Copy { start, end } => {
+                w.size(*start).size(*end);
+            }
+            Piece::Bytes(b) => {
+                w.u32(u32::MAX).size(b.len()).rest(b);
+            }
+        }
+    }
+}
+
+/// `jpeg::strip_plan`: what [`jpeg_strip`] would write, as ranges of the input (the bytes don't come back across the
+/// boundary). Ok: the six counts as in [`jpeg_strip`], then the pieces (see `pieces`). Errors as [`jpeg_strip`].
+#[must_use]
+pub fn jpeg_strip_plan(bytes: &[u8]) -> Vec<u8> {
+    match jpeg::strip_plan(bytes) {
+        Ok((plan, r)) => {
+            let mut w = Writer::ok();
+            w.size(r.app_segments)
+                .size(r.app0_segments)
+                .size(r.jfif_trimmed)
+                .size(r.comments)
+                .size(r.fill_bytes)
+                .size(r.trailing_bytes);
+            pieces(&mut w, &plan);
+            w.finish()
         }
         Err(e) => jpeg_error(e),
     }
@@ -123,14 +160,34 @@ pub fn png_strip(bytes: &[u8]) -> Vec<u8> {
                 .rest(&s.bytes)
                 .finish()
         }
-        Err(e) => {
-            let (code, at) = match e {
-                png::PngError::NotPng => ("not-png", None),
-                png::PngError::Truncated { at } => ("truncated", Some(at)),
-                png::PngError::NoEnd => ("no-end", None),
-            };
-            error(code, at, &e.to_string())
+        Err(e) => png_error(e),
+    }
+}
+
+fn png_error(e: png::PngError) -> Vec<u8> {
+    let (code, at) = match e {
+        png::PngError::NotPng => ("not-png", None),
+        png::PngError::Truncated { at } => ("truncated", Some(at)),
+        png::PngError::NoEnd => ("no-end", None),
+    };
+    error(code, at, &e.to_string())
+}
+
+/// `png::strip_plan`: what [`png_strip`] would write, as ranges of the input. Ok: the four counts as in
+/// [`png_strip`], then the pieces (see `pieces`). Errors as [`png_strip`].
+#[must_use]
+pub fn png_strip_plan(bytes: &[u8]) -> Vec<u8> {
+    match png::strip_plan(bytes) {
+        Ok((plan, r)) => {
+            let mut w = Writer::ok();
+            w.size(r.exif)
+                .size(r.text)
+                .size(r.time)
+                .size(r.trailing_bytes);
+            pieces(&mut w, &plan);
+            w.finish()
         }
+        Err(e) => png_error(e),
     }
 }
 
@@ -478,6 +535,48 @@ mod tests {
             (le(&route, 1), le(&route, 5), &route[9..]),
             (3, 0, b"x".as_slice())
         );
+    }
+
+    /// The plan's pieces, applied to the input, are exactly what the strip writes.
+    fn apply_plan(env: &[u8], counts: usize, input: &[u8]) -> Vec<u8> {
+        let mut at = 1 + 4 * counts;
+        let n = le(env, at) as usize;
+        at += 4;
+        let mut out = Vec::new();
+        for _ in 0..n {
+            let (a, b) = (le(env, at), le(env, at + 4) as usize);
+            at += 8;
+            if a == u32::MAX {
+                out.extend_from_slice(&env[at..at + b]);
+                at += b;
+            } else {
+                out.extend_from_slice(&input[a as usize..b]);
+            }
+        }
+        assert_eq!(at, env.len());
+        out
+    }
+
+    #[test]
+    fn strip_plans_match_the_strips() {
+        let clean = midstudy_media::jpeg::strip(b"\xff\xd8\xff\xd9")
+            .unwrap()
+            .bytes;
+        let mut dirty =
+            b"\xff\xd8\xff\xe0\x00\x13JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x01\x01abc".to_vec();
+        dirty.extend_from_slice(b"\xff\xe1\x00\x04GP\xff\xff\xd9trailing");
+        for input in [clean.as_slice(), dirty.as_slice()] {
+            let strip = jpeg_strip(input);
+            let plan = jpeg_strip_plan(input);
+            assert_eq!(&plan[..25], &strip[..25], "same counts");
+            assert_eq!(apply_plan(&plan, 6, input), &strip[25..]);
+        }
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\0tEXt\0\0\0\0\0\0\0\0IEND\0\0\0\0after";
+        let (strip, plan) = (png_strip(png), png_strip_plan(png));
+        assert_eq!(&plan[..17], &strip[..17]);
+        assert_eq!(apply_plan(&plan, 4, png), &strip[17..]);
+        assert_eq!(jpeg_strip_plan(b"nope"), jpeg_strip(b"nope"));
+        assert_eq!(png_strip_plan(b"nope"), png_strip(b"nope"));
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //                                                unless the golden set expects it to block
 //   MIDSTUDY_LIVE_LLM=1 node evals/product_live.mjs --live --llm
 //                                                also lets the language model read the pages without a size: real fal
-//                                                calls (about $0.001 a page), serve.py started WITHOUT the fal mock and
+//                                                calls (about $0.001 a page), the server started WITHOUT the fal mock and
 //                                                WITHOUT MIDSTUDY_NO_DOTENV (it reads .env in this checkout) and with
 //                                                --daily-spend-usd 0.02. Main session only, with the user's OK. Costs go to
 //                                                the scratch library's costs.csv under evals/out/product-live/ and are printed.
@@ -16,7 +16,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createEval, startServer, api, raw, sleep, fmt, freePort, REPO, STUB_CALIB } from './lib/harness.mjs'
+import { createEval, startServer, api, raw, sleep, fmt, freePort, REPO, STUB_CALIB, serverCommand } from './lib/harness.mjs'
 import { snapshotPages, startPagesServer } from './lib/pages_server.mjs'
 
 const args = process.argv.slice(2)
@@ -33,7 +33,7 @@ if (LLM && (!LIVE || process.env.MIDSTUDY_LIVE_LLM !== '1')) {
   await ev.finish(1)
 }
 
-// serve.py with the real fal (no mock, .env read), a $0.02 cap and scratch dirs; only for --live --llm.
+// The server with the real fal (no mock, .env read), a $0.02 cap and scratch dirs; only for --live --llm.
 async function startRealFalServer() {
   const data = path.join(ev.out, 'server-llm')
   const dirs = { scenes: path.join(data, 'scenes'), layouts: path.join(data, 'layouts'), renders: path.join(data, 'renders'), library: path.join(data, 'library') }
@@ -44,10 +44,11 @@ async function startRealFalServer() {
   const base = `http://127.0.0.1:${port}`
   const env = { ...process.env }
   for (const k of ['MIDSTUDY_FAL_MOCK', 'NOOK_FAL_MOCK', 'MIDSTUDY_NO_DOTENV', 'NOOK_NO_DOTENV', 'MIDSTUDY_FAL_MOCK_COST', 'MIDSTUDY_FAL_MOCK_LOG', 'MIDSTUDY_FETCH_ALLOW']) delete env[k]
-  const argv = ['planner/serve.py', '--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
-    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--calib', STUB_CALIB, '--daily-spend-usd', '0.02']
+  // the server's command (the harness's)
+  const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
+    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--calib', STUB_CALIB, '--daily-spend-usd', '0.02'])
   let log = ''
-  const proc = spawn('python3', argv, { cwd: REPO, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const proc = spawn(cmd, argv, { cwd: REPO, env, stdio: ['ignore', 'pipe', 'pipe'] })
   proc.stdout.on('data', (d) => { log += d })
   proc.stderr.on('data', (d) => { log += d })
   const srv = { base, port, dirs, up: false, why: '', exited: null }
@@ -62,7 +63,7 @@ async function startRealFalServer() {
     if (r.status) { srv.up = true; break }
     await sleep(150)
   }
-  if (!srv.up) srv.why = `serve.py did not start: ${log.trim().split('\n').slice(-3).join(' | ')}`
+  if (!srv.up) srv.why = `the server did not start: ${log.trim().split('\n').slice(-3).join(' | ')}`
   return srv
 }
 
@@ -80,7 +81,7 @@ if (!LIVE) {
 } else {
   srv = await startServer(ev)
 }
-ev.check(`serve.py starts (${mode})`, srv.up, srv.up ? srv.base : srv.why)
+ev.check(`the server starts (${mode})`, srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish(1)
 
 const near = (got, want) => typeof got === 'number' && Math.abs(got - want) <= Math.max(1, Math.abs(want) * 0.015)

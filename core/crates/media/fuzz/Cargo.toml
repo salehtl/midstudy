@@ -48,6 +48,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "media_misc"
+path = "fuzz_targets/media_misc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "host_check"
 path = "fuzz_targets/host_check.rs"
 test = false

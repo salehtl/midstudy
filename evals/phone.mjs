@@ -14,7 +14,7 @@ import {
 const ev = createEval('E9', 'phone', { timeoutS: 600 })
 const LW = golden('living-wide'), { w: W, h: H } = LW.truth.image
 const srv = await startServer(ev)
-ev.check('serve.py starts (calib stub + MIDSTUDY_CALIB_MOCK, empty scenes dir)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (calib stub + MIDSTUDY_CALIB_MOCK, empty scenes dir)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const browser = await launchBrowser(ev)
 const P = await openPlanner(browser, srv.base, { device: 'phone' })

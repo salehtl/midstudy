@@ -3,7 +3,7 @@
 For the proofs track (docs/REFACTOR.md §1: "Aeneas extracts the integer Rust kernels to Lean"). These are the
 functions that are integer- and byte-only, loop-simple and worth a proof, in the order to try them. Each needs at most
 a small mechanical rewrite to get past what Charon/Aeneas don't model well (iterator adapters with closures, `str`
-methods, `first_chunk`, `core::array::from_fn`, `format!`/`Display`). Keep `tests/diff_v1.py`, `tests/props.rs` and
+methods, `first_chunk`, `core::array::from_fn`, `format!`/`Display`). Keep `tests/props.rs`, the exhaustive tests and
 the fuzz targets as the regression check for any rewrite: they pin today's behaviour exactly.
 
 | # | Function | File | Why it's a good target | Rewrite needed first | Property to prove |

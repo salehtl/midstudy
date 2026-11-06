@@ -72,7 +72,7 @@ function addSplatProbe(libDir) {
 
 // --- server, library adds -------------------------------------------------------------------------------------------------
 const srv = await startServer(ev)
-ev.check('serve.py starts (fal mock, calib stub + mock, $0 cap)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (fal mock, calib stub + mock, $0 cap)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const probeSplats = addSplatProbe(srv.dirs.library)
 

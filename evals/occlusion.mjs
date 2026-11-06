@@ -20,7 +20,7 @@ const CAM = LW.truth.camera
 const BEHIND = [-0.3, 0, -4.3] // between the sofa's back (z −3.75) and the back wall (z −5.0); x inside the sofa's span
 
 const srv = await startServer(ev)
-ev.check('serve.py starts (calib stub + MIDSTUDY_CALIB_MOCK, probe library)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (calib stub + MIDSTUDY_CALIB_MOCK, probe library)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const D = await seedScene(srv, 'living-wide')
 ev.check('scene with depth: golden living-wide, calibrated, depth_url set', D.name && !D.why && !!D.scene?.depth_url, D.why || fmt({ depth_url: D.scene?.depth_url }))

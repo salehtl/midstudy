@@ -107,6 +107,71 @@ export type Calib = {
   readonly [key: string]: unknown
 }
 
+export type CalibCliAlign = {
+  readonly id?: CalibCliId
+  readonly ok: true
+  readonly applied: boolean
+  readonly inliers: number
+  readonly residual_px: number | null
+  /** Why it wasn't applied. */
+  readonly reason?: string
+}
+
+/** Any command that failed: exit 1 (one-shot), the same sentence as the last stderr line after `midstudy-calib: `. */
+export type CalibCliError = {
+  readonly id?: CalibCliId
+  readonly ok: false
+  /** One sentence the server shows as it is. */
+  readonly error: string
+}
+
+/** Worker responses only: the request's id (null when the request had no usable id). */
+export type CalibCliId = string | null
+
+export type CalibCliIngest = {
+  readonly id?: CalibCliId
+  readonly ok: true
+  readonly photo: "photo.jpg"
+  readonly source: "source.jpg" | "source.png" | "source.heic" | "source.webp"
+  readonly image: ImageSize
+}
+
+export type CalibCliLight = CalibCliLightDone | CalibCliLightNone
+
+/** `light` wrote lighting.json. */
+export type CalibCliLightDone = {
+  readonly id?: CalibCliId
+  readonly ok: true
+  readonly lighting: true
+  readonly cct_k: number | null
+  readonly confidence: number
+  readonly elapsed_s: number
+}
+
+/** `light` found too little to go on and wrote nothing. */
+export type CalibCliLightNone = {
+  readonly id?: CalibCliId
+  readonly ok: true
+  readonly lighting: false
+  readonly reason: string
+}
+
+/** One line on the worker's stdin. */
+export type CalibCliRequest = {
+  /** Echoed in the response. */
+  readonly id: string
+  readonly cmd: "run" | "fit" | "light" | "align" | "ingest"
+  /** The one-shot command's arguments after its name, as an argument list. */
+  readonly args: readonly string[]
+}
+
+/** `run` and `fit`: calib.json's contents plus "ok": true. */
+export type CalibCliRun = Calib & {
+  readonly ok: true
+  readonly id?: CalibCliId
+  readonly [key: string]: unknown
+}
+
 /** 202 of POST /api/scenes/<name>/calibrate (contract §4.4): fit on photo.jpg, or run on source.<ext> when photo.jpg is missing. 409 while one is queued or running for that scene. */
 export type CalibrateAccepted = {
   readonly job: CalibrationJob
@@ -647,7 +712,7 @@ export type RenderRequest = {
 
 export type Rgb = readonly [number, number, number]
 
-/** Written by planner/serve.py: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes. */
+/** Written by the server: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes. */
 export type Scene = {
   readonly version: 1
   /** Free text, set on upload (X-Midstudy-Meta) or by rename; null shows the date. */

@@ -4,13 +4,17 @@ See furniture in your own room before you buy it. The room is **one phone photo*
 real-world size (Idol or Meta's SAM 3D, on fal) or comes from a 3D file. You place the pieces on the photo's floor in the
 browser, save layouts, and render a photoreal image of the result.
 
-midstudy is a fork of [nook](https://github.com/salehtl/nook) without the room scan, for personal use. Where things
-stand is in [docs/STATUS.md](docs/STATUS.md).
+midstudy is a fork of [nook](https://github.com/salehtl/nook) without the room scan, for personal use. This is v2: the
+same app rebuilt in strict TypeScript (the planner, the server and `midstudy-add`), with the hot paths in Rust compiled
+to WebAssembly, Lean proofs of the camera model, and calibration still in Python with a warm worker
+([docs/REFACTOR.md](docs/REFACTOR.md); where it ended: [docs/notes/cutover.md](docs/notes/cutover.md)). Where v1 stood
+is in [docs/STATUS.md](docs/STATUS.md).
 
 ## How it works
 
 1. **New scene.** You upload a room photo (JPEG, HEIC, PNG or WebP, up to 25 MB). MoGe-2 estimates the camera and the
-   floor in about 10 s, and the scene opens with a 50 cm grid drawn on the floor.
+   floor in a few seconds (about 1 s from the second photo on, while the server keeps the model loaded), and the scene
+   opens with a 50 cm grid drawn on the floor.
 2. **Adjust floor**, if the grid is off: sliders for camera height, field of view and roll, a draggable horizon line
    for the pitch, and a two-tap ruler. If you know a real length on the floor (a rug, a tile), type it in and
    **Set scale** fixes the size of everything.
@@ -32,13 +36,17 @@ and **Fit** resets it. It works on the desktop and on a phone (touch, 390 px wid
 
 ## Run it locally
 
-Everything comes from the flake's dev shell (Python 3.12, uv, Node 22, git). Nothing is installed globally.
+Everything comes from the flake's dev shell (Node 22, Python 3.12, uv, Rust with wasm32, git). Nothing is installed
+globally.
 
 ```sh
+nix develop -c npm ci                       # once: the Node packages (three.js, glTF-Transform, …)
 nix develop -c uv sync --project calib      # once: MoGe-2 and torch, about 2.5 min, ~1 GB in calib/.venv
-nix develop -c uv sync --project pipeline   # once: midstudy-add
-nix develop -c npm run serve                # http://127.0.0.1:8765/
+nix develop -c npm run serve                # builds (wasm kernels, planner bundle), then http://127.0.0.1:8765/
 ```
+
+`npm run serve` is `node scripts/build.mjs` (incremental) then `node server/src/main.ts`: the server is TypeScript that
+Node 22 runs directly, and it serves the bundled planner from `planner/dist/`.
 
 - **fal key.** Paid calls (furniture from a photo or link, renders) read `FAL_KEY` from the environment or from a
   `.env` file at the repo root (`FAL_KEY=...`, git-ignored). Without it, everything else still works, including GLB
@@ -46,13 +54,14 @@ nix develop -c npm run serve                # http://127.0.0.1:8765/
 - **Spend cap.** The server refuses paid calls past **$2 per UTC day** by default (`--daily-spend-usd`, `0` blocks
   them all). Every paid call is logged in `library/costs.csv`.
 - **First calibration.** The first photo you upload downloads the MoGe-2 ViT-L weights (1.32 GB, about 20 s on a fast
-  line) into `~/.cache/huggingface/hub`, outside the repo. After that, each photo takes about 10 s on an M-series Mac
-  (MPS), of which about 4 s is loading the model.
+  line) into `~/.cache/huggingface/hub`, outside the repo. The server runs calibration in a worker
+  (`midstudy-calib serve`) that keeps the model loaded: the first photo after a start takes a few seconds, each later
+  one about 1 s on an M-series Mac (MPS). The worker lets go of its memory after 10 idle minutes.
 - **Your data** stays in the repo folder and is git-ignored: `scenes/` (one folder per photo), `layouts/`,
   `renders/`, and the furniture in `library/<id>/`. Only `library/library.json` and `library/costs.csv` are tracked.
 - **Other flags:** `--port`, `--host`, `--scenes-dir`, `--library-dir`, `--layouts-dir`, `--renders-dir`,
   `--allowed-host NAME` (the server answers only loopback names unless you add one), `--calib`, `--midstudy-add`.
-  Run `nix develop -c python3 planner/serve.py --help`. The app has no login, so don't expose it beyond your machine
+  Run `nix develop -c node server/src/main.ts --help`. The app has no login, so don't expose it beyond your machine
   without access control in front of it.
 
 ## Add furniture
@@ -81,9 +90,9 @@ The engines make different things:
   (Splat or Mesh), and pieces already placed switch at once.
 - **TRELLIS 2** makes a textured mesh with finer detail.
 
-The planner draws splats with [Spark](https://sparkjs.dev) 2.4.0. Their colours are the photo's own, so the
-**Look** sliders only brighten or warm them; meshes are lit and tone-mapped. The real furniture in the room photo
-hides both. Renders include splats like any other piece.
+The planner draws splats with its own splat renderer (WebGPU where the browser has it, else WebGL2). Their colours
+are the photo's own, so the **Look** sliders only brighten or warm them; meshes are lit and tone-mapped. The real
+furniture in the room photo hides both. Renders include splats like any other piece.
 
 ### From a product page
 
@@ -102,14 +111,14 @@ the units itself. Shops that refuse automatic reading (on 2026-11-05: West Elm, 
 automatic reading: paste the image link and size instead." with a button to switch to **Image link**. The reader
 introduces itself as `midstudy/1.0 (product page reader)` and never downloads the pictures itself.
 
-The same from the command line (the planner picks it up on reload):
+The same from the command line, from the repo root after `npm run build` (the planner picks it up on reload):
 
 ```sh
-nix develop -c uv run --project pipeline midstudy-add chair.jpg --name "Strandmon wing chair" --dims 82x96x101
-nix develop -c uv run --project pipeline midstudy-add chair.jpg --engine sam3d --name "Morris chair" --dims 70x80x95
-nix develop -c uv run --project pipeline midstudy-add chair.glb --engine glb --name "Sheen chair" --dims 60x65x85
-nix develop -c uv run --project pipeline midstudy-add rug.jpg --engine rug --name "Zen rug" --dims 160x230x1
-nix develop -c uv run --project pipeline midstudy-add --help
+nix develop -c node pipeline/src/cli.ts chair.jpg --name "Strandmon wing chair" --dims 82x96x101
+nix develop -c node pipeline/src/cli.ts chair.jpg --engine sam3d --name "Morris chair" --dims 70x80x95
+nix develop -c node pipeline/src/cli.ts chair.glb --engine glb --name "Sheen chair" --dims 60x65x85
+nix develop -c node pipeline/src/cli.ts rug.jpg --engine rug --name "Zen rug" --dims 160x230x1
+nix develop -c node pipeline/src/cli.ts --help
 ```
 
 Item conventions: meters in 3D, centimeters in `dims_cm` and `--dims`; Y-up; the origin is the center of the
@@ -140,15 +149,32 @@ If no floor is found, or MoGe can't run, the scene still opens with a fallback c
 height 1.40 m, pitch −10°) and asks you to check the floor. `--device auto|cuda|mps|cpu` picks the hardware (auto:
 CUDA, then MPS, then CPU).
 
+## Build and check
+
+```sh
+nix develop -c npm run build                # wasm kernels into build/wasm/, the planner into planner/dist/
+nix develop -c npm run check                # every gate, one line each (about 35 min: Rust, fuzzing, proofs)
+nix develop -c npm run check:types          # or one of them: types lint dead gen tests tscert planner py rust fuzz proofs
+```
+
+`check:types` is `tsc` in strict mode over the planner, server, CLI and kernel faces; `check:lint` is typescript-eslint
+(no `any`, no casts, no `!`); `check:dead` is knip; `check:gen` keeps `contract/gen/` equal to what the schemas
+generate; `check:tests` runs the node:test suites; `check:tscert` certifies the pure `logic/` modules with TScert
+against `tscert/baseline.json`; `check:rust` is fmt, clippy, tests, Miri and Kani on `core/`; `check:fuzz` a minute per
+fuzz target; `check:proofs` builds the Lean proofs in `proofs/`; `check:py` is pyright and ruff on `calib/`.
+[CLAUDE.md](CLAUDE.md) has the commands behind each.
+
 ## Evals
 
 All evals are free: fal is mocked, and they set the mock variables, a $0 cap and scratch data folders under
-`evals/out/` themselves. Browser evals run headless Helium (`/Applications/Helium.app`, or `MIDSTUDY_BROWSER`).
-[evals/README.md](evals/README.md) describes every check.
+`evals/out/` themselves. They run the server and `midstudy-add` in strict mode, so every answer and file is also checked
+against the contract's schemas. Browser evals run the flake's headless Chrome (`$PUPPETEER_EXECUTABLE_PATH`, or
+`MIDSTUDY_BROWSER`), never a browser you browse with. Several agents share this Mac, so run each eval through the lock:
+`nix develop -c node scripts/eval-lock.mjs -- npm run eval:…`. [evals/README.md](evals/README.md) describes every check.
 
 ```sh
-nix develop -c npm install                  # once
-nix develop -c npm run eval:all             # E1, E3–E9, E11–E16 (about 12 min)
+nix develop -c npm ci                       # once
+nix develop -c npm run eval:all             # E1, E3–E9, E11–E16 (about 10 min)
 nix develop -c npm run eval:product         # E14: the product page reader on made-up shop pages (seconds)
 nix develop -c npm run eval:product-ui      # E15: the Product page form, desktop and phone
 nix develop -c npm run eval:product-live    # the golden set of real shop pages, from saved copies (-- --live: the web)
@@ -157,6 +183,7 @@ nix develop -c npm run eval:calib           # E2: real MoGe-2 on the golden scen
 nix develop -c npm run eval:calib -- --mock # E2 ingest only, no model (seconds)
 nix develop -c npm run eval:real            # the real path end to end on a photo from fixtures/photos/
 nix develop -c npm run eval:selftest        # the eval machinery itself
+nix develop -c npm run eval:perf -- --compare evals/perf/baseline.json   # E17: performance against v1's numbers
 nix develop -c bash -c 'cd calib && uv run pytest -q'
 ```
 
@@ -167,12 +194,15 @@ checks them. `fixtures/photos/` holds real room photos and is git-ignored.
 
 The flake has packages (`midstudy`, `midstudy-calib`, `moge-weights`, `midstudy-add`) and a NixOS module
 (`services.midstudy`) for hosting on homeserver next to nook. They were built and run on the Mac but never on Linux.
-[docs/HANDOFF.md](docs/HANDOFF.md) has the build, verify and deploy steps for the agent that does it.
+[docs/HANDOFF.md](docs/HANDOFF.md) has the build, verify and deploy steps for the agent that does it. **They still
+package v1** (`planner/serve.py` and the Python `midstudy-add`), which the v2 cutover deleted: until the packaging is
+redone for v2 (the Node server and CLI, `build/wasm/`, `planner/dist/`, `node_modules`), `midstudy` and
+`midstudy-add` don't build from this tree; `midstudy-calib` and `moge-weights` are unchanged.
 
 ## Docs
 
-- [PLAN.md](PLAN.md): the plan and the spec.
+- [PLAN.md](PLAN.md): the plan and the spec. [docs/REFACTOR.md](docs/REFACTOR.md): the v2 refactor.
 - [contract/CONTRACT.md](contract/CONTRACT.md): files, routes, the camera model, the `window.midstudy` hook.
-- [docs/STATUS.md](docs/STATUS.md): what works, what was checked, what's left.
+- [docs/STATUS.md](docs/STATUS.md): v1's status; [docs/notes/cutover.md](docs/notes/cutover.md): v2's, at the cutover.
 - [docs/notes/](docs/notes/): what each build agent did and measured.
 - [CLAUDE.md](CLAUDE.md): rules for agents working in this repo.

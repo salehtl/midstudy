@@ -1,7 +1,14 @@
 {
-  // What TScert reads server/src/logic/ with: the server's strict options, the logic modules only, no Node types (a
+  // What TScert reads the server's logic modules with (server/src/logic/, the scenes, library and product logic, and
+  // common/logic/ they share with midstudy-add): the server's strict options, the logic modules only, no Node types (a
   // logic module that needs node:fs belongs in a shell module).
   "extends": "../tsconfig.server.json",
   "compilerOptions": { "lib": ["ES2024"], "types": [], "composite": false },
-  "include": ["../server/src/logic/**/*.ts", "../common/logic/**/*.ts"]
+  "include": [
+    "../server/src/logic/**/*.ts",
+    "../server/src/scenes/logic/**/*.ts",
+    "../server/src/library/logic/**/*.ts",
+    "../server/src/product/logic/**/*.ts",
+    "../common/logic/**/*.ts"
+  ]
 }

@@ -15,10 +15,12 @@ import { fileURLToPath } from 'node:url'
 interface Raw {
   sniff(bytes: Uint8Array): string
   jpeg_strip(bytes: Uint8Array): Uint8Array
+  jpeg_strip_plan(bytes: Uint8Array): Uint8Array
   jpeg_frame(bytes: Uint8Array): Uint8Array
   jpeg_is_clean(bytes: Uint8Array): boolean
   jpeg_passthrough(bytes: Uint8Array): Uint8Array
   png_strip(bytes: Uint8Array): Uint8Array
+  png_strip_plan(bytes: Uint8Array): Uint8Array
   png_size(bytes: Uint8Array): Uint8Array
   glb_strip(bytes: Uint8Array, inPlace: boolean): Uint8Array
   data_uri_image(value: string, png: boolean): Uint8Array
@@ -38,7 +40,8 @@ interface Raw {
 }
 
 const RAW_FUNCTIONS = [
-  'sniff', 'jpeg_strip', 'jpeg_frame', 'jpeg_is_clean', 'jpeg_passthrough', 'png_strip', 'png_size', 'glb_strip',
+  'sniff', 'jpeg_strip', 'jpeg_strip_plan', 'jpeg_frame', 'jpeg_is_clean', 'jpeg_passthrough', 'png_strip', 'png_strip_plan',
+  'png_size', 'glb_strip',
   'data_uri_image', 'meta_decode', 'path_normalize', 'reduce_leading_slashes', 'static_route', 'is_slug',
   'is_scene_name', 'is_render_name', 'cmp_names', 'content_length', 'host_name', 'check_host', 'origin_ok', 'zip_plan',
 ] as const satisfies readonly (keyof Raw)[]
@@ -62,7 +65,7 @@ function raw(): Raw {
   const require = createRequire(import.meta.url)
   const mod: unknown = require(WASM_MODULE)
   if (!isRaw(mod)) {
-    throw new Error(`core/js/node.ts: ${WASM_MODULE} doesn't export the media API: rebuild it (core/crates/wasm-node/build-node.sh)`)
+    throw new Error(`core/js/node.ts: ${WASM_MODULE} doesn't export the media API: rebuild it (nix develop -c npm run build)`)
   }
   loaded = mod
   return mod
@@ -121,6 +124,45 @@ class Payload {
   rest(): Uint8Array {
     return this.#bytes.subarray(this.#at)
   }
+
+  /** The next `n` bytes (a view). */
+  bytes(n: number): Uint8Array {
+    const v = this.#bytes.subarray(this.#at, this.#at + n)
+    this.#at += n
+    return v
+  }
+
+  /** A plan's pieces (api.rs `pieces`): views of `input` for its ranges, views of the envelope for its own bytes. */
+  pieces(input: Uint8Array): { pieces: Uint8Array[]; length: number } {
+    const count = this.u32()
+    const pieces: Uint8Array[] = []
+    let length = 0
+    for (let k = 0; k < count; k++) {
+      const a = this.u32()
+      const b = this.u32()
+      const piece = a === NO_OFFSET ? this.bytes(b) : input.subarray(a, b)
+      pieces.push(piece)
+      length += piece.length
+    }
+    return { pieces, length }
+  }
+}
+
+/** The pieces are exactly `input`: one view of all of it. */
+function isWhole(pieces: readonly Uint8Array[], input: Uint8Array): boolean {
+  const [only] = pieces
+  return pieces.length === 1 && only?.buffer === input.buffer && only.byteOffset === input.byteOffset && only.length === input.length
+}
+
+/** The pieces joined into one new buffer (the input is never handed back: callers may change either). */
+function join(pieces: readonly Uint8Array[], length: number): Uint8Array {
+  const out = new Uint8Array(length)
+  let at = 0
+  for (const p of pieces) {
+    out.set(p, at)
+    at += p.length
+  }
+  return out
 }
 
 function decode<T, C extends string>(env: Uint8Array, codes: readonly C[], read: (p: Payload) => T): Result<T, MediaError<C>> {
@@ -185,13 +227,34 @@ export interface Stripped<R> {
   readonly removed: R
 }
 
+/** A stripped file as pieces, without copying it: views of the input (and the few bytes the strip writes itself, such
+ *  as a rewritten JFIF header), in order. Write them in order (`fs.writev`, a stream) or join them. The views share
+ *  the input's memory: they are only valid while the input isn't changed. */
+export interface StrippedPieces<R> {
+  readonly pieces: readonly Uint8Array[]
+  /** The output's length in bytes. */
+  readonly length: number
+  /** The output is the input, byte for byte (one piece: all of it). */
+  readonly unchanged: boolean
+  readonly removed: R
+}
+
+function jpegRemoved(p: Payload): JpegRemoved {
+  return { appSegments: p.u32(), app0Segments: p.u32(), jfifTrimmed: p.u32(), comments: p.u32(), fillBytes: p.u32(), trailingBytes: p.u32() }
+}
+
 /** The JPEG without its metadata, its image data untouched (contract §2.6, §2.8). */
 export function stripJpeg(bytes: Uint8Array): Result<Stripped<JpegRemoved>, MediaError<JpegErrorCode>> {
-  return decode(raw().jpeg_strip(bytes), JPEG_ERRORS, (p) => {
-    const removed: JpegRemoved = {
-      appSegments: p.u32(), app0Segments: p.u32(), jfifTrimmed: p.u32(), comments: p.u32(), fillBytes: p.u32(), trailingBytes: p.u32(),
-    }
-    return { removed, bytes: p.rest() }
+  const r = stripJpegPieces(bytes)
+  return r.ok ? { ok: true, value: { removed: r.value.removed, bytes: join(r.value.pieces, r.value.length) } } : r
+}
+
+/** stripJpeg's output as pieces of the input: only the plan crosses the wasm boundary, not the bytes. */
+export function stripJpegPieces(bytes: Uint8Array): Result<StrippedPieces<JpegRemoved>, MediaError<JpegErrorCode>> {
+  return decode(raw().jpeg_strip_plan(bytes), JPEG_ERRORS, (p) => {
+    const removed = jpegRemoved(p)
+    const { pieces, length } = p.pieces(bytes)
+    return { removed, pieces, length, unchanged: isWhole(pieces, bytes) }
   })
 }
 
@@ -251,9 +314,16 @@ export interface PngRemoved {
 
 /** The PNG without eXIf, tEXt, iTXt, zTXt and tIME, and nothing after IEND (contract §2.8). */
 export function stripPng(bytes: Uint8Array): Result<Stripped<PngRemoved>, MediaError<PngErrorCode>> {
-  return decode(raw().png_strip(bytes), PNG_ERRORS, (p) => {
+  const r = stripPngPieces(bytes)
+  return r.ok ? { ok: true, value: { removed: r.value.removed, bytes: join(r.value.pieces, r.value.length) } } : r
+}
+
+/** stripPng's output as pieces of the input (every kept chunk is a range of it): only the plan crosses the boundary. */
+export function stripPngPieces(bytes: Uint8Array): Result<StrippedPieces<PngRemoved>, MediaError<PngErrorCode>> {
+  return decode(raw().png_strip_plan(bytes), PNG_ERRORS, (p) => {
     const removed: PngRemoved = { exif: p.u32(), text: p.u32(), time: p.u32(), trailingBytes: p.u32() }
-    return { removed, bytes: p.rest() }
+    const { pieces, length } = p.pieces(bytes)
+    return { removed, pieces, length, unchanged: isWhole(pieces, bytes) }
   })
 }
 
@@ -329,8 +399,18 @@ export const DATA_URI_ERRORS = ['not-data-uri', 'base64'] as const
 export type DataUriCode = (typeof DATA_URI_ERRORS)[number]
 
 /** The bytes of `data:image/jpeg;base64,…` (or `jpg`; `png` for a mask), whitespace allowed in the base64, decoded
- *  strictly (contract §2.6, §2.8, §4.4, §4.7; v1's decode_data_uri). */
+ *  strictly (contract §2.6, §2.8, §4.4, §4.7; v1's decode_data_uri). A payload that is exactly the base64 of its own
+ *  bytes (canonical, what a browser's `toDataURL` makes) is decoded by Node's decoder, on which CPython's strict decode
+ *  (the kernel's `decode_python`) agrees, ~50× faster for a render-size image (int-backend: 2.5 ms → 0.05 ms for
+ *  260 kB); anything else (whitespace, odd padding or trailing bits, foreign characters, errors) is the kernel's. */
 export function decodeImageDataUri(value: string, type: 'jpeg' | 'png'): Result<Uint8Array, MediaError<DataUriCode>> {
+  const prefixes = type === 'png' ? ['data:image/png;base64,'] : ['data:image/jpeg;base64,', 'data:image/jpg;base64,']
+  const prefix = prefixes.find((p) => value.startsWith(p))
+  if (prefix !== undefined && value.length > prefix.length) {
+    const payload = value.slice(prefix.length)
+    const bytes = Buffer.from(payload, 'base64')
+    if (bytes.toString('base64') === payload) return { ok: true, value: new Uint8Array(bytes) }
+  }
   return decode(raw().data_uri_image(value, type === 'png'), DATA_URI_ERRORS, (p) => p.rest())
 }
 

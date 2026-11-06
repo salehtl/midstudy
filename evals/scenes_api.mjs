@@ -1,4 +1,4 @@
-// E1 eval:scenes-api — the scenes API of planner/serve.py (PLAN.md §6.2 E1; contract §4.4, §2.7, §2.9). No browser.
+// E1 eval:scenes-api — the scenes API of the server (PLAN.md §6.2 E1; contract §4.4, §2.7, §2.9). No browser.
 // Upload → 202, listed pending, calibrates (calib stub + MIDSTUDY_CALIB_MOCK), photo.jpg ≤ 2048, the scene has the
 // camera; PUT camera round-trips; calibrate; delete moves to the trash; layouts per scene don't leak; static rules;
 // W1 (forged), W2 (Host), W4 (paths) on every new route; the spend cap covers /api/render. fal mocked, $0.
@@ -15,7 +15,7 @@ import path from 'node:path'
 import Ajv2020 from 'ajv/dist/2020.js'
 import {
   REPO, DEFAULT_CAMERA, SCENE_NAME_RE, createEval, startServer, api, raw, uploadScene, waitFor, waitScene, golden, fmt, clip,
-  camEq, dataUri, sleep,
+  camEq, dataUri, sleep, serverCommand,
 } from './lib/harness.mjs'
 
 const ev = createEval('E1', 'scenes-api', { timeoutS: 300 })
@@ -43,7 +43,7 @@ const srv = await startServer(ev, {
   calib: `python3 ${path.join(REPO, 'evals/lib/gated_calib.py')}`,
   env: { MIDSTUDY_EVAL_CALIB_GATE: GATE, MIDSTUDY_EVAL_CALIB_LOG: CALLOG, MIDSTUDY_EVAL_CALIB_TARGET: `python3 ${path.join(REPO, 'fixtures/stub_calib.py')}` },
 })
-ev.check('serve.py starts with --scenes-dir, --calib and scratch dirs', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts with --scenes-dir, --calib and scratch dirs', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const B = srv.base
 const scenesDir = srv.dirs.scenes
@@ -709,14 +709,17 @@ if (srv5.up) {
   await srv5.stop()
 }
 
-const bad = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--allowed-host', 'https://midstudy.example.com', '--calib', 'python3 fixtures/stub_calib.py'],
+// the server's command (the harness's), as startServer runs it
+const badCmd = serverCommand(['--port', '0', '--daily-spend-usd', '0', '--allowed-host', 'https://midstudy.example.com', '--calib', 'python3 fixtures/stub_calib.py'])
+const bad = spawnSync(badCmd.cmd, badCmd.args,
   { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })
 ev.check('a malformed --allowed-host (a URL) is refused at startup (it would have allowed a missing or malformed Host)', bad.status !== 0 && bad.signal == null && /allowed-host/.test(bad.stderr || ''),
   `exit ${bad.status ?? bad.signal}: ${clip((bad.stderr || '').trim().split('\n').at(-1), 200)}`)
 
 ev.section('verify round 1: the spend cap reads the file midstudy-add writes')
 const other = path.join(ev.out, 'other-costs.csv')
-const run = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--costs-file', other, '--calib', 'python3 fixtures/stub_calib.py'],
+const runCmd = serverCommand(['--port', '0', '--daily-spend-usd', '0', '--costs-file', other, '--calib', 'python3 fixtures/stub_calib.py'])
+const run = spawnSync(runCmd.cmd, runCmd.args,
   { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })
 ev.check('--costs-file that isn\'t <library-dir>/costs.csv is refused even without --library-dir (adds would be uncapped)', run.status !== 0 && run.signal == null && /costs-file/.test(run.stderr || ''),
   `exit ${run.status ?? run.signal}: ${clip((run.stderr || '').trim(), 200)}`)

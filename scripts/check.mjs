@@ -16,6 +16,8 @@
 //   fuzz       a smoke run per cargo-fuzz target under core/ (MIDSTUDY_FUZZ_SECONDS, default 60), nightly shell
 //   proofs     lake build in proofs/; no sorry or admit, no axiom outside proofs/axioms.txt
 //   py         pyright (strict) and ruff on calib/
+//   tests      every `npm run test:*` suite but the planner's (node:test: the contract, the server's core, scenes, library
+//              and product routes, midstudy-add), FAL_KEY unset; one line with the counts
 //   ownership  scripts/check-ownership.mjs for MIDSTUDY_TRACK (default: the track of a v2-<track> branch)
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -26,10 +28,12 @@ let ts
 try { ts = (await import('typescript')).default } catch { console.error('check: typescript missing: run `nix develop -c npm install`'); process.exit(1) }
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
-const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tscert', 'planner', 'py', 'rust', 'fuzz', 'proofs']
+const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tests', 'tscert', 'planner', 'py', 'rust', 'fuzz', 'proofs']
 const wanted = argv.filter((a) => !a.startsWith('--'))
 for (const w of wanted) if (!ORDER.includes(w)) { console.error(`check: unknown check ${w} (${ORDER.join(', ')})`); process.exit(2) }
 const exists = (p) => fs.existsSync(path.join(ROOT, p))
+// The planner's suites print their own summaries (not node:test's); check:planner runs them, check:tests skips them.
+const PLANNER_SUITES = ['test:engine', 'test:ui']
 const bin = (name) => path.join(ROOT, 'node_modules/.bin', name)
 
 function walk(dir, skip = new Set(['node_modules', 'dist', 'target', '.lake', '.venv', 'build', '.git']), out = []) {
@@ -113,6 +117,27 @@ const checks = {
     return { ok: r.code === 0, line: r.code === 0 ? 'knip: no unused files, exports or dependencies' : `knip: ${n || 'some'} unused item(s)`, out: r.out }
   },
 
+  tests() {
+    const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts ?? {}
+    const suites = Object.keys(scripts).filter((k) => k.startsWith('test:') && !PLANNER_SUITES.includes(k)).sort()
+    if (!suites.length) return { ok: true, line: 'nothing to check (no test:* scripts)' }
+    // the tests never read a real key: FAL_KEY is dropped for them (the fal tests skip themselves when it is set)
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'FAL_KEY'))
+    const failed = []
+    let pass = 0
+    let fail = 0
+    const outs = []
+    for (const s of suites) {
+      const r = spawnSync('npm', ['run', '-s', s], { cwd: ROOT, encoding: 'utf8', maxBuffer: 512 << 20, env: { ...env, FORCE_COLOR: '0' } })
+      const out = `${r.stdout || ''}${r.stderr || ''}`
+      const count = (k) => [...out.matchAll(new RegExp(`^# ${k} (\\d+)$`, 'gm'))].reduce((a, m) => a + Number(m[1]), 0)
+      pass += count('pass')
+      fail += count('fail')
+      if (r.status !== 0) { failed.push(s); outs.push(`--- ${s}\n${tail(out, 60)}`) }
+    }
+    return { ok: failed.length === 0, line: `${suites.length} suites (${suites.map((s) => s.slice(5)).join(', ')}): ${pass} passed, ${fail} failed${failed.length ? `; failing: ${failed.join(', ')}` : ''}`, out: outs.join('\n') }
+  },
+
   tscert() {
     const r = sh('node', ['scripts/tscert-ratchet.mjs'])
     const last = r.out.trim().split('\n').at(-1) || ''
@@ -124,7 +149,7 @@ const checks = {
     const b = sh('node', ['scripts/build.mjs', '--wasm-only', '--quiet'])
     if (b.code !== 0) return { ok: false, line: 'the wasm build failed (the planner tests load the kernels)', out: b.out }
     const lines = []
-    for (const t of ['test:engine', 'test:ui']) {
+    for (const t of PLANNER_SUITES) {
       const r = sh('npm', ['run', '--silent', t])
       if (r.code !== 0) return { ok: false, line: `npm run ${t} failed`, out: r.out }
       lines.push(...r.out.trim().split('\n').filter((l) => /groups pass|^logic-vs-v1: ok|^bus: ok/.test(l)).map((l) => l.replace(/ \(seed.*$/, '').replace(': ok — ', ': ')))
@@ -182,7 +207,8 @@ const checks = {
     if (harnesses.length) {
       const k = nightly(['cargo', 'kani', '--version'], { cwd })
       if (k.code === 0) {
-        const run = nightly(['cargo', 'kani', '--workspace'], { cwd })
+        // four harnesses at a time (kernels-hardening: 244 s instead of 627 s for the 21 harnesses), one line each
+        const run = nightly(['cargo', 'kani', '--workspace', '-j', '4', '--output-format', 'terse'], { cwd })
         if (run.code !== 0) return { ok: false, line: 'Kani found a failing harness', out: run.out }
         steps.push(`Kani (${harnesses.length} file(s) with harnesses)`)
       } else steps.push(`Kani unavailable: ${harnesses.length} file(s) with harnesses not run`)

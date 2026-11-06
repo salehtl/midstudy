@@ -104,7 +104,7 @@ const lum = (rgb) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
 // --- setup ------------------------------------------------------------------------------------------------------------------
 const srv = await startServer(ev, { library: 'custom' })
-ev.check('serve.py starts (calib stub + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (calib stub + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const libItems = writeLibrary(srv.dirs.library)
 const splatItem = libItems.find((i) => i.splat) || null

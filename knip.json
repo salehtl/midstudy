@@ -6,7 +6,12 @@
     "planner/gpu/demo/demo.ts",
     "planner/gpu/demo/*.mjs",
     "server/src/main.ts",
+    "server/test/*.test.ts",
+    "server/test/lock-child.ts",
+    "server/test/scenes/*.test.ts",
+    "server/test/scenes/fake-calib.ts",
     "pipeline/src/cli.ts",
+    "pipeline/test/*.test.ts",
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",
     "scripts/*.mjs",
@@ -17,6 +22,7 @@
   "project": [
     "planner/**/*.ts",
     "server/**/*.ts",
+    "common/**/*.ts",
     "pipeline/**/*.ts",
     "core/js/**/*.ts",
     "contract/gen/**/*.{ts,js}",
@@ -29,13 +35,8 @@
     "contract/gen/**"
   ],
   "ignoreDependencies": [
-    "@gltf-transform/core",
-    "@gltf-transform/extensions",
-    "@gltf-transform/functions",
-    "fflate",
     "libheif-js",
-    "obj2gltf",
-    "parse5"
+    "obj2gltf"
   ],
   "ignoreBinaries": [
     "nix",

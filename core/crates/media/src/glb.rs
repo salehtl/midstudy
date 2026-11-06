@@ -310,14 +310,14 @@ impl core::fmt::Display for GlbError {
 }
 
 /// The chunks of a GLB.
-struct Container<'a> {
-    json: &'a [u8],
-    bin: Option<&'a [u8]>,
-    dropped_chunks: usize,
-    trailing_bytes: usize,
+pub(crate) struct Container<'a> {
+    pub(crate) json: &'a [u8],
+    pub(crate) bin: Option<&'a [u8]>,
+    pub(crate) dropped_chunks: usize,
+    pub(crate) trailing_bytes: usize,
 }
 
-fn read_container(data: &[u8]) -> Result<Container<'_>, GlbError> {
+pub(crate) fn read_container(data: &[u8]) -> Result<Container<'_>, GlbError> {
     if data.len() < 20 || !data.starts_with(MAGIC) {
         return Err(GlbError::NotGlb);
     }
@@ -532,7 +532,7 @@ fn clean_image(bytes: &[u8]) -> Result<(ImageKind, Option<Vec<u8>>), ImageProble
 
 /// `a == b`, as an OR of XORs over 64-byte blocks with no early exit, which vectorizes (in wasm, slice equality is
 /// compiler-builtins' byte-at-a-time `memcmp`).
-fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     const BLOCK: usize = 64;
     if a.len() != b.len() {
         return false;
@@ -722,7 +722,7 @@ fn check_overlaps(edits: &[ViewEdit], views: &[View]) -> Result<(), GlbError> {
 }
 
 /// How a shrinking view's freed bytes are split: `(zero padding kept after the image, bytes removed)`.
-fn split_freed(freed: usize, layout: Layout) -> (usize, usize) {
+pub(crate) fn split_freed(freed: usize, layout: Layout) -> (usize, usize) {
     match layout {
         Layout::InPlace => (freed, 0),
         Layout::Compact => {
@@ -732,7 +732,7 @@ fn split_freed(freed: usize, layout: Layout) -> (usize, usize) {
     }
 }
 
-fn pad4(len: usize) -> usize {
+pub(crate) fn pad4(len: usize) -> usize {
     len.wrapping_neg() & 3
 }
 
@@ -763,10 +763,10 @@ fn bin_buffer<'a>(
     }
 }
 
-/// Buffer 0 with each shrinking image written at its offset and followed by its zero padding (compact: the rest of
-/// the freed bytes removed). `edits` are sorted by offset and don't overlap.
-fn rebuild_bin(bin: &[u8], edits: &[ViewEdit], layout: Layout) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bin.len());
+/// Appends buffer 0 to `out` with each shrinking image written at its offset and followed by its zero padding
+/// (compact: the rest of the freed bytes removed). `edits` are sorted by offset and don't overlap. Written straight
+/// into the output file: the binary chunk, nearly all of a textured GLB, is copied once.
+fn write_bin(out: &mut Vec<u8>, bin: &[u8], edits: &[ViewEdit], layout: Layout) {
     let mut pos = 0usize;
     for e in edits {
         out.extend_from_slice(bin.get(pos..e.offset).unwrap_or_default());
@@ -776,7 +776,14 @@ fn rebuild_bin(bin: &[u8], edits: &[ViewEdit], layout: Layout) -> Vec<u8> {
         pos = e.offset.saturating_add(e.length);
     }
     out.extend_from_slice(bin.get(pos..).unwrap_or_default());
-    out
+}
+
+/// The length [`write_bin`] writes: buffer 0 less the bytes the layout removes.
+fn rebuilt_len(bin: &[u8], edits: &[ViewEdit], layout: Layout) -> usize {
+    let removed = edits.iter().fold(0usize, |sum, e| {
+        sum.saturating_add(split_freed(e.length.saturating_sub(e.clean.len()), layout).1)
+    });
+    bin.len().saturating_sub(removed)
 }
 
 /// The JSON edits a layout needs: the shrunk views' new lengths and, when bytes were removed, the new offsets of the
@@ -861,16 +868,18 @@ fn splice_json(text: &[u8], mut edits: Vec<TextEdit>) -> Vec<u8> {
     j
 }
 
-/// The GLB container around a JSON chunk and an optional binary chunk (padded with zeros to 4 bytes here).
-fn assemble(json_chunk: &[u8], bin: Option<Vec<u8>>) -> Result<Vec<u8>, GlbError> {
-    let bin = bin.map(|mut b| {
-        b.resize(b.len().saturating_add(pad4(b.len())), 0);
-        b
-    });
+/// The GLB container around a JSON chunk and an optional binary chunk (buffer 0 rewritten by [`write_bin`], padded
+/// with zeros to 4 bytes), written in one pass.
+fn assemble(
+    json_chunk: &[u8],
+    bin: Option<(&[u8], &[ViewEdit], Layout)>,
+) -> Result<Vec<u8>, GlbError> {
+    let bin_len = bin.map(|(b, edits, layout)| rebuilt_len(b, edits, layout));
+    let bin_padded = bin_len.map(|n| n.saturating_add(pad4(n)));
     let total = HEADER_LEN
         .checked_add(8)
         .and_then(|t| t.checked_add(json_chunk.len()))
-        .and_then(|t| t.checked_add(bin.as_ref().map_or(0, |b| b.len().saturating_add(8))))
+        .and_then(|t| t.checked_add(bin_padded.map_or(0, |n| n.saturating_add(8))))
         .and_then(|t| u32::try_from(t).ok())
         .ok_or(GlbError::TooLarge)?;
     let json_len = u32::try_from(json_chunk.len()).map_err(|_| GlbError::TooLarge)?;
@@ -881,11 +890,13 @@ fn assemble(json_chunk: &[u8], bin: Option<Vec<u8>>) -> Result<Vec<u8>, GlbError
     out.extend_from_slice(&json_len.to_le_bytes());
     out.extend_from_slice(&CHUNK_JSON.to_le_bytes());
     out.extend_from_slice(json_chunk);
-    if let Some(b) = &bin {
-        let bin_len = u32::try_from(b.len()).map_err(|_| GlbError::TooLarge)?;
-        out.extend_from_slice(&bin_len.to_le_bytes());
+    if let (Some((b, edits, layout)), Some(padded)) = (bin, bin_padded) {
+        let bin_len32 = u32::try_from(padded).map_err(|_| GlbError::TooLarge)?;
+        out.extend_from_slice(&bin_len32.to_le_bytes());
         out.extend_from_slice(&CHUNK_BIN.to_le_bytes());
-        out.extend_from_slice(b);
+        let start = out.len();
+        write_bin(&mut out, b, edits, layout);
+        out.resize(start.saturating_add(padded), 0);
     }
     Ok(out)
 }
@@ -934,11 +945,7 @@ pub fn strip(data: &[u8], layout: Layout) -> Result<Stripped, GlbError> {
 
     // A binary chunk is written when buffer 0 lives in it and the input had one (an empty buffer 0 may have none).
     let bin_out = match bin {
-        Some(b) if container.bin.is_some() => Some(if view_edits.is_empty() {
-            b.to_vec()
-        } else {
-            rebuild_bin(b, &view_edits, layout)
-        }),
+        Some(b) if container.bin.is_some() => Some((b, view_edits.as_slice(), layout)),
         _ => None,
     };
     let bytes = assemble(&splice_json(text, text_edits), bin_out)?;
@@ -1151,6 +1158,23 @@ pub(crate) mod tests {
 
     use proptest::prelude::*;
 
+    /// `cases` cases natively (with proptest's regression file); 4 and no file under Miri (interpreted, and isolated:
+    /// no `getcwd` to find the file).
+    fn proptest_config(cases: u32) -> ProptestConfig {
+        if cfg!(miri) {
+            ProptestConfig {
+                cases: 4,
+                failure_persistence: None,
+                ..ProptestConfig::default()
+            }
+        } else {
+            ProptestConfig {
+                cases,
+                ..ProptestConfig::default()
+            }
+        }
+    }
+
     /// One bufferView of a generated GLB: an image (a JPEG with `exif` bytes of EXIF, or a PNG with a `text`-byte
     /// tEXt chunk) or plain data, after `gap` bytes of padding.
     #[derive(Clone, Debug)]
@@ -1204,7 +1228,7 @@ pub(crate) mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 500, ..ProptestConfig::default() })]
+        #![proptest_config(proptest_config(500))]
 
         /// Both layouts: every image's bytes become exactly its stripped bytes, every other view keeps its bytes,
         /// every view moves by a multiple of 16 (not at all in place), the output strips to itself, and compact is

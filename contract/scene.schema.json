@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/scene.schema.json",
   "title": "midstudy scene (scenes/<name>/scene.json, contract §4.2 and §4.4)",
-  "description": "Written by planner/serve.py: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes.",
+  "description": "Written by the server: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes.",
   "type": "object",
   "required": ["version", "title", "created", "saved", "camera", "camera_source"],
   "additionalProperties": false,

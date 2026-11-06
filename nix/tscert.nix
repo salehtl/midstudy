@@ -185,6 +185,11 @@ let
         TSCERT_PREBUILT = "1";
         # Each TScert step's limit in seconds (TScert's default is 60, its census uses 300): the Mac is shared and loaded.
         TSCERT_STEP_LIMIT = stepLimit;
+        # The batch's second pass over tool errors must run timed-out stages again: TScert's worker processes read this
+        # when they start, so scripts/tscert.mjs setting it before the retry never reached them, and every retry
+        # replayed the first attempt's timeout ("an earlier attempt, …"; int-backend). A fresh sandbox has no earlier
+        # timeout, so the first pass is unchanged.
+        TSCERT_RETRY_TIMEOUTS = "1";
       }
       ''
         cp -R $src work

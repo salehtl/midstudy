@@ -14,6 +14,18 @@
       "project": "tscert/tsconfig.server.json"
     },
     {
+      "glob": "server/src/scenes/logic/**/*.ts",
+      "project": "tscert/tsconfig.server.json"
+    },
+    {
+      "glob": "server/src/library/logic/**/*.ts",
+      "project": "tscert/tsconfig.server.json"
+    },
+    {
+      "glob": "server/src/product/logic/**/*.ts",
+      "project": "tscert/tsconfig.server.json"
+    },
+    {
       "glob": "pipeline/src/logic/**/*.ts",
       "project": "tscert/tsconfig.pipeline.json"
     },

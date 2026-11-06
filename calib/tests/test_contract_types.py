@@ -47,11 +47,11 @@ def _keys(node: object) -> tuple[set[str], set[str]]:
     (ct.Lighting, "contract/lighting.schema.json", ()),
     (ct.LightingKey, "contract/lighting.schema.json", ("properties", "key")),
     (ct.LightingWhiteBalance, "contract/lighting.schema.json", ("properties", "white_balance")),
-    (ct.ErrorResult, "calib/src/midstudy_calib/schemas/calib-cli.schema.json", ("$defs", "error")),
-    (ct.IngestResult, "calib/src/midstudy_calib/schemas/calib-cli.schema.json", ("$defs", "ingest")),
-    (ct.LightDone, "calib/src/midstudy_calib/schemas/calib-cli.schema.json", ("$defs", "light_done")),
-    (ct.AlignResult, "calib/src/midstudy_calib/schemas/calib-cli.schema.json", ("$defs", "align")),
-    (ct.WorkerRequest, "calib/src/midstudy_calib/schemas/calib-cli.schema.json", ("$defs", "request")),
+    (ct.ErrorResult, "contract/calib-cli.schema.json", ("$defs", "error")),
+    (ct.IngestResult, "contract/calib-cli.schema.json", ("$defs", "ingest")),
+    (ct.LightDone, "contract/calib-cli.schema.json", ("$defs", "light_done")),
+    (ct.AlignResult, "contract/calib-cli.schema.json", ("$defs", "align")),
+    (ct.WorkerRequest, "contract/calib-cli.schema.json", ("$defs", "request")),
 ])
 def test_typed_dicts_have_the_schemas_keys(cls: type, file: str, path: tuple[str, ...]) -> None:
     schema = load_json(REPO / file)

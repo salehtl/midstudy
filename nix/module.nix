@@ -14,8 +14,9 @@ let
   cfg = config.services.midstudy;
   dir = cfg.dataDir;
   calib = lib.getExe cfg.package.passthru.midstudy-calib;
-  # `run` and `fit` take --device; `ingest` and `align` don't (contract §4.3). serve.py appends the subcommand and its
-  # arguments to --calib, so the device goes last. "auto" needs no shim: the CLI's own default is auto.
+  # `run`, `fit` and `light` take --device; `ingest` and `align` don't (contract §4.3); `serve --device X` makes X the
+  # device of every worker request (§4.3 Worker). The server appends the subcommand and its arguments to --calib, so
+  # the device goes last. "auto" needs no shim: the CLI's own default is auto.
   calibCmd =
     if cfg.calibDevice == "auto" then
       calib
@@ -23,7 +24,7 @@ let
       toString (
         pkgs.writeShellScript "midstudy-calib-${cfg.calibDevice}" ''
           case "$1" in
-            run | fit) exec ${calib} "$@" --device ${cfg.calibDevice} ;;
+            run | fit | light | serve) exec ${calib} "$@" --device ${cfg.calibDevice} ;;
             *) exec ${calib} "$@" ;;
           esac
         ''

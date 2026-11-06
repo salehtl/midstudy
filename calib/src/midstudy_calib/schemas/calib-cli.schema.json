@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/calib-cli.schema.json",
   "title": "midstudy-calib's results and its worker protocol (contract §4.3)",
-  "description": "The last stdout line of every one-shot command, and the JSON lines of `midstudy-calib serve` (contract §4.3 Worker). A worker response is the one-shot result of its command plus the request's `id`; one-shot results carry no `id`. Written by calib (calib/src/midstudy_calib/schemas/); calib.schema.json and lighting.schema.json are copies of contract/.",
+  "description": "The last stdout line of every one-shot command, and the JSON lines of `midstudy-calib serve` (contract §4.3 Worker). A worker response is the one-shot result of its command plus the request's `id`; one-shot results carry no `id`. The server checks every result and worker answer against it (strict mode); calib validates what it prints with its byte copy (calib/src/midstudy_calib/schemas/, written by calib/scripts/gen_contract_types.py).",
   "$defs": {
     "id": {
       "description": "Worker responses only: the request's id (null when the request had no usable id).",
@@ -40,6 +40,7 @@
           "$ref": "calib.schema.json"
         },
         {
+          "type": "object",
           "required": [
             "ok"
           ],

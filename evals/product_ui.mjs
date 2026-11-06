@@ -1,6 +1,6 @@
 // E15 eval:product-ui — Add furniture's Product page source (contract §2.11 Planner, §2.4 readProductPage), desktop
 // 1280 × 800 and phone 390 × 844 (touch: taps). The synthetic shop pages (fixtures/product-pages/) are served by
-// evals/lib/pages_server.mjs on one local port, which serve.py may fetch through MIDSTUDY_FETCH_ALLOW. fal is mocked, $0.
+// evals/lib/pages_server.mjs on one local port, which the server may fetch through MIDSTUDY_FETCH_ALLOW. fal is mocked, $0.
 // On each device: Product page is the default source; reading the rug page shows the loading state, then 3 sizes, Flat
 // rug, H 0.8 and 3 pictures; picking size 2 fills 200 × 300 and picking picture 2 marks it; the notes say where it came
 // from; nothing is added and no picture is fetched by the server before Make; Make sends the chosen picture and size
@@ -39,7 +39,7 @@ const RUG = C['ui-rug'].expect, CHAIR = C['ui-chair'].expect
 const rugPics = RUG.images.map((s) => s.replace('{base}', P))
 
 const srv = await startServer(ev, { env: { MIDSTUDY_FETCH_ALLOW: `127.0.0.1:${pages.port}` } })
-ev.check('serve.py starts (fal mocked, MIDSTUDY_FETCH_ALLOW = the pages server)', srv.up, srv.up ? `${srv.base}; pages ${P}` : srv.why)
+ev.check('the server starts (fal mocked, MIDSTUDY_FETCH_ALLOW = the pages server)', srv.up, srv.up ? `${srv.base}; pages ${P}` : srv.why)
 if (!srv.up) await ev.finish()
 if (!STUB) {
   const r = await api.send(srv.base, 'POST', '/api/library/product', { url: URLS.chair })

@@ -1,0 +1,20 @@
+# The pipeline kernels (crates/splat, crates/imaging) for Node, through wasm-bindgen: plain types across the boundary
+# (Uint8Array and numbers in, a Uint8Array envelope out), nothing that can panic across it. Built by scripts/build.mjs
+# into build/wasm/pipeline/ (Node ESM); core/js/pipeline.ts is its typed TypeScript face.
+[package]
+name = "midstudy-wasm-pipeline"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+midstudy-imaging = { path = "../imaging" }
+midstudy-splat = { path = "../splat" }
+wasm-bindgen = "=0.2.121"
+
+[lints]
+workspace = true

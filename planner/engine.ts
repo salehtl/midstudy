@@ -839,7 +839,8 @@ function splatItemCount(): number {
 const sleep = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms) })
 // The order the splats are drawn in is for the camera as it is now and every placed piece (a capture reads the frame
 // right after). The view offset (zoom, pan) doesn't change the order: it depends on the camera's position and
-// direction only.
+// direction only. The layer reads each piece's world matrix with its parents' (updateWorldMatrix(true, false)) when it
+// prepares a sort, so a piece added since the last frame sorts where it stands (v2's E13.24 race was Spark's stale one).
 async function settleSplats(): Promise<void> {
   if (!splatLayer || !splatItemCount()) return
   try { await splatLayer.settle(camera) } catch (e) { reportError('The splats were still sorting when the render was captured; try rendering again', e) }
