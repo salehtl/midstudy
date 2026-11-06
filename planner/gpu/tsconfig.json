@@ -1,0 +1,26 @@
+{
+  // Strict TypeScript for planner/gpu (the WebGPU spike, docs/notes/webgpu-spike.md). Same flags as REFACTOR.md §3
+  // check:types. The sort worker has its own config (WebWorker lib): tsconfig.worker.json.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["@webgpu/types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "useUnknownInCatchVariables": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts", "demo/*.ts"],
+  "exclude": ["sort-worker.ts"]
+}
