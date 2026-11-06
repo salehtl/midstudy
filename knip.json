@@ -9,6 +9,7 @@
     "server/test/scenes/*.test.ts",
     "server/test/scenes/fake-calib.ts",
     "pipeline/src/cli.ts",
+    "pipeline/test/*.test.ts",
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",
     "scripts/*.mjs",
