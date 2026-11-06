@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/trash.schema.json",
   "title": "Trash",
-  "description": "What the server writes beside a deleted scene or library item (contract §1, §2.8, §4.4), so that restore can bring it back. Never served. Not a file itself.",
+  "description": "What the server writes beside a deleted scene, room or library item (contract §1, §2.8, §4.4, §4.9), so that restore can bring it back. Never served. Not a file itself.",
   "$defs": {
     "scene": {
       "title": "SceneTrash",
@@ -13,6 +13,31 @@
       "properties": {
         "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
         "title": { "type": ["string", "null"] },
+        "deleted": { "type": "string", "format": "date-time" },
+        "room": {
+          "title": "SceneTrashRoom",
+          "description": "Present when the scene was a member of a room when it was deleted (contract §4.9): the room, the member's 0-based index in members and its member record. Restoring the scene puts it back into that room at min(index, number of members) with this record, when the room exists (not in the trash) and the scene isn't in another room; otherwise the scene comes back on its own.",
+          "type": "object",
+          "required": ["name", "index", "member"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+            "index": { "type": "integer", "minimum": 0 },
+            "member": { "$ref": "room.schema.json#/$defs/member" }
+          }
+        }
+      }
+    },
+    "room": {
+      "title": "RoomTrash",
+      "description": "rooms/.trash/<room>-<UTC stamp>/trash.json (contract §4.9): room.json and align.json sit beside it, the room's layouts in layouts/ inside it.",
+      "type": "object",
+      "required": ["name", "title", "created", "deleted"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "title": { "type": ["string", "null"] },
+        "created": { "type": ["string", "null"], "format": "date-time" },
         "deleted": { "type": "string", "format": "date-time" }
       }
     },

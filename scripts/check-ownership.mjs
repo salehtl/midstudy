@@ -38,7 +38,8 @@ const rules = spec.tracks[track]
 const include = rules.filter((r) => !r.startsWith('!')).map(globRe)
 const exclude = rules.filter((r) => r.startsWith('!')).map((r) => globRe(r.slice(1)))
 const shared = spec.shared_append.map(globRe)
-const notes = globRe(`docs/notes/${track}.md`)
+// a track's notes: docs/notes/<track>.md, or docs/notes/rooms-<track>.md for the rooms work (docs/ROOMS.md §5)
+const notes = { test: (p) => p === `docs/notes/${track}.md` || p === `docs/notes/rooms-${track}.md` }
 
 const owned = (p) => notes.test(p) || shared.some((r) => r.test(p)) || (include.some((r) => r.test(p)) && !exclude.some((r) => r.test(p)))
 

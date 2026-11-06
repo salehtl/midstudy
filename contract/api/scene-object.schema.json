@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/api/scene-object.schema.json",
   "title": "SceneObject",
-  "description": "The scene object (contract §4.4): each entry of GET /api/scenes, and the answer of POST /api/scenes/<name>/restore. GET /api/scenes/<name> carries the same fields (scene-detail).",
+  "description": "The scene object (contract §4.4, §4.9): each entry of GET /api/scenes, and the answer of POST /api/scenes/<name>/restore. GET /api/scenes/<name> carries the same fields (scene-detail).",
   "type": "object",
   "required": ["name", "title", "created", "saved", "photo_url", "thumb_url", "depth_url", "w", "h", "camera_source", "floor_found", "layouts", "calib_status", "calib_error"],
   "additionalProperties": false,
@@ -20,6 +20,7 @@
     "floor_found": { "description": "calib.json's floor.found; null without calib.json.", "type": ["boolean", "null"] },
     "layouts": { "description": "How many layouts the scene has.", "type": "integer", "minimum": 0 },
     "calib_status": { "description": "pending while a job is queued, running while it runs, else done when calib.json exists and the last job (if any) succeeded, else failed (also a calibration lost to a restart).", "enum": ["pending", "running", "done", "failed"] },
-    "calib_error": { "description": "The failed calibration's sentence, else null.", "type": ["string", "null"] }
+    "calib_error": { "description": "The failed calibration's sentence, else null.", "type": ["string", "null"] },
+    "room": { "description": "The room the scene is a member of, or null (contract §4.9). Optional in the schema so that a server without rooms conforms; a server with rooms always sends it.", "anyOf": [{ "$ref": "common.schema.json#/$defs/slug" }, { "type": "null" }] }
   }
 }

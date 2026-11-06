@@ -19,6 +19,7 @@
     "created": { "$ref": "common.schema.json#/$defs/dateTime" },
     "scene": { "description": "The scene rendered, or null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/slug" }, { "type": "null" }] },
     "layout": { "description": "The layout shown, or null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/slug" }, { "type": "null" }] },
+    "room": { "description": "The room the render was made in (contract §4.9): present exactly when the request named one; layout is then a room layout.", "$ref": "common.schema.json#/$defs/slug" },
     "reference": { "description": "The scene photo was sent as image 2 (nano-banana with a scene).", "type": "boolean" },
     "keep_room": { "type": "boolean" },
     "aligned": {

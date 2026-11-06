@@ -2,14 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/api/layout-deleted.schema.json",
   "title": "LayoutDeleted",
-  "description": "DELETE /api/layouts/<layout>?scene=<name> (contract §2.7): the file moved to layouts/<scene>/.trash/<layout>-<UTC stamp>.json. v1 also names the layout and scene.",
+  "description": "DELETE /api/layouts/<layout>?scene=<name> or ?room=<room> (contract §2.7, §4.9): the file moved to layouts/<scene>/.trash/<layout>-<UTC stamp>.json (a room's: layouts/@<room>/.trash/…). v1 also names the layout and scene; a room layout's answer names the room instead of the scene.",
   "type": "object",
-  "required": ["ok", "name", "scene", "trash"],
+  "required": ["ok", "name", "trash"],
   "additionalProperties": false,
+  "oneOf": [{ "required": ["scene"] }, { "required": ["room"] }],
   "properties": {
     "ok": { "const": true },
     "name": { "$ref": "common.schema.json#/$defs/slug" },
     "scene": { "$ref": "common.schema.json#/$defs/slug" },
-    "trash": { "description": "<layouts dir name>/<scene>/.trash/<layout>-<YYYYMMDD-HHMMSS>[-n].json", "type": "string", "pattern": "^[^/]+/[a-z0-9][a-z0-9-]{0,63}/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?\\.json$" }
+    "room": { "$ref": "common.schema.json#/$defs/slug" },
+    "trash": { "description": "<layouts dir name>/<scene>/.trash/<layout>-<YYYYMMDD-HHMMSS>[-n].json, or <layouts dir name>/@<room>/.trash/… for a room layout", "type": "string", "pattern": "^[^/]+/@?[a-z0-9][a-z0-9-]{0,63}/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?\\.json$" }
   }
 }

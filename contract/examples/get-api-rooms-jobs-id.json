@@ -1,0 +1,139 @@
+{
+  "route": "GET /api/rooms/jobs/{id}",
+  "contract": "§4.9",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/room-job.schema.json",
+      "type": "AlignJob",
+      "note": "waiting for a member to calibrate",
+      "body": {
+        "id": "a-20261106-101531-k3m9",
+        "kind": "align",
+        "room": "room-20261106-101530",
+        "status": "queued",
+        "created": "2026-11-06T10:15:31Z",
+        "started": null,
+        "finished": null,
+        "message": "waiting for 1 photo to calibrate",
+        "waiting_for": [
+          "scene-20261106-101502"
+        ],
+        "align": null
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/room-job.schema.json",
+      "type": "AlignJob",
+      "note": "running",
+      "body": {
+        "id": "a-20261106-101531-k3m9",
+        "kind": "align",
+        "room": "room-20261106-101530",
+        "status": "running",
+        "created": "2026-11-06T10:15:31Z",
+        "started": "2026-11-06T10:16:18Z",
+        "finished": null,
+        "message": "aligning 3 photos",
+        "waiting_for": [],
+        "align": null
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/room-job.schema.json",
+      "type": "AlignJob",
+      "note": "done: two placed, one unplaced",
+      "body": {
+        "id": "a-20261106-101531-k3m9",
+        "kind": "align",
+        "room": "room-20261106-101530",
+        "status": "done",
+        "created": "2026-11-06T10:15:31Z",
+        "started": "2026-11-06T10:16:18Z",
+        "finished": "2026-11-06T10:16:40Z",
+        "message": "aligned 2 of 3 photos (vggt); 1 left to place by hand",
+        "waiting_for": [],
+        "align": {
+          "version": 1,
+          "solver": "vggt",
+          "created": "2026-11-06T10:16:40Z",
+          "elapsed_s": 21.4,
+          "device": "mps",
+          "loop_residual_cm": null,
+          "members": [
+            {
+              "scene": "scene-20261106-101500",
+              "photo_sha256": "3f1c0e8a4b6d2f7091a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7",
+              "pose": {
+                "x_m": 0,
+                "z_m": 0,
+                "yaw_deg": 0
+              },
+              "scale": 1,
+              "confidence": 1,
+              "residual_cm": null
+            },
+            {
+              "scene": "scene-20261106-101501",
+              "photo_sha256": "9b2d4f6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c",
+              "pose": {
+                "x_m": -1.87,
+                "z_m": 0.62,
+                "yaw_deg": -29.1
+              },
+              "scale": 1.021,
+              "confidence": 0.86,
+              "residual_cm": 3.2
+            },
+            {
+              "scene": "scene-20261106-101502",
+              "photo_sha256": "c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6",
+              "pose": null,
+              "scale": null,
+              "confidence": 0,
+              "residual_cm": null
+            }
+          ],
+          "unplaced": [
+            "scene-20261106-101502"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/room-job.schema.json",
+      "type": "AlignJob",
+      "note": "failed",
+      "body": {
+        "id": "a-20261106-101531-k3m9",
+        "kind": "align",
+        "room": "room-20261106-101530",
+        "status": "failed",
+        "created": "2026-11-06T10:15:31Z",
+        "started": "2026-11-06T10:16:18Z",
+        "finished": "2026-11-06T10:16:40Z",
+        "message": "align-room needs at least two photos with depth",
+        "waiting_for": [],
+        "align": null
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "unknown job",
+      "body": {
+        "error": "there's no align job 'a-nope'"
+      }
+    }
+  ],
+  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+}

@@ -1,0 +1,56 @@
+{
+  "route": "POST /api/rooms/{room}/align",
+  "contract": "§4.9",
+  "examples": [
+    {
+      "kind": "request",
+      "schema": "midstudy/api/align-request.schema.json",
+      "type": "AlignRequest",
+      "note": "as the planner asks after New room",
+      "body": {}
+    },
+    {
+      "kind": "request",
+      "schema": "midstudy/api/align-request.schema.json",
+      "type": "AlignRequest",
+      "note": "again, replacing the poses moved by hand",
+      "body": {
+        "overwrite_manual": true
+      }
+    },
+    {
+      "kind": "response",
+      "status": 202,
+      "schema": "midstudy/api/align-accepted.schema.json",
+      "type": "AlignAccepted",
+      "note": "queued behind a calibration",
+      "body": {
+        "job": {
+          "id": "a-20261106-101531-k3m9",
+          "kind": "align",
+          "room": "room-20261106-101530",
+          "status": "queued",
+          "created": "2026-11-06T10:15:31Z",
+          "started": null,
+          "finished": null,
+          "message": "waiting for 1 photo to calibrate",
+          "waiting_for": [
+            "scene-20261106-101502"
+          ],
+          "align": null
+        }
+      }
+    },
+    {
+      "kind": "response",
+      "status": 409,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "already queued",
+      "body": {
+        "error": "room 'room-20261106-101530' is already being aligned"
+      }
+    }
+  ],
+  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+}

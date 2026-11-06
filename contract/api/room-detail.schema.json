@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-detail.schema.json",
+  "title": "RoomDetail",
+  "description": "GET /api/rooms/<room>, and the answer of POST /api/rooms (201) and PUT /api/rooms/<room> (200) (contract §4.9): room.json, each member with its scene object, its scene's camera and its effective camera, align.json (or null), and the alignment's status.",
+  "type": "object",
+  "required": ["version", "name", "title", "created", "saved", "aligned", "members", "layouts", "align", "align_status", "align_error"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "$ref": "room-object.schema.json#/properties/name" },
+    "title": { "$ref": "room-object.schema.json#/properties/title" },
+    "created": { "$ref": "room-object.schema.json#/properties/created" },
+    "saved": { "$ref": "room-object.schema.json#/properties/saved" },
+    "aligned": { "$ref": "room-object.schema.json#/properties/aligned" },
+    "members": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "title": "RoomMemberDetail",
+        "description": "A member (room.json), its scene object, the camera its scene.json uses and its effective camera: that camera with height_m × scale, clamped to 0.2–3.0 (contract §4.9).",
+        "type": "object",
+        "required": ["scene", "pose", "scale", "pose_source", "scene_object", "camera", "effective_camera"],
+        "additionalProperties": false,
+        "properties": {
+          "scene": { "$ref": "common.schema.json#/$defs/slug" },
+          "pose": { "anyOf": [{ "$ref": "../room.schema.json#/$defs/pose" }, { "type": "null" }] },
+          "scale": { "$ref": "../room.schema.json#/$defs/scale" },
+          "pose_source": { "$ref": "../room.schema.json#/$defs/poseSource" },
+          "scene_object": { "$ref": "scene-object.schema.json" },
+          "camera": { "$ref": "../calib.schema.json#/$defs/camera" },
+          "effective_camera": { "$ref": "../calib.schema.json#/$defs/camera" }
+        }
+      }
+    },
+    "layouts": { "$ref": "room-object.schema.json#/properties/layouts" },
+    "align": { "description": "rooms/<room>/align.json as it is (the solver's last answer), or null without one (or when it can't be read).", "anyOf": [{ "$ref": "../align.schema.json" }, { "type": "null" }] },
+    "align_status": { "$ref": "room-object.schema.json#/$defs/alignStatus" },
+    "align_error": { "$ref": "room-object.schema.json#/properties/align_error" }
+  }
+}

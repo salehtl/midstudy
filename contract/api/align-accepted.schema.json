@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/align-accepted.schema.json",
+  "title": "AlignAccepted",
+  "description": "202 of POST /api/rooms/<room>/align (contract §4.9 Align): the queued job.",
+  "type": "object",
+  "required": ["job"],
+  "additionalProperties": false,
+  "properties": {
+    "job": { "$ref": "room-job.schema.json" }
+  }
+}

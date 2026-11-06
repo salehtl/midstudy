@@ -131,6 +131,241 @@
         }
       }
     },
+    "Align": {
+      "description": "rooms/<room>/align.json (contract §4.3 align-room, §4.9): the pose solver's last answer for a room's photos, written atomically by `midstudy-calib align-room` (never by the server). Poses and scales are relative to the first scene folder the command was given (pose {0, 0, 0}, scale 1), in the §4.9 convention. `align-room` prints the same object plus \"ok\": true as its last stdout line. Keys not listed here are allowed at the top level for diagnostics; readers ignore them.",
+      "type": "object",
+      "required": [
+        "version",
+        "solver",
+        "created",
+        "elapsed_s",
+        "device",
+        "loop_residual_cm",
+        "members",
+        "unplaced"
+      ],
+      "additionalProperties": {},
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "solver": {
+          "description": "Which solver answered: manhattan (the no-ML fallback), the chosen learned solver's name (e.g. vggt, mast3r, solv3r; Gate A, docs/ROOMS.md §5), truth (the golden room fixtures' mock answers), none (nothing could be placed: the mock without a match, or every solver failed).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "created": {
+          "description": "When the answer was written, ISO-8601 UTC.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "elapsed_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "device": {
+          "enum": [
+            "mps",
+            "cuda",
+            "cpu",
+            null
+          ]
+        },
+        "loop_residual_cm": {
+          "description": "How far the poses disagree around closed loops of overlapping photos (cm), or null when there is no loop (fewer than three placed photos, or a chain).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "members": {
+          "description": "Every scene folder given, in the order given. members[0] is the frame: pose {0, 0, 0}, scale 1, confidence 1, residual_cm null.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/AlignMember"
+          }
+        },
+        "unplaced": {
+          "description": "The scenes of the members whose pose is null, in member order (never members[0]).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          }
+        }
+      }
+    },
+    "AlignAccepted": {
+      "description": "202 of POST /api/rooms/<room>/align (contract §4.9 Align): the queued job.",
+      "type": "object",
+      "required": [
+        "job"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "job": {
+          "$ref": "#/definitions/AlignJob"
+        }
+      }
+    },
+    "AlignJob": {
+      "description": "An align job (contract §4.9 Align): runs `align-room` on the calibration queue. GET /api/rooms/jobs/<id>, inside the jobs list and the 202 of POST /api/rooms/<room>/align. In memory: a restart forgets them.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "room",
+        "status",
+        "created",
+        "started",
+        "finished",
+        "message",
+        "waiting_for",
+        "align"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "a-…, e.g. a-20261106-101500-ab12.",
+          "type": "string",
+          "pattern": "^a-[0-9a-z-]+$"
+        },
+        "kind": {
+          "const": "align"
+        },
+        "room": {
+          "$ref": "#/definitions/Slug"
+        },
+        "status": {
+          "$ref": "#/definitions/JobStatus"
+        },
+        "created": {
+          "$ref": "#/definitions/DateTime"
+        },
+        "started": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "description": "A human-readable status line; a failed job's is the tool's error sentence.",
+          "type": "string"
+        },
+        "waiting_for": {
+          "description": "While queued: the member scenes it waits for (calibration pending or running); empty otherwise.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Slug"
+          }
+        },
+        "align": {
+          "description": "The answer (align.json) once done, else null.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Align"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AlignMember": {
+      "description": "One photo's answer. pose and scale are both null (unplaced) or both set.",
+      "type": "object",
+      "required": [
+        "scene",
+        "photo_sha256",
+        "pose",
+        "scale",
+        "confidence",
+        "residual_cm"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scene": {
+          "description": "The scene folder's name (the last path segment of its argument).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "photo_sha256": {
+          "description": "SHA-256 of the scene's photo.jpg as it was read (lowercase hex): an answer for a photo since replaced is stale.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "pose": {
+          "description": "Relative to members[0], or null when the solver couldn't place this photo.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pose"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "description": "This photo's scale relative to members[0] (multiplies its camera's height_m), or null when unplaced.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MemberScale"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "description": "0–1: how sure the solver is of this pose (0 when unplaced). The planner flags a placed photo below 0.5.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "residual_cm": {
+          "description": "The median distance between this photo's depth points and the other placed photos' where they overlap, after alignment (cm); null for members[0], when unplaced, or when it overlaps no other placed photo.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "AlignRequest": {
+      "description": "POST /api/rooms/<room>/align (contract §4.9 Align): no body, or this object. 409 while an align job for the room is queued or running, or when fewer than two members have a photo.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "solver": {
+          "description": "align-room's --solver (default auto).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "overwrite_manual": {
+          "description": "Also replace the poses of manual members with the answer (default false: they keep theirs).",
+          "type": "boolean"
+        }
+      }
+    },
     "AlignResult": {
       "type": "object",
       "required": [
@@ -162,6 +397,16 @@
           "type": "string"
         }
       }
+    },
+    "AlignStatus": {
+      "description": "pending while an align job is queued (also while it waits for members to calibrate), running while it runs; else done when align.json exists and the last align job (if any since the server started) succeeded; failed when the last one failed; none when the room was never aligned (no align.json, no job).",
+      "enum": [
+        "none",
+        "pending",
+        "running",
+        "done",
+        "failed"
+      ]
     },
     "ApiError": {
       "description": "Every /api error answer (contract §2.1): one sentence. Routes with richer errors name their own schema in routes.json (402: spend-refused, product: product-error).",
@@ -439,6 +684,29 @@
         }
       }
     },
+    "CalibCliAlignRoom": {
+      "description": "`align-room` (contract §4.3, §4.9): align.json's contents (align.schema.json) plus \"ok\": true; the same object the command wrote to <room-dir>/align.json.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Align"
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "id": {
+              "$ref": "#/definitions/CalibCliId"
+            }
+          },
+          "additionalProperties": {}
+        }
+      ]
+    },
     "CalibCliError": {
       "description": "Any command that failed: exit 1 (one-shot), the same sentence as the last stderr line after `midstudy-calib: `.",
       "type": "object",
@@ -597,7 +865,8 @@
             "fit",
             "light",
             "align",
-            "ingest"
+            "ingest",
+            "align-room"
           ]
         },
         "args": {
@@ -911,12 +1180,11 @@
       "pattern": "^data:image/jpe?g;base64,[A-Za-z0-9+/=\\s]+$"
     },
     "Layout": {
-      "description": "A scene's furniture placement. Every layout belongs to one scene; there are no scene-less layouts. The camera is the scene's (scene.json), not the layout's.",
+      "description": "A scene's or a room's furniture placement. Every layout belongs to exactly one scene (scene_name) or exactly one room (room_name, contract §4.9), never both, never neither. The camera is the scene's (scene.json), not the layout's; a room layout's positions and rotations are in the room frame.",
       "type": "object",
       "required": [
         "version",
         "name",
-        "scene_name",
         "items"
       ],
       "additionalProperties": false,
@@ -937,7 +1205,12 @@
           "maxLength": 120
         },
         "scene_name": {
-          "description": "The scene this layout belongs to (its folder name, e.g. scene-20261104-201500). The server sets it from ?scene=.",
+          "description": "The scene this layout belongs to (its folder name, e.g. scene-20261104-201500). The server sets it from ?scene=. Exactly one of scene_name and room_name.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "room_name": {
+          "description": "The room this layout belongs to (contract §4.9; its folder name, e.g. room-20261106-101500). The server sets it from ?room=. Exactly one of scene_name and room_name.",
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
         },
@@ -971,12 +1244,11 @@
       }
     },
     "LayoutDeleted": {
-      "description": "DELETE /api/layouts/<layout>?scene=<name> (contract §2.7): the file moved to layouts/<scene>/.trash/<layout>-<UTC stamp>.json. v1 also names the layout and scene.",
+      "description": "DELETE /api/layouts/<layout>?scene=<name> or ?room=<room> (contract §2.7, §4.9): the file moved to layouts/<scene>/.trash/<layout>-<UTC stamp>.json (a room's: layouts/@<room>/.trash/…). v1 also names the layout and scene; a room layout's answer names the room instead of the scene.",
       "type": "object",
       "required": [
         "ok",
         "name",
-        "scene",
         "trash"
       ],
       "additionalProperties": false,
@@ -990,10 +1262,13 @@
         "scene": {
           "$ref": "#/definitions/Slug"
         },
+        "room": {
+          "$ref": "#/definitions/Slug"
+        },
         "trash": {
-          "description": "<layouts dir name>/<scene>/.trash/<layout>-<YYYYMMDD-HHMMSS>[-n].json",
+          "description": "<layouts dir name>/<scene>/.trash/<layout>-<YYYYMMDD-HHMMSS>[-n].json, or <layouts dir name>/@<room>/.trash/… for a room layout",
           "type": "string",
-          "pattern": "^[^/]+/[a-z0-9][a-z0-9-]{0,63}/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?\\.json$"
+          "pattern": "^[^/]+/@?[a-z0-9][a-z0-9-]{0,63}/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?\\.json$"
         }
       }
     },
@@ -1139,7 +1414,7 @@
       }
     },
     "LayoutPut": {
-      "description": "PUT /api/layouts/<layout>?scene=<name> (contract §2.7): a layout (layout.schema.json); the server sets name, scene_name and updated, and answers the stored layout. v1 also fills a missing uid (<id>-<n>), render (glb) and rotation_y_deg (0), so only id and position are required of an item.",
+      "description": "PUT /api/layouts/<layout>?scene=<name> or ?room=<room> (contract §2.7, §4.9): a layout (layout.schema.json); the server sets name, scene_name or room_name (from the query; the other is dropped) and updated, and answers the stored layout. v1 also fills a missing uid (<id>-<n>), render (glb) and rotation_y_deg (0), so only id and position are required of an item.",
       "type": "object",
       "required": [
         "items"
@@ -1160,6 +1435,9 @@
           ]
         },
         "scene_name": {
+          "$ref": "#/definitions/Slug"
+        },
+        "room_name": {
           "$ref": "#/definitions/Slug"
         },
         "library": {
@@ -2147,6 +2425,12 @@
         }
       }
     },
+    "MemberScale": {
+      "description": "Multiplies the member scene's camera height_m to give its effective camera (contract §4.9); clamped to 0.25–4 by every writer.",
+      "type": "number",
+      "minimum": 0.25,
+      "maximum": 4
+    },
     "Percent": {
       "type": "number",
       "minimum": 0
@@ -2155,6 +2439,64 @@
       "description": "A PNG as a base64 data URI.",
       "type": "string",
       "pattern": "^data:image/png;base64,[A-Za-z0-9+/=\\s]+$"
+    },
+    "Pose": {
+      "description": "Where a member photo was taken, in the room frame (contract §4.9 Frames): its scene frame maps to the room frame by p_room = Ry(yaw) · p_scene + (x_m, 0, z_m). Every writer clamps x_m and z_m to −50…50 and brings yaw_deg into (−180, 180].",
+      "type": "object",
+      "required": [
+        "x_m",
+        "z_m",
+        "yaw_deg"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "x_m": {
+          "type": "number",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "z_m": {
+          "type": "number",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "yaw_deg": {
+          "description": "Positive is counterclockwise seen from above (+X turns toward −Z), the sign of rotation_y_deg.",
+          "type": "number",
+          "exclusiveMinimum": -180,
+          "maximum": 180
+        }
+      }
+    },
+    "PosePut": {
+      "description": "A pose as the client sends it: any numbers (the server clamps x_m and z_m to −50…50 and brings yaw_deg into (−180, 180]).",
+      "type": "object",
+      "required": [
+        "x_m",
+        "z_m",
+        "yaw_deg"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "x_m": {
+          "type": "number"
+        },
+        "z_m": {
+          "type": "number"
+        },
+        "yaw_deg": {
+          "type": "number"
+        }
+      }
+    },
+    "PoseSource": {
+      "description": "origin: set when the room was created, on its first member (pose {0, 0, 0}); solver: from an align result; manual: the user moved or turned it (an align never overwrites it unless asked); unplaced: no pose (pose is null): just added, or the solver couldn't place it.",
+      "enum": [
+        "origin",
+        "solver",
+        "manual",
+        "unplaced"
+      ]
     },
     "ProductError": {
       "description": "A 4xx of POST /api/library/product (contract §2.11): one sentence; blocked: true when the shop refuses automatic reading (422).",
@@ -2377,7 +2719,7 @@
       "minLength": 1
     },
     "RenderList": {
-      "description": "GET /api/renders[?scene=<name>] (contract §2.6, §4.7): newest first.",
+      "description": "GET /api/renders[?scene=<name>][&room=<room>] (contract §2.6, §4.7, §4.9): newest first; ?scene= keeps one photo's renders (with or without a room), ?room= keeps the renders made in that room.",
       "type": "object",
       "required": [
         "renders",
@@ -2497,6 +2839,9 @@
             }
           ]
         },
+        "room": {
+          "$ref": "#/definitions/Slug"
+        },
         "reference": {
           "description": "The scene photo was sent as image 2 (nano-banana with a scene).",
           "type": "boolean"
@@ -2569,8 +2914,11 @@
           "$ref": "#/definitions/Slug"
         },
         "layout": {
-          "description": "The layout shown; a value that isn't a slug is recorded as null.",
+          "description": "The layout shown; a value that isn't a slug is recorded as null. With room, a room layout.",
           "type": "string"
+        },
+        "room": {
+          "$ref": "#/definitions/Slug"
         },
         "keep_room": {
           "description": "Keep room exact (§4.7): needs scene and mask.",
@@ -2589,6 +2937,556 @@
       },
       "minItems": 3,
       "maxItems": 3
+    },
+    "Room": {
+      "description": "rooms/<room>/room.json (contract §4.9): several scenes (photos of one room) in one shared frame, the room frame. Written by the server only: created by POST /api/rooms, changed by PUT /api/rooms/<room>, by an align job that finishes (§4.9 Align), by Set scale and by deleting or restoring a member scene. The folder name is the room's name; it never changes. Joining a room never rewrites a scene's scene.json.",
+      "type": "object",
+      "required": [
+        "version",
+        "name",
+        "title",
+        "created",
+        "saved",
+        "members",
+        "aligned"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "name": {
+          "description": "room-YYYYMMDD-HHMMSS (UTC of the POST), -2, -3… on collision; the folder name.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "title": {
+          "description": "Free text (trimmed, at most 200 characters), or null (shows the date).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "created": {
+          "description": "When the room was created, ISO-8601 UTC.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "saved": {
+          "description": "The last change to anything but the title (members, poses, scales, an align result applied), ISO-8601 UTC; null until then.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "members": {
+          "description": "The member scenes in order (the photo strip's order, numbered from 1). A scene is in at most one room. At most 32. May be empty (every member deleted); the room stays until it is deleted.",
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/RoomMember"
+          }
+        },
+        "aligned": {
+          "description": "The last align result the server applied (§4.9 Align): which solver and when, or null when none was.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/RoomAlignApplied"
+            }
+          ]
+        }
+      }
+    },
+    "RoomAlignApplied": {
+      "type": "object",
+      "required": [
+        "solver",
+        "finished"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "solver": {
+          "description": "Which solver answered: manhattan (the no-ML fallback), the chosen learned solver's name (e.g. vggt, mast3r, solv3r; Gate A, docs/ROOMS.md §5), truth (the golden room fixtures' mock answers), none (nothing could be placed: the mock without a match, or every solver failed).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "finished": {
+          "description": "When the align job finished, ISO-8601 UTC.",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RoomCreate": {
+      "description": "POST /api/rooms (contract §4.9): a new room of existing scenes, in this order. The first becomes the origin (pose {0, 0, 0}, pose_source origin), the others unplaced; every scale 1. Nothing is aligned until POST /api/rooms/<room>/align. 400 for a duplicate scene or a bad title, 404 for a scene that doesn't exist, 409 for a scene already in a room.",
+      "type": "object",
+      "required": [
+        "scenes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "description": "Trimmed; at most 200 characters after that (400 otherwise); blank or null means none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          }
+        }
+      }
+    },
+    "RoomDeleted": {
+      "description": "200 of DELETE /api/rooms/<room> (contract §4.9): the room's folder and layouts/@<room>/ moved to rooms/.trash/<room>-<UTC stamp>; its scenes stay where they are, in no room.",
+      "type": "object",
+      "required": [
+        "ok",
+        "trash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "trash": {
+          "description": "<rooms dir name>/.trash/<room>-<YYYYMMDD-HHMMSS>[-n]",
+          "type": "string",
+          "pattern": "^[^/]+/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?$"
+        }
+      }
+    },
+    "RoomDetail": {
+      "description": "GET /api/rooms/<room>, and the answer of POST /api/rooms (201) and PUT /api/rooms/<room> (200) (contract §4.9): room.json, each member with its scene object, its scene's camera and its effective camera, align.json (or null), and the alignment's status.",
+      "type": "object",
+      "required": [
+        "version",
+        "name",
+        "title",
+        "created",
+        "saved",
+        "aligned",
+        "members",
+        "layouts",
+        "align",
+        "align_status",
+        "align_error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/definitions/Slug"
+        },
+        "title": {
+          "description": "Free text (trimmed, at most 200 characters), or null (shows the date).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "created": {
+          "$ref": "#/definitions/DateTime"
+        },
+        "saved": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aligned": {
+          "description": "The last align result the server applied (§4.9 Align): which solver and when, or null when none was.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/RoomAlignApplied"
+            }
+          ]
+        },
+        "members": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/RoomMemberDetail"
+          }
+        },
+        "layouts": {
+          "description": "How many room layouts it has (layouts/@<room>/).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "align": {
+          "description": "rooms/<room>/align.json as it is (the solver's last answer), or null without one (or when it can't be read).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Align"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "align_status": {
+          "$ref": "#/definitions/AlignStatus"
+        },
+        "align_error": {
+          "description": "The failed align job's sentence, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RoomJobs": {
+      "description": "GET /api/rooms/jobs (contract §4.9): align jobs, newest first. They run on the calibration queue but are listed here, not in GET /api/scenes/jobs.",
+      "type": "object",
+      "required": [
+        "jobs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AlignJob"
+          }
+        }
+      }
+    },
+    "RoomList": {
+      "description": "GET /api/rooms (contract §4.9): the rooms newest first (by created, ties by the name's collision suffix as a number, as scenes), and the deleted rooms newest first.",
+      "type": "object",
+      "required": [
+        "rooms",
+        "trash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rooms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RoomObject"
+          }
+        },
+        "trash": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TrashedRoom"
+          }
+        }
+      }
+    },
+    "RoomMember": {
+      "description": "One member photo. pose is null exactly when pose_source is unplaced.",
+      "type": "object",
+      "required": [
+        "scene",
+        "pose",
+        "scale",
+        "pose_source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scene": {
+          "description": "The member scene's name (scenes/<scene>/).",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "pose": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pose"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "$ref": "#/definitions/MemberScale"
+        },
+        "pose_source": {
+          "$ref": "#/definitions/PoseSource"
+        }
+      }
+    },
+    "RoomMemberDetail": {
+      "description": "A member (room.json), its scene object, the camera its scene.json uses and its effective camera: that camera with height_m × scale, clamped to 0.2–3.0 (contract §4.9).",
+      "type": "object",
+      "required": [
+        "scene",
+        "pose",
+        "scale",
+        "pose_source",
+        "scene_object",
+        "camera",
+        "effective_camera"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scene": {
+          "$ref": "#/definitions/Slug"
+        },
+        "pose": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pose"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "$ref": "#/definitions/MemberScale"
+        },
+        "pose_source": {
+          "$ref": "#/definitions/PoseSource"
+        },
+        "scene_object": {
+          "$ref": "#/definitions/SceneObject"
+        },
+        "camera": {
+          "$ref": "#/definitions/Camera"
+        },
+        "effective_camera": {
+          "$ref": "#/definitions/Camera"
+        }
+      }
+    },
+    "RoomMemberObject": {
+      "description": "A member (room.json) and its scene object (§4.4).",
+      "type": "object",
+      "required": [
+        "scene",
+        "pose",
+        "scale",
+        "pose_source",
+        "scene_object"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scene": {
+          "$ref": "#/definitions/Slug"
+        },
+        "pose": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Pose"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "$ref": "#/definitions/MemberScale"
+        },
+        "pose_source": {
+          "$ref": "#/definitions/PoseSource"
+        },
+        "scene_object": {
+          "$ref": "#/definitions/SceneObject"
+        }
+      }
+    },
+    "RoomMemberPut": {
+      "type": "object",
+      "required": [
+        "scene"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scene": {
+          "$ref": "#/definitions/Slug"
+        },
+        "pose": {
+          "description": "Numbers are clamped and yaw brought into (−180, 180].",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PosePut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "description": "Clamped to 0.25–4.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "RoomObject": {
+      "description": "The room object (contract §4.9): each entry of GET /api/rooms, and the answer of POST /api/rooms/<room>/restore. room.json's fields, each member with its scene object, the number of room layouts and the alignment's status. GET /api/rooms/<room> carries more (room-detail).",
+      "type": "object",
+      "required": [
+        "name",
+        "title",
+        "created",
+        "saved",
+        "aligned",
+        "members",
+        "layouts",
+        "align_status",
+        "align_error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/Slug"
+        },
+        "title": {
+          "description": "Free text (trimmed, at most 200 characters), or null (shows the date).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
+        "created": {
+          "$ref": "#/definitions/DateTime"
+        },
+        "saved": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aligned": {
+          "description": "The last align result the server applied (§4.9 Align): which solver and when, or null when none was.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/RoomAlignApplied"
+            }
+          ]
+        },
+        "members": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/RoomMemberObject"
+          }
+        },
+        "layouts": {
+          "description": "How many room layouts it has (layouts/@<room>/).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "align_status": {
+          "$ref": "#/definitions/AlignStatus"
+        },
+        "align_error": {
+          "description": "The failed align job's sentence, else null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RoomPut": {
+      "description": "PUT /api/rooms/<room> (contract §4.9 Changes): any of title, members, reset and rescale, applied in that order. Numbers are clamped (pose and scale ranges of room.schema.json); unknown keys or bad values are 400, an unknown scene 404, a scene in another room 409, reset without align.json 409. Answers the room (room-detail).",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "description": "Trimmed; at most 200 characters after that (400 otherwise); blank or null removes it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "members": {
+          "description": "The whole new member list, in order: a scene not listed leaves the room (its pose is forgotten), a new one joins (unplaced, scale 1, unless it carries a pose), the order is the new order. Per entry, a pose that differs from the stored one is stored with pose_source manual (null makes it unplaced); a scale is stored as given (clamped), its pose_source unchanged.",
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/RoomMemberPut"
+          }
+        },
+        "reset": {
+          "description": "Align photos' Reset: these members go back to align.json's answer, re-expressed in the room frame as an align result is applied (§4.9 Align), with pose_source solver (unplaced when align.json doesn't place them); an origin member is left as it is. Members not in the room are 400.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          }
+        },
+        "rescale": {
+          "description": "The room's Set scale: multiplies every member's scale and every pose's x_m and z_m by this factor (then clamps); pose_source is unchanged; layouts are not rewritten (as a scene's Set scale).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "RoomTrash": {
+      "description": "rooms/.trash/<room>-<UTC stamp>/trash.json (contract §4.9): room.json and align.json sit beside it, the room's layouts in layouts/ inside it.",
+      "type": "object",
+      "required": [
+        "name",
+        "title",
+        "created",
+        "deleted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "deleted": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
     },
     "Scene": {
       "description": "Written by the server: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes.",
@@ -2817,6 +3715,17 @@
             "null"
           ]
         },
+        "room": {
+          "description": "The room the scene is a member of, or null (contract §4.9). Optional in the schema so that a server without rooms conforms; a server with rooms always sends it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Slug"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "calib": {
           "description": "calib.json without exif.make and exif.model, or null.",
           "anyOf": [
@@ -2923,7 +3832,7 @@
       }
     },
     "SceneObject": {
-      "description": "The scene object (contract §4.4): each entry of GET /api/scenes, and the answer of POST /api/scenes/<name>/restore. GET /api/scenes/<name> carries the same fields (scene-detail).",
+      "description": "The scene object (contract §4.4, §4.9): each entry of GET /api/scenes, and the answer of POST /api/scenes/<name>/restore. GET /api/scenes/<name> carries the same fields (scene-detail).",
       "type": "object",
       "required": [
         "name",
@@ -3038,6 +3947,17 @@
             "string",
             "null"
           ]
+        },
+        "room": {
+          "description": "The room the scene is a member of, or null (contract §4.9). Optional in the schema so that a server without rooms conforms; a server with rooms always sends it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Slug"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3110,6 +4030,32 @@
         "deleted": {
           "type": "string",
           "format": "date-time"
+        },
+        "room": {
+          "$ref": "#/definitions/SceneTrashRoom"
+        }
+      }
+    },
+    "SceneTrashRoom": {
+      "description": "Present when the scene was a member of a room when it was deleted (contract §4.9): the room, the member's 0-based index in members and its member record. Restoring the scene puts it back into that room at min(index, number of members) with this record, when the room exists (not in the trash) and the scene isn't in another room; otherwise the scene comes back on its own.",
+      "type": "object",
+      "required": [
+        "name",
+        "index",
+        "member"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "member": {
+          "$ref": "#/definitions/RoomMember"
         }
       }
     },
@@ -3234,6 +4180,40 @@
         },
         "name": {
           "type": "string"
+        },
+        "deleted": {
+          "$ref": "#/definitions/DateTime"
+        }
+      }
+    },
+    "TrashedRoom": {
+      "type": "object",
+      "required": [
+        "name",
+        "title",
+        "created",
+        "deleted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/Slug"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "deleted": {
           "$ref": "#/definitions/DateTime"

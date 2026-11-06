@@ -1,0 +1,198 @@
+{
+  "route": "GET /api/rooms/{room}",
+  "contract": "§4.9",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/room-detail.schema.json",
+      "type": "RoomDetail",
+      "note": "aligned; the second photo moved by hand, the third unplaced",
+      "body": {
+        "version": 1,
+        "name": "room-20261106-101530",
+        "title": "Living room",
+        "created": "2026-11-06T10:15:30Z",
+        "saved": "2026-11-06T10:17:02Z",
+        "aligned": {
+          "solver": "vggt",
+          "finished": "2026-11-06T10:16:40Z"
+        },
+        "members": [
+          {
+            "scene": "scene-20261106-101500",
+            "pose": {
+              "x_m": 0,
+              "z_m": 0,
+              "yaw_deg": 0
+            },
+            "scale": 1,
+            "pose_source": "origin",
+            "scene_object": {
+              "name": "scene-20261106-101500",
+              "title": null,
+              "created": "2026-11-06T10:15:00Z",
+              "saved": null,
+              "photo_url": "/scenes/scene-20261106-101500/photo.jpg?v=1794000000",
+              "thumb_url": "/scenes/scene-20261106-101500/thumb.jpg?v=1794000001",
+              "depth_url": "/scenes/scene-20261106-101500/depth.png?v=1794000000",
+              "w": 1600,
+              "h": 1200,
+              "camera_source": "auto",
+              "floor_found": true,
+              "layouts": 0,
+              "calib_status": "done",
+              "calib_error": null,
+              "room": "room-20261106-101530"
+            },
+            "camera": {
+              "fov_y_deg": 55,
+              "height_m": 1.4,
+              "pitch_deg": -10,
+              "roll_deg": 0
+            },
+            "effective_camera": {
+              "fov_y_deg": 55,
+              "height_m": 1.4,
+              "pitch_deg": -10,
+              "roll_deg": 0
+            }
+          },
+          {
+            "scene": "scene-20261106-101501",
+            "pose": {
+              "x_m": -1.9,
+              "z_m": 0.6,
+              "yaw_deg": -29.4
+            },
+            "scale": 1.021,
+            "pose_source": "manual",
+            "scene_object": {
+              "name": "scene-20261106-101501",
+              "title": null,
+              "created": "2026-11-06T10:15:01Z",
+              "saved": null,
+              "photo_url": "/scenes/scene-20261106-101501/photo.jpg?v=1794000000",
+              "thumb_url": "/scenes/scene-20261106-101501/thumb.jpg?v=1794000001",
+              "depth_url": "/scenes/scene-20261106-101501/depth.png?v=1794000000",
+              "w": 1600,
+              "h": 1200,
+              "camera_source": "auto",
+              "floor_found": true,
+              "layouts": 0,
+              "calib_status": "done",
+              "calib_error": null,
+              "room": "room-20261106-101530"
+            },
+            "camera": {
+              "fov_y_deg": 60,
+              "height_m": 1.5,
+              "pitch_deg": -12,
+              "roll_deg": 1
+            },
+            "effective_camera": {
+              "fov_y_deg": 60,
+              "height_m": 1.5315,
+              "pitch_deg": -12,
+              "roll_deg": 1
+            }
+          },
+          {
+            "scene": "scene-20261106-101502",
+            "pose": null,
+            "scale": 1,
+            "pose_source": "unplaced",
+            "scene_object": {
+              "name": "scene-20261106-101502",
+              "title": null,
+              "created": "2026-11-06T10:15:02Z",
+              "saved": null,
+              "photo_url": "/scenes/scene-20261106-101502/photo.jpg?v=1794000000",
+              "thumb_url": "/scenes/scene-20261106-101502/thumb.jpg?v=1794000001",
+              "depth_url": "/scenes/scene-20261106-101502/depth.png?v=1794000000",
+              "w": 1600,
+              "h": 1200,
+              "camera_source": "auto",
+              "floor_found": true,
+              "layouts": 0,
+              "calib_status": "done",
+              "calib_error": null,
+              "room": "room-20261106-101530"
+            },
+            "camera": {
+              "fov_y_deg": 58,
+              "height_m": 1.35,
+              "pitch_deg": -15,
+              "roll_deg": -1.5
+            },
+            "effective_camera": {
+              "fov_y_deg": 58,
+              "height_m": 1.35,
+              "pitch_deg": -15,
+              "roll_deg": -1.5
+            }
+          }
+        ],
+        "layouts": 1,
+        "align": {
+          "version": 1,
+          "solver": "vggt",
+          "created": "2026-11-06T10:16:40Z",
+          "elapsed_s": 21.4,
+          "device": "mps",
+          "loop_residual_cm": null,
+          "members": [
+            {
+              "scene": "scene-20261106-101500",
+              "photo_sha256": "3f1c0e8a4b6d2f7091a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7",
+              "pose": {
+                "x_m": 0,
+                "z_m": 0,
+                "yaw_deg": 0
+              },
+              "scale": 1,
+              "confidence": 1,
+              "residual_cm": null
+            },
+            {
+              "scene": "scene-20261106-101501",
+              "photo_sha256": "9b2d4f6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c",
+              "pose": {
+                "x_m": -1.87,
+                "z_m": 0.62,
+                "yaw_deg": -29.1
+              },
+              "scale": 1.021,
+              "confidence": 0.86,
+              "residual_cm": 3.2
+            },
+            {
+              "scene": "scene-20261106-101502",
+              "photo_sha256": "c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6",
+              "pose": null,
+              "scale": null,
+              "confidence": 0,
+              "residual_cm": null
+            }
+          ],
+          "unplaced": [
+            "scene-20261106-101502"
+          ]
+        },
+        "align_status": "done",
+        "align_error": null
+      }
+    },
+    {
+      "kind": "response",
+      "status": 404,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "unknown room",
+      "body": {
+        "error": "there's no room 'room-20261106-999999'"
+      }
+    }
+  ],
+  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+}

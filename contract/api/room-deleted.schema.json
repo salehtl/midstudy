@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-deleted.schema.json",
+  "title": "RoomDeleted",
+  "description": "200 of DELETE /api/rooms/<room> (contract §4.9): the room's folder and layouts/@<room>/ moved to rooms/.trash/<room>-<UTC stamp>; its scenes stay where they are, in no room.",
+  "type": "object",
+  "required": ["ok", "trash"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "const": true },
+    "trash": { "description": "<rooms dir name>/.trash/<room>-<YYYYMMDD-HHMMSS>[-n]", "type": "string", "pattern": "^[^/]+/\\.trash/[a-z0-9][a-z0-9-]{0,63}-\\d{8}-\\d{6}(-\\d+)?$" }
+  }
+}

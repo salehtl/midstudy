@@ -46,9 +46,10 @@ export const routes = Object.freeze({
     {
       "method": "GET",
       "path": "/api/renders",
-      "contract": "§2.6, §4.7",
+      "contract": "§2.6, §4.7, §4.9",
       "query": [
-        "scene"
+        "scene",
+        "room"
       ],
       "responses": {
         "200": "midstudy/api/render-list.schema.json"
@@ -57,9 +58,10 @@ export const routes = Object.freeze({
     {
       "method": "GET",
       "path": "/api/layouts",
-      "contract": "§2.7",
+      "contract": "§2.7, §4.9",
       "query": [
-        "scene"
+        "scene",
+        "room"
       ],
       "responses": {
         "200": "midstudy/api/layout-list.schema.json"
@@ -68,9 +70,10 @@ export const routes = Object.freeze({
     {
       "method": "GET",
       "path": "/api/layouts/{layout}",
-      "contract": "§2.7",
+      "contract": "§2.7, §4.9",
       "query": [
-        "scene"
+        "scene",
+        "room"
       ],
       "responses": {
         "200": "midstudy/layout.schema.json"
@@ -79,9 +82,10 @@ export const routes = Object.freeze({
     {
       "method": "PUT",
       "path": "/api/layouts/{layout}",
-      "contract": "§2.7",
+      "contract": "§2.7, §4.9",
       "query": [
-        "scene"
+        "scene",
+        "room"
       ],
       "request": {
         "body": "midstudy/api/layout-put.schema.json"
@@ -93,9 +97,10 @@ export const routes = Object.freeze({
     {
       "method": "DELETE",
       "path": "/api/layouts/{layout}",
-      "contract": "§2.7",
+      "contract": "§2.7, §4.9",
       "query": [
-        "scene"
+        "scene",
+        "room"
       ],
       "responses": {
         "200": "midstudy/api/layout-deleted.schema.json"
@@ -302,6 +307,87 @@ export const routes = Object.freeze({
       "contract": "§4.4",
       "responses": {
         "200": "midstudy/api/scene-object.schema.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms",
+      "contract": "§4.9",
+      "responses": {
+        "200": "midstudy/api/room-list.schema.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms",
+      "contract": "§4.9",
+      "request": {
+        "body": "midstudy/api/room-create.schema.json"
+      },
+      "responses": {
+        "201": "midstudy/api/room-detail.schema.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/jobs",
+      "contract": "§4.9",
+      "responses": {
+        "200": "midstudy/api/room-jobs.schema.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/jobs/{id}",
+      "contract": "§4.9",
+      "responses": {
+        "200": "midstudy/api/room-job.schema.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{room}",
+      "contract": "§4.9",
+      "responses": {
+        "200": "midstudy/api/room-detail.schema.json"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rooms/{room}",
+      "contract": "§4.9",
+      "request": {
+        "body": "midstudy/api/room-put.schema.json"
+      },
+      "responses": {
+        "200": "midstudy/api/room-detail.schema.json"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rooms/{room}",
+      "contract": "§4.9",
+      "responses": {
+        "200": "midstudy/api/room-deleted.schema.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{room}/align",
+      "contract": "§4.9",
+      "request": {
+        "body": "midstudy/api/align-request.schema.json"
+      },
+      "responses": {
+        "202": "midstudy/api/align-accepted.schema.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{room}/restore",
+      "contract": "§4.9",
+      "responses": {
+        "200": "midstudy/api/room-object.schema.json"
       }
     }
   ]

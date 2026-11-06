@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-jobs.schema.json",
+  "title": "RoomJobs",
+  "description": "GET /api/rooms/jobs (contract §4.9): align jobs, newest first. They run on the calibration queue but are listed here, not in GET /api/scenes/jobs.",
+  "type": "object",
+  "required": ["jobs"],
+  "additionalProperties": false,
+  "properties": {
+    "jobs": { "type": "array", "items": { "$ref": "room-job.schema.json" } }
+  }
+}

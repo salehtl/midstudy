@@ -70,6 +70,7 @@ library/settings.json
 /scenes/
 /layouts/
 /renders/
+/rooms/
 
 # product pages downloaded for the golden set (shops' pages and pictures are never committed)
 fixtures/pages/
