@@ -105,7 +105,9 @@ export function checkScenePut(body: PutBody): PutCheck {
     const lookEntries = body.lookEntries ?? []
     const problem = lookProblem(body.lookEntries !== null, lookEntries)
     if (problem !== null) return refuse(problem)
-    look = lookEntries.map(([k, v]) => [k, lookValue(v)] as const)
+    const pairs: (readonly [string, LookValue])[] = []
+    for (const [k, v] of lookEntries) pairs.push([k, lookValue(v)])
+    look = pairs
   }
   return { ok: true, patch: { title, camera, cameraSource, look } }
 }

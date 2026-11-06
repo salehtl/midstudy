@@ -16,7 +16,10 @@ export function isRecord(v: unknown): v is Readonly<Record<string, unknown>> {
 
 /** Python's `bool(v)` of a parsed JSON value: false for null, false, 0, '', [] and {} (NaN is true). */
 export function pyTruthy(v: unknown): boolean {
-  if (v === null || v === undefined || v === false || v === 0 || v === '') return false
+  if (v === null || v === undefined) return false
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number') return v !== 0
+  if (typeof v === 'string') return v !== ''
   if (Array.isArray(v)) return v.length > 0
   if (isRecord(v)) return Object.keys(v).length > 0
   return true
