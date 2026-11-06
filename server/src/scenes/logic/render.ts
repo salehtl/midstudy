@@ -187,6 +187,8 @@ export interface RenderMeta {
   readonly height: number
   readonly out_w: number | null
   readonly out_h: number | null
+  /** The room it was made in (contract §4.9): present exactly when the request named one (the shell adds it). */
+  readonly room?: string
 }
 
 /** What a render was, for its metadata. */

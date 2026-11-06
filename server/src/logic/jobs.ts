@@ -2,7 +2,8 @@
 // (`f"l-{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"`). Pure (TScert).
 import { utcStamp } from '../../../common/logic/time.ts'
 
-/** A job id: `c` calibration, `l` library or light job; `hex` is 4 random lowercase hex digits. */
-export function jobId(prefix: 'c' | 'l', epochMs: number, hex: string): string {
+/** A job id: `c` calibration, `l` library or light job, `a` a room's align job (§4.9); `hex` is 4 random lowercase hex
+ *  digits. */
+export function jobId(prefix: 'c' | 'l' | 'a', epochMs: number, hex: string): string {
   return prefix + '-' + utcStamp(epochMs) + '-' + hex
 }

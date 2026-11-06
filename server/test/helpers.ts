@@ -18,6 +18,7 @@ export interface Running {
   readonly scenes: string
   readonly renders: string
   readonly layouts: string
+  readonly rooms: string
   readonly costs: string
   log(): string
   stop(): Promise<void>
@@ -41,10 +42,11 @@ export async function startServer(options: { readonly args?: readonly string[]; 
   const scenes = path.join(dir, 'scenes')
   const renders = path.join(dir, 'renders')
   const layouts = path.join(dir, 'layouts')
+  const rooms = path.join(dir, 'rooms')
   for (const d of [library, scenes, renders, layouts]) fs.mkdirSync(d, { recursive: true })
   const costs = path.join(library, 'costs.csv')
   const args = ['server/src/main.ts', '--port', '0', '--host', '127.0.0.1', '--scenes-dir', scenes, '--layouts-dir', layouts, '--renders-dir', renders,
-    '--library-dir', library, '--costs-file', costs, '--calib', 'python3 fixtures/stub_calib.py', '--daily-spend-usd', '0', ...(options.args ?? [])]
+    '--rooms-dir', rooms, '--library-dir', library, '--costs-file', costs, '--calib', 'python3 fixtures/stub_calib.py', '--daily-spend-usd', '0', ...(options.args ?? [])]
   const child: ChildProcess = spawn(process.execPath, args, { cwd: REPO, env: mockEnv(options.env), stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
   child.stdout?.on('data', (d: Buffer) => {
@@ -78,6 +80,7 @@ export async function startServer(options: { readonly args?: readonly string[]; 
     scenes,
     renders,
     layouts,
+    rooms,
     costs,
     log: () => out,
     stop: async () => {

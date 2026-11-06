@@ -37,6 +37,8 @@ export interface RenderJob {
   readonly prompt: string
   readonly scene: string | null
   readonly layout: string | null
+  /** The room the render was made in (§4.9), or null; `scene` is then one of its photos. Absent: null. */
+  readonly room?: string | null
   /** The scene photo, sent as image 2 (nano-banana or gpt-image with a scene), or null. */
   readonly reference: Uint8Array | null
   readonly keepRoom: boolean
@@ -186,11 +188,13 @@ export class RenderService {
     }
     const final = fs.readFileSync(path.join(this.dir, name + '.jpg'))
     const out = jpegFrame(final)
-    const meta = renderMeta({
+    const base = renderMeta({
       name, model: job.model, cost, mock, prompt: job.prompt, created: isoUtcMs(now), scene: job.scene, layout: job.layout,
       reference: job.reference !== null, keepRoom: job.keepRoom, aligned, width: job.width, height: job.height,
       outW: out.ok ? out.value.width : null, outH: out.ok ? out.value.height : null,
     })
+    const room = job.room ?? null
+    const meta: RenderMeta = room === null ? base : { ...base, room }
     writeJsonSync(path.join(this.dir, name + '.json'), meta, 'midstudy/api/render-meta.schema.json')
     if (mock) await appendCost(this.#options.costsFile, { date: stamp, id: name, engine, costUsd: cost, mock: true, input }, 'midstudy server')
     this.#reserved.delete(name) // the files now hold the name; after a failure it stays reserved
@@ -232,9 +236,9 @@ export class RenderService {
     }
   }
 
-  /** v1 `list_renders`: every `render-*.json` (a render name) that parses to an object, of `scene` when given, newest
-   *  first. */
-  list(scene: string | null): unknown[] {
+  /** v1 `list_renders`: every `render-*.json` (a render name) that parses to an object, of `scene` when given, made in
+   *  `room` when given (§4.9), newest first. */
+  list(scene: string | null, room: string | null = null): unknown[] {
     const out: { readonly meta: Readonly<Record<string, unknown>>; readonly created: string; readonly name: string }[] = []
     for (const f of listDir(this.dir)) {
       if (!f.startsWith('render-') || !f.endsWith('.json')) continue
@@ -242,6 +246,7 @@ export class RenderService {
       const meta = readJson(path.join(this.dir, f))
       if (!isRecord(meta)) continue
       if (scene !== null && meta['scene'] !== scene) continue
+      if (room !== null && meta['room'] !== room) continue
       const created = meta['created']
       const nameValue = meta['name']
       out.push({ meta, created: created === undefined ? '' : pyStr(created), name: nameValue === undefined ? '' : pyStr(nameValue) })

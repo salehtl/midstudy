@@ -53,7 +53,7 @@ export function workerUsable(failures: number): boolean {
 
 /** The schema of contract/calib-cli.schema.json a result line (one-shot) or worker answer of `cmd` must match: the
  *  error result when it says `ok: false` (or anything but true), else the command's own result. */
-export function calibResultSchema(cmd: 'run' | 'fit' | 'light' | 'align', ok: boolean): SchemaUri {
+export function calibResultSchema(cmd: 'run' | 'fit' | 'light' | 'align' | 'align-room', ok: boolean): SchemaUri {
   if (!ok) return 'midstudy/calib-cli.schema.json#/$defs/error'
   switch (cmd) {
     case 'run':
@@ -63,5 +63,7 @@ export function calibResultSchema(cmd: 'run' | 'fit' | 'light' | 'align', ok: bo
       return 'midstudy/calib-cli.schema.json#/$defs/light'
     case 'align':
       return 'midstudy/calib-cli.schema.json#/$defs/align'
+    case 'align-room':
+      return 'midstudy/calib-cli.schema.json#/$defs/align_room'
   }
 }

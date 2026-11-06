@@ -15,6 +15,7 @@ interface CliOptions {
   readonly port: number
   readonly host: string
   readonly scenesDir: string
+  readonly roomsDir: string
   readonly libraryDir: string | null
   readonly layoutsDir: string
   readonly rendersDir: string
@@ -32,17 +33,18 @@ export type CliParse =
   | { readonly kind: 'help' }
   | { readonly kind: 'error'; readonly message: string }
 
-type Flag = '--port' | '--host' | '--scenes-dir' | '--library-dir' | '--layouts-dir' | '--renders-dir' | '--costs-file'
+type Flag = '--port' | '--host' | '--scenes-dir' | '--library-dir' | '--layouts-dir' | '--renders-dir' | '--rooms-dir' | '--costs-file'
   | '--calib' | '--midstudy-add' | '--allowed-host' | '--daily-spend-usd' | '--help'
 
-const FLAGS: readonly Flag[] = ['--help', '--port', '--host', '--scenes-dir', '--library-dir', '--layouts-dir', '--renders-dir',
+const FLAGS: readonly Flag[] = ['--help', '--port', '--host', '--scenes-dir', '--library-dir', '--layouts-dir', '--renders-dir', '--rooms-dir',
   '--costs-file', '--calib', '--midstudy-add', '--allowed-host', '--daily-spend-usd']
 
 /** argparse's usage line for v1's flags. */
 export function usage(prog: string): string {
   return 'usage: ' + prog + ' [-h] [--port PORT] [--host HOST] [--scenes-dir SCENES_DIR] [--library-dir LIBRARY_DIR]\n'
-    + '       [--layouts-dir LAYOUTS_DIR] [--renders-dir RENDERS_DIR] [--costs-file COSTS_FILE] [--calib CALIB]\n'
-    + '       [--midstudy-add MIDSTUDY_ADD] [--allowed-host NAME] [--daily-spend-usd DAILY_SPEND_USD]\n'
+    + '       [--layouts-dir LAYOUTS_DIR] [--renders-dir RENDERS_DIR] [--rooms-dir ROOMS_DIR] [--costs-file COSTS_FILE]\n'
+    + '       [--calib CALIB]'
+    + ' [--midstudy-add MIDSTUDY_ADD] [--allowed-host NAME] [--daily-spend-usd DAILY_SPEND_USD]\n'
 }
 
 /** argparse's help text. */
@@ -55,6 +57,7 @@ export function help(prog: string): string {
     + "  --library-dir LIBRARY_DIR\n                        serve /library/ from here (default: the repo's library/)\n"
     + '  --layouts-dir LAYOUTS_DIR\n'
     + '  --renders-dir RENDERS_DIR\n'
+    + "  --rooms-dir ROOMS_DIR\n                        the rooms (several photos of one room in one frame; default: the repo's rooms/)\n"
     + '  --costs-file COSTS_FILE\n                        default: <library-dir>/costs.csv, where midstudy-add writes its rows; if\n                        given, it must be that file\n'
     + '  --calib CALIB         the calibration command, run as an argument list (default: ' + DEFAULT_CALIB + ')\n'
     + '  --midstudy-add MIDSTUDY_ADD\n                        the command that adds furniture, run with --library <library-dir>\n                        (default: ' + DEFAULT_MIDSTUDY_ADD + ')\n'
@@ -196,6 +199,7 @@ export function parseCli(argv: readonly string[]): CliParse {
     port: portText === null ? 8765 : (pyInt(portText) ?? 8765),
     host: lastValue(pairs, '--host') ?? '127.0.0.1',
     scenesDir: lastValue(pairs, '--scenes-dir') ?? 'scenes',
+    roomsDir: lastValue(pairs, '--rooms-dir') ?? 'rooms',
     libraryDir: lastValue(pairs, '--library-dir'),
     layoutsDir: lastValue(pairs, '--layouts-dir') ?? 'layouts',
     rendersDir: lastValue(pairs, '--renders-dir') ?? 'renders',

@@ -97,6 +97,8 @@ export interface SceneObject {
   readonly layouts: number
   readonly calib_status: 'pending' | 'running' | 'done' | 'failed'
   readonly calib_error: string | null
+  /** The room the scene is a member of, or null (contract §4.9); a server with rooms always sends it. */
+  readonly room?: string | null
 }
 
 /** A scene asset's URL with its cache buster (`?v=<int(mtime)>`), or null without the file. */

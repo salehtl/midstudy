@@ -8,10 +8,10 @@ import path from 'node:path'
 import { isoUtc } from '../../../common/logic/time.ts'
 import { isSlug } from '../../../common/logic/slug.ts'
 import { jpegFrame } from '../../../core/js/node.ts'
-import type { Camera } from '../../../contract/gen/types.ts'
+import type { Camera, SceneTrashRoom } from '../../../contract/gen/types.ts'
 import { JobStore, SerialQueue, newJobId } from '../jobs.ts'
 import { toolError } from '../../../common/tools.ts'
-import { CalibRunner, type CalibOutcome } from './calib.ts'
+import { CalibRunner, type CalibOutcome, type CalibRequest } from './calib.ts'
 import { listDir, makeDir, makeDirs, mtimeOf, readHead, readJson, readRecord, writeBytesSync, writeJsonSync } from './files.ts'
 import { exists, isDir, isFile, move, removeTree, resolvePath } from '../../../common/files.ts'
 import { DEFAULT_CAMERA, clampCamera, mergeCamera } from './logic/camera.ts'
@@ -54,6 +54,26 @@ interface JobWork {
   readonly cmd: CalibCommand
   readonly args: readonly string[]
   readonly cleanup: string | null
+}
+
+/** What the rooms (contract §4.9, server/src/rooms/service.ts) do for the scenes: say which room each scene is in
+ *  (the scene object's `room`), take a deleted scene out of its room (its member record goes into the scene's
+ *  trash.json) and put a restored one back. */
+export interface RoomHooks {
+  /** scene → the room it is a member of. */
+  readonly index: () => ReadonlyMap<string, string>
+  /** Takes `scene` out of its room; its record for trash.json, or null when it is in none. */
+  readonly leave: (scene: string) => SceneTrashRoom | null
+  /** Puts a restored scene back into the room its trash.json names, when it can (§4.9 Membership). */
+  readonly rejoin: (scene: string, record: unknown) => void
+}
+
+/** Work of another kind on the calibration queue (a room's align job, §4.9 Align): it runs in its turn, one job at a
+ *  time with the calibrations. `run` resolves false when the job isn't ready (members still calibrating): it goes to
+ *  the back of the queue, so the calibrations queued behind it pass it. */
+export interface QueueTask {
+  readonly run: () => Promise<boolean>
+  readonly failed: (error: unknown) => void
 }
 
 /** A refusal of a scene request: the status and v1's sentence. */
@@ -107,6 +127,11 @@ export class SceneService {
   readonly #lightLast = new Map<string, string>()
   readonly #queue: SerialQueue
   readonly #runner: CalibRunner
+  /** Queued work that isn't a calibration or light job (align jobs), by id. */
+  readonly #tasks = new Map<string, QueueTask>()
+  /** Tasks sent to the back of the queue by their last turn (their `after` must not forget them). */
+  readonly #requeued = new Set<string>()
+  #rooms: RoomHooks | null = null
 
   constructor(options: SceneServiceOptions) {
     this.dir = options.scenesDir
@@ -125,6 +150,33 @@ export class SceneService {
     this.#queue = new SerialQueue((id) => this.#run(id), (id, e) => {
       this.#failed(id, e)
     }, (id) => this.#after(id))
+  }
+
+  /** The rooms (§4.9): from now on scene objects carry `room`, and delete and restore keep the rooms in step. */
+  setRooms(hooks: RoomHooks): void {
+    this.#rooms = hooks
+  }
+
+  /** Queues work of another kind on the calibration queue (§4.9 Align); `id` must be unique among the queue's jobs. */
+  queueTask(id: string, task: QueueTask): void {
+    this.#tasks.set(id, task)
+    this.#queue.push(id)
+  }
+
+  /** How many jobs wait in the calibration queue (not counting the one running). */
+  get queued(): number {
+    return this.#queue.waiting
+  }
+
+  /** One step of a queue task through the calibration tool (the warm worker when it answers, else one-shot), with
+   *  the job timeout. */
+  runCalib(req: CalibRequest): Promise<CalibOutcome> {
+    return this.#runner.run(req)
+  }
+
+  /** The job timeout, in seconds. */
+  get timeoutSeconds(): number {
+    return this.#timeoutMs / 1000
   }
 
   /** Stops the calibration worker (the server is shutting down). */
@@ -203,7 +255,7 @@ export class SceneService {
   }
 
   /** v1 `scene_object`: the scene object of scene.json `data` (read when not given), or null without one. */
-  sceneObject(name: string, given?: Readonly<Record<string, unknown>> | null): SceneObject | null {
+  sceneObject(name: string, given?: Readonly<Record<string, unknown>> | null, roomIndex?: ReadonlyMap<string, string>): SceneObject | null {
     const data = given ?? this.read(name)
     if (data === null) return null
     const size = this.#photoSize(name)
@@ -211,7 +263,8 @@ export class SceneService {
     const floor = calib === null ? undefined : calib['floor']
     const found = isRecord(floor) ? floor['found'] : undefined
     const st = this.status(name, calib !== null)
-    return {
+    const index = roomIndex ?? this.#rooms?.index() ?? null
+    const obj: SceneObject = {
       name,
       title: shownTitle(data['title']),
       created: data['created'] ?? null,
@@ -227,6 +280,7 @@ export class SceneService {
       calib_status: st.status,
       calib_error: st.error,
     }
+    return index === null ? obj : { ...obj, room: index.get(name) ?? null }
   }
 
   /** v1 `lighting_status`. */
@@ -263,8 +317,9 @@ export class SceneService {
   /** v1 `all`: newest first by `created`, ties by the name's collision suffix as a number (-10 before -9). */
   all(nameOrder: (a: string, b: string) => number): SceneObject[] {
     const out: SceneObject[] = []
+    const index = this.#rooms?.index()
     for (const n of this.names()) {
-      const s = this.sceneObject(n)
+      const s = this.sceneObject(n, null, index)
       if (s !== null) out.push(s)
     }
     const createdText = (s: SceneObject): string => (pyTruthy(s.created) ? pyStr(s.created) : '')
@@ -401,10 +456,12 @@ export class SceneService {
     }
     makeDirs(trashRoot)
     const title = this.read(name)?.['title']
+    const room = this.#rooms?.leave(name) ?? null
     const moved = move(path.join(this.dir, name), trash)
     const layouts = path.join(this.layoutsDir, name)
     if (isDir(layouts)) move(layouts, path.join(moved, 'layouts'))
-    writeJsonSync(path.join(moved, TRASH_META), { name, title: typeof title === 'string' ? title : null, deleted: isoUtc(now) }, 'midstudy/trash.schema.json#/$defs/scene')
+    const meta = { name, title: typeof title === 'string' ? title : null, deleted: isoUtc(now) }
+    writeJsonSync(path.join(moved, TRASH_META), room === null ? meta : { ...meta, room }, 'midstudy/trash.schema.json#/$defs/scene')
     return path.basename(this.dir) + '/.trash/' + path.basename(moved)
   }
 
@@ -453,11 +510,14 @@ export class SceneService {
     const dest = path.join(this.dir, name)
     if (exists(dest) || exists(path.join(this.layoutsDir, name))) return 'exists'
     const moved = move(path.join(this.dir, '.trash', copy.dir), dest)
+    const meta = readJson(path.join(moved, TRASH_META))
     fs.rmSync(path.join(moved, TRASH_META), { force: true })
     if (isDir(path.join(moved, 'layouts'))) {
       makeDirs(this.layoutsDir)
       move(path.join(moved, 'layouts'), path.join(this.layoutsDir, name))
     }
+    const room = isRecord(meta) ? meta['room'] : undefined
+    if (room !== undefined) this.#rooms?.rejoin(name, room)
     return { scene: this.sceneObject(name) }
   }
 
@@ -490,6 +550,15 @@ export class SceneService {
   }
 
   async #run(id: string): Promise<void> {
+    const task = this.#tasks.get(id)
+    if (task !== undefined) {
+      const done = await task.run()
+      if (!done) {
+        this.#requeued.add(id)
+        this.#queue.push(id)
+      }
+      return
+    }
     const job = this.#jobs.get(id)
     const work = this.#work.get(id)
     if (job === null || work === undefined || job.status !== 'queued') return // dropped while it waited
@@ -567,12 +636,22 @@ export class SceneService {
 
   /** The queue's catch-all (v1 `worker`): one bad job never stops the queue. */
   #failed(id: string, e: unknown): void {
+    const task = this.#tasks.get(id)
+    if (task !== undefined) {
+      task.failed(e)
+      return
+    }
     const name = e instanceof Error ? e.name : 'Error'
     const message = e instanceof Error ? e.message : String(e)
     this.#jobs.update(id, { status: 'failed', finished: isoUtc(this.#now()), message: serverFailed(name, message) })
   }
 
   #after(id: string): Promise<void> {
+    if (this.#tasks.has(id)) {
+      if (this.#requeued.has(id)) this.#requeued.delete(id)
+      else this.#tasks.delete(id)
+      return Promise.resolve()
+    }
     const work = this.#work.get(id)
     this.#work.delete(id)
     if (work?.cleanup !== null && work?.cleanup !== undefined) removeTree(work.cleanup)
