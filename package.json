@@ -41,6 +41,7 @@
     "check:ownership": "node scripts/check.mjs ownership",
     "gen:contract": "node scripts/gen-contract.mjs",
     "test:contract": "node --test contract/test/contract.test.mjs && node contract/test/typecheck.mjs",
+    "test:server": "node --test --test-concurrency=1 server/test/*.test.ts",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {

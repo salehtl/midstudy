@@ -4,6 +4,8 @@
     "planner/main.{ts,js}",
     "planner/**/*.worker.{ts,js}",
     "server/src/main.ts",
+    "server/test/*.test.ts",
+    "server/test/lock-child.ts",
     "pipeline/src/cli.ts",
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",
@@ -15,6 +17,7 @@
   "project": [
     "planner/**/*.{ts,js}",
     "server/**/*.ts",
+    "common/**/*.ts",
     "pipeline/**/*.ts",
     "core/js/**/*.ts",
     "contract/gen/**/*.{ts,js}",
