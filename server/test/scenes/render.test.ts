@@ -69,7 +69,6 @@ void test('nano-banana with the scene: both images as data URIs, the result down
   const out = await r.renders.render(job('nano-banana'))
   assert.equal(out.kind, 'done')
   assert.deepEqual(r.calls, [{ endpoint: 'fal-ai/nano-banana/edit', key: 'test-key', args: { image_urls: [uri(LIVING), uri(LIVING)], prompt: 'P', output_format: 'jpeg' } }])
-  if (out.kind !== 'done') return
   assert.equal(out.meta.cost_usd, 0.0398)
   assert.equal(out.meta.mock, false)
   assert.equal(out.meta.reference, true)
