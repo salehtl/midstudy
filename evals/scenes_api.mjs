@@ -15,7 +15,7 @@ import path from 'node:path'
 import Ajv2020 from 'ajv/dist/2020.js'
 import {
   REPO, DEFAULT_CAMERA, SCENE_NAME_RE, createEval, startServer, api, raw, uploadScene, waitFor, waitScene, golden, fmt, clip,
-  camEq, dataUri, sleep,
+  camEq, dataUri, sleep, serverCommand,
 } from './lib/harness.mjs'
 
 const ev = createEval('E1', 'scenes-api', { timeoutS: 300 })
@@ -709,14 +709,17 @@ if (srv5.up) {
   await srv5.stop()
 }
 
-const bad = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--allowed-host', 'https://midstudy.example.com', '--calib', 'python3 fixtures/stub_calib.py'],
+// the server MIDSTUDY_SERVER picks (the harness's command), as startServer runs it
+const badCmd = serverCommand(['--port', '0', '--daily-spend-usd', '0', '--allowed-host', 'https://midstudy.example.com', '--calib', 'python3 fixtures/stub_calib.py'])
+const bad = spawnSync(badCmd.cmd, badCmd.args,
   { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })
 ev.check('a malformed --allowed-host (a URL) is refused at startup (it would have allowed a missing or malformed Host)', bad.status !== 0 && bad.signal == null && /allowed-host/.test(bad.stderr || ''),
   `exit ${bad.status ?? bad.signal}: ${clip((bad.stderr || '').trim().split('\n').at(-1), 200)}`)
 
 ev.section('verify round 1: the spend cap reads the file midstudy-add writes')
 const other = path.join(ev.out, 'other-costs.csv')
-const run = spawnSync('python3', ['planner/serve.py', '--port', '0', '--daily-spend-usd', '0', '--costs-file', other, '--calib', 'python3 fixtures/stub_calib.py'],
+const runCmd = serverCommand(['--port', '0', '--daily-spend-usd', '0', '--costs-file', other, '--calib', 'python3 fixtures/stub_calib.py'])
+const run = spawnSync(runCmd.cmd, runCmd.args,
   { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })
 ev.check('--costs-file that isn\'t <library-dir>/costs.csv is refused even without --library-dir (adds would be uncapped)', run.status !== 0 && run.signal == null && /costs-file/.test(run.stderr || ''),
   `exit ${run.status ?? run.signal}: ${clip((run.stderr || '').trim(), 200)}`)
