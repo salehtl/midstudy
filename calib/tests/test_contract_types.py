@@ -22,7 +22,7 @@ def test_generated_files_are_current() -> None:
     assert p.returncode == 0, p.stderr
 
 
-@pytest.mark.parametrize("name", ["calib.schema.json", "lighting.schema.json"])
+@pytest.mark.parametrize("name", ["calib.schema.json", "lighting.schema.json", "room.schema.json", "align.schema.json", "calib-cli.schema.json"])
 def test_schema_copies_are_the_contract(name: str) -> None:
     assert (SCHEMAS / name).read_bytes() == (REPO / "contract" / name).read_bytes()
 
@@ -52,6 +52,10 @@ def _keys(node: object) -> tuple[set[str], set[str]]:
     (ct.LightDone, "contract/calib-cli.schema.json", ("$defs", "light_done")),
     (ct.AlignResult, "contract/calib-cli.schema.json", ("$defs", "align")),
     (ct.WorkerRequest, "contract/calib-cli.schema.json", ("$defs", "request")),
+    (ct.Align, "contract/align.schema.json", ()),
+    (ct.AlignMember, "contract/align.schema.json", ("$defs", "member")),
+    (ct.Pose, "contract/room.schema.json", ("$defs", "pose")),
+    (ct.RoomMember, "contract/room.schema.json", ("$defs", "member")),
 ])
 def test_typed_dicts_have_the_schemas_keys(cls: type, file: str, path: tuple[str, ...]) -> None:
     schema = load_json(REPO / file)

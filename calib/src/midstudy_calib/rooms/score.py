@@ -8,7 +8,8 @@
   member sees, tilt how far the solver's floor is from the photo's own floor fit, and constraint λmin/λmax of the
   horizontal parts of its own surface normals (a bare wall: 0, its shift along the wall is unconstrained).
 - A member below MIN_CONFIDENCE is unplaced (Phase A: 0.5 turns every low-overlap pair placement into unplaced and
-  costs MASt3R nothing on the golden room); the rest are scored again without it, until none drops.
+  costs MASt3R nothing on the golden room), the least sure first and one at a time: the rest are scored again without
+  it (a wrong member spoils the residuals of the members it overlaps), until none is below.
 - loop_residual_cm: the median pair residual when the overlapping placed members close a loop (contract §4.9: null
   without one: fewer than three placed photos, or a chain).
 """
@@ -151,19 +152,20 @@ def score_once(photos: list[RoomPhoto], placed: list[Candidate | None], pts: lis
 
 
 def score(photos: list[RoomPhoto], cands: list[Candidate | None], min_confidence: float = MIN_CONFIDENCE) -> tuple[list[Scored], float | None]:
-    """Score, unplace every member below min_confidence (its pose kept as `rejected_pose` in its diagnostics), and
-    score the rest again until none drops. Member 0 always stays (the frame)."""
+    """Score; unplace the least sure member below min_confidence (its pose kept as `rejected_*` in its diagnostics) and
+    score the rest again, until none is below. Member 0 always stays (the frame)."""
     pts = [p.lift(step=6) if p.usable else np.zeros((0, 3)) for p in photos]
     placed = list(cands)
     rejected: dict[int, Scored] = {}
     while True:
         scored, loop = score_once(photos, placed, pts)
-        drop = [i for i, s in enumerate(scored) if i > 0 and s.placement is not None and s.confidence < min_confidence]
-        if not drop:
+        low = [(s.confidence, i) for i, s in enumerate(scored) if i > 0 and s.placement is not None and s.confidence < min_confidence]
+        if not low:
             break
-        for i in drop:
-            rejected[i] = scored[i]
-            placed[i] = None
+        # one at a time, the least sure first: a wrong member also spoils the residuals of the members it overlaps
+        _, i = min(low)
+        rejected[i] = scored[i]
+        placed[i] = None
     for i, r in rejected.items():
         p = r.placement
         rp: Diag = {} if p is None else {"rejected_x_m": _round(p.x, 4), "rejected_z_m": _round(p.z, 4),
