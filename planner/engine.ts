@@ -119,14 +119,16 @@ import * as num from './logic/num.js'
 import * as selLogic from './logic/selection.js'
 import type { JsonObject, Kernels } from './logic/num.js'
 import * as sceneLogic from './logic/scenes.js'
+import * as roomLogic from './logic/room.js'
+import type { Pose } from './logic/room.js'
 import * as text from './logic/text.js'
 import type { DimsCm } from './logic/text.js'
 import * as viewLogic from './logic/view.js'
 import type { Box, ViewReport, ViewState, Xform } from './logic/view.js'
 import { Bus } from './bus.js'
 import type { Events } from './bus.js'
-import { layoutSummaries, libraryEntries, libraryEntry, renderMeta, renderMetas, sceneSummaries, sceneSummary, trashedScenes, calibInfo } from './wire.js'
-import type { CalibInfo, LayoutSummary, LibraryEntry, RenderMeta, SceneSummary, TrashedScene } from './wire.js'
+import { alignJob, layoutSummaries, libraryEntries, libraryEntry, renderMeta, renderMetas, roomInfo, roomInfos, sceneCreated, sceneSummaries, sceneSummary, trashedRooms, trashedScenes, calibInfo } from './wire.js'
+import type { AlignJobInfo, CalibInfo, LayoutSummary, LibraryEntry, RenderMeta, RoomInfo, SceneSummary, TrashedRoom, TrashedScene } from './wire.js'
 
 /** The engine's value types (planner/logic/, planner/wire.ts). */
 export type { Camera, LightingReport, LibraryEntry, RenderMeta }
@@ -247,6 +249,10 @@ interface EngineEvents {
   error: { text: string }
   toast: { text: string; kind: msg.ToastKind; ms: number }
   lighting: LightingStatus
+  /** the room view (§4.9): opened, photo (switched), members (poses or scales changed), pose (live, Align photos),
+   *  aligning, aligned, align-failed, title, align-photos, floor-plan, deleted, restored, closed */
+  room: { phase: string; name: string | null }
+  rooms: { rooms: RoomInfo[] }
 }
 const events = new Bus<EngineEvents>()
 function emit<K extends keyof EngineEvents>(name: K, detail: EngineEvents[K]): void {
@@ -351,18 +357,61 @@ scene.add(P.depth.mesh)
 const grid = P.grid
 scene.add(grid)
 
+// --- the room view (contract §4.9): several photos of one room, one layout in the room frame -------------------------
+/** A member photo as the room view keeps it (the room detail's member; `confidence` from align.json). */
+interface RoomMember {
+  readonly scene: string
+  pose: Pose | null
+  scale: number
+  pose_source: string
+  readonly camera: Camera | null
+  readonly effective_camera: Camera | null
+  readonly scene_object: SceneSummary | null
+  readonly confidence: number | null
+}
+/** The open room: its detail as last read (or changed locally while a photo is dragged on the plan). */
+interface RoomState {
+  readonly name: string
+  title: string | null
+  members: RoomMember[]
+  info: RoomInfo
+}
+let room: RoomState | null = null
+let alignPhotos = false
+let floorPlanShown = false
+/** The current photo's member (null outside a room, or while it isn't one). */
+function curMember(): RoomMember | null {
+  if (!room || !sceneName) return null
+  const n = sceneName
+  return room.members.find((m) => m.scene === n) ?? null
+}
+/** The current photo's pose: null outside a room or while the photo is unplaced. */
+function curPose(): Pose | null { return curMember()?.pose ?? null }
+/** The current photo's scale (1 outside a room). */
+function roomScale(): number { const m = curMember(); return m ? roomLogic.clampScale(m.scale) : 1 }
+/** In a room view whose photo has no pose: room layouts aren't drawn (the pieces wait, parked, in the room frame). */
+const roomUnplaced = (): boolean => !!room && !!sceneName && curPose() === null
+
 // --- the scene camera (contract §4.1) --------------------------------------------------------------------------------
 const camera = new THREE.PerspectiveCamera(55, 4 / 3, 0.05, 200)
 camera.rotation.order = 'YXZ'
 let cam: Camera = cameraLogic.cameraCopy(DEFAULT_CAMERA)
+// In a room view (§4.9) the photo is drawn through its member's effective camera: the scene's camera with height_m ×
+// scale (clamped). The world the furniture is drawn in is that camera's scene frame; outside a room it is `cam` itself.
+// `cam` stays the scene.json camera (Adjust floor, getCamera, Save scene).
+function drawCam(): Camera {
+  const s = roomScale()
+  return s === 1 ? cam : roomLogic.effectiveCamera(cam, s)
+}
 const R = new THREE.Matrix3() // camera-to-world rotation, Ry(0)·Rx(pitch)·Rz(roll)
 function applyCamera(): void {
-  camera.fov = cam.fov_y_deg
-  camera.position.set(0, cam.height_m, 0)
-  camera.rotation.set(cam.pitch_deg * DEG, 0, cam.roll_deg * DEG, 'YXZ')
+  const dc = drawCam()
+  camera.fov = dc.fov_y_deg
+  camera.position.set(0, dc.height_m, 0)
+  camera.rotation.set(dc.pitch_deg * DEG, 0, dc.roll_deg * DEG, 'YXZ')
   camera.updateMatrixWorld(true)
   R.setFromMatrix4(camera.matrixWorld)
-  lights.setCamera(R, cam.fov_y_deg)
+  lights.setCamera(R, dc.fov_y_deg)
   lights.setLook(resolvedLook()) // the inferred key turns with the camera (§4.8: lighting.json is in its frame)
   updateView()
 }
@@ -370,9 +419,10 @@ function applyCamera(): void {
 let kc: SceneCamera | null = null
 function kcam(): SceneCamera {
   const b = kc?.block
-  if (kc && b && kc.width === photo.w && kc.height === photo.h && b.fov_y_deg === cam.fov_y_deg && b.height_m === cam.height_m && b.pitch_deg === cam.pitch_deg && b.roll_deg === cam.roll_deg) return kc
+  const dc = drawCam()
+  if (kc && b && kc.width === photo.w && kc.height === photo.h && b.fov_y_deg === dc.fov_y_deg && b.height_m === dc.height_m && b.pitch_deg === dc.pitch_deg && b.roll_deg === dc.roll_deg) return kc
   kc?.dispose()
-  kc = new SceneCamera(cam, photo.w, photo.h)
+  kc = new SceneCamera(dc, photo.w, photo.h)
   return kc
 }
 
@@ -427,7 +477,7 @@ function depthScale(): number {
   const floor = rec(c?.['floor'])
   const source = c?.['source']
   const measured = !!floor?.['found'] && (source === 'moge-2' || source === 'truth')
-  return kDepthScale(cam.height_m, Number(rec(c?.['camera'])?.['height_m']), measured)
+  return kDepthScale(drawCam().height_m, Number(rec(c?.['camera'])?.['height_m']), measured)
 }
 // The view's report rounds with the kernels. A resize while the page starts (before they have loaded) has no listener
 // to tell yet: the UI mounts after the kernels and reads the view then.
@@ -614,6 +664,37 @@ interface ItemRec {
   readonly missing: boolean
   noGlb: boolean
   build: number
+  /** In a room view (§4.9): where the piece stands in the room frame, kept as it was placed (the scene transform is
+   *  derived from it through the current photo's pose, so switching photos never drifts it); null outside a room. */
+  roomAt: RoomXf | null
+}
+/** A piece's place in the room frame: position (y the elevation) and rotation_y_deg. */
+interface RoomXf {
+  readonly x: number
+  readonly y: number
+  readonly z: number
+  readonly rot: number
+}
+/** The piece's room-frame place from its scene transform, through the current photo's pose (null outside a room). */
+function syncRoomAt(r: ItemRec): void {
+  const pose = curPose()
+  if (!room || !pose) { r.roomAt = null; return }
+  const g = r.group.position
+  const p = roomLogic.sceneToRoom([g.x, g.y, g.z], pose)
+  r.roomAt = { x: p[0], y: g.y, z: p[2], rot: roomLogic.rotationToRoom(r.rotationDeg, pose) }
+}
+/** A room-frame place in the current photo's scene frame (null when the photo isn't placed). */
+function roomToSceneXf(x: RoomXf): RoomXf | null {
+  const pose = curPose()
+  if (!pose) return null
+  const p = roomLogic.roomToScene([x.x, x.y, x.z], pose)
+  return { x: p[0], y: x.y, z: p[2], rot: roomLogic.rotationToScene(x.rot, pose) }
+}
+/** Where a piece stands in its layout's frame: the room frame in a room view, else the scene frame. */
+function layoutXf(r: ItemRec): RoomXf {
+  if (room && r.roomAt) return r.roomAt
+  const g = r.group.position
+  return { x: g.x, y: g.y, z: g.z, rot: r.rotationDeg }
 }
 let library: LibraryEntry[] = []
 let libraryLoading: Promise<void> = Promise.resolve() // the library read in flight (a layout waits for it, or its pieces look missing)
@@ -974,6 +1055,7 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   }
   if (!l) throw reportError(`Unknown library item "${asText(id)}"`)
   if (!sceneName) throw reportError('Open a scene first, then add furniture')
+  if (roomUnplaced()) throw reportError('Place this photo on the floor plan first (Align photos), then add furniture')
   const pos = o['position']
   const pa: readonly unknown[] = Array.isArray(pos) ? pos : []
   const p0 = pa[0], p1 = pa[1], p2 = pa[2]
@@ -991,7 +1073,8 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   group.rotation.set(0, rot * DEG, 0)
   group.userData['uid'] = uid
   group.name = `item:${uid}`
-  const r: ItemRec = { uid, id: l.id, lib: l, sig: libSig(l), group, child: null, splat: null, render: 'glb', localBox: null, rotationDeg: rot, shadow: null, caster: null, missing: !!l.missing, noGlb: false, build: 0 }
+  const r: ItemRec = { uid, id: l.id, lib: l, sig: libSig(l), group, child: null, splat: null, render: 'glb', localBox: null, rotationDeg: rot, shadow: null, caster: null, missing: !!l.missing, noGlb: false, build: 0, roomAt: null }
+  syncRoomAt(r)
   try {
     attachBuilt(r, await buildChild(l)) // a splat item: its GLB and its splat have both loaded
   } catch (e) {
@@ -1028,6 +1111,7 @@ function moveItemInternal(uid: unknown, opts: unknown = {}): void {
   }
   r.group.updateMatrixWorld(true)
   syncShadow(r)
+  syncRoomAt(r)
   emit('items', { change: 'move', uid: r.uid })
 }
 
@@ -1201,7 +1285,7 @@ function grabPointOn(r: ItemRec, clientX: number, clientY: number): THREE.Vector
 function dragHeight(r: ItemRec, clientX: number, clientY: number): number {
   const b = worldBounds(r)
   const p = grabPointOn(r, clientX, clientY)
-  return kDragHeight(p ? p.y : null, b.min.y, b.max.y, cam.height_m)
+  return kDragHeight(p ? p.y : null, b.min.y, b.max.y, drawCam().height_m)
 }
 // Drag to move: the grabbed point of the piece stays under the finger: the piece slides on the horizontal plane
 // through that point (its elevation doesn't change), so farther away it shrinks with perspective, closer it grows.
@@ -1290,22 +1374,29 @@ export interface ItemSnapshot {
   position: Vec3
   rotation_y_deg: number
   missing: JsonObject | undefined
+  /** in a room view: where it stood in the room frame (Undo puts it back there, whichever photo is open then) */
+  roomAt?: RoomXf | null
 }
 function removeItemWithUndo(uid: string): ItemSnapshot | null {
   const r = items.get(uid)
   if (!r) return null
-  const snapItem: ItemSnapshot = { uid, id: r.id, name: libLogic.libName(r.lib), position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg, missing: r.missing ? { ...(r.lib.dims_cm ?? {}) } : undefined }
+  const snapItem: ItemSnapshot = { uid, id: r.id, name: libLogic.libName(r.lib), position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg, missing: r.missing ? { ...(r.lib.dims_cm ?? {}) } : undefined, roomAt: r.roomAt }
   removeItemInternal(uid)
   return snapItem
 }
+/** Where a snapshot goes back to: its room-frame place through the current photo's pose, else as it was. */
+function snapPlace(s: ItemSnapshot): { position: Vec3; rotation_y_deg: number } {
+  const x = room && s.roomAt ? roomToSceneXf(s.roomAt) : null
+  return x ? { position: [x.x, x.y, x.z], rotation_y_deg: x.rot } : { position: s.position, rotation_y_deg: s.rotation_y_deg }
+}
 async function restoreItem(s: ItemSnapshot): Promise<string> {
-  const uid = await addItemInternal(s.id, { uid: s.uid, position: s.position, rotation_y_deg: s.rotation_y_deg, missing: s.missing })
+  const uid = await addItemInternal(s.id, { uid: s.uid, ...snapPlace(s), missing: s.missing })
   select(uid)
   return uid
 }
 // Undo of removing several pieces: all of them back, selected together.
 async function restoreItems(snaps: readonly ItemSnapshot[]): Promise<string[]> {
-  const uids = await Promise.all(snaps.map((s) => addItemInternal(s.id, { uid: s.uid, position: s.position, rotation_y_deg: s.rotation_y_deg, missing: s.missing })))
+  const uids = await Promise.all(snaps.map((s) => addItemInternal(s.id, { uid: s.uid, ...snapPlace(s), missing: s.missing })))
   selectMany(uids)
   return uids
 }
@@ -1434,7 +1525,8 @@ let sceneBaseline = ''
 const touchScene = (): void => { setDirty({ ...dirty, scene: !!sceneName && sceneSig() !== sceneBaseline }) }
 // The layout is dirty when the placed pieces differ from the ones last saved or loaded (not merely when something
 // happened: Remove then Undo puts back the same layout). Pieces compare by library id, position (to 0.1 mm) and turn.
-const layoutSig = (): string => layoutLogic.layoutSig([...items.values()].map((r) => ({ id: r.id, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg })), K)
+// In a room view the pieces compare in the room frame (switching photos changes nothing), parked ones included.
+const layoutSig = (): string => layoutLogic.layoutSig(parked ? parked.map((p) => ({ id: p.id, x: p.at.x, y: p.at.y, z: p.at.z, rotation_y_deg: p.at.rot })) : [...items.values()].map((r) => { const x = layoutXf(r); return { id: r.id, x: x.x, y: x.y, z: x.z, rotation_y_deg: x.rot } }), K)
 let layoutBaseline = layoutLogic.EMPTY_SIG
 const markLayoutClean = (): void => { layoutBaseline = layoutSig(); setDirty({ ...dirty, layout: false }) }
 events.addEventListener('items', () => { if (!quietItems) setDirty({ ...dirty, layout: layoutSig() !== layoutBaseline }) })
@@ -1564,14 +1656,23 @@ function floorNoteFor(data: JsonObject | null): string | null {
 }
 
 // Opens a scene by name: its photo, depth and camera, and its layouts and renders. Placed items are cleared. A scene
-// that's still calibrating opens when it's done.
-async function openScene(name: unknown): Promise<void> {
+// that's still calibrating opens when it's done. Outside a room view (a room view's photos: openSceneAs).
+function openScene(name: unknown): Promise<void> {
+  return openSceneAs(name, null)
+}
+// With `inRoom` (§4.9): opens that room's member photo `name` in the room view. The first photo of a room clears the
+// pieces and loads the room layout (as a scene's); every later one keeps the pieces (each in its room-frame place) and
+// shows them through its own pose. The photo's own layouts are never loaded in a room view.
+async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void> {
   if (!msg.isSceneName(name)) throw reportError(msg.sceneNameText(asText(name)))
   const t0 = performance.now()
+  const switching = !!inRoom && room?.name === inRoom.name // another photo of the open room
   flushLook()
   const token = ++sceneToken
-  setLoad(true, 'photo', name, null)
-  emit('scene', { phase: 'loading', name })
+  if (!switching) { // switching photos is a cut: the last photo stays until the next one is ready
+    setLoad(true, 'photo', name, null)
+    emit('scene', { phase: 'loading', name })
+  }
   let data: JsonObject
   try {
     data = await getSceneInternal(name)
@@ -1593,7 +1694,12 @@ async function openScene(name: unknown): Promise<void> {
       depthUrl ? loadDepth(depthUrl).catch((e: unknown) => { reportError('Could not read depth.png; occlusion is off', e); return null }) : null,
     ])
     if (token !== sceneToken) return
-    await quietly(() => { clearItemsInternal() })
+    if (!switching) {
+      await quietly(() => { clearItemsInternal() })
+      parked = null
+      alignPhotos = false
+      room = inRoom ? { name: inRoom.name, title: inRoom.title ?? null, members: membersOf(inRoom), info: inRoom } : null
+    }
     clearRuler()
     ruler.active = false
     setPhoto(img, depth)
@@ -1615,12 +1721,24 @@ async function openScene(name: unknown): Promise<void> {
     view = viewLogic.fitState(photo)
     applyCamera()
     applyLook()
-    setLayoutName('')
-    layoutDetails = []
+    if (switching) {
+      await placeRoomItems() // the pieces where this photo sees them (parked on an unplaced one)
+      if (token !== sceneToken) return
+      setDirty({ scene: false, layout: dirty.layout })
+    } else {
+      setLayoutName('')
+      layoutDetails = []
+      layoutBaseline = layoutLogic.EMPTY_SIG
+      setDirty({ scene: false, layout: false })
+    }
     renders = []
-    layoutBaseline = layoutLogic.EMPTY_SIG
-    setDirty({ scene: false, layout: false })
-    store.set(LAST_SCENE_KEY, name)
+    if (room) {
+      store.set(LAST_ROOM_KEY, room.name)
+      store.set(roomPhotoKey(room.name), name)
+    } else {
+      store.set(LAST_ROOM_KEY, null)
+      store.set(LAST_SCENE_KEY, name)
+    }
     syncUrl(name)
     setLoad(false, null, null, null)
     emit('camera', { camera: cameraLogic.cameraCopy(cam), source: cameraSource })
@@ -1629,16 +1747,21 @@ async function openScene(name: unknown): Promise<void> {
     emit('grid', { visible: true })
     emitView()
     emit('scene', { phase: 'opened', name })
+    if (room) emit('room', { phase: switching ? 'photo' : 'opened', name: room.name })
     if (lightingStatus.status === 'missing' && data['calib_status'] === 'done') quiet(inferLighting())
     // The scene comes back with its layout (layoutToOpen: what this device had open, or the one saved last on any
     // device), so the furniture isn't lost on a reload or on the other device; then the renders list. The library
-    // must be read first, or the pieces would load as missing.
-    await Promise.all([refreshLayouts(), libraryLoading.catch(() => undefined)])
-    if (token !== sceneToken) return
-    const pick = layoutToOpen(name)
-    if (pick) {
-      try { await loadLayoutInternal(pick) } catch { /* reported */ }
+    // must be read first, or the pieces would load as missing. A room view: the room's layout, once, on its first photo.
+    if (!switching) {
+      if (room && roomUnplaced()) parkItems() // nothing placed yet: the room layout loads into the parked list
+      await Promise.all([refreshLayouts(), libraryLoading.catch(() => undefined)])
       if (token !== sceneToken) return
+      const scope = layoutScope()
+      const pick = scope ? layoutToOpen(scope) : null
+      if (pick) {
+        try { await loadLayoutInternal(pick) } catch { /* reported */ }
+        if (token !== sceneToken) return
+      }
     }
     quiet(listRendersInternal())
     wake(1500)
@@ -1657,7 +1780,11 @@ async function openScene(name: unknown): Promise<void> {
 function syncUrl(name: string | null): void {
   try {
     const u = new URL(location.href)
-    if (name) u.searchParams.set('scene', name); else u.searchParams.delete('scene')
+    if (room && name) { u.searchParams.set('room', room.name); u.searchParams.set('photo', name); u.searchParams.delete('scene') } else {
+      u.searchParams.delete('room')
+      u.searchParams.delete('photo')
+      if (name) u.searchParams.set('scene', name); else u.searchParams.delete('scene')
+    }
     history.replaceState(history.state, '', u)
   } catch { /* ignore */ }
 }
@@ -1685,18 +1812,26 @@ function closeScene(): void {
   setLayoutName('')
   layoutBaseline = layoutLogic.EMPTY_SIG
   setDirty({ scene: false, layout: false })
+  const wasRoom = room
+  room = null
+  parked = null
+  alignPhotos = false
   syncUrl(null)
   emit('adjust', { on: false })
   emit('scene', { phase: 'closed', name: null })
+  if (wasRoom) emit('room', { phase: 'closed', name: wasRoom.name })
 }
 
 async function deleteScene(name: unknown): Promise<void> {
   if (!msg.isSceneName(name)) throw reportError(msg.sceneSlugText(asText(name)))
   try { await apiJson(sceneUrl(name), { method: 'DELETE' }) } catch (e) { throw reportError(`Could not delete the scene "${name}"`, e) }
   if (store.get(LAST_SCENE_KEY) === name) store.set(LAST_SCENE_KEY, null)
+  const inOpenRoom = !!room && room.members.some((m) => m.scene === name)
   if (name === sceneName) closeScene()
+  else if (inOpenRoom && room) { const rn = room.name; quiet(getRoomInternal(rn).then(setRoomInfo).catch(() => undefined)) } // it left its room (§4.9 Membership)
   emit('scene', { phase: 'deleted', name })
   quiet(listScenesInternal())
+  if (inOpenRoom || roomsList.some((r) => r.members.some((m) => m.scene === name))) quiet(listRoomsInternal().catch(() => undefined))
 }
 
 // Undo of a delete: POST /api/scenes/<name>/restore puts the scene (and its layouts) back; its renders show again.
@@ -1861,11 +1996,17 @@ function layoutDisplayName(name: unknown): string {
 // scene open: then it opens with the most recently saved layout. So a reload keeps what this device had, and the
 // phone opens a scene with the layout the desktop just saved, and the other way round.
 const layoutKey = (s: string): string => `midstudy.layout.${s}`
+/** Whose layouts are open: the scene's, or in a room view the room's (`@<room>`, as its layouts folder; a slug never
+ *  starts with @, so a room's never collides with a scene's). */
+function layoutScope(): string | null {
+  return room ? `@${room.name}` : sceneName
+}
 function rememberLayout(name: string | null, at: unknown = null): void {
-  if (!sceneName) return
+  const scope = layoutScope()
+  if (!scope) return
   const parsed = Date.parse(typeof at === 'string' ? at : '')
   const t = parsed || Date.now()
-  store.set(layoutKey(sceneName), JSON.stringify({ name: str(name), at: new Date(t).toISOString() }))
+  store.set(layoutKey(scope), JSON.stringify({ name: str(name), at: new Date(t).toISOString() }))
 }
 function recalledLayout(s: string): Recalled | null {
   const raw = store.get(layoutKey(s))
@@ -1878,28 +2019,31 @@ function recalledLayout(s: string): Recalled | null {
   } catch { /* unreadable: as if nothing were remembered */ }
   return null
 }
-function layoutToOpen(s: string): string | null {
+function layoutToOpen(s: string): string | null { // s: the scene, or @<room>
   return layoutLogic.layoutToOpen(recalledLayout(s), details())
 }
-const layoutQuery = (): string => `?scene=${encodeURIComponent(sceneName ?? '')}`
+const layoutQuery = (): string => (room ? `?room=${encodeURIComponent(room.name)}` : `?scene=${encodeURIComponent(sceneName ?? '')}`)
+type DocItem = LayoutDocItem | (LayoutDocItem & { dims_cm: JsonObject })
 interface LayoutDoc {
   version: 1
   name: string
   title: string | null
-  scene_name: string | null
+  scene_name?: string | null
+  room_name?: string
   library: string
-  items: (LayoutDocItem | (LayoutDocItem & { dims_cm: JsonObject }))[]
+  items: DocItem[]
 }
 function layoutDoc(name: string, title: string | null = null): LayoutDoc {
-  return {
-    version: 1, name, title: str(title), scene_name: sceneName, library: LIBRARY_URL,
-    items: [...items.values()].map((r) => {
-      const it = layoutLogic.docItem({ uid: r.uid, id: r.id, render: r.render, x: r.group.position.x, y: r.group.position.y, z: r.group.position.z, rotation_y_deg: r.rotationDeg }, K)
-      const dims = r.lib.dims_cm ?? null
-      // a placeholder's size if the piece goes missing (§2.8)
-      return dims && libLogic.validDims(dims) ? { ...it, dims_cm: { ...dims } } : it
-    }),
-  }
+  // a room layout (§4.9 Layouts) is in the room frame and names the room instead of the scene
+  const owner = room ? { room_name: room.name } : { scene_name: sceneName }
+  const placed: DocItem[] = parked ? parked.map((p) => p.doc) : [...items.values()].map((r) => {
+    const x = layoutXf(r)
+    const it = layoutLogic.docItem({ uid: r.uid, id: r.id, render: r.render, x: x.x, y: x.y, z: x.z, rotation_y_deg: x.rot }, K)
+    const dims = r.lib.dims_cm ?? null
+    // a placeholder's size if the piece goes missing (§2.8)
+    return dims && libLogic.validDims(dims) ? { ...it, dims_cm: { ...dims } } : it
+  })
+  return { version: 1, name, title: str(title), ...owner, library: LIBRARY_URL, items: placed }
 }
 // opts.title: the name as the user typed it; saving over a layout keeps its title unless a new one is given.
 async function saveLayoutInternal(name: unknown, opts: unknown = {}): Promise<void> {
@@ -1934,13 +2078,26 @@ async function loadLayoutInternal(name: unknown): Promise<void> {
   await quietly(async () => {
     clearItemsInternal()
     const missing = list.filter((it) => isRecord(it) && typeof it['id'] === 'string' && !library.some((l) => l.id === it['id']))
-    const results = await Promise.allSettled(list.map((it) => {
+    const missingOf = (it: unknown): JsonObject | undefined => {
+      const dims = rec(rec(it)?.['dims_cm'])
+      return missing.includes(it) ? (dims && libLogic.validDims(dims) ? dims : { ...libLogic.MISSING_DIMS }) : undefined
+    }
+    if (room && parked) {
+      // an unplaced photo is open (§4.9): the room layout waits, in the room frame, until a placed photo shows it
+      parked = list.flatMap((it) => { const pk = parkedOf(it, missingOf(it)); return pk ? [pk] : [] })
+      return
+    }
+    const results = await Promise.allSettled(list.map(async (it) => {
       const o = rec(it)
-      const dims = rec(o?.['dims_cm'])
-      return addItemInternal(o?.['id'], {
-        uid: o?.['uid'], position: o?.['position'], rotation_y_deg: o?.['rotation_y_deg'],
-        missing: missing.includes(it) ? (dims && libLogic.validDims(dims) ? dims : libLogic.MISSING_DIMS) : undefined,
+      const at = room ? roomXfOf(o) : null
+      const x = at ? roomToSceneXf(at) : null
+      const uid = await addItemInternal(o?.['id'], {
+        uid: o?.['uid'], position: x ? [x.x, x.y, x.z] : o?.['position'], rotation_y_deg: x ? x.rot : o?.['rotation_y_deg'],
+        missing: missingOf(it),
       })
+      const r = items.get(uid)
+      if (r && at && x) r.roomAt = { ...at, y: r.group.position.y } // exactly as saved (the elevation as clamped)
+      return uid
     }))
     const failed = results.filter((r) => r.status === 'rejected').length
     if (failed) toast(layoutLogic.failedText(name, failed, list.length), 'error')
@@ -1970,9 +2127,11 @@ async function restoreLayoutInternal(docIn: unknown): Promise<void> {
   const name = doc?.['name']
   if (!doc || typeof name !== 'string' || !SLUG.test(name) || !Array.isArray(doc['items'])) throw reportError('Nothing to restore')
   const scn = doc['scene_name']
-  if (!sceneName || (scn && scn !== sceneName)) throw reportError('That layout belongs to another scene')
+  const rn = doc['room_name']
+  if (room ? (rn && rn !== room.name) || (!rn && scn) : !sceneName || (scn && scn !== sceneName) || rn) throw reportError(room ? 'That layout belongs to another room' : 'That layout belongs to another scene')
   const notes = doc['notes']
-  const body = { version: 1, name, title: doc['title'] ?? null, scene_name: sceneName, library: doc['library'] ?? LIBRARY_URL, items: doc['items'], ...(typeof notes === 'string' ? { notes } : {}) }
+  const owner = room ? { room_name: room.name } : { scene_name: sceneName }
+  const body = { version: 1, name, title: doc['title'] ?? null, ...owner, library: doc['library'] ?? LIBRARY_URL, items: doc['items'], ...(typeof notes === 'string' ? { notes } : {}) }
   let stored: JsonObject | null
   try {
     stored = rec(await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
@@ -1981,7 +2140,7 @@ async function restoreLayoutInternal(docIn: unknown): Promise<void> {
   await refreshLayouts()
 }
 async function listLayoutsInternal(): Promise<string[]> {
-  if (!sceneName) return []
+  if (!sceneName && !room) return []
   const data = rec(await apiJson(`/api/layouts${layoutQuery()}`))
   const raw = data?.['layouts']
   const all: unknown[] = Array.isArray(raw) ? raw : []
@@ -1994,6 +2153,468 @@ async function refreshLayouts(): Promise<void> {
   let names: string[] = []
   try { names = await listLayoutsInternal() } catch (e) { reportError('Could not list layouts', e); return }
   emit('layouts', { names: names.slice(), details: layoutDetails.slice() })
+}
+
+// --- rooms (contract §4.9) ---------------------------------------------------------------------------------------------
+// A room view is a scene view of one member photo (its photo, effective camera, depth, Look, lighting, renders) whose
+// pieces are a room layout: each piece keeps its place in the room frame (ItemRec.roomAt) and is drawn in the photo's
+// scene frame through the photo's pose. Switching photos is a cut: the next photo opens (openSceneAs with the room) and
+// the pieces are put where that photo sees them. On a photo without a pose the pieces wait, parked, in the room frame.
+/** A piece of a room layout while an unplaced photo is open: its room-frame place and the layout entry it saves as. */
+interface Parked {
+  readonly uid: string
+  readonly id: string
+  readonly at: RoomXf
+  readonly doc: DocItem
+  readonly missing: JsonObject | undefined
+}
+let parked: Parked[] | null = null
+let roomsList: RoomInfo[] = []
+let roomsTrash: TrashedRoom[] = []
+const LAST_ROOM_KEY = 'midstudy.lastRoom'
+const roomPhotoKey = (r: string): string => `midstudy.roomPhoto.${r}`
+const roomUrl = (name: string): string => `/api/rooms/${encodeURIComponent(name)}`
+/** A layout entry's room-frame place (position, rotation_y_deg), or null when it has none. */
+function roomXfOf(o: JsonObject | null): RoomXf | null {
+  const pos = o?.['position']
+  const pa: readonly unknown[] = Array.isArray(pos) ? pos : []
+  const [x, y, z] = pa
+  const rot = o?.['rotation_y_deg']
+  if (!isNum(x) || !isNum(z)) return null
+  return { x, y: isNum(y) ? clampElevation(y) : 0, z, rot: isNum(rot) ? rot : 0 }
+}
+function parkedOf(it: unknown, missing: JsonObject | undefined): Parked | null {
+  const o = rec(it)
+  const id = o?.['id']
+  const at = roomXfOf(o)
+  if (!o || typeof id !== 'string' || !id || !at) return null
+  const uidIn = o['uid']
+  const uid = typeof uidIn === 'string' && uidIn ? uidIn : newUid(id)
+  const render = o['render'] === 'splat' ? 'splat' : 'glb'
+  const base = layoutLogic.docItem({ uid, id, render, x: at.x, y: at.y, z: at.z, rotation_y_deg: at.rot }, K)
+  const dims = rec(o['dims_cm'])
+  return { uid, id, at, doc: dims && libLogic.validDims(dims) ? { ...base, dims_cm: { ...dims } } : base, missing }
+}
+// The pieces into the parked list (the photo just opened has no pose).
+function parkItems(): void {
+  if (parked) return
+  parked = [...items.values()].map((r) => {
+    const at = layoutXf(r)
+    const it = layoutLogic.docItem({ uid: r.uid, id: r.id, render: r.render, x: at.x, y: at.y, z: at.z, rotation_y_deg: at.rot }, K)
+    const dims = r.lib.dims_cm ?? null
+    const doc: DocItem = dims && libLogic.validDims(dims) ? { ...it, dims_cm: { ...dims } } : it
+    return { uid: r.uid, id: r.id, at, doc, missing: r.missing ? { ...(r.lib.dims_cm ?? {}) } : undefined }
+  })
+  quietItems++
+  try { clearItemsInternal() } finally { quietItems-- }
+}
+// The parked pieces back into the scene, where the (now placed) photo sees them.
+async function unparkItems(): Promise<void> {
+  const list = parked
+  if (!list) return
+  parked = null
+  await quietly(async () => {
+    await Promise.allSettled(list.map(async (p) => {
+      const x = roomToSceneXf(p.at)
+      if (!x) return
+      const uid = await addItemInternal(p.id, { uid: p.uid, position: [x.x, x.y, x.z], rotation_y_deg: x.rot, missing: p.missing })
+      const r = items.get(uid)
+      if (r) r.roomAt = p.at
+    }))
+  })
+}
+// The pieces put where the current photo sees them (after a switch, or when its pose or scale changed). Placed →
+// placed is a re-projection in place (same uids, selection, splats); placed → unplaced parks them; back unparks them.
+function placeRoomItems(): Promise<void> {
+  if (!room) return Promise.resolve()
+  if (roomUnplaced()) { parkItems(); return Promise.resolve() }
+  if (parked) return unparkItems()
+  quietItems++
+  try {
+    for (const r of items.values()) {
+      const at = r.roomAt
+      const x = at ? roomToSceneXf(at) : null
+      if (!at || !x) { syncRoomAt(r); continue }
+      r.group.position.set(x.x, x.y, x.z)
+      r.rotationDeg = x.rot
+      r.group.rotation.set(0, x.rot * DEG, 0)
+      r.group.updateMatrixWorld(true)
+      syncShadow(r)
+      emit('items', { change: 'move', uid: r.uid })
+    }
+  } finally { quietItems-- }
+  return Promise.resolve()
+}
+/** The room detail as the room view keeps it. */
+function membersOf(info: RoomInfo): RoomMember[] {
+  const align = info.align
+  return info.members.map((m) => {
+    const a = align?.members.find((x) => x.scene === m.scene)
+    const unplacedByAlign = !!align?.unplaced?.includes(m.scene)
+    const conf = a && isNum(a.confidence) ? a.confidence : unplacedByAlign ? 0 : null
+    return {
+      scene: m.scene, pose: m.pose ? roomLogic.clampPose(m.pose) : null, scale: roomLogic.clampScale(m.scale), pose_source: m.pose_source,
+      camera: m.camera ? clampCamera(m.camera) : null, effective_camera: m.effective_camera ? clampCamera(m.effective_camera) : null,
+      scene_object: m.scene_object ?? null, confidence: conf,
+    }
+  })
+}
+/** Takes a new room detail (an answer of the server): the members, their poses and scales. When the current photo's
+ *  pose or scale changed, its camera and the pieces follow (the room frame doesn't move). */
+function setRoomInfo(info: RoomInfo): void {
+  if (room?.name !== info.name) return
+  const before = curMember()
+  const was = before ? { pose: before.pose, scale: before.scale } : null
+  room.info = info
+  room.title = info.title ?? null
+  room.members = membersOf(info)
+  const now = curMember()
+  if (now && (!was || !roomLogic.samePose(was.pose, now.pose) || was.scale !== now.scale)) {
+    applyCamera()
+    quiet(placeRoomItems())
+  }
+  emit('room', { phase: 'members', name: info.name })
+}
+/** Live, without saving: a photo's pose (and scale) while it is dragged on the plan (Align photos). */
+function previewPose(scene: unknown, pose: unknown, scale?: unknown): void {
+  if (!room || typeof scene !== 'string') return
+  const m = room.members.find((x) => x.scene === scene)
+  const p = rec(pose)
+  if (!m) return
+  const before = { pose: m.pose, scale: m.scale }
+  if (p) {
+    const base = m.pose ?? { x_m: 0, z_m: 0, yaw_deg: 0 }
+    const n = (k: 'x_m' | 'z_m' | 'yaw_deg'): number => { const v = p[k]; return isNum(v) ? v : base[k] }
+    m.pose = roomLogic.clampPose({ x_m: n('x_m'), z_m: n('z_m'), yaw_deg: n('yaw_deg') })
+  } else if (pose === null) m.pose = null
+  if (isNum(scale)) m.scale = roomLogic.clampScale(scale)
+  if (scene === sceneName && (!roomLogic.samePose(before.pose, m.pose) || before.scale !== m.scale)) {
+    applyCamera()
+    quiet(placeRoomItems())
+  }
+  emit('room', { phase: 'pose', name: room.name })
+}
+
+async function listRoomsInternal(): Promise<RoomInfo[]> {
+  let data: JsonObject | null
+  try { data = rec(await apiJson('/api/rooms')) } catch (e) { throw reportError('Could not list the rooms', e) }
+  roomsList = roomInfos(data?.['rooms'])
+  roomsTrash = trashedRooms(data?.['trash'])
+  emit('rooms', { rooms: roomsList.slice() })
+  return roomsList.slice()
+}
+async function getRoomInternal(name: string): Promise<RoomInfo> {
+  const info = roomInfo(await apiJson(roomUrl(name)))
+  if (!info) throw new Error("the server's answer isn't a room")
+  return info
+}
+async function putRoom(name: string, body: JsonObject, what: string): Promise<RoomInfo> {
+  let info: RoomInfo | null
+  try { info = roomInfo(await apiJson(roomUrl(name), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })) } catch (e) {
+    throw reportError(`Could not ${what}`, e)
+  }
+  if (!info) throw reportError(`Could not ${what}`, new Error("the server's answer isn't a room"))
+  setRoomInfo(info)
+  quiet(listRoomsInternal().catch(() => undefined))
+  return info
+}
+/** POST /api/rooms: a room of existing scenes, in this order (the first is the room frame). */
+async function createRoomFromScenes(scenes: readonly string[], title: string | null): Promise<RoomInfo> {
+  let info: RoomInfo | null
+  try { info = roomInfo(await apiJson('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, scenes }) })) } catch (e) {
+    throw reportError('Could not make the room', e)
+  }
+  if (!info) throw reportError('Could not make the room', new Error("the server's answer isn't a room"))
+  quiet(listRoomsInternal().catch(() => undefined))
+  quiet(listScenesInternal().catch(() => undefined))
+  return info
+}
+/** POST /api/rooms/<room>/align (§4.9 Align): queues an alignment; resolves with the job when it is accepted. */
+async function alignRoom(name: unknown, opts: unknown = {}): Promise<AlignJobInfo> {
+  const r = typeof name === 'string' && name ? name : room?.name
+  if (!r) throw reportError('No room is open')
+  const o = rec(opts) ?? {}
+  const body = { ...(typeof o['solver'] === 'string' ? { solver: o['solver'] } : {}), ...(o['overwrite_manual'] === true ? { overwrite_manual: true } : {}) }
+  let job: AlignJobInfo | null
+  try { job = alignJob(rec(await apiJson(`${roomUrl(r)}/align`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))?.['job']) } catch (e) {
+    throw reportError(statusOf(e) === 409 ? 'An alignment is already running for this room, or it has fewer than two photos' : 'Could not start the alignment', e)
+  }
+  if (!job) throw reportError('Could not start the alignment', new Error("the server's answer has no job"))
+  emit('room', { phase: 'aligning', name: r })
+  quiet(followAlign(r))
+  return job
+}
+// Polls the room while its alignment is pending or running, then takes the result (the open room's poses).
+const following = new Set<string>()
+async function followAlign(name: string): Promise<void> {
+  if (following.has(name)) return
+  following.add(name)
+  try {
+    for (let i = 0; i < 2400; i++) {
+      await sleep(i < 10 ? 500 : 1500)
+      let info: RoomInfo
+      try { info = await getRoomInternal(name) } catch (e) { if (statusOf(e) === 404) return; continue }
+      const st = info.align_status ?? 'none'
+      if (st === 'pending' || st === 'running') continue
+      setRoomInfo(info)
+      quiet(listRoomsInternal().catch(() => undefined))
+      emit('room', { phase: st === 'failed' ? 'align-failed' : 'aligned', name })
+      if (st === 'failed') toast(`Alignment failed: ${info.align_error ?? 'see the server log'}`, 'error')
+      return
+    }
+  } finally { following.delete(name) }
+}
+/** New room (§4.9 hook createRoom): each photo uploaded (POST /api/scenes), the room made in that order, then an
+ *  alignment asked for; resolves when all three are accepted. */
+async function createRoom(files: unknown, meta: unknown = {}): Promise<{ room: string; scenes: string[]; job: AlignJobInfo | null }> {
+  const list: unknown[] = Array.isArray(files) ? files : []
+  if (!list.length || !list.every((f) => f instanceof Blob)) throw reportError('createRoom needs a list of photo files')
+  const t = rec(meta)?.['title']
+  const title = typeof t === 'string' && t.trim() ? t.trim() : null
+  const scenes: string[] = []
+  for (const f of list) {
+    const res = sceneCreated(await createScene(f, {}))
+    if (!res) throw reportError("Could not make the room: the server didn't name the new scene")
+    scenes.push(res.scene)
+  }
+  const info = await createRoomFromScenes(scenes, title)
+  const job = scenes.length >= 2 ? await alignRoom(info.name) : null
+  return { room: info.name, scenes, job }
+}
+/** Resolves when every member has finished calibrating and the alignment isn't pending or running (§4.9 hook). */
+async function waitForRoom(name: unknown): Promise<RoomInfo> {
+  if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`"${asText(name)}" isn't a room name`)
+  const t0 = performance.now()
+  for (;;) {
+    let info: RoomInfo
+    try { info = await getRoomInternal(name) } catch (e) {
+      if (statusOf(e) === 404) throw reportError(`There's no room "${name}"`, e)
+      if (performance.now() - t0 > 15 * 60e3) throw reportError(`Gave up waiting for "${name}"`, e)
+      await sleep(2000)
+      continue
+    }
+    const calibrated = info.members.every((m) => sceneLogic.calibFinished(m.scene_object?.calib_status ?? 'done'))
+    const st = info.align_status ?? 'none'
+    if (calibrated && st !== 'pending' && st !== 'running') { setRoomInfo(info); return info }
+    await sleep(700)
+  }
+}
+/** Opens a room (§4.9 Room view) on a member photo: `photo`, else the one this device last had open there, else the
+ *  first placed one. Resolves when the photo (and depth) are shown and the room layout loaded. */
+async function openRoom(name: unknown, photoWanted?: unknown): Promise<void> {
+  if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`"${asText(name)}" isn't a room name`)
+  let info: RoomInfo
+  try { info = await getRoomInternal(name) } catch (e) { throw reportError(statusOf(e) === 404 ? `There's no room "${name}"` : `Could not open the room "${name}"`, e) }
+  const lite = info.members.map((m) => ({ scene: m.scene, placed: !!m.pose }))
+  const pick = roomLogic.photoToOpen(lite, typeof photoWanted === 'string' ? photoWanted : null, store.get(roomPhotoKey(name)))
+  if (!pick) throw reportError(`The room "${info.title ?? name}" has no photos yet: add some on the Scenes page`)
+  await openSceneAs(pick, info)
+}
+/** Switches the room view to another member photo (the photo strip, keys 1–9). */
+async function setRoomPhoto(scene: unknown): Promise<void> {
+  if (!room) throw reportError('No room is open')
+  if (typeof scene !== 'string' || !room.members.some((m) => m.scene === scene)) throw reportError(`"${asText(scene)}" isn't a photo of this room`)
+  if (scene === sceneName && !sceneLoad.loading) return
+  await openSceneAs(scene, room.info)
+}
+/** Align photos and setPose (§4.9): a member's new pose (and scale), saved (PUT members: pose_source manual). */
+async function setPose(scene: unknown, partial: unknown = {}): Promise<RoomInfo> {
+  if (!room) throw reportError('No room is open')
+  const m = typeof scene === 'string' ? room.members.find((x) => x.scene === scene) : undefined
+  if (!m) throw reportError(`"${asText(scene)}" isn't a photo of this room`)
+  const o = rec(partial) ?? {}
+  const base = m.pose ?? { x_m: 0, z_m: 0, yaw_deg: 0 }
+  const n = (k: 'x_m' | 'z_m' | 'yaw_deg'): number => { const v = o[k]; return isNum(v) ? v : base[k] }
+  const pose = partial === null ? null : roomLogic.clampPose({ x_m: n('x_m'), z_m: n('z_m'), yaw_deg: n('yaw_deg') })
+  const sc = o['scale']
+  const body = { members: roomLogic.membersWithPose(room.members.map((x) => x.scene), m.scene, pose, isNum(sc) ? sc : null) }
+  return putRoom(room.name, body, 'save the photo\'s place')
+}
+/** Align photos' Reset (§4.9): the photo back to the solver's answer (PUT {reset: [scene]}). */
+function resetPose(scene: unknown): Promise<RoomInfo> {
+  if (!room) return Promise.reject(reportError('No room is open'))
+  if (typeof scene !== 'string' || !room.members.some((m) => m.scene === scene)) return Promise.reject(reportError(`"${asText(scene)}" isn't a photo of this room`))
+  return putRoom(room.name, { reset: [scene] }, 'reset the photo to the alignment')
+}
+/** Set scale for the room (§4.9, room-scale): the ruler's measured length made `meters`: every member's scale and
+ *  every pose's position × k (PUT {rescale: k}); the scene's camera is left as it is. */
+async function setRoomScale(meters: unknown): Promise<number | null> {
+  if (!room) throw reportError('No room is open')
+  const r = getRuler()
+  const k = r.meters !== null && isNum(meters) ? roomLogic.rescaleFactor(r.meters, meters) : null
+  if (k === null) return null
+  const before = ruler.points
+  await putRoom(room.name, { rescale: k }, 'set the room\'s scale')
+  // the ruler's points stay on the same photo pixels: the floor under them scaled with the effective camera
+  ruler.points = before.map((p): Vec3 => [p[0] * k, 0, p[2] * k])
+  emit('ruler', getRuler())
+  return k
+}
+async function renameRoom(name: string, title: unknown): Promise<void> {
+  const t = typeof title === 'string' && title.trim() ? title.trim() : null
+  await putRoom(name, { title: t }, 'rename the room')
+  if (room?.name === name) room.title = t
+  emit('room', { phase: 'title', name })
+}
+/** A room's member scenes as the planner knows them (the open room's, else the list's). */
+async function memberScenes(name: string): Promise<string[]> {
+  if (room?.name === name) return room.members.map((m) => m.scene)
+  const info = roomsList.find((r) => r.name === name) ?? await getRoomInternal(name)
+  return info.members.map((m) => m.scene)
+}
+async function addSceneToRoom(name: string, scene: string): Promise<RoomInfo> {
+  return putRoom(name, { members: roomLogic.membersAdding(await memberScenes(name), scene) }, 'add the photo to the room')
+}
+async function removeSceneFromRoom(name: string, scene: string): Promise<RoomInfo> {
+  const info = await putRoom(name, { members: roomLogic.membersRemoving(await memberScenes(name), scene) }, 'take the photo out of the room')
+  if (room?.name === name && sceneName === scene) {
+    const next = room.members[0]
+    if (next) await openSceneAs(next.scene, info)
+    else closeScene()
+  }
+  quiet(listScenesInternal().catch(() => undefined))
+  return info
+}
+async function deleteRoom(name: unknown): Promise<void> {
+  if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`"${asText(name)}" isn't a room name`)
+  try { await apiJson(roomUrl(name), { method: 'DELETE' }) } catch (e) { throw reportError(`Could not delete the room "${name}"`, e) }
+  if (store.get(LAST_ROOM_KEY) === name) store.set(LAST_ROOM_KEY, null)
+  if (room?.name === name) closeScene()
+  emit('room', { phase: 'deleted', name })
+  quiet(listRoomsInternal().catch(() => undefined))
+  quiet(listScenesInternal().catch(() => undefined))
+}
+async function restoreRoom(name: unknown): Promise<void> {
+  if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`"${asText(name)}" isn't a room name`)
+  try { await apiJson(`${roomUrl(name)}/restore`, { method: 'POST' }) } catch (e) {
+    throw reportError(statusOf(e) === 409 ? `A room named "${name}" exists again` : `Could not restore the room "${name}"`, e)
+  }
+  emit('room', { phase: 'restored', name })
+  await listRoomsInternal()
+  quiet(listScenesInternal().catch(() => undefined))
+}
+function setAlignPhotos(on: unknown): void {
+  alignPhotos = !!on && !!room
+  if (alignPhotos) select(null)
+  emit('room', { phase: 'align-photos', name: room?.name ?? null })
+}
+function setFloorPlanShown(on: unknown): void {
+  floorPlanShown = !!on
+  if (!floorPlanShown && alignPhotos) alignPhotos = false
+  emit('room', { phase: 'floor-plan', name: room?.name ?? null })
+}
+/** getRoom() (§4.9 hook): the open room, its current photo and every member's pose, scale and cameras. */
+interface RoomReport {
+  name: string
+  title: string | null
+  photo: string
+  members: { scene: string; index: number; pose: Pose | null; scale: number; pose_source: string; camera: Camera | null; effective_camera: Camera | null; confidence: number | null }[]
+}
+function getRoom(): RoomReport | null {
+  if (!room || !sceneName) return null
+  const cur = sceneName
+  return {
+    name: room.name, title: room.title, photo: cur,
+    members: room.members.map((m, index) => {
+      const own = m.scene === cur
+      const camera = own ? cameraLogic.cameraCopy(cam) : m.camera
+      const eff = own ? cameraLogic.cameraCopy(drawCam()) : m.effective_camera ?? (m.camera ? roomLogic.effectiveCamera(m.camera, m.scale) : null)
+      return { scene: m.scene, index, pose: m.pose ? { ...m.pose } : null, scale: m.scale, pose_source: m.pose_source, camera, effective_camera: eff, confidence: m.confidence }
+    }),
+  }
+}
+/** A member's pose: the scene given, else the current photo's (null when it isn't placed or isn't a member). */
+function poseOf(scene: unknown): Pose | null {
+  if (!room) return null
+  const n = typeof scene === 'string' ? scene : sceneName
+  return room.members.find((m) => m.scene === n)?.pose ?? null
+}
+function roomToSceneHook(p: unknown, scene?: unknown): Vec3 | null {
+  const pose = poseOf(scene)
+  return pose ? roomLogic.roomToScene(xyz(pointLike(p)), pose) : null
+}
+function sceneToRoomHook(p: unknown, scene?: unknown): Vec3 | null {
+  const pose = poseOf(scene)
+  return pose ? roomLogic.sceneToRoom(xyz(pointLike(p)), pose) : null
+}
+/** A hook point ([x, y, z] or {x, y, z}); anything else is NaN. */
+function pointLike(p: unknown): PointLike {
+  if (Array.isArray(p)) { const a: readonly unknown[] = p; return a.map((v) => (typeof v === 'number' ? v : Number(v))) }
+  const o = rec(p)
+  if (o) { const n = (v: unknown): number => (typeof v === 'number' ? v : Number.NaN); return { x: n(o['x']), y: n(o['y']), z: n(o['z']) } }
+  return [Number.NaN, Number.NaN, Number.NaN]
+}
+
+/** The occlusion depth's scale for a scene's calib.json at camera height `height_m` (§4.5 Occlusion): the floor plan
+ *  lifts every member's depth.png with its effective camera. */
+function depthScaleFor(calib: unknown, height: number): number {
+  const c = rec(calib)
+  const floor = rec(c?.['floor'])
+  const source = c?.['source']
+  const measured = !!floor?.['found'] && (source === 'moge-2' || source === 'truth')
+  return kDepthScale(height, Number(rec(c?.['camera'])?.['height_m']), measured)
+}
+/** Every piece of the open layout in its layout frame (the room frame in a room view; parked ones too), with its local
+ *  box (the item frame; a parked piece's from its dims): what the floor plan draws. */
+function layoutItems(): { uid: string; at: RoomXf; box: { min: Vec3; max: Vec3 } | null }[] {
+  if (parked) {
+    return parked.map((p) => {
+      const own = 'dims_cm' in p.doc ? rec(p.doc.dims_cm) : null
+      const d = libLogic.validDims(own) ?? libLogic.validDims(library.find((l) => l.id === p.id)?.dims_cm ?? null)
+      const min: Vec3 = d ? [-d.w / 200, 0, -d.d / 200] : [0, 0, 0]
+      const max: Vec3 = d ? [d.w / 200, d.h / 100, d.d / 200] : [0, 0, 0]
+      return { uid: p.uid, at: p.at, box: d ? { min, max } : null }
+    })
+  }
+  return [...items.values()].map((r) => ({
+    uid: r.uid, at: layoutXf(r),
+    box: r.localBox ? { min: [r.localBox.min.x, r.localBox.min.y, r.localBox.min.z], max: [r.localBox.max.x, r.localBox.max.y, r.localBox.max.z] } : null,
+  }))
+}
+
+// The hook's item and projection calls (§2.4, §4.6) in a room view take and give room-frame places (§4.9 Hook);
+// outside a room they are the scene calls as they were.
+function addItemHook(id: unknown, position: unknown, rotation: unknown): Promise<string> {
+  const pose = curPose()
+  if (!room || !pose) return addItemInternal(id, { position, rotation_y_deg: rotation })
+  const pa: readonly unknown[] = Array.isArray(position) ? position : []
+  const [x, y, z] = pa
+  const given = pa.length >= 3 && isNum(x) && isNum(z)
+  const p = given ? roomLogic.roomToScene([x, isNum(y) ? y : 0, z], pose) : null
+  const rot = isNum(rotation) ? roomLogic.rotationToScene(rotation, pose) : rotation
+  return addItemInternal(id, { position: p ? [p[0], y, p[2]] : position, rotation_y_deg: rot })
+}
+function moveItemHook(uid: unknown, opts: unknown): void {
+  const r = typeof uid === 'string' ? items.get(uid) : undefined
+  const pose = curPose()
+  if (!room || !pose || !r) { moveItemInternal(uid, opts); return }
+  const o = rec(opts) ?? {}
+  const at = r.roomAt ?? layoutXf(r)
+  const pos = o['position']
+  const pa: readonly unknown[] = Array.isArray(pos) ? pos : []
+  const [x, y, z] = pa
+  const out: { position?: unknown[]; rotation_y_deg?: number } = {}
+  if (Array.isArray(pos)) {
+    const p = roomLogic.roomToScene([isNum(x) ? x : at.x, 0, isNum(z) ? z : at.z], pose)
+    out.position = [p[0], y, p[2]]
+  }
+  const rot = o['rotation_y_deg']
+  if (isNum(rot)) out.rotation_y_deg = roomLogic.rotationToScene(rot, pose)
+  moveItemInternal(uid, out)
+  // exactly the room place asked for (the round trip through the scene frame is only good to ~1e-15)
+  if (r.roomAt) r.roomAt = { x: isNum(x) ? x : r.roomAt.x, y: r.group.position.y, z: isNum(z) ? z : r.roomAt.z, rot: isNum(rot) ? rot : r.roomAt.rot }
+}
+function photoToFloorHook(px: unknown, py: unknown): Vec3 | null {
+  const p = photoToFloor(px, py)
+  if (!room || !p) return p
+  const pose = curPose()
+  return pose ? roomLogic.sceneToRoom(p, pose) : null
+}
+function floorToPhotoHook(p: PointLike): [number, number] {
+  if (!room) return floorToPhoto(p)
+  const pose = curPose()
+  if (!pose) return [Number.NaN, Number.NaN]
+  return floorToPhoto(roomLogic.roomToScene(xyz(p), pose))
 }
 
 // --- look and lighting (contract §4.8) --------------------------------------------------------------------------------
@@ -2288,6 +2909,7 @@ async function postRender(shot: Shot, opts: { model?: string; prompt?: string | 
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         image: shot.dataUrl, model, prompt: str(opts.prompt) ?? undefined, scene: str(scn) ?? undefined,
+        ...(room ? { room: room.name } : {}), // §4.7 Room: the capture is the current photo's; layout names the room layout
         layout: SLUG.test(layout) ? layout : undefined,
         ...(opts.keepRoom ? { keep_room: true, mask: opts.mask?.dataUrl } : {}),
       }),
@@ -2302,7 +2924,7 @@ async function postRender(shot: Shot, opts: { model?: string; prompt?: string | 
     throw reportError(msg.renderFailText(null), new Error("the server's answer isn't a render"))
   }
   emit('render', { phase: 'done', model, meta })
-  if (meta.scene === sceneName) {
+  if (room ? meta.room === room.name : meta.scene === sceneName) {
     renders = [meta, ...renders.filter((r) => r.name !== meta.name)]
     emit('renders', { renders: renders.slice() })
   }
@@ -2325,7 +2947,9 @@ async function renderViewInternal(opts: unknown = {}): Promise<RenderMeta> {
 }
 async function listRendersInternal(): Promise<RenderMeta[]> {
   let data: JsonObject | null
-  try { data = rec(await apiJson(sceneName ? `/api/renders?scene=${encodeURIComponent(sceneName)}` : '/api/renders')) } catch (e) { throw reportError('Could not list renders', e) }
+  // a room view lists the room's renders (every photo, §4.7 Room); a scene its own
+  const q = room ? `?room=${encodeURIComponent(room.name)}` : sceneName ? `?scene=${encodeURIComponent(sceneName)}` : ''
+  try { data = rec(await apiJson(`/api/renders${q}`)) } catch (e) { throw reportError('Could not list renders', e) }
   renders = renderMetas(data?.['renders'])
   renderMock = data?.['mock'] === true
   emit('renders', { renders: renders.slice() })
@@ -2393,27 +3017,42 @@ interface StateItem {
   missing?: true
   worldBounds: { min: Vec3; max: Vec3 }
 }
-/** window.midstudy.getState() (§4.6). */
+/** getState().room (§4.9 hook). */
+interface RoomStateReport {
+  name: string
+  title: string | null
+  photo: string
+  alignPhotos: boolean
+  floorPlan: boolean
+}
+/** window.midstudy.getState() (§4.6, §4.9). */
 export interface PlannerState {
   scene: SceneState | null
   items: StateItem[]
   layout: string | null
   dirty: boolean
+  room: RoomStateReport | null
+}
+// In a room view every position the hook gives is in the room frame (§4.9 Hook): a piece's room place, and its bounds
+// as its box stands there.
+function stateItem(r: ItemRec): StateItem {
+  const at = room ? r.roomAt : null
+  const b = at && r.localBox ? kWorldBounds({ position: [at.x, at.y, at.z], rotation_y_deg: at.rot, min: [r.localBox.min.x, r.localBox.min.y, r.localBox.min.z], max: [r.localBox.max.x, r.localBox.max.y, r.localBox.max.z] }) : null
+  const wb = b ? { min: b.min, max: b.max } : ((): { min: Vec3; max: Vec3 } => { const w = worldBounds(r); return { min: [w.min.x, w.min.y, w.min.z], max: [w.max.x, w.max.y, w.max.z] } })()
+  return {
+    uid: r.uid, id: r.id, render: r.render, ...(r.splat ? { splats: r.splat.count } : {}),
+    position: at ? [at.x, at.y, at.z] : [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: at ? at.rot : r.rotationDeg,
+    ...(r.missing ? { missing: true as const } : {}),
+    worldBounds: wb,
+  }
 }
 function getState(): PlannerState {
   return {
     scene: getSceneState(),
-    items: [...items.values()].map((r) => {
-      const b = worldBounds(r)
-      return {
-        uid: r.uid, id: r.id, render: r.render, ...(r.splat ? { splats: r.splat.count } : {}),
-        position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg,
-        ...(r.missing ? { missing: true as const } : {}),
-        worldBounds: { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] },
-      }
-    }),
+    items: [...items.values()].map(stateItem),
     layout: layoutName || null,
     dirty: dirty.layout,
+    room: room && sceneName ? { name: room.name, title: room.title, photo: sceneName, alignPhotos, floorPlan: floorPlanShown } : null,
   }
 }
 /** window.midstudy.getRenderSettings() (§2.4). */
@@ -2446,6 +3085,22 @@ interface SceneInfo extends SceneSummary {
 // The first page state (§4.5): ?scene=<name>; else the scene last opened on this device, if it still exists; else none
 // (the UI shows the Scenes page). → the scene name opened, or null
 async function startScene(): Promise<string | null> {
+  // §2.2: ?room=<room>[&photo=<scene>] wins over ?scene=; without either, the room last opened on this device (when it
+  // was the last thing opened: opening a scene on its own forgets it)
+  const want = params.get('room')
+  const lastRoom = store.get(LAST_ROOM_KEY)
+  if (want || (!params.get('scene') && lastRoom)) {
+    const target = want ?? lastRoom ?? ''
+    const rooms = await listRoomsInternal().catch(() => null)
+    if (rooms?.some((r) => r.name === target)) {
+      await openRoom(target, params.get('photo') ?? undefined).catch(() => undefined)
+      if (sceneName) return sceneName
+    } else if (want) {
+      reportError(`There's no room "${want}"`)
+      syncUrl(null)
+      return null
+    } else store.set(LAST_ROOM_KEY, null)
+  }
   const list = await listScenesInternal().catch(() => null)
   const names = list ? list.map((s) => s.name) : null
   const go = sceneLogic.landing(params.get('scene'), store.get(LAST_SCENE_KEY), names)
@@ -2509,6 +3164,15 @@ export const engine = {
   getRuler, getState, getRenderSettings, horizonAt,
   // scenes
   listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, restoreScene, renameScene, saveScene, recalibrate,
+  // rooms (§4.9)
+  getRoomState: (): { name: string; title: string | null; photo: string | null; members: readonly RoomMember[]; info: RoomInfo; alignPhotos: boolean; floorPlan: boolean; unplaced: boolean } | null =>
+    (room ? { name: room.name, title: room.title, photo: sceneName, members: room.members.map((m) => ({ ...m })), info: room.info, alignPhotos, floorPlan: floorPlanShown, unplaced: roomUnplaced() } : null),
+  getRooms: (): RoomInfo[] => roomsList.slice(), getRoomsTrash: (): TrashedRoom[] => roomsTrash.map((t) => ({ ...t })),
+  getRoom, listRoomsInternal, getRoomInternal, createRoom, createRoomFromScenes, alignRoom, waitForRoom, openRoom, setRoomPhoto,
+  setPose, previewPose, resetPose, setRoomScale, renameRoom, addSceneToRoom, removeSceneFromRoom, deleteRoom, restoreRoom,
+  setAlignPhotos, setFloorPlanShown, roomToSceneHook, sceneToRoomHook, addItemHook, moveItemHook, photoToFloorHook, floorToPhotoHook,
+  loadDepthMap: (url: string): Promise<DepthMap> => loadDepth(url), depthScaleFor,
+  getLayoutItems: (): { uid: string; at: RoomXf; box: { min: Vec3; max: Vec3 } | null }[] => layoutItems(),
   setCamera, resetCamera, setAdjustFloor, setOcclusion, setGridVisible, setPitchFromHorizon,
   // view
   zoomAt, zoomBy, panBy, fitView,

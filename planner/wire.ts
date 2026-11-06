@@ -159,10 +159,12 @@ export interface SceneSummary {
   readonly calib_error?: string | null
   readonly floor_found?: boolean | null
   readonly camera_source?: string | null
+  /** The room the scene is a member of (§4.9), or null; a server without rooms leaves it out. */
+  readonly room?: string | null
 }
 const SCENE: Fields = {
   name: str, title: opt(str), created: opt(str), photo_url: opt(str), thumb_url: opt(str), w: opt(num), h: opt(num),
-  layouts: opt(num), calib_status: opt(str), calib_error: opt(str), floor_found: opt(bool), camera_source: opt(str),
+  layouts: opt(num), calib_status: opt(str), calib_error: opt(str), floor_found: opt(bool), camera_source: opt(str), room: opt(str),
 }
 function isScene(v: unknown): v is SceneSummary {
   return isObject(v) && conforms(v, SCENE)
@@ -243,6 +245,8 @@ export interface RenderMeta {
   readonly prompt?: string | null
   readonly created: string
   readonly scene?: string | null
+  /** The room it was made in (§4.7 Room), when the request named one. */
+  readonly room?: string | null
   readonly layout?: string | null
   readonly reference?: boolean | null
   readonly keep_room?: boolean | null
@@ -254,7 +258,7 @@ export interface RenderMeta {
 }
 const RENDER: Fields = {
   name: str, url: str, input_url: str, raw_url: opt(str), model: str, cost_usd: opt(num), mock: opt(bool), prompt: opt(str),
-  created: str, scene: opt(str), layout: opt(str), reference: opt(bool), keep_room: opt(bool),
+  created: str, scene: opt(str), room: opt(str), layout: opt(str), reference: opt(bool), keep_room: opt(bool),
   aligned: opt(shape({ applied: opt(bool), inliers: opt(num), residual_px: opt(num), reason: opt(str) })),
   width: opt(num), height: opt(num), out_w: opt(num), out_h: opt(num),
 }
@@ -263,3 +267,116 @@ function isRender(v: unknown): v is RenderMeta {
 }
 export const renderMeta = (v: unknown): RenderMeta | null => read(v, RENDER, isRender)
 export const renderMetas = (v: unknown): RenderMeta[] => readList(v, renderMeta)
+
+// --- rooms (contract §4.9) ------------------------------------------------------------------------------------------
+
+/** A pose (room.schema.json $defs/pose). */
+export interface PoseInfo {
+  readonly x_m: number
+  readonly z_m: number
+  readonly yaw_deg: number
+}
+const POSE: Fields = { x_m: num, z_m: num, yaw_deg: num }
+const isPose = (v: unknown): v is PoseInfo => isObject(v) && conforms(v, POSE)
+/** A camera block (§4.1). */
+interface CameraInfo {
+  readonly fov_y_deg: number
+  readonly height_m: number
+  readonly pitch_deg: number
+  readonly roll_deg: number
+}
+const CAMERA: Fields = { fov_y_deg: num, height_m: num, pitch_deg: num, roll_deg: num }
+const isCamera = (v: unknown): v is CameraInfo => isObject(v) && conforms(v, CAMERA)
+
+/** A member of a room: room.json's record, plus (room object, detail) its scene object and (detail) its cameras. */
+export interface RoomMemberInfo {
+  readonly scene: string
+  readonly pose: PoseInfo | null
+  readonly scale: number
+  readonly pose_source: string
+  readonly scene_object?: SceneSummary | null
+  readonly camera?: CameraInfo | null
+  readonly effective_camera?: CameraInfo | null
+}
+const MEMBER: Fields = { scene: str, pose: opt(isPose), scale: num, pose_source: str, scene_object: opt(isScene), camera: opt(isCamera), effective_camera: opt(isCamera) }
+function isMember(v: unknown): v is RoomMemberInfo {
+  return isObject(v) && conforms(v, MEMBER)
+}
+/** align.json's answer for one photo (align.schema.json AlignMember). */
+export interface AlignMemberInfo {
+  readonly scene: string
+  readonly pose?: PoseInfo | null
+  readonly confidence?: number | null
+  readonly residual_cm?: number | null
+}
+const ALIGN_MEMBER: Fields = { scene: str, pose: opt(isPose), confidence: opt(num), residual_cm: opt(num) }
+const isAlignMember = (v: unknown): v is AlignMemberInfo => isObject(v) && conforms(v, ALIGN_MEMBER)
+/** align.json as the planner reads it. */
+export interface AlignInfo {
+  readonly solver?: string | null
+  readonly members: readonly AlignMemberInfo[]
+  readonly unplaced?: readonly string[] | null
+  readonly loop_residual_cm?: number | null
+}
+const ALIGN: Fields = {
+  solver: opt(str), members: (v) => Array.isArray(v) && v.every(isAlignMember),
+  unplaced: opt((v) => Array.isArray(v) && v.every((x) => typeof x === 'string')), loop_residual_cm: opt(num),
+}
+function isAlign(v: unknown): v is AlignInfo {
+  return isObject(v) && conforms(v, ALIGN)
+}
+/** A room: the room object (GET /api/rooms entries) or the room detail (GET /api/rooms/<room>, its POST and PUT). */
+export interface RoomInfo {
+  readonly name: string
+  readonly title?: string | null
+  readonly created?: string | null
+  readonly saved?: string | null
+  readonly aligned?: { readonly solver?: string | null; readonly finished?: string | null } | null
+  readonly members: readonly RoomMemberInfo[]
+  readonly layouts?: number | null
+  readonly align_status?: string | null
+  readonly align_error?: string | null
+  readonly align?: AlignInfo | null
+}
+const ROOM: Fields = {
+  name: str, title: opt(str), created: opt(str), saved: opt(str), aligned: opt(shape({ solver: opt(str), finished: opt(str) })),
+  members: (v) => Array.isArray(v), layouts: opt(num), align_status: opt(str), align_error: opt(str), align: any,
+}
+function isRoom(v: unknown): v is RoomInfo {
+  return isObject(v) && conforms(v, ROOM) && Array.isArray(v['members']) && v['members'].every(isMember) && (v['align'] === undefined || v['align'] === null || isAlign(v['align']))
+}
+/** A room as it can be read: members that can't be read are left out, an align.json that can't be read is null. */
+export function roomInfo(v: unknown): RoomInfo | null {
+  if (isRoom(v)) return v
+  if (!isObject(v)) return null
+  const base = read(v, ROOM, (x): x is Json => isObject(x) && conforms(x, ROOM))
+  if (!base) return null
+  const align = base['align']
+  const copy = { ...base, members: readList(base['members'], (x) => (isMember(x) ? x : null)), align: isAlign(align) ? align : null }
+  return isRoom(copy) ? copy : null
+}
+export const roomInfos = (v: unknown): RoomInfo[] => readList(v, roomInfo)
+
+/** A deleted room the server keeps (GET /api/rooms `trash`). */
+export interface TrashedRoom {
+  readonly name: string
+  readonly title?: string | null
+  readonly created?: string | null
+  readonly deleted?: string | null
+}
+export const trashedRooms = (v: unknown): TrashedRoom[] => readList(v, (x) => read(x, TRASHED_SCENE, isTrashedScene))
+
+/** An align job (api/room-job.schema.json), as far as the planner follows it. */
+export interface AlignJobInfo {
+  readonly id: string
+  readonly kind?: string | null
+  readonly room?: string | null
+  readonly status?: string | null
+  readonly message?: string | null
+  readonly waiting_for?: readonly string[] | null
+}
+const ALIGN_JOB: Fields = { id: str, kind: opt(str), room: opt(str), status: opt(str), message: opt(str), waiting_for: opt((v) => Array.isArray(v)) }
+function isAlignJob(v: unknown): v is AlignJobInfo {
+  return isObject(v) && conforms(v, ALIGN_JOB)
+}
+export const alignJob = (v: unknown): AlignJobInfo | null => read(v, ALIGN_JOB, isAlignJob)

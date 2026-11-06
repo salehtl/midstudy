@@ -11,6 +11,6 @@
     "types": [],
     "tsBuildInfoFile": "build/tsc/planner.tsbuildinfo"
   },
-  "include": ["planner/**/*.ts", "core/js/web.ts"],
+  "include": ["planner/**/*.ts", "core/js/web.ts", "contract/gen/types.ts"],
   "exclude": ["planner/dist"]
 }

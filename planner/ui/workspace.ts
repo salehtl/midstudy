@@ -15,11 +15,12 @@
 // Shell events it sends (cancelable; preventDefault() to take over): 'render-request' {}, 'open-render' { meta }
 // The decisions, placements and words: logic/workspace.ts.
 import { ring, unsavedGlyph, icon, svgFrom } from './icons.js'
-import { dimsText, horizonDragGain, horizonDragRow, quiet, sceneTitle, MAX_ELEVATION, CAMERA_RANGE, type CameraKey, type CameraPatch, type ItemSnapshot, type UiContext } from './seam.js'
+import { dimsText, friendlyDate, horizonDragGain, horizonDragRow, quiet, sceneTitle, MAX_ELEVATION, CAMERA_RANGE, type CameraKey, type CameraPatch, type ItemSnapshot, type UiContext } from './seam.js'
 import type { Child } from './kit.js'
 import type { ToastHandle } from './shell.js'
 import { keyboardInset } from './logic/chrome.js'
 import { fixedMinus, readDecimal, readSigned, signed1 } from './logic/text.js'
+import { roomScaleText, roomTitleText } from './logic/rooms.js'
 import {
   adjustNote, bottomBar, clipInset, elevCm as cmOf, elevMeters, fillPercent, floorSavedText, frontCorner, gripSpot, horizonHandle as handleSpot,
   labelSpot, missingText, renderChip, repeatCm, repeatDelayMs, rulerHint as rulerHintText, scaleText, stageInsets, switcher as switcherOf, switcherLabel, upText,
@@ -181,7 +182,8 @@ export function mount(ctx: UiContext): void {
       title = 'Scenes'
       g = glyph(G.scenes, 16)
     } else {
-      title = sceneTitle(engine.getScene() ?? scenes.getScene(name))
+      const rm = engine.getRoomState()
+      title = rm ? roomTitleText(rm.title, friendlyDate(rm.info.created ?? null), rm.name) : sceneTitle(engine.getScene() ?? scenes.getScene(name))
       g = s.state === 'unsaved' ? unsavedGlyph(14) : s.state === 'check' ? icon('warning', { size: 16, stroke: 1.75 }) : h('span.dot')
     }
     switcher.dataset['state'] = s.state
@@ -424,9 +426,11 @@ export function mount(ctx: UiContext): void {
     const rulerText = h('span.ws-adj-ruler.tnum')
     // A known length fixes the scale: "[ ] cm · Set scale" scales the camera height (engine.setRulerTrueLength).
     const trueInput = h('input.input.ws-adj-true.tnum', { type: 'text', inputmode: 'decimal', enterkeyhint: 'done', autocomplete: 'off', spellcheck: false, placeholder: phone() ? 'Real length' : 'e.g. 200', 'aria-label': 'Its real length, cm', dataset: { midstudy: 'ruler-true' } })
+    const inRoom = !!engine.getRoomState()
     const applyTrue = (): void => {
       const cm = readDecimal(trueInput.value)
       if (!(cm > 0)) { trueInput.focus(); return }
+      if (inRoom) { quiet(roomScale(cm)); return }
       const exact = engine.setRulerTrueLength(cm / 100)
       trueInput.value = ''
       trueInput.blur()
@@ -440,7 +444,8 @@ export function mount(ctx: UiContext): void {
     const rulerHint = h('span.ws-adj-rhint', { role: 'status' })
     const trueBox = h('div.ws-adj-truebox', { hidden: true },
       h('span.ws-adj-true-cap', 'Know its real length?'), h('label.ws-adj-true-field', trueInput, h('span', 'cm')),
-      h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'ruler-set', tip: 'Scale the room so the ruler reads this length' }, onclick: applyTrue }, 'Set scale'))
+      // in a room view (§4.9) Set scale scales the whole room (every photo), not this photo's camera: room-scale
+      h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: inRoom ? 'room-scale' : 'ruler-set', tip: inRoom ? 'Scale the whole room (every photo) so the ruler reads this length' : 'Scale the room so the ruler reads this length' }, onclick: applyTrue }, 'Set scale'))
     const trueRow = h('div.ws-adj-truerow', { hidden: true }, rulerHint, trueBox)
     const reset = h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'floor-reset', tip: 'Back to the automatic camera' }, onclick: () => { engine.resetCamera() } }, 'Reset')
     const ok = h('button.ws-adj-btn.is-primary', { type: 'button', dataset: { midstudy: 'floor-ok' }, onclick: () => { quiet(looksRight()) } }, 'Looks right')
@@ -471,6 +476,12 @@ export function mount(ctx: UiContext): void {
       reset.disabled = false
     }
     adjustSync()
+  }
+  async function roomScale(cm: number): Promise<void> {
+    let k: number | null
+    try { k = await engine.setRoomScale(cm / 100) } catch { return }
+    if (k === null) return
+    shell.toast(roomScaleText(k), { kind: 'ok', id: 'ruler-scale', ms: 5000 })
   }
   async function looksRight(): Promise<void> {
     const before = engine.getSavedScene()
@@ -525,7 +536,10 @@ export function mount(ctx: UiContext): void {
   function syncStage(): void {
     const m = shell.metrics()
     const sheet = m.mode === 'desktop' ? null : shell.getOpenPanel()
-    engine.setStageInsets(stageInsets(m.mode, m.chromeLeft, m.safe.top, m.safe.bottom, m.sheetH, !!sheet && sheet.detent !== 'full', adjustCard.hidden ? null : adjustCard.offsetHeight))
+    const ins = stageInsets(m.mode, m.chromeLeft, m.safe.top, m.safe.bottom, m.sheetH, !!sheet && sheet.detent !== 'full', adjustCard.hidden ? null : adjustCard.offsetHeight)
+    // a room view (§4.9): the photo strip above the photo, the floor plan beside it (desktop) or below it (phone)
+    const rm = ctx.floorPlan?.insets() ?? { top: 0, right: 0, bottom: 0 }
+    engine.setStageInsets(rm.top || rm.right || rm.bottom ? { left: ins.left, top: ins.top + rm.top, right: ins.right + rm.right, bottom: Math.max(ins.bottom, rm.bottom) } : ins)
   }
 
   // --- the whole chrome from the current state ----------------------------------------------------------------------------
@@ -547,7 +561,8 @@ export function mount(ctx: UiContext): void {
     if (showSel) syncElev()
     const wasAdj = !adjustCard.hidden
     if (set(adjustCard, adj && open && !busy())) {
-      if (!adjustCard.childElementCount || adjustCard.dataset['mode'] !== shell.mode) { adjustCard.dataset['mode'] = shell.mode; buildAdjust() }
+      const adjMode = `${shell.mode}${engine.getRoomState() ? '|room' : ''}`
+      if (!adjustCard.childElementCount || adjustCard.dataset['mode'] !== adjMode) { adjustCard.dataset['mode'] = adjMode; buildAdjust() }
       adjustSync?.()
     } else if (wasAdj) { adjustCard.replaceChildren(); adjustCard.dataset['mode'] = '' }
     toolRow.hidden = !phone() || showSel || (adj && open) || !open
@@ -559,6 +574,7 @@ export function mount(ctx: UiContext): void {
   const rebuild = (): void => { buildTools(); selBar.replaceChildren(); lift.replaceChildren(); adjustCard.replaceChildren(); hint.replaceChildren(); emptyCard.replaceChildren(); sync(); syncStage() }
 
   for (const ev of ['scene', 'dirty', 'selection', 'adjust', 'occlusion', 'grid', 'look', 'layouts'] as const) engine.events.addEventListener(ev, sync)
+  engine.events.addEventListener('room', (e) => { if (e.detail.phase !== 'pose') { sync(); requestAnimationFrame(syncStage) } })
   engine.events.addEventListener('items', (e) => { if (e.detail.change !== 'move') sync(); else if (engine.isSelected(e.detail.uid)) syncElev() })
   engine.events.addEventListener('camera', () => { if (!adjustCard.hidden) adjustSync?.(); renderSwitcher() })
   engine.events.addEventListener('ruler', () => { if (!adjustCard.hidden) adjustSync?.() })
@@ -758,7 +774,7 @@ export function mount(ctx: UiContext): void {
   vv?.addEventListener('scroll', syncKb)
   syncKb()
 
-  ctx.workspace = { setAdjust }
+  ctx.workspace = { setAdjust, syncStage: () => { syncStage(); sync() } }
   buildTools()
   sync()
   syncStage()
