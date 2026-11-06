@@ -228,8 +228,13 @@ async function readBody(res: http.IncomingMessage, options: SafeFetchOptions, bu
     }
   }
   let inflater: zlib.Gunzip | zlib.Inflate | zlib.InflateRaw | null = null
+  // Node 22 never calls write's callback after a Z_DATA_ERROR, so the 'error' event settles the write too (a body
+  // that doesn't decode as its Content-Encoding says used to hold the request open forever).
   const feed = (z: zlib.Gunzip | zlib.Inflate | zlib.InflateRaw, chunk: Buffer): Promise<void> => new Promise((resolve, reject) => {
+    const onError = (e: Error): void => { reject(e) }
+    z.once('error', onError)
     z.write(chunk, (err) => {
+      z.off('error', onError)
       if (err) reject(err)
       else resolve()
     })

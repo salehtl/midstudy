@@ -36,9 +36,12 @@ judge it in Safari or Helium on Metal, with and without `?webgpu=0`.
 
 - `main` has 8 commits written against v1 files since the fork (`e1b717f..main`: keyboard shortcuts and Export, GPT
   Image 2 renders, the daily fal budget in Settings, the light-colour fix, headless-Chrome evals): not yet ported to v2.
-- Phase 4 stopped early (usage limit): findings from the contract and rigor verifiers are in their worktrees
-  (`.claude/worktrees/rf-verify-*/evals/out/`), not fixed. Two medium ones: the product route can hang on some page
-  bodies; decimal-form private IPs pass the picture-link check (as in v1).
+- Phase 4 stopped early (usage limit). Fixed: the product route no longer hangs on a page or feed body that doesn't
+  decode as its Content-Encoding says (422 in ~10 ms, as v1; gzip with trailing junk is now 422 where v1 read it), and
+  picture links to private or loopback IPv4 written in decimal, hex, octal, short or percent-encoded form are dropped
+  (v1 kept them). The other findings (all low, plus three medium rigor ones: kernel differential tests in no gate,
+  TS re-implementations of the proved slug and photo-extension rules, Python-compatibility helpers duplicated) are
+  in `.claude/worktrees/rf-verify-*/evals/out/`, not fixed.
 - `v2-webgpu`'s last commit (lazy environment maps, `25a9c3a`) is left out: it broke E16.33.
 - Fuzz corpora are committed in bulk (~18 MB); trim to seeds.
 - Not verified: live fal, a real GPU or phone, the Linux packaging (Nix is evaluated, not built on Linux).

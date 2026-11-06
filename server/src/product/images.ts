@@ -65,8 +65,23 @@ function privateHost(p: SplitUrl, allow: string): boolean {
   if (host === 'localhost' || ['.localhost', '.local', '.internal', '.lan', '.home.arpa'].some((s) => host.endsWith(s))) return true
   const bare = host.replace(/^[[\]]+/, '').replace(/[[\]]+$/, '')
   const ip = bare.split('%')[0] ?? ''
-  if (parseIpv4(ip) === null && parseIpv6(ip) === null) return false // a name: the browser resolves it (and from-url checks it at Make)
+  if (parseIpv4(ip) === null && parseIpv6(ip) === null) {
+    // A browser's URL parser reads decimal, hex, octal, short and percent-encoded hosts as IPv4 (2130706433, 0x7f000001,
+    // 0177.0.0.1, 127.1, %31%32%37.0.0.1 are all 127.0.0.1): judge the address it would request.
+    const seen = browserHost(bare)
+    if (seen !== null && seen !== bare && parseIpv4(seen) !== null) return addressBlocked(seen)
+    return false // a name: the browser resolves it (and from-url checks it at Make)
+  }
   return addressBlocked(bare)
+}
+
+/** The host a WHATWG URL parser (the browser's) reads from `host`, or null if it refuses it. */
+function browserHost(host: string): string | null {
+  try {
+    return new URL(`http://${host}/`).hostname
+  } catch {
+    return null
+  }
 }
 
 const SCHEME_PREFIX = /^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}]*(?:data|javascript|blob|about):/iu
