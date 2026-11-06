@@ -55,6 +55,11 @@ RoomPlan import, an agent that models the room. Free roaming is not a goal.
   code, **NVIDIA non-commercial weights**: fine for this personal tool, a blocker if it ever becomes a product), VGGT,
   MASt3R, and a no-ML fallback that snaps walls to two square directions (Manhattan) from MoGe's normals. Phase A
   picks one on numbers (§5).
+- **Gate A (2026-11-07): MASt3R**, with Manhattan as the no-dependency fallback. On the golden room it was the only
+  candidate within every target (worst 2.3 cm / 0.21° / 0.37 %, the blank-wall photo unplaced, no confident-wrong
+  placement; re-run by the main session). Costs accepted by the user: CC BY-NC-SA 4.0 (non-commercial), about 1 min
+  for 7 photos and 2.3 min for 11 on MPS, ~11.5 GB peak. Solv3R and VGGT placed the far photo 12–19 cm off with
+  confidence 0.57–0.81. Numbers and commands: `docs/notes/rooms-calib.md`.
 
 ---
 

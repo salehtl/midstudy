@@ -38,6 +38,10 @@ fn scenes() -> Vec<Scene> {
             continue;
         };
         let truth: Value = serde_json::from_str(&text).unwrap();
+        // The room fixtures (room-1 … room-6, docs/ROOMS.md) are other cameras in the same room, not the five pinned here.
+        if truth.get("pose_in_room").is_some() {
+            continue;
+        }
         let lighting: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("lighting.json")).unwrap())
                 .unwrap();
