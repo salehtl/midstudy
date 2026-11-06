@@ -96,6 +96,12 @@ export function conformance(uri: SchemaUri, data: unknown, what: string): Contra
   return v
 }
 
+/** Whether `data` passes the schema at `uri` (always true when strict mode is off), without reporting it: for files the
+ *  server only reads and serves as they are (a room's align.json, written by midstudy-calib). */
+export function conforms(uri: SchemaUri, data: unknown): boolean {
+  return violationOf(uri, data) === null
+}
+
 /** @public Throws ContractViolation when `data` breaks the schema at `uri` (strict mode), with a stderr line naming `what`. */
 export function assertConforms(uri: SchemaUri, data: unknown, what: string): void {
   const v = conformance(uri, data, what)

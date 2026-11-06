@@ -15,6 +15,7 @@ import { exists, isDir, isFile, move, removeTree, resolvePath } from '../../../c
 import { compareNames } from '../../../core/js/node.ts'
 import type { Camera, SceneTrashRoom } from '../../../contract/gen/types.ts'
 import { JobStore, newJobId } from '../jobs.ts'
+import { conforms } from '../strict.ts'
 import type { CalibOutcome } from '../scenes/calib.ts'
 import { listDir, makeDir, makeDirs, mtimeOf, readJson, writeJsonSync } from '../scenes/files.ts'
 import { clampCamera } from '../scenes/logic/camera.ts'
@@ -187,10 +188,11 @@ export class RoomService {
     return out
   }
 
-  /** align.json as it is (an object), or null. */
+  /** align.json as it is, or null when there is none or it can't be read as an answer (in strict mode: it breaks
+   *  align.schema.json; the tool that wrote it is to blame, and the room stays usable). */
   alignJson(name: string): Readonly<Record<string, unknown>> | null {
     const v = readJson(path.join(this.dir, name, 'align.json'))
-    return isRecord(v) ? v : null
+    return isRecord(v) && readAnswer(v) !== null && conforms('midstudy/align.schema.json', v) ? v : null
   }
 
   /** How many room layouts (`<slug>.json` in layouts/@<room>/). */
@@ -214,7 +216,7 @@ export class RoomService {
   }
 
   #status(name: string): { readonly status: AlignStatus; readonly error: string | null } {
-    return alignStatus(this.#lastJob(name), isFile(path.join(this.dir, name, 'align.json')))
+    return alignStatus(this.#lastJob(name), this.alignJson(name) !== null)
   }
 
   /** The room object (GET /api/rooms entries, restore). Members whose scene is gone (removed by hand) are left out. */
@@ -478,7 +480,9 @@ export class RoomService {
     if (r === null) return { status: 404, error: noRoom(name) }
     const last = this.#lastJob(name)
     if (last !== null && (last.status === 'queued' || last.status === 'running')) return { status: 409, error: ALIGN_BUSY }
-    if (r.members.filter((m) => isFile(this.#photo(m.scene))).length < 2) return { status: 409, error: ALIGN_NEEDS_PHOTOS }
+    // A member still calibrating counts: its photo.jpg comes with its calibration, which the job waits for (New room
+    // asks for the alignment right after the uploads, §4.9 Planner).
+    if (r.members.filter((m) => isFile(this.#photo(m.scene)) || this.#scenes.busy(m.scene)).length < 2) return { status: 409, error: ALIGN_NEEDS_PHOTOS }
     const now = this.#now()
     const id = newJobId('a', now)
     const job: AlignJobView = { id, kind: 'align', room: name, status: 'queued', created: isoUtc(now), started: null, finished: null, message: ALIGN_QUEUED, waiting_for: [], align: null }

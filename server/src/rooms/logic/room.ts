@@ -23,7 +23,7 @@ function refuse<T>(error: string): Checked<T> {
 }
 
 /** A room title as stored: trimmed, null when blank or null; refused when it isn't text or is over 200 characters. */
-export function checkTitle(v: unknown): Checked<string | null> {
+function checkTitle(v: unknown): Checked<string | null> {
   if (v !== null && typeof v !== 'string') return refuse('title must be text or null')
   const t = pyStrip(typeof v === 'string' ? v : '')
   if (codePointLength(t) > MAX_TITLE) return refuse('the title can be at most ' + String(MAX_TITLE) + ' characters')
