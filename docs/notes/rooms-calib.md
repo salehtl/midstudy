@@ -48,7 +48,7 @@ uv run --extra rooms midstudy-calib align-room ../fixtures/scenes/living-wide ..
 MIDSTUDY_CALIB_MOCK=../fixtures/calib uv run midstudy-calib align-room <dirs...> --out <room-dir>   # the mock
 echo '{"id":"a-1","cmd":"align-room","args":["/abs/scenes/a","/abs/scenes/b","--out","/abs/rooms/r"]}' | uv run midstudy-calib serve
 
-uv run pytest -q -m "not mast3r"                  # 136 tests, ~50 s, no MASt3R
+uv run pytest -q -m "not mast3r"                  # 137 tests, ~50 s, no MASt3R
 uv run --extra rooms pytest -q -m mast3r          # the golden room with the real MASt3R, ~100 s on MPS (run it under the eval lock)
 uv run --extra rooms python scripts/bench_rooms.py ../fixtures/scenes/{living-wide,room-1,room-2,room-3,room-4,room-5,room-6}
 bash scripts/check.sh                             # gen_contract_types --check, ruff, pyright strict (note: its `uv sync` removes the extra)
@@ -150,8 +150,8 @@ worst position error 2.7 cm. Peak footprint for 7 photos: 11.6 GB (`/usr/bin/tim
 
 ## Phase B checks run (this worktree)
 
-- `cd calib && uv run --extra rooms pytest -q`: 141 passed, 1 skipped (the user's photo, absent) — includes the 5
-  `mast3r` tests with the real MASt3R; after the last edits `pytest -q tests/test_align_room.py` (28 passed).
+- `cd calib && uv run --extra rooms pytest -q` (final, under the eval lock): 142 passed, 1 skipped (the user's photo, absent) — includes the 5
+  `mast3r` tests with the real MASt3R.
 - Without the extra (`uv sync`, exact): `pytest -q`: 136 passed, 6 skipped (the 5 `mast3r` tests and the photo);
   `align-room` answers `manhattan`; `--solver mast3r` exits 1 "the mast3r solver isn't installed (…)".
 - `npm run check:py` (pyright strict 0 errors, ruff clean), `calib/scripts/check.sh` (gen_contract_types current),
