@@ -2,7 +2,9 @@
 
 See furniture in your own room before you buy it: the room is **one phone photo**, furniture is made from photos at real-world size (SAM 3D on fal), you place it on the photo's floor, save layouts, and render a photoreal image. A fork of [nook](https://github.com/salehtl/nook) without the room scan. Personal use; prefer the simplest thing that works.
 
-[PLAN.md](PLAN.md) is the plan; [contract/CONTRACT.md](contract/CONTRACT.md) is the spec (files, routes, the camera model, the hook, the schemas in `contract/`). Read the contract before changing `planner/`, `server/`, `pipeline/`, `calib/` or `core/`. [docs/REFACTOR.md](docs/REFACTOR.md) is how v2 was built; `docs/notes/cutover.md` is where it ended. Agents leave notes in `docs/notes/<track>.md`.
+[PLAN.md](PLAN.md) is the plan; [contract/CONTRACT.md](contract/CONTRACT.md) is the spec (files, routes, the camera model, the hook, the schemas in `contract/`). Read the contract before changing `planner/`, `server/`, `pipeline/`, `calib/` or `core/`. [docs/REFACTOR.md](docs/REFACTOR.md) is how v2 was built; `docs/notes/cutover.md` is where it ended. [docs/STATUS.md](docs/STATUS.md) says where v2 stands; [docs/ROOMS.md](docs/ROOMS.md) is the next plan (one layout across several photos of a room; not started). Agents leave notes in `docs/notes/<track>.md`.
+
+How the pieces connect: a room photo goes through `calib/` (MoGe-2) and becomes a scene in `scenes/` with its camera block (contract §4.1–4.3). Furniture photos go through `midstudy-add` (`pipeline/`, fal) into entries in `library/library.json` (§3). The server serves both to the planner, which places items on the photo's floor, saves layouts and asks for renders (§2.6–2.8, §4.4–4.7). The Rust kernels in `core/` are used as wasm by all three TypeScript programs.
 
 ## Conventions
 
@@ -34,6 +36,7 @@ scripts/         build.mjs, check.mjs (npm run check), gen-contract, tscert-ratc
 tscert/          TScert's config and the ratchet (baseline.json: every function that must keep certifying)
 nix/, flake.nix  dev shells (default, nightly) and the packaging
 build/           wasm and other build outputs (git-ignored; so is planner/dist/)
+.upstream/nook/  nook's source, git-ignored, for reference only: read it, never edit or import from it
 ```
 
 User data (`scenes/`, `library/`, `layouts/`, `renders/`) is written by the tools and git-ignored, except `library/library.json` and `library/costs.csv`.
