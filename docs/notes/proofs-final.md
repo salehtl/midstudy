@@ -39,6 +39,10 @@ tables** (they supersede the two tables in proofs.md, which this track does not 
 | sniff (new) | `sniff::sniff`, `Kind::photo_ext`, wasm-node `api::sniff`; and calib's own Python `sniff(data[:64])` | 20,103 identical, every kind; calib's Python agrees on 20,103/20,103 | 20,103 identical, calib agrees |
 | wire (new) | wire.rs `Reader` read as `zip_plan` reads (every entry's name, flags, words, attributes, size), and whether `api::zip_plan` answers `bad-input` | 20,001 identical (10,892 read, 9,109 bad-input) | 20,001 identical |
 
+Re-run at this round's last proofs commit (`9def78e`, in place) and against kernels-hardening's newer tip `1a13d59`
+(which changed `http.rs`, `path.rs` and the Kani harnesses, none of the modelled functions): all eight modes
+identical again, with the same counts (`evals/out/proofs-diff-head-v2.log`, `evals/out/proofs-diff-kh-1a13d59.log`).
+
 The JPEG corpus is 30,476 (not 30,076 as in proofs.md) since the 400 frame-header cases were added to it. Logs:
 `evals/out/proofs-diff-final-v2.log`, `evals/out/proofs-diff-final-kh.log` (scratch, git-ignored). About a minute for
 all eight modes once `mediastrip` and the harness are built.
@@ -218,8 +222,8 @@ Row 17 is this round's; the others are as in proofs.md.
   argued in its comment and pinned by geom's differential test against v1, not proved here.
 - LEAN.md 23's rank-9 claim (numeric) and 28 (half floats): as in proofs.md, not proved.
 - Aeneas and Charon: still blocked (proofs.md).
-- **kernels-hardening is not on `v2`**: its crates were measured at `a7953e9` (the branch tip when this ran; that
-  track was still committing). After the integration merges it, run `nix develop -c proofs/diff/run.sh 20000` in place
+- **kernels-hardening is not on `v2`**: its crates were measured at `a7953e9` and `1a13d59` (its tips while this ran;
+  that track was still committing). After the integration merges it, run `nix develop -c proofs/diff/run.sh 20000` in place
   once more.
 
 ## Requests to other tracks
