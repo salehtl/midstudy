@@ -18,7 +18,8 @@ See furniture in your own room before you buy it: the room is **one phone photo*
 contract/        CONTRACT.md, *.schema.json (files), api/*.schema.json + routes.json (HTTP), examples/ (recorded)
 contract/gen/    generated from the schemas (node scripts/gen-contract.mjs): types.ts, validate.js, routes.js; never edit
 planner/         the browser app, strict TypeScript: main.ts, engine*.ts, lighting.ts, input.ts, data.ts, wire.ts, bus.ts,
-                 logic/ (pure, TScert), ui/ (DOM; ui/logic/ pure, TScert), styles/, index.html; bundled to planner/dist/
+                 logic/ (pure, TScert), ui/ (DOM; ui/logic/ pure, TScert), gpu/ (WebGPU: TSL passes, the splat renderer
+                 and its GPU and worker sorts; WebGL2 fallback built in, ?webgpu=0), styles/, index.html; bundled to planner/dist/
 server/          the HTTP server (node server/src/main.ts): src/http, src/routes, src/scenes, src/library, src/product,
                  src/logic (pure, TScert; also src/*/logic/); test/ (npm run test:server, test:scenes, test:library)
 common/          what the server and midstudy-add share: the library lock, costs.csv, fal, files, tools; logic/ (TScert)
@@ -56,7 +57,7 @@ User data (`scenes/`, `library/`, `layouts/`, `renders/`) is written by the tool
 | everything (merges, cross-cutting fixes) | integration |
 | `docs/notes/<track>.md` | each track its own |
 
-**Shared-append** (any track adds entries, never edits or removes others'; whoever merges unions conflicts and regenerates the lockfile): `package.json`, `package-lock.json`, `core/Cargo.lock`, `tscert/baseline.json`, `knip.json`. Parallel tracks each work in their own worktree and branch; only integration commits to the main line. Nothing is pushed.
+**Shared-append** (any track adds entries, never edits or removes others'; whoever merges unions conflicts and regenerates the lockfile): `package.json`, `package-lock.json`, `core/Cargo.lock`, `tscert/baseline.json`, `knip.json`. Parallel tracks each work in their own worktree and branch; only integration commits to the main line. Push only when the user asks.
 
 ## Secrets, privacy and cost
 
@@ -93,10 +94,10 @@ Everything comes from the flake's dev shell: run `nix develop -c <cmd>` from the
 
 `evals/README.md` describes each one; `docs/notes/*.md` say where things stand. All are $0 (fal mocked) and set the mock variables themselves. They run `node server/src/main.ts` and `node pipeline/src/cli.ts` in strict mode (`MIDSTUDY_STRICT=1`: every answer and written file is checked against its schema), after `node scripts/build.mjs`. **Every eval goes through the lock**, a machine-wide semaphore shared by every worktree: `nix develop -c node scripts/eval-lock.mjs -- npm run eval:…` (`--exclusive` for performance measurements). A timing check that fails once under load is re-run before it counts.
 
-- `npm run eval:all`: E1, E3–E9 and E11–E16 (scenes API, planner, occlusion, floor, render, library, pipeline, phone, the UX rounds, splats, the product page and its form, lighting), one after another; `-- --with-calib` adds E2.
+- `npm run eval:all`: E1, E3–E9, E11–E16 and `eval:keys` (scenes API, planner, occlusion, floor, render, library, pipeline, phone, the UX rounds, splats, the product page and its form, lighting, keyboard shortcuts and Export), one after another; `-- --with-calib` adds E2. Browser evals run on WebGPU; `MIDSTUDY_WEBGPU=0` runs them on the WebGL2 fallback.
 - `npm run eval:calib`: E2, real MoGe-2 on the golden scenes and `fixtures/photos/` (`-- --mock` checks ingest only).
 - `npm run eval:real`: the real path on this Mac (real MoGe-2, a photo from `fixtures/photos/`, GLB add, renders, Compare); not in `eval:all`.
-- `npm run eval:perf`: E17, the performance eval (`-- --compare evals/perf/baseline.json`, v1's numbers; `--target a:<path> --target b:<path>` for an A/B).
+- `npm run eval:perf`: the performance eval (its reports say E17, as does `eval:keys`'s file: two evals share the number) (`-- --compare evals/perf/baseline.json`, v1's numbers; `--target a:<path> --target b:<path>` for an A/B).
 - `npm run eval:selftest`: the eval machinery itself. `npm run eval:ui-smoke`: the UI flows no other eval drives.
 - `nix develop -c node fixtures/make_scene.mjs` regenerates the golden scenes; `nix develop -c npm run check:scenes` checks them (and pins the camera convention).
 - `evals/validate_library.py <library.json>` checks a library against the contract.
