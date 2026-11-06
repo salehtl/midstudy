@@ -1,0 +1,32 @@
+[project]
+name = "midstudy-rooms-spike"
+version = "0.0.0"
+description = "Phase A solver spike for rooms (docs/ROOMS.md §5): poses of several photos of one room, per candidate solver. Not wired into midstudy-calib."
+requires-python = ">=3.12,<3.13"
+# Manhattan (the no-ML candidate) needs only these.
+dependencies = [
+    "numpy>=1.26,<2.3",
+    "pillow>=11.0",
+    "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+# Solv3R, VGGT and MASt3R run from their own repos, cloned at pinned commits outside midstudy (setup.sh, into
+# ~/.cache/midstudy-spike/repos) and put on sys.path by run.py; these are their runtime dependencies.
+ml = [
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "huggingface-hub[torch]>=0.25",
+    "safetensors>=0.4",
+    "einops>=0.8",
+    "opencv-python-headless>=4.10",
+    # MASt3R / DUSt3R
+    "roma>=1.5",
+    "scikit-learn>=1.5",
+    "trimesh>=4.4",
+    "matplotlib>=3.9",
+    "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false
