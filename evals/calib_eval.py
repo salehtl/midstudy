@@ -9,7 +9,8 @@ Written from the spec only (it never reads calib/ source). Run through evals/py 
     evals/py evals/calib_eval.py --self-test     the comparator and checks themselves, against fixtures (no CLI)
     options: --cli "CMD" (default "uv run --project calib midstudy-calib"; e.g. "python3 fixtures/stub_calib.py"),
              --calib-mock DIR (real mode: set MIDSTUDY_CALIB_MOCK, to exercise the harness without MoGe),
-             --only living-wide,portrait (golden subset), --no-real-photos
+             --only living-wide,portrait (golden subset), --no-real-photos,
+             --no-align (real mode without E20: align-room's real solver, evals/align_eval.mjs, which runs last otherwise)
 
 Tolerances (§6.2): each golden photo runs twice. With its focal length in EXIF (what a phone photo carries): FOV the
 EXIF one, height within 5 %, pitch within 3°, roll within 2°, depth.png median relative error ≤ 10 % on non-floor
@@ -946,6 +947,19 @@ def run_self_test() -> None:
     check("self-test: the oversize input is over 25 MB", inputs["oversize"].stat().st_size > 25 * 2**20, f"{inputs['oversize'].stat().st_size / 2**20:.1f} MiB")
 
 
+def run_align(args) -> None:
+    """E20 real (docs/ROOMS.md §5: the real E20 joins eval:calib): `node evals/align_eval.mjs` with the same CLI runs
+    align-room's real solver on the golden room fixtures at the Phase A targets; its own PASS/FAIL lines are shown and
+    its result is one check here."""
+    print("\n--- E20 align-room, the real solver (node evals/align_eval.mjs)", flush=True)
+    t0 = time.monotonic()
+    p = subprocess.run(["node", str(REPO / "evals/align_eval.mjs"), "--cli", args.cli], cwd=REPO, capture_output=True, text=True, timeout=3600)
+    sys.stdout.write(p.stdout)
+    sys.stdout.flush()
+    tail = [ln for ln in p.stdout.strip().splitlines() if ln.startswith("E20:")]
+    check("E20 (evals/align_eval.mjs, real solver) passes", p.returncode == 0, (tail[-1] if tail else (p.stderr or "no output")[-300:]) + f" ({time.monotonic() - t0:.0f} s)")
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--mock", action="store_true", help="ingest only, no MoGe")
@@ -954,6 +968,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--calib-mock", default=None, help="real mode: set MIDSTUDY_CALIB_MOCK to this dir (harness check)")
     ap.add_argument("--only", default=None)
     ap.add_argument("--no-real-photos", action="store_true")
+    ap.add_argument("--no-align", action="store_true", help="real mode: skip E20 (align-room's real solver on the golden room)")
     args = ap.parse_args(argv)
     if args.calib_mock:
         args.calib_mock = str((REPO / args.calib_mock).resolve())
@@ -972,6 +987,8 @@ def main(argv: list[str]) -> int:
             run_mock(cli, args)
         else:
             run_real(cli, args)
+            if not args.no_align and not args.only and not args.calib_mock:
+                run_align(args)
     failed = [r for r in results if not r["ok"]]
     print(f"\nE2: {len(results) - len(failed)}/{len(results)} checks passed in {time.monotonic() - t_start:.1f} s" + (f" (failed: {' '.join(r['n'] for r in failed)})" if failed else ""))
     (OUT / "results.json").write_text(json.dumps({"mode": mode, "results": results}, indent=2))
