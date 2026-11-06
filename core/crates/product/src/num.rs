@@ -91,16 +91,16 @@ pub(crate) fn num_ends(s: &[char], p: usize, out: &mut Vec<usize>) {
         let whole = digit_run(s, p, 7);
         for k in (1..=whole).rev() {
             let p1 = add(p, k);
-            let mut decimals: Vec<usize> = Vec::new();
             if is(at(s, p1), |c| c == '.' || c == ',') {
                 let e = digit_run(s, add(p1, 1), 4);
-                decimals.extend((1..=e).rev().map(|j| add(p1, add(1, j))));
+                for j in (1..=e).rev() {
+                    let p2 = add(p1, add(1, j));
+                    fraction_parts(s, p2, out);
+                    out.push(p2);
+                }
             }
-            decimals.push(p1);
-            for p2 in decimals {
-                fraction_parts(s, p2, out);
-                out.push(p2);
-            }
+            fraction_parts(s, p1, out);
+            out.push(p1);
         }
         if let Some(end) = numerator_fraction(s, p) {
             out.push(end);

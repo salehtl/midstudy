@@ -135,15 +135,9 @@ fn axis_code(a: Option<&str>) -> Option<char> {
     }
 }
 
-/// v1's `_map_axes`: None when the reading isn't a plausible size.
-fn map_axes(parts: &[Part], units: &[Unit], ctx: Ctx, pair_ok: bool) -> Option<Mapped> {
-    let mut notes = Vec::new();
-    let cm: Vec<f64> = parts
-        .iter()
-        .zip(units)
-        .map(|(p, u)| p.value * u.cm())
-        .collect();
-    let mut axes: Vec<Option<char>> = parts.iter().map(|p| axis_code(p.axis.as_deref())).collect();
+/// v1's `_map_axes` on L: with a W too, the longer of the two is the width (a bed's length is its depth); alone, it is
+/// the width.
+fn resolve_length(axes: &mut [Option<char>], cm: &[f64], ctx: Ctx, notes: &mut Vec<String>) {
     let li = axes.iter().position(|a| *a == Some('l'));
     let wi = axes.iter().position(|a| *a == Some('w'));
     match (li, wi) {
@@ -176,7 +170,7 @@ fn map_axes(parts: &[Part], units: &[Unit], ctx: Ctx, pair_ok: bool) -> Option<M
             }
         }
         (Some(_), None) => {
-            for a in &mut axes {
+            for a in axes.iter_mut() {
                 if *a == Some('l') {
                     *a = Some('w');
                 }
@@ -185,6 +179,18 @@ fn map_axes(parts: &[Part], units: &[Unit], ctx: Ctx, pair_ok: bool) -> Option<M
         }
         _ => {}
     }
+}
+
+/// v1's `_map_axes`: None when the reading isn't a plausible size.
+fn map_axes(parts: &[Part], units: &[Unit], ctx: Ctx, pair_ok: bool) -> Option<Mapped> {
+    let mut notes = Vec::new();
+    let cm: Vec<f64> = parts
+        .iter()
+        .zip(units)
+        .map(|(p, u)| p.value * u.cm())
+        .collect();
+    let mut axes: Vec<Option<char>> = parts.iter().map(|p| axis_code(p.axis.as_deref())).collect();
+    resolve_length(&mut axes, &cm, ctx, &mut notes);
     let mut out = Mapped {
         out: Vec::new(),
         axis_of: axes.iter().map(|a| a.unwrap_or(' ')).collect(),
@@ -261,6 +267,58 @@ pub struct Made {
     pub dropped_unitless: bool,
 }
 
+/// v1's unit note for a reading not in cm: feet and inches as the page wrote them, one unit's word, or each number's
+/// unit, in W, D, H order.
+fn unit_note_of(parts: &[Part], used_units: &[Unit], axis_of: &[char], main: Unit) -> String {
+    let rank = |a: char| match a {
+        'w' => 0,
+        'd' => 1,
+        'h' => 2,
+        _ => 3,
+    };
+    let mut order: Vec<usize> = (0..parts.len()).collect();
+    order.sort_by_key(|i| rank(axis_of.get(*i).copied().unwrap_or(' ')));
+    let ps: Vec<(&Part, Unit)> = order
+        .iter()
+        .filter_map(|i| Some((parts.get(*i)?, *used_units.get(*i)?)))
+        .collect();
+    if ps
+        .iter()
+        .any(|(p, _)| p.unit == Some(Unit::Ft) && p.text.contains('\''))
+    {
+        let shown: Vec<String> = ps
+            .iter()
+            .map(|(p, u)| {
+                if p.text.contains('\'') {
+                    p.text.clone()
+                } else {
+                    let mark = match u {
+                        Unit::Ft => "'".to_owned(),
+                        Unit::In => "\"".to_owned(),
+                        u => format!(" {}", u.name()),
+                    };
+                    format!("{}{mark}", p.text)
+                }
+            })
+            .collect();
+        format!("from feet and inches: {}", shown.join(" \u{d7} "))
+    } else if used_units.iter().all(|u| *u == main) {
+        let nums: Vec<&str> = ps.iter().map(|(p, _)| p.text.as_str()).collect();
+        format!(
+            "from {}: {} {}",
+            main.word(),
+            nums.join(" \u{d7} "),
+            main.name()
+        )
+    } else {
+        let shown: Vec<String> = ps
+            .iter()
+            .map(|(p, u)| format!("{} {}", p.text, u.name()))
+            .collect();
+        format!("from {}", shown.join(" \u{d7} "))
+    }
+}
+
 /// v1's `_make_reading` (§2.11 Mapping and Units).
 pub(crate) fn make_reading(
     parts: &[Part],
@@ -319,53 +377,7 @@ pub(crate) fn make_reading(
     let mut notes = mapped.notes.clone();
     let main = used_units.first().copied().unwrap_or(Unit::Cm);
     if unit_note.is_none() && used_units.iter().any(|u| *u != Unit::Cm) {
-        let rank = |a: char| match a {
-            'w' => 0,
-            'd' => 1,
-            'h' => 2,
-            _ => 3,
-        };
-        let mut order: Vec<usize> = (0..parts.len()).collect();
-        order.sort_by_key(|i| rank(mapped.axis_of.get(*i).copied().unwrap_or(' ')));
-        let ps: Vec<(&Part, Unit)> = order
-            .iter()
-            .filter_map(|i| Some((parts.get(*i)?, *used_units.get(*i)?)))
-            .collect();
-        if ps
-            .iter()
-            .any(|(p, _)| p.unit == Some(Unit::Ft) && p.text.contains('\''))
-        {
-            let shown: Vec<String> = ps
-                .iter()
-                .map(|(p, u)| {
-                    if p.text.contains('\'') {
-                        p.text.clone()
-                    } else {
-                        let mark = match u {
-                            Unit::Ft => "'".to_owned(),
-                            Unit::In => "\"".to_owned(),
-                            u => format!(" {}", u.name()),
-                        };
-                        format!("{}{mark}", p.text)
-                    }
-                })
-                .collect();
-            unit_note = Some(format!("from feet and inches: {}", shown.join(" \u{d7} ")));
-        } else if used_units.iter().all(|u| *u == main) {
-            let nums: Vec<&str> = ps.iter().map(|(p, _)| p.text.as_str()).collect();
-            unit_note = Some(format!(
-                "from {}: {} {}",
-                main.word(),
-                nums.join(" \u{d7} "),
-                main.name()
-            ));
-        } else {
-            let shown: Vec<String> = ps
-                .iter()
-                .map(|(p, u)| format!("{} {}", p.text, u.name()))
-                .collect();
-            unit_note = Some(format!("from {}", shown.join(" \u{d7} ")));
-        }
+        unit_note = Some(unit_note_of(parts, &used_units, &mapped.axis_of, main));
     }
     for ((p, u), a) in parts.iter().zip(&used_units).zip(&mapped.axis_of) {
         if let Some(to) = p.to.filter(|t| *t != 0.0) {

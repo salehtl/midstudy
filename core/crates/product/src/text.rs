@@ -90,16 +90,164 @@ fn intro(s: &[char]) -> bool {
     search_b(&INTRO, &text(s))
 }
 
-/// `str.split()`'s word count.
-fn words(s: &[char]) -> usize {
-    s.split(|c| is_space(*c)).filter(|w| !w.is_empty()).count()
+/// v1's `len((line[:start] + line[end:]).strip(" \t:-–—|").split())`, in constant time per chain after a linear pass
+/// over the line (v1 rebuilt the rest of the line for every chain, quadratic on a line of many sizes).
+struct RestIndex {
+    ws: Vec<bool>,
+    /// `starts[k]`: how many j < k (j ≥ 1) start a word after whitespace.
+    starts: Vec<usize>,
+    /// `next_non_s[i]`: the first j ≥ i not in the strip set (len when none).
+    next_non_s: Vec<usize>,
+    /// `prev_non_s[i]`: the last j ≤ i not in the strip set.
+    prev_non_s: Vec<Option<usize>>,
+}
+
+fn in_strip_set(c: char) -> bool {
+    matches!(c, ' ' | '\t' | ':' | '-' | '\u{2013}' | '\u{2014}' | '|')
+}
+
+impl RestIndex {
+    fn new(line: &[char]) -> Self {
+        let n = line.len();
+        let ws: Vec<bool> = line.iter().map(|c| is_space(*c)).collect();
+        let mut starts = Vec::with_capacity(add(n, 1));
+        starts.push(0usize);
+        let mut acc = 0usize;
+        for j in 0..n {
+            let begins = j > 0
+                && !ws.get(j).copied().unwrap_or(true)
+                && ws.get(j.saturating_sub(1)).copied().unwrap_or(false);
+            if begins {
+                acc = add(acc, 1);
+            }
+            starts.push(acc);
+        }
+        let mut next_non_s = vec![n; add(n, 1)];
+        for i in (0..n).rev() {
+            let next = if is(at(line, i), in_strip_set) {
+                next_non_s.get(add(i, 1)).copied().unwrap_or(n)
+            } else {
+                i
+            };
+            if let Some(slot) = next_non_s.get_mut(i) {
+                *slot = next;
+            }
+        }
+        let mut prev_non_s = Vec::with_capacity(n);
+        let mut last = None;
+        for (i, c) in line.iter().enumerate() {
+            if !in_strip_set(*c) {
+                last = Some(i);
+            }
+            prev_non_s.push(last);
+        }
+        Self {
+            ws,
+            starts,
+            next_non_s,
+            prev_non_s,
+        }
+    }
+
+    fn is_ws(&self, i: usize) -> bool {
+        self.ws.get(i).copied().unwrap_or(true)
+    }
+
+    /// `len(line[x:y].split())`.
+    fn words(&self, x: usize, y: usize) -> usize {
+        if x >= y {
+            return 0;
+        }
+        let first = usize::from(!self.is_ws(x));
+        let inner = self
+            .starts
+            .get(y)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(self.starts.get(add(x, 1)).copied().unwrap_or(0));
+        add(first, inner)
+    }
+
+    fn rest_words(&self, start: usize, end: usize) -> usize {
+        let n = self.ws.len();
+        let first_non_s = self.next_non_s.first().copied().unwrap_or(n);
+        let last_non_s = n
+            .checked_sub(1)
+            .and_then(|i| self.prev_non_s.get(i).copied().flatten());
+        let (mut a_lo, mut a_hi) = (0, start);
+        let (mut b_lo, mut b_hi) = (end, n);
+        // the leading strip: through A when A is all strip characters, into B
+        if first_non_s >= start {
+            a_lo = start;
+            b_lo = self.next_non_s.get(end).copied().unwrap_or(n);
+        } else {
+            a_lo = a_lo.max(first_non_s);
+        }
+        // the trailing strip: through B when B is all strip characters, into A
+        match last_non_s {
+            Some(r) if r >= end => b_hi = add(r, 1),
+            _ => {
+                b_lo = b_hi;
+                a_hi = match start
+                    .checked_sub(1)
+                    .and_then(|i| self.prev_non_s.get(i).copied().flatten())
+                {
+                    Some(j) if j >= a_lo && a_hi > a_lo => add(j, 1),
+                    _ => a_lo,
+                };
+            }
+        }
+        let a = self.words(a_lo, a_hi);
+        let b = self.words(b_lo, b_hi.max(b_lo));
+        let joined =
+            a_hi > a_lo && b_hi > b_lo && !self.is_ws(a_hi.saturating_sub(1)) && !self.is_ws(b_lo);
+        a.saturating_add(b).saturating_sub(usize::from(joined))
+    }
+}
+
+/// A labelled single on a line: (line index, axis, part, the text before it).
+type Single = (usize, Axis, Part, String);
+/// A reading found in text: (0 when introduced by "overall", "dimensions"…, else 1; its order; the reading).
+type Found = (u8, usize, Reading);
+
+/// v1's singles grouping: labelled singles in a block of lines (a table, "Width: 80 cm / Depth: 40 cm …") make one
+/// reading; a repeated axis or a gap of more than two lines starts the next block.
+fn group_singles(singles: Vec<Single>, ctx: Ctx, found: &mut Vec<Found>, order: &mut usize) {
+    let mut group: Vec<Single> = Vec::new();
+    let mut flush = |group: &mut Vec<Single>, found: &mut Vec<Found>| {
+        let dia = group.first().is_some_and(|g| g.1 == Axis::Dia);
+        if group.len() >= 2 || dia {
+            let joined = group
+                .iter()
+                .map(|g| g.3.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            let quote = prefix(&joined, 200).to_owned();
+            let parts: Vec<Part> = group.iter().map(|g| g.2.clone()).collect();
+            if let Some(r) = make_reading(&parts, ctx, "text", &quote, None, true, false).reading {
+                found.push((0, *order, r));
+                *order = add(*order, 1);
+            }
+        }
+        group.clear();
+    };
+    for s in singles {
+        let breaks = group
+            .last()
+            .is_some_and(|last| group.iter().any(|g| g.1 == s.1) || s.0.saturating_sub(last.0) > 2);
+        if breaks {
+            flush(&mut group, found);
+        }
+        group.push(s);
+    }
+    flush(&mut group, found);
 }
 
 /// v1's `_text_readings` (§2.11 layer 3): sizes with units (or the page's unit hint) in text lines, labelled
 /// singles in neighbouring lines grouped (tables), distractors left out; introduced sizes first.
 pub(crate) fn text_readings(lines: &[Vec<char>], ctx: Ctx) -> Result<Vec<Reading>, crate::PyError> {
-    let mut found: Vec<(u8, usize, Reading)> = Vec::new();
-    let mut singles: Vec<(usize, Axis, Part, String)> = Vec::new();
+    let mut found: Vec<Found> = Vec::new();
+    let mut singles: Vec<Single> = Vec::new();
     let mut order = 0usize;
     let mut prev_line: Option<&[char]> = None;
     for (li, line) in lines.iter().enumerate() {
@@ -111,18 +259,16 @@ pub(crate) fn text_readings(lines: &[Vec<char>], ctx: Ctx) -> Result<Vec<Reading
             continue;
         }
         let mut prev_end = 0;
+        let mut rest_index: Option<RestIndex> = None;
         for chain in line_chains(line)? {
             let (Some(first), Some(last)) = (chain.first(), chain.last()) else {
                 continue;
             };
             let (start, end) = (first.start, last.end);
-            let ctx_text = context(
-                line,
-                start,
-                prev_end,
-                if chain.len() >= 2 { prev_line } else { None },
-            );
+            // v1 computed the context for every chain; it is only read for chains of 2 or 3 and labelled singles, so
+            // it is computed for those alone (the same text, in linear time: prev_end only moves past those).
             if chain.len() >= 2 {
+                let ctx_text = context(line, start, prev_end, prev_line);
                 prev_end = end;
                 let mut probe = ctx_text.clone();
                 probe.push(' ');
@@ -131,14 +277,11 @@ pub(crate) fn text_readings(lines: &[Vec<char>], ctx: Ctx) -> Result<Vec<Reading
                     continue;
                 }
                 if chain.iter().all(|it| it.unit.is_none()) {
-                    let mut rest: Vec<char> = slice(line, 0, start).to_vec();
-                    rest.extend_from_slice(slice(line, end, line.len()));
-                    let rest_text = text(&rest);
-                    let trimmed: Vec<char> = rest_text
-                        .trim_matches(|c| " \t:-\u{2013}\u{2014}|".contains(c))
-                        .chars()
-                        .collect();
-                    if words(&trimmed) > 2 || ctx.hint.is_none() {
+                    if ctx.hint.is_none() {
+                        continue;
+                    }
+                    let index = rest_index.get_or_insert_with(|| RestIndex::new(line));
+                    if index.rest_words(start, end) > 2 {
                         continue;
                     }
                 }
@@ -158,6 +301,7 @@ pub(crate) fn text_readings(lines: &[Vec<char>], ctx: Ctx) -> Result<Vec<Reading
                     order = add(order, 1);
                 }
             } else if let Some(axis) = first.axis {
+                let ctx_text = context(line, start, prev_end, None);
                 prev_end = end;
                 if distract(slice(line, start.saturating_sub(ctx_text.len()), end)) {
                     continue;
@@ -181,39 +325,7 @@ pub(crate) fn text_readings(lines: &[Vec<char>], ctx: Ctx) -> Result<Vec<Reading
             prev_line = Some(line);
         }
     }
-    // singles in a block of lines (a table, "Width: 80 cm / Depth: 40 cm …") make one reading
-    let mut group: Vec<(usize, Axis, Part, String)> = Vec::new();
-    let mut flush = |group: &mut Vec<(usize, Axis, Part, String)>,
-                     found: &mut Vec<(u8, usize, Reading)>| {
-        let dia = group.first().is_some_and(|g| g.1 == Axis::Dia);
-        if group.len() >= 2 || dia {
-            let quote = prefix(
-                &group
-                    .iter()
-                    .map(|g| g.3.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; "),
-                200,
-            )
-            .to_owned();
-            let parts: Vec<Part> = group.iter().map(|g| g.2.clone()).collect();
-            if let Some(r) = make_reading(&parts, ctx, "text", &quote, None, true, false).reading {
-                found.push((0, order, r));
-                order = add(order, 1);
-            }
-        }
-        group.clear();
-    };
-    for s in singles {
-        let breaks = group
-            .last()
-            .is_some_and(|last| group.iter().any(|g| g.1 == s.1) || s.0.saturating_sub(last.0) > 2);
-        if breaks {
-            flush(&mut group, &mut found);
-        }
-        group.push(s);
-    }
-    flush(&mut group, &mut found);
+    group_singles(singles, ctx, &mut found, &mut order);
     found.sort_by_key(|t| (t.0, t.1));
     Ok(found.into_iter().map(|t| t.2).collect())
 }
@@ -290,9 +402,12 @@ fn thick_key(s: &[char], p: usize, words: &[&str]) -> Option<usize> {
     Some(q)
 }
 
-fn thick_at(s: &[char], p: usize) -> Option<ThickMatch> {
-    let mut nums = Vec::new();
-    let mut units = Vec::new();
+fn thick_at(
+    s: &[char],
+    p: usize,
+    nums: &mut Vec<usize>,
+    units: &mut Vec<usize>,
+) -> Option<ThickMatch> {
     let stop = |c: char| is_digit(c) || c == '.' || c == ',';
     // (?P<k>…)\s*[:\-–]?\s*(?:approx\.?\s*)?(?P<v>{NUM})(?:\s*(?P<u>{UNITS}))?(?![\d.,])
     for words in THICK_KEYS {
@@ -310,10 +425,10 @@ fn thick_at(s: &[char], p: usize) -> Option<ThickMatch> {
                 skip_ws(s, a)
             };
         }
-        num_ends(s, q, &mut nums);
+        num_ends(s, q, nums);
         for n in nums.iter().copied() {
             let u0 = skip_ws(s, n);
-            units_ends(s, u0, &mut units);
+            units_ends(s, u0, units);
             let with_unit = units.iter().copied().find(|ue| !is(at(s, *ue), stop));
             let (end, u) = match with_unit {
                 Some(ue) => (ue, Some(text(slice(s, u0, ue)))),
@@ -331,10 +446,10 @@ fn thick_at(s: &[char], p: usize) -> Option<ThickMatch> {
         }
     }
     // (?P<v2>{NUM})\s*(?P<u2>{UNITS})\s+(?:thick|in\s+thickness)\b
-    num_ends(s, p, &mut nums);
+    num_ends(s, p, nums);
     for n in nums.iter().copied() {
         let u0 = skip_ws(s, n);
-        units_ends(s, u0, &mut units);
+        units_ends(s, u0, units);
         for ue in units.iter().copied() {
             let w = skip_ws(s, ue);
             if w == ue {
@@ -360,10 +475,12 @@ fn thick_at(s: &[char], p: usize) -> Option<ThickMatch> {
 pub(crate) fn thickness(lines: &[Vec<char>], hint: Option<Unit>) -> Option<(f64, String)> {
     let mut thick: Option<(f64, String)> = None;
     let mut pile: Option<(f64, String)> = None;
+    let mut nums = Vec::new();
+    let mut units = Vec::new();
     for line in lines {
         let mut pos = 0;
         while pos < line.len() {
-            let Some(m) = thick_at(line, pos) else {
+            let Some(m) = thick_at(line, pos, &mut nums, &mut units) else {
                 pos = add(pos, 1);
                 continue;
             };

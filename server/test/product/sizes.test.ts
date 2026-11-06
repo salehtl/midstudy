@@ -137,6 +137,14 @@ void test('generated size strings: v2 reads exactly what v1 read', { skip: !orac
       reqs.push({ op: 'text_readings', lines, ctxIndex }, { op: 'unit_hint', lines }, { op: 'thickness', lines, ctxIndex }, { op: 'llm_text', lines })
     }
   }
+  // option-like lines: a unitless size with little around it (v1 read those only when the page has a unit hint, and
+  // only when the rest of the line, stripped of " \t:-\u{2013}\u{2014}|", is at most two words)
+  const EDGE = ['', ' ', ':', ' - ', '|', '\u{2013}', '\u{2014}', '\t', 'Size:', 'Size: ', 'Rug', 'a b', 'a b c', '- x -', '| Rug |', 'x', ':-|', 'Oak\u{a0}Desk', '1', 'cm']
+  for (let i = 0; i < CASES / 4; i++) {
+    const chain = pick(r, ['160 x 230', '160x230', '3*4', '2 x 3', '200 x 90 x 85', '160 X 230', '7 x 9', '1x1', '120 by 60'])
+    const lines = [pick(r, EDGE) + pick(r, ['', ' ']) + chain + pick(r, ['', ' ']) + pick(r, EDGE)]
+    reqs.push({ op: 'text_readings', lines, ctxIndex: 2 + Math.floor(r() * 3) })
+  }
   for (const t of [...NUMS, ...UNITS, ...LABELS, ...POSTS, ' 80 ', '\u{a0}80\u{a0}', '1/0', 'x', '', ' in. ', 'Metre.', 'OVERALL  WIDTH']) {
     reqs.push({ op: 'num', text: t }, { op: 'unit', text: t }, { op: 'axis', text: t })
   }
