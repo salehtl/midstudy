@@ -3,6 +3,8 @@
   "entry": [
     "planner/main.ts",
     "planner/**/*.worker.ts",
+    "planner/gpu/demo/demo.ts",
+    "planner/gpu/demo/*.mjs",
     "server/src/main.ts",
     "pipeline/src/cli.ts",
     "core/js/{web,node}.ts",

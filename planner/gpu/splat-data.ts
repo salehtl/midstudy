@@ -22,7 +22,7 @@ export interface SplatData {
   readonly max: readonly [number, number, number]
 }
 
-export const SPZ_MAGIC = 0x5053474e
+const SPZ_MAGIC = 0x5053474e
 const C0 = 0.28209479177387814
 const SPZ_COLOR_SCALE = 0.15
 
@@ -68,10 +68,10 @@ export function decodeSpzRaw(raw: Uint8Array): SplatData {
   const magic = dv.getUint32(0, true), version = dv.getUint32(4, true), count = dv.getUint32(8, true)
   const shDegree = dv.getUint8(12), frac = dv.getUint8(13)
   if (magic !== SPZ_MAGIC) throw new Error(`not an SPZ file (magic 0x${magic.toString(16)})`)
-  if (version !== 2) throw new Error(`SPZ version ${version} is not supported (midstudy writes version 2)`)
-  if (shDegree > 3) throw new Error(`SPZ SH degree ${shDegree} is not valid`)
+  if (version !== 2) throw new Error(`SPZ version ${String(version)} is not supported (midstudy writes version 2)`)
+  if (shDegree > 3) throw new Error(`SPZ SH degree ${String(shDegree)} is not valid`)
   const need = 16 + count * 19
-  if (raw.byteLength < need) throw new Error(`splat.spz holds ${raw.byteLength} bytes, ${need} needed for ${count} splats`)
+  if (raw.byteLength < need) throw new Error(`splat.spz holds ${String(raw.byteLength)} bytes, ${String(need)} needed for ${String(count)} splats`)
   const pos = 16, alp = pos + 9 * count, col = alp + count, scl = col + 3 * count, rot = scl + 3 * count
   const centers = new Float32Array(3 * count)
   const covariances = new Float32Array(6 * count)
@@ -95,7 +95,7 @@ export function decodeSpzRaw(raw: Uint8Array): SplatData {
 }
 
 /** Gunzips with the platform's DecompressionStream (browsers, workers, Node ≥ 18). */
-export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
+async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
   const stream = new Blob([copy]).stream().pipeThrough(new DecompressionStream('gzip'))
@@ -117,7 +117,7 @@ export function decodePly(bytes: Uint8Array): SplatData {
     throw new Error('PLY header has no end_header')
   })()
   const header = new TextDecoder().decode(bytes.subarray(0, headEnd))
-  if (!/^ply\n/.test(header) || !/format binary_little_endian 1\.0/.test(header)) throw new Error('only binary little-endian PLY splats are supported')
+  if (!header.startsWith('ply\n') || !header.includes('format binary_little_endian 1.0')) throw new Error('only binary little-endian PLY splats are supported')
   let count = 0
   const offsets = new Map<string, { offset: number, type: string }>()
   let stride = 0

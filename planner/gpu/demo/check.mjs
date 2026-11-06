@@ -41,8 +41,8 @@ const results = { cases: {}, perf: {} }
 ev.section('setup')
 const bundleDir = path.join(ev.out, 'bundle')
 let built = null
-try { built = build(bundleDir) } catch (e) { built = { error: String(e.message || e) } }
-ev.check('esbuild bundles the demo and the sort worker', !built.error && built.sizes?.['demo.js'] > 0 && built.sizes?.['sort-worker.js'] > 0, fmt(built))
+try { built = await build(bundleDir) } catch (e) { built = { error: String(e.message || e) } }
+ev.check('esbuild bundles the demo and the sort worker', !built.error && built.sizes?.['demo.js'] > 0 && built.sizes?.['sort.worker.js'] > 0, fmt(built))
 const srv = await startServer(ev)
 ev.check('serve.py starts (fal mock, calib stub + mock, $0 cap)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()

@@ -1,5 +1,5 @@
 // Back-to-front order of splats by view depth, on the CPU: the WebGL2 fallback's sort (run in a worker,
-// sort-worker.ts) and the reference the GPU radix sort (radix-sort.ts) is checked against. Pure: no DOM, no three.js.
+// sort.worker.ts), the same keys as the GPU radix sort (radix-sort.ts) and the same order. Pure: no DOM, no three.js.
 //
 // Keys are the GPU sort's: the depth along the view axis, d = −(V·M)·c (the camera looks along −z), quantized linearly
 // over [dmin, dmax] (the depth range of every placed item's bounds, computed per frame by the layer) to 16 bits with
@@ -64,11 +64,4 @@ export function sortSplats(req: SortRequest, out: Uint32Array, scratch: SortScra
     counts[k] = p + 1
   }
   return visible
-}
-
-/** A stable sort of `vals` by u32 `keys` (ascending), the reference for the GPU radix sort's output. */
-export function referenceOrder(keys: Uint32Array, count: number): Uint32Array {
-  const idx = new Uint32Array(count)
-  for (let i = 0; i < count; i++) idx[i] = i
-  return idx.sort((a, b) => (keys[a] ?? 0) - (keys[b] ?? 0) || a - b)
 }

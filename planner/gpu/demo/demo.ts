@@ -1,251 +1,195 @@
-// The WebGPU spike's demo: a golden scene drawn the way engine.js draws it, on three.js's WebGPURenderer (WebGPU, or
-// its WebGL2 fallback with ?backend=webgl), with SplatLayer for splat items. Driven by planner/gpu/demo/check.mjs
-// through window.gpuDemo. URL: ?backend=webgpu|webgl&sort=gpu|cpu&keyBits=16|24|32
-import {
-  Box3, CanvasTexture, Group, HalfFloatType, LinearSRGBColorSpace, Matrix3, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, QuadMesh, RenderTarget,
-  SRGBColorSpace, Scene, Texture, TimestampQuery, UnsignedByteType, Vector3, WebGPURenderer, BoxGeometry, MeshBasicNodeMaterial,
-} from 'three/webgpu'
-import type { Object3D } from 'three/webgpu'
+// The WebGPU check's demo: a golden scene drawn by the planner's own render code (planner/engine.passes.ts drawFrame,
+// planner/lighting.ts, planner/gpu/splat-layer.ts, the kernels' depth decode), without the engine's state and UI, so one
+// page can be forced onto either backend and either sort. Driven by planner/gpu/demo/check.mjs through window.gpuDemo.
+// URL: ?backend=webgpu|webgl&sort=gpu|cpu&keyBits=16|24|32
+import * as THREE from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { texture } from 'three/tsl'
-import { decodeSplat } from '../splat-data.ts'
-import type { SplatData } from '../splat-data.ts'
-import { SplatLayer, isWebGPU } from '../splat-layer.ts'
-import type { SortMode } from '../splat-layer.ts'
-import { BAR, clearTarget, createDepthPrepass, createFrame, createFurnitureComposite, createPhotoPass, createSplatComposite, depthTexture, photoTexture, warmthTint } from '../passes.ts'
-import { CASTER_LAYER, createLightRig, flipSides } from '../light-rig.ts'
-import type { LightingJson } from '../light-rig.ts'
-import { decodeDepthPng } from './depth-png.ts'
+import { azElOf, decodeDepth, dirOf, loadKernels, splatMultiplier } from '../../../core/js/web.js'
+import { V1_KEY_DIR, V1_SOFTNESS, createLighting } from '../../lighting.js'
+import { captureTarget, createPasses, drawFrame, makeContactShadow, onDepthLayer, readRgba, setScreen, setSplatSource, sizeTargets, withFullFrame } from '../../engine.passes.js'
+import { defaultLook, resolveLook } from '../../logic/look.js'
+import type { LookState } from '../../logic/look.js'
+import type { JsonObject } from '../../logic/num.js'
+import { depthTexture, isWebGPU, photoTexture } from '../passes.js'
+import { decodeSplat } from '../splat-data.js'
+import type { SplatData } from '../splat-data.js'
+import { SplatLayer } from '../splat-layer.js'
+import type { SortMode } from '../splat-layer.js'
 
 const DEG = Math.PI / 180
-const DEPTH_LAYER = 2 // meshes whose depth hides splats (the splat pass draws them depth-only)
 const params = new URLSearchParams(location.search)
 const forceWebGL = params.get('backend') === 'webgl'
 const sortParam = params.get('sort')
-const keyBitsParam = Number(params.get('keyBits') || 16)
+const keyBitsParam = Number(params.get('keyBits') ?? 16)
 
-interface Camera { fov_y_deg: number, height_m: number, pitch_deg: number, roll_deg: number }
-interface ItemSpec { uid: string, glb?: string, splat?: string, dims_cm?: { w: number, d: number, h: number }, position: [number, number, number], rotation_y_deg?: number }
-interface ItemRec { uid: string, group: Group, child: Object3D, box: Box3, splat: SplatData | null, caster: Object3D | null, shadow: Mesh }
-interface Timing { fetchMs: number, decodeMs: number, firstFrameMs: number, splats: number }
+interface Camera { fov_y_deg: number; height_m: number; pitch_deg: number; roll_deg: number }
+interface ItemSpec { uid: string; glb?: string; splat?: string; dims_cm?: { w: number; d: number; h: number }; position: [number, number, number]; rotation_y_deg?: number }
+interface ItemRec { uid: string; group: THREE.Group; box: THREE.Box3; splat: SplatData | null; shadow: THREE.Mesh }
+interface Timing { fetchMs: number; decodeMs: number; firstFrameMs: number; splats: number }
 
-const renderer = new WebGPURenderer({ forceWebGL, antialias: false, alpha: false, trackTimestamp: true })
+const renderer = new THREE.WebGPURenderer({ forceWebGL, antialias: false, alpha: false, trackTimestamp: true })
 renderer.setPixelRatio(1)
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.autoClear = false
-renderer.outputColorSpace = LinearSRGBColorSpace // no output conversion: the canvas gets the passes' bytes as they are
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace // no output conversion: the passes write sRGB bytes themselves
 document.body.appendChild(renderer.domElement)
+// window.gpuDemo exists at once; its `ready` resolves once the backend and the kernels are up and every call is there.
+declare global {
+  interface Window {
+    gpuDemo?: Record<string, unknown>
+  }
+}
+const api: Record<string, unknown> = {}
+window.gpuDemo = api
+let started: (v: { backend: string; canvas: number[] }) => void = () => undefined
+let failed: (e: unknown) => void = () => undefined
+api['ready'] = new Promise((resolve, reject) => { started = resolve; failed = reject })
+await Promise.all([renderer.init(), loadKernels(new URL('midstudy_wasm_web_bg.wasm', new URL('../bundle/', location.href)))]).catch((e: unknown) => { failed(e); throw e })
 
-const frame = createFrame()
-const photoPass = createPhotoPass(frame)
-const depthPre = createDepthPrepass(frame)
-const furnRT = new RenderTarget(1, 1, { type: HalfFloatType, samples: Number(params.get('msaa') ?? 4), depthBuffer: true })
-const furnComp = createFurnitureComposite(frame, furnRT)
-const furnScene = new Scene()
-const depthScene = new Scene()
-const photoQuad = new QuadMesh(photoPass.material)
-const furnQuad = new QuadMesh(furnComp.material)
-const prepassMesh = new Mesh(new PlaneGeometry(2, 2), depthPre.material)
-prepassMesh.frustumCulled = false
-prepassMesh.renderOrder = -1000
-prepassMesh.visible = false
-const prepassMesh2 = new Mesh(prepassMesh.geometry, depthPre.material)
-prepassMesh2.frustumCulled = false
-prepassMesh2.visible = false
-furnScene.add(prepassMesh)
-depthScene.add(prepassMesh2)
-const depthOnly = new MeshBasicNodeMaterial()
-depthOnly.colorWrite = false
-
-const camera = new PerspectiveCamera(55, 4 / 3, 0.05, 200)
+const P = createPasses(renderer)
+const scene = new THREE.Scene()
+const lights = createLighting({ renderer, scene, photo: { node: P.photo.node, frame: P.frame } })
+scene.add(P.depth.mesh)
+const camera = new THREE.PerspectiveCamera(55, 4 / 3, 0.05, 200)
 camera.rotation.order = 'YXZ'
-const photoNode = { node: texture(new Texture()) } // the photo, for the catcher and the reflections
-const rig = createLightRig({ renderer, scene: furnScene, frame, photo: photoNode })
 let splats: SplatLayer | null = null
-let splatQuad: QuadMesh | null = null
 const items = new Map<string, ItemRec>()
 const gltf = new GLTFLoader()
-const photo: { w: number, h: number, texture: Texture | null } = { w: 1600, h: 1200, texture: null }
+const photo = { w: 1600, h: 1200 }
 let cam: Camera = { fov_y_deg: 55, height_m: 1.4, pitch_deg: -10, roll_deg: 0 }
 let occlusion = true
-let contactShadows = true
 let hasDepth = false
+let hasLighting = false
+let look: LookState = defaultLook()
+let tick = 0 // the demo draws its splat pass every frame (no redraw cache): its numbers are a whole frame's
+
+// The Look in use (the engine's resolvedLook): Auto lighting, from lighting.json's key or the v1 key.
+function applyLook(): void {
+  const inf = lights.inferred()
+  const dir = inf ? inf.direction : V1_KEY_DIR
+  const ae = azElOf(dir)
+  lights.setLook(resolveLook(look, { dir, softness: inf ? inf.softness : V1_SOFTNESS, azimuth_deg: ae.azimuth_deg, elevation_deg: ae.elevation_deg }, hasLighting, dirOf))
+  const tint = splatMultiplier(look.warmth, 1, [1, 1, 1])
+  P.comp.exposure.value = look.exposure
+  P.comp.tint.value.set(tint[0], tint[1], tint[2])
+  const g = splatMultiplier(look.warmth, look.exposure, lights.splatGain())
+  P.splatGain.value.set(g[0], g[1], g[2])
+}
 
 function applyCamera(): void {
   camera.fov = cam.fov_y_deg
   camera.position.set(0, cam.height_m, 0)
   camera.rotation.set(cam.pitch_deg * DEG, 0, cam.roll_deg * DEG, 'YXZ')
   camera.updateMatrixWorld(true)
+  lights.setCamera(new THREE.Matrix3().setFromMatrix4(camera.matrixWorld), cam.fov_y_deg)
 }
 
-// contain-fit the photo in the window (zoom 1), as engine.js updateView
-function updateView(w = renderer.domElement.width, h = renderer.domElement.height): void {
+// contain-fit the photo in the window (zoom 1), as the engine's view at Fit
+function updateView(): void {
+  const w = renderer.domElement.width, h = renderer.domElement.height
   const s = Math.min(w / photo.w, h / photo.h)
   const ox = (w - s * photo.w) / 2, oy = (h - s * photo.h) / 2
   camera.aspect = photo.w / photo.h
   camera.setViewOffset(s * photo.w, s * photo.h, -ox, -oy, w, h)
   camera.updateProjectionMatrix()
-  frame.rect.value.set(ox, oy, s * photo.w, s * photo.h)
-  frame.target.value.set(w, h)
+  setScreen(P, [ox, oy, s * photo.w, s * photo.h], new THREE.Vector2(w, h))
+  sizeTargets(P, w, h)
 }
-
-function fullFrame(w: number, h: number): void {
-  camera.clearViewOffset()
-  camera.aspect = photo.w / photo.h
-  camera.updateProjectionMatrix()
-  frame.rect.value.set(0, 0, w, h)
-  frame.target.value.set(w, h)
-}
-
-const shadowTex = (() => {
-  const c = document.createElement('canvas')
-  c.width = c.height = 128
-  const g = c.getContext('2d')
-  if (g) {
-    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-    grd.addColorStop(0, 'rgba(0,0,0,0.95)'); grd.addColorStop(0.45, 'rgba(0,0,0,0.85)'); grd.addColorStop(0.65, 'rgba(0,0,0,0.55)')
-    grd.addColorStop(0.82, 'rgba(0,0,0,0.2)'); grd.addColorStop(1, 'rgba(0,0,0,0)')
-    g.fillStyle = grd
-    g.fillRect(0, 0, 128, 128)
-  }
-  const t = new CanvasTexture(c)
-  t.colorSpace = SRGBColorSpace
-  return t
-})()
-const shadowGeo = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
-const shadowMat = new MeshBasicMaterial({ color: 0x000000, map: shadowTex, transparent: true, depthWrite: false, opacity: 0.75 })
 
 async function fetchBytes(url: string): Promise<Uint8Array> {
   const r = await fetch(url)
-  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`)
+  if (!r.ok) throw new Error(`${url}: HTTP ${String(r.status)}`)
   return new Uint8Array(await r.arrayBuffer())
 }
-
 const num = (o: unknown, k: string): number => { const v: unknown = o && typeof o === 'object' ? Reflect.get(o, k) : undefined; if (typeof v !== 'number') throw new Error(`${k} is not a number`); return v }
-const field = (o: unknown, k: string): unknown => (o && typeof o === 'object' ? Reflect.get(o, k) : undefined)
-function cameraOf(calib: unknown): Camera {
-  const c = field(calib, 'camera')
-  return { fov_y_deg: num(c, 'fov_y_deg'), height_m: num(c, 'height_m'), pitch_deg: num(c, 'pitch_deg'), roll_deg: num(c, 'roll_deg') }
-}
-const numbers = (v: unknown): number[] => (Array.isArray(v) ? v.map((x: unknown) => (typeof x === 'number' ? x : 0)) : [])
-function lightingOf(j: unknown): LightingJson {
-  const sh = field(field(j, 'ambient'), 'sh'), key = field(j, 'key'), wb = field(field(j, 'white_balance'), 'rgb')
-  if (!Array.isArray(sh) || sh.length !== 9 || !key) throw new Error('lighting.json has no ambient.sh or key')
-  return {
-    ambient: { sh: sh.map(numbers) },
-    key: { direction: numbers(field(key, 'direction')), color: numbers(field(key, 'color')), intensity: num(key, 'intensity'), softness: num(key, 'softness') },
-    ...(Array.isArray(wb) ? { white_balance: { rgb: numbers(wb) } } : {}),
-  }
+const isJson = (x: unknown): x is JsonObject => typeof x === 'object' && x !== null && !Array.isArray(x)
+async function json(url: string): Promise<JsonObject | null> {
+  const r = await fetch(url)
+  if (!r.ok) return null
+  const v: unknown = await r.json()
+  return isJson(v) ? v : null
 }
 
-async function openScene(dir: string): Promise<{ w: number, h: number, hasDepth: boolean, lighting: boolean }> {
-  cam = cameraOf(await (await fetch(`${dir}/calib.json`)).json())
+async function openScene(dir: string): Promise<{ w: number; h: number; hasDepth: boolean; lighting: boolean }> {
+  const c = (await json(`${dir}/calib.json`))?.['camera']
+  cam = { fov_y_deg: num(c, 'fov_y_deg'), height_m: num(c, 'height_m'), pitch_deg: num(c, 'pitch_deg'), roll_deg: num(c, 'roll_deg') }
   const img = new Image()
   img.src = `${dir}/photo.jpg`
   await img.decode()
   photo.w = img.naturalWidth
   photo.h = img.naturalHeight
-  photo.texture = photoTexture(img)
-  photoPass.setPhoto(photo.texture)
-  photoNode.node.value = photo.texture
+  P.photo.setPhoto(photoTexture(img))
   const dres = await fetch(`${dir}/depth.png`)
   hasDepth = false
   if (dres.ok) {
-    const d = await decodeDepthPng(new Uint8Array(await dres.arrayBuffer()))
-    depthPre.setDepth(depthTexture(d.data, d.w, d.h))
+    const d = decodeDepth(new Uint8Array(await dres.arrayBuffer()))
+    P.depth.pass.setDepth(depthTexture(d.data, d.width, d.height))
     hasDepth = true
   }
-  const lres = await fetch(`${dir}/lighting.json`)
-  const lj = lres.ok ? lightingOf(await lres.json()) : null
+  const lj = await json(`${dir}/lighting.json`)
+  hasLighting = !!lj
   applyCamera()
-  rig.setData(lj, new Matrix3().setFromMatrix4(camera.matrixWorld), cam.fov_y_deg)
-  rig.setPhoto(photo.texture, photo.w / photo.h)
-  syncLook()
+  lights.setData(lj)
+  look = defaultLook()
+  applyLook()
   updateView()
-  return { w: photo.w, h: photo.h, hasDepth, lighting: !!lj }
-}
-
-function syncLook(): void {
-  const g = rig.splatGain()
-  const t = warmthTint(0)
-  splats?.setColorMultiplier(t.x * g[0], t.y * g[1], t.z * g[2])
-  furnComp.exposure.value = 1
-  furnComp.tint.value.copy(t)
+  return { w: photo.w, h: photo.h, hasDepth, lighting: hasLighting }
 }
 
 function ensureSplats(): SplatLayer {
   if (splats) return splats
   const sort: SortMode | undefined = sortParam === 'cpu' || sortParam === 'gpu' ? sortParam : undefined
   const keyBits = keyBitsParam === 24 || keyBitsParam === 32 ? keyBitsParam : 16
-  splats = new SplatLayer({ renderer, ...(sort ? { sort } : {}), keyBits, workerUrl: new URL('../bundle/sort-worker.js', location.href), debug: params.get('splatDebug') ?? '' })
-  splatQuad = new QuadMesh(createSplatComposite(frame, splats.target, splats.gain))
-  syncLook()
+  splats = new SplatLayer({ renderer, ...(sort ? { sort } : {}), keyBits, workerUrl: new URL('../bundle/sort.worker.js', location.href) })
+  setSplatSource(P, splats.target.texture)
   return splats
 }
 
-function boxChild(d: { w: number, d: number, h: number }): { obj: Object3D, box: Box3 } {
+function boxChild(d: { w: number; d: number; h: number }): { obj: THREE.Object3D; box: THREE.Box3 } {
   const w = d.w / 100, dd = d.d / 100, h = d.h / 100
-  const m = new Mesh(new BoxGeometry(w, h, dd).translate(0, h / 2, 0), new MeshBasicMaterial({ color: 0xffffff }))
-  return { obj: m, box: new Box3(new Vector3(-w / 2, 0, -dd / 2), new Vector3(w / 2, h, dd / 2)) }
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd).translate(0, h / 2, 0), new THREE.MeshBasicMaterial({ color: 0xffffff }))
+  return { obj: m, box: new THREE.Box3(new THREE.Vector3(-w / 2, 0, -dd / 2), new THREE.Vector3(w / 2, h, dd / 2)) }
 }
 
-function prepareMeshes(root: Object3D, drawn: boolean): void {
-  root.traverse((o) => {
-    if (!(o instanceof Mesh)) return
-    const lit = !(o.material instanceof MeshBasicMaterial)
-    o.castShadow = true
-    o.receiveShadow = lit
-    if (drawn) { o.layers.enable(DEPTH_LAYER); o.layers.enable(CASTER_LAYER) }
-  })
-}
-
-async function addItem(spec: ItemSpec): Promise<{ uid: string, splats: number | null, timing: Timing | null }> {
+// An item as the engine builds one (attachBuilt): its GLB or box, its lights, its depth layer, its splats and their
+// shadow-only caster, its contact shadow.
+async function addItem(spec: ItemSpec): Promise<{ uid: string; splats: number | null; timing: Timing | null }> {
   const t0 = performance.now()
-  const group = new Group()
+  const group = new THREE.Group()
   group.name = spec.uid
   group.position.set(...spec.position)
   group.rotation.y = (spec.rotation_y_deg ?? 0) * DEG
-  let child: { obj: Object3D, box: Box3 }
+  let child: { obj: THREE.Object3D; box: THREE.Box3 }
   if (spec.glb) {
     const g = await gltf.loadAsync(spec.glb)
     const root = g.scene
     root.updateMatrixWorld(true)
-    child = { obj: root, box: new Box3().setFromObject(root, true) }
+    child = { obj: root, box: new THREE.Box3().setFromObject(root, true) }
   } else if (spec.dims_cm) child = boxChild(spec.dims_cm)
   else throw new Error('an item needs a glb or dims_cm')
   let data: SplatData | null = null
   let timing: Timing | null = null
-  let caster: Object3D | null = null
   if (spec.splat) {
     const bytes = await fetchBytes(spec.splat)
     const t1 = performance.now()
     data = await decodeSplat(bytes)
-    const t2 = performance.now()
-    timing = { fetchMs: t1 - t0, decodeMs: t2 - t1, firstFrameMs: 0, splats: data.count }
+    timing = { fetchMs: t1 - t0, decodeMs: performance.now() - t1, firstFrameMs: 0, splats: data.count }
     child.obj.visible = false // never drawn: it picks, bounds and casts (§4.5 Splats)
-    caster = child.obj.clone(true)
-    caster.visible = true
-    caster.traverse((o) => { o.visible = true; o.layers.set(CASTER_LAYER) })
   }
-  prepareMeshes(child.obj, !data)
-  flipSides(child.obj) // shared with the caster copy's materials
   group.add(child.obj)
-  if (caster) group.add(caster)
-  const size = child.box.getSize(new Vector3()), c = child.box.getCenter(new Vector3())
-  const shadow = new Mesh(shadowGeo, shadowMat)
-  shadow.name = 'contact-shadow'
-  shadow.position.set(c.x, 0.004, c.z)
-  shadow.scale.set(size.x * 1.45 + 0.06, 1, size.z * 1.45 + 0.06)
-  shadow.renderOrder = 2
-  shadow.visible = contactShadows
+  lights.prepare(child.obj)
+  if (data) group.add(lights.caster(child.obj))
+  onDepthLayer(child.obj)
+  const shadow = makeContactShadow(child.box)
+  shadow.visible = look.contact_shadows
   group.add(shadow)
-  furnScene.add(group)
+  scene.add(group)
   group.updateMatrixWorld(true)
-  items.set(spec.uid, { uid: spec.uid, group, child: child.obj, box: child.box, splat: data, caster, shadow })
+  items.set(spec.uid, { uid: spec.uid, group, box: child.box, splat: data, shadow })
   if (data) ensureSplats().add(spec.uid, data, group)
   if (timing && splats) {
     await splats.settle(camera) // the CPU sort's first order (the GPU sort runs in the draw)
-    await draw(null)
+    draw(null)
     await gpuSync()
     timing.firstFrameMs = performance.now() - t0
   }
@@ -255,45 +199,26 @@ async function addItem(spec: ItemSpec): Promise<{ uid: string, splats: number | 
 function removeItem(uid: string): void {
   const r = items.get(uid)
   if (!r) return
-  furnScene.remove(r.group)
+  scene.remove(r.group)
   if (r.splat) splats?.remove(uid)
   items.delete(uid)
 }
 
-function shadowBox(): Box3 | null {
-  const b = new Box3()
+function shadowBox(): THREE.Box3 | null {
+  if (!lights.key.castShadow) return null
+  const b = new THREE.Box3()
   for (const r of items.values()) b.union(r.box.clone().applyMatrix4(r.group.matrixWorld))
   return b.isEmpty() ? null : b
 }
 
-function drawDepth(): void {
-  if (prepassMesh2.visible) renderer.render(depthScene, camera)
-  const prev = furnScene.overrideMaterial
-  furnScene.overrideMaterial = depthOnly
-  camera.layers.set(DEPTH_LAYER)
-  try { renderer.render(furnScene, camera) } finally { camera.layers.set(0); furnScene.overrideMaterial = prev }
-}
-
-// One frame into target (null: the canvas) at w × h: the furniture pass, the splat pass, then the screen.
-async function draw(target: RenderTarget | null, w = renderer.domElement.width, h = renderer.domElement.height): Promise<void> {
-  prepassMesh.visible = prepassMesh2.visible = occlusion && hasDepth
-  for (const r of items.values()) r.shadow.visible = contactShadows && r.group.position.y <= 0.02
-  furnScene.updateMatrixWorld()
-  rig.fitShadow(shadowBox(), furnScene)
-  if (furnRT.width !== w || furnRT.height !== h) furnRT.setSize(w, h)
-  renderer.setRenderTarget(furnRT)
-  renderer.setClearColor(0x000000, 0)
-  clearTarget(renderer)
-  renderer.render(furnScene, camera)
-  const withSplats = !!splats && splats.splats > 0
-  if (withSplats && splats) splats.render(camera, w, h, drawDepth)
-  renderer.setRenderTarget(target)
-  renderer.setClearColor(BAR, 1)
-  clearTarget(renderer)
-  photoQuad.render(renderer)
-  furnQuad.render(renderer)
-  if (withSplats && splatQuad) splatQuad.render(renderer)
-  await Promise.resolve()
+// One frame into target (null: the canvas), as the engine's drawTo.
+function draw(target: THREE.RenderTarget | null): void {
+  P.depth.mesh.visible = occlusion && hasDepth
+  for (const r of items.values()) r.shadow.visible = look.contact_shadows && r.group.position.y <= 0.02
+  scene.updateMatrixWorld()
+  lights.fitShadow(shadowBox())
+  const layer = splats && splats.splats > 0 ? splats : null
+  drawFrame(P, target, { scene, camera, furniture: true, splats: layer ? { layer, key: () => String(++tick) } : null })
 }
 
 async function gpuSync(): Promise<void> {
@@ -303,56 +228,42 @@ async function gpuSync(): Promise<void> {
   if (gl instanceof WebGL2RenderingContext) { const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px) }
 }
 
-// The full photo frame at its own resolution, splats sorted for the capture camera first (§4.7): PNG.
-// One capture target, kept and resized to the photo.
-const captureRT = new RenderTarget(1, 1, { type: UnsignedByteType, depthBuffer: false })
-async function capture(): Promise<{ dataUrl: string, width: number, height: number, ms: number, flipped: boolean }> {
+// The full photo frame at its own resolution, splats sorted for the capture camera first (§4.7), as a PNG.
+async function capture(): Promise<{ dataUrl: string; width: number; height: number; ms: number }> {
   const t0 = performance.now()
   const w = photo.w, h = photo.h
-  const out = captureRT
-  if (out.width !== w || out.height !== h) out.setSize(w, h)
-  try {
-    fullFrame(w, h)
+  const px = await withFullFrame(P, camera, photo.w / photo.h, w, h, async () => {
     if (splats && splats.splats > 0) await splats.settle(camera)
-    await draw(out, w, h)
-    await draw(out, w, h) // the catcher's material and the shadow map exist from the first
-    const px = await renderer.readRenderTargetPixelsAsync(out, 0, 0, w, h)
-    const c = document.createElement('canvas')
-    c.width = w; c.height = h
-    const g = c.getContext('2d')
-    if (!g) throw new Error('no 2d context')
-    const img = g.createImageData(w, h)
-    const src = px instanceof Uint8Array ? px : new Uint8Array(px.buffer, px.byteOffset, px.byteLength)
-    // WebGL reads rows bottom-up, WebGPU top-down: the photo's top-left corner tells which
-    const flipped = !isWebGPU(renderer)
-    for (let y = 0; y < h; y++) {
-      const row = flipped ? h - 1 - y : y
-      img.data.set(src.subarray(row * w * 4, (row + 1) * w * 4), y * w * 4)
-    }
-    g.putImageData(img, 0, 0)
-    return { dataUrl: c.toDataURL('image/png'), width: w, height: h, ms: performance.now() - t0, flipped }
-  } finally {
-    renderer.setRenderTarget(null)
-    updateView()
-  }
+    const out = captureTarget(P, w, h)
+    draw(out)
+    return readRgba(renderer, out, w, h)
+  }, updateView)
+  const c = document.createElement('canvas')
+  c.width = w; c.height = h
+  const g = c.getContext('2d')
+  if (!g) throw new Error('no 2d context')
+  g.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), w, h), 0, 0)
+  return { dataUrl: c.toDataURL('image/png'), width: w, height: h, ms: performance.now() - t0 }
 }
 
-// n frames to the canvas; moveSplats nudges every splat item by ±1 mm so each frame re-sorts and redraws.
 // GPU timestamps (WebGPU, timestamp-query): what the last frame's compute and render passes took on the device.
-async function gpuTimes(): Promise<{ compute: number | null, render: number | null }> {
+async function gpuTimes(): Promise<{ compute: number | null; render: number | null }> {
   if (!isWebGPU(renderer)) return { compute: null, render: null }
-  const t = async (type: typeof TimestampQuery.COMPUTE | typeof TimestampQuery.RENDER): Promise<number | null> => { try { const v: unknown = await renderer.resolveTimestampsAsync(type); return typeof v === 'number' ? v : null } catch { return null } }
-  return { compute: await t(TimestampQuery.COMPUTE), render: await t(TimestampQuery.RENDER) }
+  const t = async (type: typeof THREE.TimestampQuery.COMPUTE | typeof THREE.TimestampQuery.RENDER): Promise<number | null> => {
+    try { const v: unknown = await renderer.resolveTimestampsAsync(type); return typeof v === 'number' ? v : null } catch { return null }
+  }
+  return { compute: await t(THREE.TimestampQuery.COMPUTE), render: await t(THREE.TimestampQuery.RENDER) }
 }
 const median = (v: number[]): number => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] ?? 0
 
-async function timeFrames(n: number, opts: { moveSplats?: boolean } = {}): Promise<{ frames: number[], sorts: number[], median: number, gpuCompute: number[], gpuRender: number[] }> {
+// n frames to the canvas; moveSplats nudges every splat item by ±1 mm so each frame re-sorts and redraws.
+async function timeFrames(n: number, opts: { moveSplats?: boolean } = {}): Promise<{ frames: number[]; sorts: number[]; median: number; gpuCompute: number[]; gpuRender: number[] }> {
   const frames: number[] = [], sorts: number[] = [], gpuCompute: number[] = [], gpuRender: number[] = []
   await gpuTimes() // drop what earlier frames left
   for (let i = 0; i < n; i++) {
     if (opts.moveSplats) for (const r of items.values()) if (r.splat) { r.group.position.x += i % 2 ? -0.001 : 0.001; r.group.updateMatrixWorld(true) }
     const t0 = performance.now()
-    await draw(null)
+    draw(null)
     await gpuSync()
     frames.push(performance.now() - t0)
     const g = await gpuTimes()
@@ -365,7 +276,7 @@ async function timeFrames(n: number, opts: { moveSplats?: boolean } = {}): Promi
 }
 
 // GPU sort only: the radix sort against a stable CPU sort of the same keys.
-async function debugSort(): Promise<{ ok: boolean, count: number, mismatches: number, firstBad: number, keyRange: [number, number] } | null> {
+async function debugSort(): Promise<{ ok: boolean; count: number; mismatches: number; firstBad: number; keyRange: [number, number] } | null> {
   if (!splats) return null
   splats.update(camera)
   const r = await splats.debugReadSort()
@@ -387,35 +298,16 @@ function heapUsed(): number | null {
   return typeof v === 'number' ? v : null
 }
 
-let running = false
-function loop(): void {
-  if (!running) return
-  void draw(null).then(() => requestAnimationFrame(loop))
-}
-
-declare global {
-  interface Window {
-    gpuDemo?: unknown
-    gpuDemoError?: string
-  }
-}
-
-const ready = (async () => {
-  await renderer.init()
-  return { backend: isWebGPU(renderer) ? 'webgpu' : 'webgl2', canvas: [renderer.domElement.width, renderer.domElement.height] }
-})()
-
-window.gpuDemo = {
-  ready,
+Object.assign(api, {
   openScene,
   addItem,
   removeItem,
   clearItems: () => { for (const uid of [...items.keys()]) removeItem(uid) },
   setOcclusion: (on: boolean) => { occlusion = on },
-  setContactShadows: (on: boolean) => { contactShadows = on },
-  setCastShadows: (on: boolean) => { rig.catcherMaterial.visible = on; rig.key.castShadow = on },
+  setContactShadows: (on: boolean) => { look = { ...look, contact_shadows: on }; applyLook() },
+  setCastShadows: (on: boolean) => { look = { ...look, cast_shadows: on }; applyLook() },
   capture,
-  draw: async () => { await draw(null); await gpuSync() },
+  draw: async () => { draw(null); await gpuSync() },
   timeFrames,
   // the splat pass alone (sorted already, no depth), n times, synced: comparable with Spark's own draw
   timeSplatDraw: async (n: number) => {
@@ -427,7 +319,7 @@ window.gpuDemo = {
     await gpuTimes()
     for (let i = 0; i < n; i++) {
       const t0 = performance.now()
-      layer.render(camera, w, h, () => {})
+      layer.render(camera, w, h, () => undefined)
       await gpuSync()
       t.push(performance.now() - t0)
       const gt = await gpuTimes()
@@ -436,56 +328,6 @@ window.gpuDemo = {
     return { median: median(t), all: t, gpuRender: g }
   },
   debugSort,
-  // debug: how much the splat pass drew (alpha > 0 pixels in its target) at the canvas size
-  debugSplatTarget: async () => {
-    if (!splats) return null
-    await draw(null)
-    const t = splats.target
-    const px = await renderer.readRenderTargetPixelsAsync(t, 0, 0, t.width, t.height)
-    const n = t.width * t.height
-    let drawn = 0, maxA = 0
-    const samples: number[][] = []
-    const half = (h: number): number => { const e = (h >> 10) & 31, m = h & 1023, sg = h >> 15 ? -1 : 1; return e === 0 ? sg * m * 2 ** -24 : e === 31 ? (m ? NaN : sg * Infinity) : sg * (1 + m / 1024) * 2 ** (e - 15) }
-    const pxa = new Uint16Array(px.buffer, px.byteOffset, px.byteLength / 2)
-    for (let i = 0; i < n; i++) {
-      const a = Number(pxa[4 * i + 3] ?? 0)
-      if (a > 0) { drawn++; if (samples.length < 6 && i % 7 === 0) samples.push([0, 1, 2, 3].map((k) => half(Number(pxa[4 * i + k] ?? 0)))) }
-      if (a > maxA) maxA = a
-    }
-    return { w: t.width, h: t.height, drawn, maxA, samples, type: px.constructor.name, instances: splats.stats() }
-  },
-  debugShaders: () => splats?.debugShaders(camera) ?? null,
-  debugScene: () => furnScene.children.map((c) => `${c.type}:${c.name}:${c.visible ? 'v' : 'h'}`),
-  // draw calls of the furniture pass alone, and the objects three put in its render list
-  debugFurnitureCalls: () => {
-    renderer.info.autoReset = false
-    renderer.info.reset()
-    renderer.setRenderTarget(furnRT)
-    renderer.autoClear = true
-    try { renderer.render(furnScene, camera) } finally { renderer.autoClear = false; renderer.info.autoReset = true }
-    const names: string[] = []
-    furnScene.traverseVisible((o) => { if (o instanceof Mesh) names.push(`${o.parent?.name ?? ''}/${o.name}`) })
-    return { drawCalls: renderer.info.render.drawCalls, visibleMeshes: names }
-  },
-  debugClearFurn: () => { renderer.setRenderTarget(furnRT); renderer.setClearColor(0x000000, 0); clearTarget(renderer); renderer.setRenderTarget(null) },
-  debugRenderFurn: (withShadow: boolean) => {
-    furnScene.updateMatrixWorld()
-    if (withShadow) rig.fitShadow(shadowBox(), furnScene)
-    renderer.setRenderTarget(furnRT); renderer.setClearColor(0x000000, 0)
-    renderer.autoClear = true
-    try { renderer.render(furnScene, camera) } finally { renderer.autoClear = false }
-    renderer.setRenderTarget(null)
-  },
-  // the furniture target's alpha at a photo-space rect (msaa=0 only): is the piece in the target itself?
-  debugFurnAlpha: async (x0: number, y0: number, w: number, h: number) => {
-    const px = await renderer.readRenderTargetPixelsAsync(furnRT, x0, y0, w, h)
-    const pxa = new Uint16Array(px.buffer, px.byteOffset, px.byteLength / 2)
-    let n = 0
-    for (let i = 0; i < w * h; i++) if (Number(pxa[4 * i + 3] ?? 0) > 0) n++
-    return { size: [furnRT.width, furnRT.height], covered: n / (w * h) }
-  },
-  start: () => { running = true; loop() },
-  stop: () => { running = false },
   stats: () => ({ splats: splats?.stats() ?? null, info: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, compute: renderer.info.compute.calls }, heap: heapUsed() }),
-}
-ready.catch((e: unknown) => { window.gpuDemoError = e instanceof Error ? e.message : String(e) })
+})
+started({ backend: isWebGPU(renderer) ? 'webgpu' : 'webgl2', canvas: [renderer.domElement.width, renderer.domElement.height] })

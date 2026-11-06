@@ -1,6 +1,7 @@
-// Build and serve helpers for the WebGPU spike's demo pages (planner/gpu/demo/), used by check.mjs.
-// - build(outDir): esbuild (from the flake's pinned nixpkgs, no global install) bundles the demo entries and the sort
-//   worker into outDir as ES modules, three.js from node_modules.
+// Build and serve helpers for the WebGPU check's demo pages (planner/gpu/demo/), used by check.mjs and gltrace.mjs.
+// - build(outDir): the wasm kernels (scripts/build.mjs --wasm-only), then esbuild (the project's, from node_modules)
+//   bundles the demo entries and the sort worker into outDir as ES modules, three.js from node_modules (its WebGPU build
+//   for 'three', as scripts/build.mjs), with the kernels' .wasm beside them.
 // - serve(routes): a static file server on 127.0.0.1 (a secure context, so WebGPU is exposed) on a free port.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -8,24 +9,20 @@ import http from 'node:http'
 import path from 'node:path'
 
 export const REPO = path.resolve(import.meta.dirname, '../../..')
-const NP = 'github:nixos/nixpkgs/1f607aa79b6356ed45d3cd3c8079c196e79efa2c'
-let esbuildBin = null
-function esbuild() {
-  if (!esbuildBin) {
-    const out = execFileSync('nix', ['build', '--no-link', '--print-out-paths', `${NP}#esbuild`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').pop()
-    esbuildBin = path.join(out, 'bin/esbuild')
-  }
-  return esbuildBin
-}
 
-export const ENTRIES = ['planner/gpu/demo/probe.ts', 'planner/gpu/demo/demo.ts', 'planner/gpu/sort-worker.ts']
+export const ENTRIES = ['planner/gpu/demo/demo.ts', 'planner/gpu/sort.worker.ts']
 
-export function build(outDir, { minify = false, entries = ENTRIES } = {}) {
+export async function build(outDir, { minify = false, entries = ENTRIES } = {}) {
   fs.mkdirSync(outDir, { recursive: true })
   const t0 = Date.now()
-  const present = entries.filter((e) => fs.existsSync(path.join(REPO, e)))
-  execFileSync(esbuild(), [...present, '--bundle', '--format=esm', '--target=es2022', '--platform=browser', `--outdir=${outDir}`,
-    '--entry-names=[name]', '--sourcemap', '--log-level=warning', ...(minify ? ['--minify'] : [])], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] })
+  execFileSync(process.execPath, [path.join(REPO, 'scripts/build.mjs'), '--wasm-only', '--quiet'], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] })
+  const esbuild = await import('esbuild')
+  const threeWebGPU = { name: 'three-webgpu', setup(b) { b.onResolve({ filter: /^three$/ }, () => ({ path: path.join(REPO, 'node_modules/three/build/three.webgpu.js') })) } }
+  await esbuild.build({
+    absWorkingDir: REPO, entryPoints: entries.map((e) => path.join(REPO, e)), bundle: true, format: 'esm', target: 'es2022', platform: 'browser',
+    outdir: outDir, entryNames: '[name]', sourcemap: true, logLevel: 'warning', minify, plugins: [threeWebGPU],
+  })
+  for (const f of fs.readdirSync(path.join(REPO, 'build/wasm/web')).filter((f) => f.endsWith('.wasm'))) fs.copyFileSync(path.join(REPO, 'build/wasm/web', f), path.join(outDir, f))
   const sizes = Object.fromEntries(fs.readdirSync(outDir).filter((f) => f.endsWith('.js')).map((f) => [f, fs.statSync(path.join(outDir, f)).size]))
   return { ms: Date.now() - t0, sizes }
 }

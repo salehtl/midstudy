@@ -18,9 +18,9 @@ import type { ComputeNode, Node } from 'three/webgpu'
 import { Fn, Loop, atomicAdd, atomicLoad, atomicOr, atomicStore, invocationLocalIndex, storage, uint, wgslFn, workgroupArray, workgroupBarrier, workgroupId } from 'three/tsl'
 import type { ShaderNodeObject } from 'three/tsl'
 
-export const THREADS = 256
-export const PER_THREAD = 4
-export const BLOCK = THREADS * PER_THREAD
+const THREADS = 256
+const PER_THREAD = 4
+const BLOCK = THREADS * PER_THREAD
 const RADIX = 256
 const WORDS = THREADS / 32 // mask words per digit
 
@@ -70,7 +70,7 @@ export class GpuRadixSort {
         workgroupBarrier()
         histNode.element(t.mul(uint(blocks)).add(b)).assign(atomicLoad(local.element(t)))
       })().compute(blocks * THREADS, [THREADS])
-      hist.setName(`radix-hist-${p}`)
+      hist.setName(`radix-hist-${String(p)}`)
 
       const scan = Fn(() => {
         const t = invocationLocalIndex
@@ -96,7 +96,7 @@ export class GpuRadixSort {
           run.addAssign(c)
         })
       })().compute(THREADS, [THREADS])
-      scan.setName(`radix-scan-${p}`)
+      scan.setName(`radix-scan-${String(p)}`)
 
       const scatter = Fn(() => {
         const t = invocationLocalIndex
@@ -133,7 +133,7 @@ export class GpuRadixSort {
           workgroupBarrier()
         }
       })().compute(blocks * THREADS, [THREADS])
-      scatter.setName(`radix-scatter-${p}`)
+      scatter.setName(`radix-scatter-${String(p)}`)
 
       this.kernels.push(hist, scan, scatter)
     }

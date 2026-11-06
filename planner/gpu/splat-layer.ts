@@ -1,15 +1,16 @@
 // SplatLayer: Gaussian splat furniture for three.js's WebGPURenderer (WebGPU, and its WebGL2 fallback), without
-// Spark. Contract §4.5 Splats, §4.8 (the colour multiplier), §1 (splat.spz). Interface (docs/notes/webgpu-spike.md):
+// Spark. Contract §4.5 Splats, §4.8 (the colour multiplier), §1 (splat.spz). Used by planner/engine.ts:
 //
-//   const layer = new SplatLayer({ renderer, workerUrl })      sort 'gpu' on WebGPU (compute radix sort), else 'cpu'
+//   const layer = new SplatLayer({ renderer, onChange })        sort 'gpu' on WebGPU (compute radix sort), else 'cpu'
 //   layer.add(uid, splatData, itemGroup)                        the group's matrixWorld places the splats (item frame)
-//   layer.remove(uid) · layer.has(uid) · layer.count            · layer.items()
-//   layer.setColorMultiplier(r, g, b)                           exposure × warmth × white balance × level (§4.8)
-//   layer.render(camera, drawDepth)                             sorts if needed, draws into layer.target: colour
-//                                                               cleared, depth from drawDepth() (the photo's depth
-//                                                               and the meshes, depth only), splats tested, no writes
-//   layer.compositeNode(frame)                                  the screen pass: un-premultiply, × multiplier, sRGB
+//   layer.remove(uid) · layer.has(uid) · layer.itemSplats(uid) · layer.itemIds() · layer.splats
+//   layer.render(camera, w, h, drawDepth)                       sorts if needed, draws into layer.target at w × h:
+//                                                               colour cleared, depth from drawDepth() (the photo's
+//                                                               depth and the meshes, depth only), splats tested,
+//                                                               no depth writes; layer.target is composited by the
+//                                                               screen pass (planner/gpu/passes.ts createSplatComposite)
 //   await layer.settle(camera)                                  the order is for this camera and set (captures)
+//   onChange()                                                  a worker sort landed: the drawn order changed
 //   layer.stats() · layer.dispose()
 //
 // Drawing follows Spark 2.4 (what v1 draws with), so the two look alike: each splat is an instanced quad around its
@@ -22,7 +23,7 @@
 // Order: one back-to-front order over every placed splat (all items together), by depth along the view axis.
 // WebGPU: a key kernel (16-bit depth keys over the frame's depth range) and GpuRadixSort, in one compute submission
 // before the draw, re-run only when the camera, a transform or the set changed. WebGL2 (no compute): the same keys
-// and a counting sort in a worker (sort-worker.ts); the previous order draws until the new one lands.
+// and a counting sort in a worker (sort.worker.ts); the previous order draws until the new one lands.
 import {
   DataTexture, FloatType, HalfFloatType, InstancedBufferAttribute, InstancedBufferGeometry, Float32BufferAttribute, Matrix4, Mesh,
   NearestFilter, NodeMaterial, RGBAFormat, RenderTarget, Scene, Vector2, Vector3, CustomBlending, DoubleSide, OneFactor, OneMinusSrcAlphaFactor,
@@ -33,16 +34,16 @@ import {
   int, ivec2, max, min, mix, positionGeometry, pow, select, sqrt, storage, textureLoad, uint, uniform, varyingProperty, vec2, vec3, vec4,
 } from 'three/tsl'
 import type { ShaderNodeObject } from 'three/tsl'
-import { BLOCK, GpuRadixSort, padToBlock } from './radix-sort.ts'
-import type { SplatData } from './splat-data.ts'
-import { clearTarget } from './passes.ts'
-import type { FromWorker, ToWorker } from './sort-messages.ts'
+import { GpuRadixSort, padToBlock } from './radix-sort.js'
+import type { SplatData } from './splat-data.js'
+import { clearTarget, isWebGPU, render } from './passes.js'
+import type { FromWorker, ToWorker } from './sort-messages.js'
 
-export const TEX_W = 2048          // data texture width (texels); rows grow with the capacity
-export const MAX_ITEMS = 256       // item slots (transform texture rows)
-export const MAX_STD_DEV = Math.sqrt(8)
-export const MIN_ALPHA = 0.5 / 255
-export const BLUR = 0.3            // px², with opacity compensation (Spark's blurAmount)
+const TEX_W = 2048          // data texture width (texels); rows grow with the capacity
+const MAX_ITEMS = 256       // item slots (transform texture rows)
+const MAX_STD_DEV = Math.sqrt(8)
+const MIN_ALPHA = 0.5 / 255
+const BLUR = 0.3            // px², with opacity compensation (Spark's blurAmount)
 const MAX_PIXEL_RADIUS = 512
 const CLIP_XY = 1.4
 
@@ -54,8 +55,10 @@ export interface SplatLayerOptions {
   sort?: SortMode
   /** the GPU sort's key width: 16 (two radix passes, the default), 24 or 32 (float bits, exact) */
   keyBits?: 16 | 24 | 32
-  /** the bundled sort-worker.js (the CPU sort) */
+  /** the bundled sort.worker.js (the CPU sort; default: beside this module's chunk) */
   workerUrl?: string | URL
+  /** called when a worker sort lands (the drawn order changed: draw again) */
+  onChange?: () => void
   /** debug draws: 'center' (fixed 4 px quads at the centers), 'grid' (one quad per instance on a grid) */
   debug?: string
 }
@@ -193,9 +196,6 @@ function dataTexture(rows: number): DataTexture {
   return t
 }
 
-/** Whether three.js picked its WebGPU backend (else the WebGL2 fallback). */
-export const isWebGPU = (r: WebGPURenderer): boolean => Reflect.get(r.backend, 'isWebGPUBackend') === true
-
 export class SplatLayer {
   readonly renderer: WebGPURenderer
   readonly backend: 'webgpu' | 'webgl2'
@@ -203,7 +203,6 @@ export class SplatLayer {
   readonly keyBits: 16 | 24 | 32
   readonly scene = new Scene()
   readonly target: RenderTarget
-  readonly gain = uniform(new Vector3(1, 1, 1))
   private items = new Map<string, Item>()
   private capacity = 0
   private count = 0
@@ -216,12 +215,13 @@ export class SplatLayer {
   private keyKernel: ComputeNode | null = null
   private worker: Worker | null = null
   private workerUrl: string | URL | undefined
+  private onChange: (() => void) | undefined
   private debug: string
   private sortId = 0
-  private pending: { id: number, key: string, resolve: Array<() => void> } | null = null
+  private pending: { id: number, key: string, resolve: (() => void)[] } | null = null
   private sortedKey = ''      // what the drawn order was sorted for
   private wantKey = ''        // what the last update asked for
-  private settleWaiters: Array<{ key: string, resolve: () => void }> = []
+  private settleWaiters: { key: string, resolve: () => void }[] = []
   private sorts = 0
   private lastSortMs: number | null = null
   private lastWorkerMs: number | null = null
@@ -242,6 +242,7 @@ export class SplatLayer {
     if (this.sortMode === 'gpu' && this.backend !== 'webgpu') throw new Error('the GPU sort needs the WebGPU backend')
     this.keyBits = opts.keyBits ?? 16
     this.workerUrl = opts.workerUrl
+    this.onChange = opts.onChange
     this.debug = opts.debug ?? ''
     this.target = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true })
     this.target.texture.name = 'splat-target'
@@ -256,7 +257,7 @@ export class SplatLayer {
   add(uid: string, data: SplatData, object: Object3D): void {
     if (this.items.has(uid)) this.remove(uid)
     const slot = this.slotFree.pop()
-    if (slot === undefined) throw new Error(`at most ${MAX_ITEMS} splat items`)
+    if (slot === undefined) throw new Error(`at most ${String(MAX_ITEMS)} splat items`)
     this.items.set(uid, { uid, data, object, slot, start: 0 })
     this.rebuild()
   }
@@ -268,8 +269,6 @@ export class SplatLayer {
     this.slotFree.push(it.slot)
     this.rebuild()
   }
-
-  setColorMultiplier(r: number, g: number, b: number): void { this.gain.value.set(r, g, b) }
 
   // The combined set: every item's splats back to back, uploaded as data textures; the GPU sort and the draw are
   // rebuilt when the capacity grows.
@@ -383,9 +382,9 @@ export class SplatLayer {
 
   private ensureWorker(): Worker {
     if (this.worker) return this.worker
-    const url = this.workerUrl ?? new URL('./sort-worker.js', import.meta.url)
+    const url = this.workerUrl ?? new URL('./sort.worker.js', import.meta.url)
     const w = new Worker(url, { type: 'module' })
-    w.onmessage = (e: MessageEvent<FromWorker>) => this.onWorker(e.data)
+    w.onmessage = (e: MessageEvent<FromWorker>) => { this.onWorker(e.data) }
     w.onerror = (e) => { console.warn('[splats] sort worker failed', e.message) }
     this.worker = w
     return w
@@ -393,7 +392,7 @@ export class SplatLayer {
 
   private onWorker(m: FromWorker): void {
     const p = this.pending
-    if (!p || m.id !== p.id) return
+    if (p?.id !== m.id) return
     this.pending = null
     if (m.type === 'error') { console.warn('[splats] sort failed:', m.message); for (const r of p.resolve) r(); return }
     if (m.version !== this.version || !this.order || !this.geometry) {
@@ -410,6 +409,7 @@ export class SplatLayer {
     this.lastWorkerMs = m.ms
     for (const r of p.resolve) r()
     this.flushWaiters()
+    this.onChange?.()
     // the camera may have moved while this sort ran
     if (this.wantKey && this.wantKey !== this.sortedKey) this.requestCpuSort(this.wantKey, this.lastRows, this.lastRange)
   }
@@ -426,7 +426,7 @@ export class SplatLayer {
   }
 
   private flushWaiters(): void {
-    const left: Array<{ key: string, resolve: () => void }> = []
+    const left: { key: string, resolve: () => void }[] = []
     for (const w of this.settleWaiters) { if (w.key === this.sortedKey) w.resolve(); else left.push(w) }
     this.settleWaiters = left
   }
@@ -451,7 +451,7 @@ export class SplatLayer {
       itemsData.set(e, 16 * it.slot)
       parts.push(...e.map((v) => v.toFixed(6)))
       // the view z row of V·M for the CPU sort: r_j = Σ_k V[2][k] M[k][j]
-      for (let j = 0; j < 4; j++) rows[4 * it.slot + j] = (ve[2] ?? 0) * (e[4 * j] ?? 0) + (ve[6] ?? 0) * (e[4 * j + 1] ?? 0) + (ve[10] ?? 0) * (e[4 * j + 2] ?? 0) + (ve[14] ?? 0) * (e[4 * j + 3] ?? 0)
+      for (let j = 0; j < 4; j++) rows[4 * it.slot + j] = ve[2] * (e[4 * j] ?? 0) + ve[6] * (e[4 * j + 1] ?? 0) + ve[10] * (e[4 * j + 2] ?? 0) + ve[14] * (e[4 * j + 3] ?? 0)
       const { min: lo, max: hi } = it.data
       for (let c = 0; c < 8; c++) {
         corner.set(c & 1 ? hi[0] : lo[0], c & 2 ? hi[1] : lo[1], c & 4 ? hi[2] : lo[2]).applyMatrix4(it.object.matrixWorld).applyMatrix4(V)
@@ -482,7 +482,7 @@ export class SplatLayer {
       const sorter = this.sorter, keyKernel = this.keyKernel
       if (!sorter || !keyKernel) return
       const t0 = performance.now()
-      this.renderer.compute([keyKernel, ...sorter.kernels])
+      void this.renderer.compute([keyKernel, ...sorter.kernels]) // a Promise only before init()
       this.lastSortMs = performance.now() - t0 // CPU-side encode + submit; GPU time: see stats via timestamps
       this.sortedKey = key
       this.sorts++
@@ -497,7 +497,7 @@ export class SplatLayer {
     this.update(camera)
     if (!this.count || this.sortedKey === this.wantKey) return Promise.resolve()
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('the splats were still sorting')), timeoutMs)
+      const timer = setTimeout(() => { reject(new Error('the splats were still sorting')) }, timeoutMs)
       this.settleWaiters.push({ key: this.wantKey, resolve: () => { clearTimeout(timer); resolve() } })
     })
   }
@@ -516,8 +516,8 @@ export class SplatLayer {
       camera.updateProjectionMatrix()
       const P = camera.projectionMatrix.elements
       this.uRenderSize.value.set(width, height)
-      this.uFocal.value.set(0.5 * width * (P[0] ?? 1), 0.5 * height * (P[5] ?? 1))
-      r.render(this.scene, camera)
+      this.uFocal.value.set(0.5 * width * P[0], 0.5 * height * P[5])
+      render(r, this.scene, camera)
     }
     r.setRenderTarget(prevTarget)
   }
@@ -568,4 +568,3 @@ export class SplatLayer {
   }
 }
 
-export { BLOCK }
