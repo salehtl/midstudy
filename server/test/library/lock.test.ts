@@ -23,7 +23,7 @@ function hold(library: string): { readonly child: ChildProcess; readonly held: P
   return { child, held }
 }
 
-void test('library writes wait 60 s for a held lock, then answer 503 and change nothing; reads never wait; a freed lock lets the write through', { timeout: 150000 }, async () => {
+void test('library writes wait 60 s for a held lock, then answer 503 and change nothing; reads never wait; a freed lock lets the write through', { timeout: 150000 }, async (t) => {
   const s = await startServer({ name: 'library-lock' })
   try {
     const item = { id: 'chair', name: 'Chair', dims_cm: { w: 80.0, d: 85, h: 95 }, assets: { glb: 'chair/model.glb' }, default_render: 'glb', source: { engine: 'glb', input: 'chair.glb', cost_usd: 0, created: '2026-11-05T12:00:00Z' } }
@@ -49,6 +49,7 @@ void test('library writes wait 60 s for a held lock, then answer 503 and change 
     assert.ok(Date.now() - t0 < 5000, 'GET /api/library does not wait for the lock')
     const answers = await writes
     const ms = Date.now() - t0
+    t.diagnostic('the four writes answered 503 after ' + String(ms) + ' ms')
     for (const a of answers) {
       assert.equal(a.status, 503)
       assert.equal(errorOf(a), LIBRARY_BUSY)
@@ -66,6 +67,7 @@ void test('library writes wait 60 s for a held lock, then answer 503 and change 
     setTimeout(() => second.child.kill('SIGKILL'), 1500)
     const done = await waiting
     assert.equal(done.status, 200, done.text)
+    t.diagnostic('the waiting thumbnail went through ' + String(Date.now() - t1) + ' ms after it was sent (the holder killed at 1500 ms)')
     assert.ok(Date.now() - t1 < 10000, 'the thumbnail went through once the holder was gone')
     assert.ok(fs.existsSync(path.join(s.library, 'chair', 'thumb.jpg')))
     const after = fs.readFileSync(path.join(s.library, 'library.json'), 'utf8')
