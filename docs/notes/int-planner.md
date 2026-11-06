@@ -85,8 +85,9 @@ wasm kernels; the check builds the wasm first).
 
 ### 3. A start-up race the kernels' rounding exposed (`d67d85a`)
 
-Round 1 of the evals (on `110bbb6`) passed everything but E13, where a re-run failed "no page errors": `TypeError:
-Cannot read properties of undefined (reading 'roundTo')`, from the engine's `resize` listener → `emitView` →
+Round 1 of the evals (on `110bbb6`) passed everything but E13: its first run missed a timing check (E13.38, see the
+evals), and its re-run failed "no page errors" (E13.48): `TypeError: Cannot read properties of undefined (reading
+'roundTo')`, from the engine's `resize` listener → `emitView` →
 `getView` → `viewReport` → the kernels' `roundTo` (stack in `evals/out/int-planner/prefix-round1-splat-rerun.log`). The
 listener is registered while the module sets up, before it awaits the kernels; a resize in that window (a phone
 context starting) reached a kernel the wasm hadn't loaded yet. With v1's `round` in TypeScript that path never
@@ -150,6 +151,39 @@ at load 28–47 with a splat in view; the eval's own comment warns of seconds-lo
 re-run and in both later rounds; E13.48 was the start-up race above, fixed in `d67d85a`. Rounds A and B: 497/497
 each, every eval on its first run.
 
+## Performance: E17's planner metrics against v1's baseline
+
+`npm run eval:perf -- --only load,scene,edit --compare evals/perf/baseline.json` through the lock, **not exclusive**,
+on `d67d85a`, 5 runs + 1 warm-up (`evals/out/int-planner/perf.log`, results `perf-results.json`). The baseline is v1's
+(f-perf, mean 1-minute load 8.1); this run's mean load was **20.8** (36 by the end of the edit suite). Three edit
+metrics came out WORSE in that run (`add_item_glb_textured` 3.04, noise 153 %; `drag_frames_p95` 9.15, noise 67 %;
+`render_capture_server` 1.80, the Python server's own share), so the edit suite was re-run once, as a timing failure
+must be (`perf-edit-rerun.log`, mean load 21.5): **no regression beyond the allowance**, all three back to 0.90, 1.15
+and 1.00. Ratio = now / v1 (median); E17's verdict uses its allowance (10 % + the metric's noise).
+
+| Metric | v1 baseline | Now | Ratio | Verdict |
+|---|---:|---:|---:|---|
+| planner_load_desktop | 1.80 s | 1.43 s | **0.79** | same (allowance +82 %) |
+| planner_load_desktop_warm | 1.79 s | 1.52 s | **0.85** | same |
+| planner_load_phone | 1.76 s | 1.59 s | **0.90** | same |
+| scene_open | 842.9 ms | 119.1 ms | **0.14** | **better** (7.1×) |
+| add_item_glb | 4.7 ms | 4.7 ms | 1.00 | same |
+| add_item_glb_textured | 24.8 ms | 22.3 ms | 0.90 | same (run 1: 75.3 ms, 3.04, WORSE at load 36) |
+| drag_frames_p50 / p95 | 66.6 / 68.3 ms | 66.6 / 78.3 ms | 1.00 / 1.15 | same (run 1 p95: 625 ms, 9.15, WORSE) |
+| render_capture (client / server) | 405.9 (398.6 / 7.5) ms | 380.0 (373.0 / 7.5) ms | 0.94 (0.94 / 1.00) | same (run 1 server: 13.5 ms, 1.80, WORSE) |
+| render_keep_room (client / server) | 745.7 (700.3 / 45.7) ms | 745.3 (700.6 / 45.2) ms | 1.00 (1.00 / 0.99) | same |
+| add_item_splat | 156.7 ms | 82.8 ms | 0.53 | same (allowance +110 %) |
+| splat_first_frame | 302.9 ms | 354.5 ms | 1.17 | same |
+| drag_splat | 3.04 s | 2.98 s | 0.98 | same |
+| render_capture_splat | 11.47 s | 10.85 s | 0.95 | same |
+
+Planner load: 27 requests on the desktop (24 on the phone), 1,645 KB, none external, `ready` at ~0.9 s. Against
+REFACTOR §4.1: **scene open ≥ 3× is met** (7.1×); **planner cold load ≥ 40 % is not** (21 % desktop, 10 % phone, as
+the engine track measured: most of what is left is SwiftShader's WebGL set-up); **keep-room mask ≥ 3× is not**
+(`render_keep_room_client` 1.00: the kernel's mask and PNG take a few ms, the mask render and read-back on SwiftShader
+dominate). Not an A/B: the machine was about 2.5× as loaded as when the baseline was recorded, which slows "now", so
+the ratios are pessimistic rather than precise.
+
 ## Decisions
 
 1. **Narrowing readers, not casts, not copies.** A type guard per shape keeps the server's object (the hook's as-is
@@ -177,12 +211,29 @@ each, every eval on its first run.
    keycap; the Scenes page's 940 px width that never applied) — behaviour first, a fixer's call; `pageSize` in the
    product form differs from `fmtBytes` (≥ 1 KB for nothing, no GB), so it is not a duplicate.
 
+## Open
+
+- **REFACTOR §4.1:** planner cold load (≥ 40 %) and the keep-room mask (≥ 3×) are missed, with the numbers above; a
+  quiet-machine A/B would tighten every ratio (load 15–36 during these runs).
+- **The kernels must load for the planner's maths now** (clamps, the Look, the view's and lighting's reports, layout
+  signatures), not only for the projection. A failed wasm load was already fatal to the planner in practice (no
+  projection, no hit tests); it is reported the same way ("Could not load the planner kernels").
+- **Malformed answers** read differently from v1 (Decisions 4); nothing the tools write is affected.
+- **The horizon drag's row** differs from v1 in the last bit for some inputs (Decisions 3).
+- **Shared files** may conflict with the backend half's merge (the list above); `scripts/check.mjs`'s `ORDER` line
+  most likely.
+- **E13.38** (the Library row's "…" click) is a timing check that can miss at load ≈ 40 with a splat in view; it
+  passed on the re-run and in both rounds.
+- Kept for a fixer, as the ui track recorded: the desktop Drop to floor tooltip's "null" keycap and the Scenes page's
+  940 px width that never applies (v1's behaviour).
+
 ## Interfaces after integration
 
 - `planner/engine.ts`: `engine` (`Engine = typeof engine`): `events: Events<EngineEvents>` (listen-only), the getters
   and actions in the header comment, `captureComposite(opts): Promise<Shot>`, `getScene(): SceneInfo | null`,
   `getItem(uid: string | null)`; exported types `Engine`, `Shot`, `ItemInfo`, `ItemSnapshot`, `DeletedLayout`,
-  `PlannerState`, `RenderSettings`, `Req`, `RequestError` and the re-exported `Camera`, `LightingReport`,
+  `SavedScene`, `SceneLoad`, `PlannerState`, `RenderSettings`, `InputHandle`, `Req`, `RequestError` and the
+  re-exported `Camera`, `LightingReport`,
   `LibraryEntry`, `RenderMeta`; values `CAMERA_RANGE` (the kernels'), `MAX_ELEVATION`, `RENDER_MODELS`, `dimsText`,
   `fmtUsd`, `quiet`, `renderPrice`, `withMidstudy`. The `window.midstudy` hook is unchanged (contract §2.4, §4.6).
 - `planner/data.ts`: `createScenes` → `Scenes` (`events: Events<ScenesEvents>`: 'scenes', 'ready', 'failed'),
