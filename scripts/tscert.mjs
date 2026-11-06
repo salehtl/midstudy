@@ -133,7 +133,8 @@ switch (cmd) {
     const jobs = JSON.parse(fs.readFileSync(batch, 'utf8'))
     const byFile = Object.fromEntries(await Promise.all(jobs.map(async (j) => [j.file, await units(j, vs, fp)])))
     // A tool error (a step's timeout under load, a crashed worker) is no verdict: check those units once more, alone,
-    // running timed-out stages again rather than replaying the recorded timeout (TScert's TSCERT_RETRY_TIMEOUTS).
+    // running timed-out stages again rather than replaying the recorded timeout (TScert's TSCERT_RETRY_TIMEOUTS; runUnits
+    // also sets it for the whole run, since TScert's worker processes read it when they start, before this line).
     process.env.TSCERT_RETRY_TIMEOUTS = '1'
     for (const j of jobs) {
       const again = Object.entries(byFile[j.file]).filter(([, r]) => r.status === 'error').map(([n]) => n)

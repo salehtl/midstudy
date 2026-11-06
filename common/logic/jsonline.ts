@@ -8,21 +8,25 @@ import { pyFloatRepr } from './pyfmt.ts'
 /** A JSON-able value. */
 export type JsonLineValue = null | boolean | number | string | readonly JsonLineValue[] | { readonly [key: string]: JsonLineValue }
 
-const NAMED: Readonly<Record<string, string>> = { '"': '\\"', '\\': '\\\\', '\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t' }
+/** One UTF-16 unit as `json.dumps` (ensure_ascii) writes it inside a string: the two-character escapes, printable
+ *  ASCII as is, anything else as a `\u` escape of four lower-case hex digits. */
+function jsonChar(code: number): string {
+  switch (code) {
+    case 0x22: return '\\"'
+    case 0x5c: return '\\\\'
+    case 0x08: return '\\b'
+    case 0x0c: return '\\f'
+    case 0x0a: return '\\n'
+    case 0x0d: return '\\r'
+    case 0x09: return '\\t'
+    default: return code >= 0x20 && code <= 0x7e ? String.fromCharCode(code) : '\\u' + code.toString(16).padStart(4, '0')
+  }
+}
 
 /** A string as `json.dumps` (ensure_ascii) quotes it. */
 function jsonString(s: string): string {
   let out = '"'
-  for (let i = 0; i < s.length; i += 1) {
-    const c = s.charAt(i)
-    const named = NAMED[c]
-    if (named !== undefined) {
-      out += named
-      continue
-    }
-    const code = s.charCodeAt(i)
-    out += code >= 0x20 && code <= 0x7e ? c : '\\u' + code.toString(16).padStart(4, '0')
-  }
+  for (let i = 0; i < s.length; i += 1) out += jsonChar(s.charCodeAt(i))
   return out + '"'
 }
 
