@@ -5,11 +5,13 @@
     midstudy-calib fit <scene-dir> [--model ...] [--device ...] [--no-depth]
     midstudy-calib light <scene-dir> [--model ...] [--device ...]
     midstudy-calib align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>
+    midstudy-calib align-room <scene-dir> <scene-dir> ... --out <room-dir> [--solver auto|mast3r|manhattan] [--device ...]
     midstudy-calib serve [--model ...] [--device ...]
 
 Progress goes to stderr. The last stdout line is one JSON object: run/fit the calib.json contents plus "ok": true;
 ingest {ok, photo, source, image}; align {ok, applied, inliers, residual_px, reason?}; light {ok, lighting: true,
-cct_k, confidence, elapsed_s} or {ok, lighting: false, reason}. A failure exits 1 with {"ok": false, "error": "<one
+cct_k, confidence, elapsed_s} or {ok, lighting: false, reason}; align-room align.json's contents plus "ok": true
+(rooms/command.py, contract §4.9). A failure exits 1 with {"ok": false, "error": "<one
 sentence>"} on stdout and "midstudy-calib: <the same sentence>" as the last stderr line. Every result (and calib.json
 and lighting.json) is checked against its schema before it is written; one that doesn't match is a bug and is reported
 as a failure instead (validate.py).
@@ -24,7 +26,8 @@ and keeps MoGe-2 loaded between them; its --model and --device are the defaults 
 
 MIDSTUDY_CALIB_MOCK=<dir> makes fit copy <dir>/<sha256>/calib.json, depth.png and lighting.json, and light copy
 <dir>/<sha256>/lighting.json (lighting: false without one), instead of running MoGe (<sha256>: of photo.jpg, then of
-source.<ext>). The worker reads it for every request, as the one-shot commands do.
+source.<ext>), and align-room write <dir>/rooms/<key>/align.json's answer (rooms/mock.py). The worker reads it for
+every request, as the one-shot commands do.
 """
 from __future__ import annotations
 
@@ -34,11 +37,11 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn, TypeGuard
+from typing import NoReturn, TypeGuard, cast
 
 from . import validate
 from .contract_types import ErrorResult
-from .records import DEVICES, MODELS, Command, Device, Model, Result, is_error
+from .records import DEVICES, MODELS, AlignRoomArgs, Command, Device, Model, Result, is_error
 from .util import Fail
 
 
@@ -86,7 +89,7 @@ class ServeArgs:
     device: Device
 
 
-type CommandArgs = RunArgs | IngestArgs | FitArgs | LightArgs | AlignArgs
+type CommandArgs = RunArgs | IngestArgs | FitArgs | LightArgs | AlignArgs | AlignRoomArgs
 type Args = CommandArgs | ServeArgs
 
 
@@ -140,6 +143,12 @@ def parser(model: Model = "vitl", device: Device = "auto", *, worker: bool = Fal
     p.add_argument("raw", type=Path)
     p.add_argument("mask", type=Path)
     p.add_argument("--out", type=Path, required=True)
+    p = sub.add_parser("align-room", help="align.json: where each photo of a room was taken (contract §4.9)")
+    p.add_argument("scenes", type=Path, nargs="+", help="scene folders; the first is the frame")
+    p.add_argument("--out", type=Path, required=True, help="the room folder (align.json is written there)")
+    # any name: an unknown one is the command's failure (one sentence), not a usage error
+    p.add_argument("--solver", default="auto", help="auto (MASt3R when installed, else manhattan), mast3r or manhattan")
+    p.add_argument("--device", choices=list(DEVICES), default=device, help="auto: cuda, then mps, then cpu")
     if not worker:
         p = sub.add_parser("serve", help="the warm worker: JSON requests on stdin, one per line (contract §4.3 Worker)")
         model_device(p)
@@ -187,6 +196,14 @@ def _from_namespace(ns: argparse.Namespace) -> Args:
         return LightArgs(path("scene"), model(), device())
     if cmd == "align":
         return AlignArgs(path("photo"), path("raw"), path("mask"), path("out"))
+    if cmd == "align-room":
+        scenes = a["scenes"]
+        if not isinstance(scenes, list) or not all(isinstance(x, Path) for x in cast(list[object], scenes)):
+            raise ArgsError("scenes aren't paths")
+        solver = a["solver"]
+        if not isinstance(solver, str):
+            raise ArgsError("solver isn't a name")
+        return AlignRoomArgs(cast(list[Path], scenes), path("out"), solver, device())
     if cmd == "serve":
         return ServeArgs(model(), device())
     raise ArgsError(f"unknown command {cmd!r}")
@@ -217,12 +234,14 @@ def command_name(args: CommandArgs) -> Command:
             return "light"
         case AlignArgs():
             return "align"
+        case AlignRoomArgs():
+            return "align-room"
 
 
 def sentence(e: BaseException, cmd: Command) -> str:
     """The one sentence a failure reports: a Fail's own message, else what failed unexpectedly (a bug)."""
     msg = " ".join(str(e).split()) or type(e).__name__
-    what = "inferring the light" if cmd == "light" else "calibration"
+    what = "inferring the light" if cmd == "light" else "aligning the room" if cmd == "align-room" else "calibration"
     return msg if isinstance(e, Fail) else f"{what} failed unexpectedly ({type(e).__name__}: {msg[:200]})"
 
 
@@ -258,8 +277,13 @@ def dispatch(args: CommandArgs) -> Result:
             from .align import align
 
             result = align(args.photo, args.raw, args.mask, args.out)
+        case AlignRoomArgs():
+            from .rooms.command import align_room
+
+            result = align_room(args)
     cmd = command_name(args)
-    validate.require("run" if cmd == "fit" else cmd, result, f"the {cmd} result")
+    target: validate.Target = "run" if cmd == "fit" else "align_room" if cmd == "align-room" else cmd
+    validate.require(target, result, f"the {cmd} result")
     return result
 
 

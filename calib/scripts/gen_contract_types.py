@@ -2,14 +2,15 @@
 
     uv run --project calib python calib/scripts/gen_contract_types.py [--check]
 
-Reads contract/calib.schema.json, contract/lighting.schema.json and contract/calib-cli.schema.json (the stdout results
-and the worker protocol, which the server checks too), and writes
+Reads contract/calib.schema.json, contract/lighting.schema.json, contract/room.schema.json and contract/align.schema.json
+(rooms, §4.9: align-room's align.json) and contract/calib-cli.schema.json (the stdout results and the worker protocol,
+which the server checks too), and writes
 
 - src/midstudy_calib/contract_types.py: one TypedDict per object schema (keys in `required` plain, the others
   NotRequired), Literal for const and enum, `X | None` for nullable types, list[...] for arrays, Mapping[str, object]
   for free-form objects. Schemas allow other keys where they say so (additionalProperties true); a TypedDict can't say
   that, so code that writes extra keys subclasses these types (types.py).
-- src/midstudy_calib/schemas/{calib,lighting,calib-cli}.schema.json: byte copies of contract/, which validate.py loads
+- src/midstudy_calib/schemas/{calib,lighting,room,align,calib-cli}.schema.json: byte copies of contract/, which validate.py loads
   at run time (the Nix package carries calib/src only).
 
 --check writes nothing and exits 1 when a generated file differs from what is on disk (tests/test_contract_types.py).
@@ -47,13 +48,19 @@ class Source:
 SOURCES = [
     Source(REPO / "contract/calib.schema.json", SCHEMAS / "calib.schema.json", "Calib", {"size": "ImageSize", "camera": "Camera"}, "Calib"),
     Source(REPO / "contract/lighting.schema.json", SCHEMAS / "lighting.schema.json", "Lighting", {"rgb": "Rgb", "unit": "UnitVector"}, "Lighting"),
+    # rooms (contract §4.9): align.json and the room.json $defs it uses (room.json itself is the server's, so no root)
+    Source(REPO / "contract/room.schema.json", SCHEMAS / "room.schema.json", None,
+           {"pose": "Pose", "scale": "MemberScale", "poseSource": "PoseSource", "member": "RoomMember"}, "Room"),
+    Source(REPO / "contract/align.schema.json", SCHEMAS / "align.schema.json", "Align", {"member": "AlignMember"}, "Align"),
     Source(REPO / "contract/calib-cli.schema.json", SCHEMAS / "calib-cli.schema.json", None,
            {"id": None, "error": "ErrorResult", "run": None, "ingest": "IngestResult", "light_done": "LightDone", "light_none": "LightNone",
-            "light": "LightResult", "align": "AlignResult", "request": "WorkerRequest"}, ""),
+            "light": "LightResult", "align": "AlignResult", "align_room": None, "request": "WorkerRequest"}, ""),
 ]
 PRIMITIVE = {"string": "str", "integer": "int", "number": "float", "boolean": "bool", "null": "None"}
 KNOWN = {"$schema", "$id", "$ref", "$defs", "title", "description", "type", "required", "additionalProperties", "properties", "items",
-         "minItems", "maxItems", "minimum", "maximum", "exclusiveMinimum", "minLength", "maxLength", "const", "enum", "oneOf", "allOf"}
+         "minItems", "maxItems", "minimum", "maximum", "exclusiveMinimum", "minLength", "maxLength", "const", "enum", "oneOf", "anyOf", "allOf",
+         # constraints only: they narrow what validates, not the Python type (validate.py checks them at run time)
+         "pattern", "format", "not"}
 
 
 def _obj(v: object, where: str) -> Json:
@@ -119,8 +126,8 @@ class Gen:
             return _literal([s["const"]])
         if "enum" in s:
             return _literal(cast(list[object], s["enum"]))
-        if "oneOf" in s:
-            subs = [self.tx(file, _obj(x, nested), nested) for x in cast(list[object], s["oneOf"])]
+        if "oneOf" in s or "anyOf" in s:
+            subs = [self.tx(file, _obj(x, nested), nested) for x in cast(list[object], s.get("oneOf", s.get("anyOf")))]
             nulls = [x for x in subs if x == "None"]
             return " | ".join([x for x in subs if x != "None"] + nulls[:1])
         if "allOf" in s:

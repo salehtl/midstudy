@@ -2,6 +2,8 @@
 
 - contract/calib.schema.json
 - contract/lighting.schema.json
+- contract/room.schema.json
+- contract/align.schema.json
 - contract/calib-cli.schema.json
 
 Do not edit: change the schemas and run the script (tests/test_contract_types.py checks that this file is current).
@@ -185,6 +187,85 @@ class Lighting(TypedDict):
     fit: NotRequired[Mapping[str, object]]
 
 
+class Pose(TypedDict):
+    """Where a member photo was taken, in the room frame (contract §4.9 Frames): its scene frame maps to the room frame
+    by p_room = Ry(yaw) · p_scene + (x_m, 0, z_m). Every writer clamps x_m and z_m to −50…50 and brings yaw_deg into
+    (−180, 180]."""
+
+    x_m: float
+    z_m: float
+    # Positive is counterclockwise seen from above (+X turns toward −Z), the sign of rotation_y_deg.
+    yaw_deg: float
+
+
+# Multiplies the member scene's camera height_m to give its effective camera (contract §4.9); clamped to 0.25–4
+# by every writer.
+type MemberScale = float
+
+
+# origin: set when the room was created, on its first member (pose {0, 0, 0}); solver: from an align result;
+# manual: the user moved or turned it (an align never overwrites it unless asked); unplaced: no pose (pose is
+# null): just added, or the solver couldn't place it.
+type PoseSource = Literal["origin", "solver", "manual", "unplaced"]
+
+
+class RoomMember(TypedDict):
+    """One member photo. pose is null exactly when pose_source is unplaced."""
+
+    # The member scene's name (scenes/<scene>/).
+    scene: str
+    pose: Pose | None
+    scale: MemberScale
+    pose_source: PoseSource
+
+
+class AlignMember(TypedDict):
+    """One photo's answer. pose and scale are both null (unplaced) or both set."""
+
+    # The scene folder's name (the last path segment of its argument).
+    scene: str
+    # SHA-256 of the scene's photo.jpg as it was read (lowercase hex): an answer for a photo since replaced is
+    # stale.
+    photo_sha256: str
+    # Relative to members[0], or null when the solver couldn't place this photo.
+    pose: Pose | None
+    # This photo's scale relative to members[0] (multiplies its camera's height_m), or null when unplaced.
+    scale: MemberScale | None
+    # 0–1: how sure the solver is of this pose (0 when unplaced). The planner flags a placed photo below 0.5.
+    confidence: float
+    # The median distance between this photo's depth points and the other placed photos' where they overlap,
+    # after alignment (cm); null for members[0], when unplaced, or when it overlaps no other placed photo.
+    residual_cm: float | None
+
+
+class Align(TypedDict):
+    """rooms/<room>/align.json (contract §4.3 align-room, §4.9): the pose solver's last answer for a room's photos,
+    written atomically by `midstudy-calib align-room` (never by the server). Poses and scales are relative to the
+    first scene folder the command was given (pose {0, 0, 0}, scale 1), in the §4.9 convention. `align-room` prints
+    the same object plus "ok": true as its last stdout line. Keys not listed here are allowed at the top level for
+    diagnostics; readers ignore them.
+
+    Open: the schema allows keys not listed here."""
+
+    version: Literal[1]
+    # Which solver answered: manhattan (the no-ML fallback), the chosen learned solver's name (e.g. vggt,
+    # mast3r, solv3r; Gate A, docs/ROOMS.md §5), truth (the golden room fixtures' mock answers), none (nothing
+    # could be placed: the mock without a match, or every solver failed).
+    solver: str
+    # When the answer was written, ISO-8601 UTC.
+    created: str
+    elapsed_s: float
+    device: Literal["mps", "cuda", "cpu"] | None
+    # How far the poses disagree around closed loops of overlapping photos (cm), or null when there is no loop
+    # (fewer than three placed photos, or a chain).
+    loop_residual_cm: float | None
+    # Every scene folder given, in the order given. members[0] is the frame: pose {0, 0, 0}, scale 1, confidence
+    # 1, residual_cm null.
+    members: list[AlignMember]
+    # The scenes of the members whose pose is null, in member order (never members[0]).
+    unplaced: list[str]
+
+
 class ErrorResult(TypedDict):
     """Any command that failed: exit 1 (one-shot), the same sentence as the last stderr line after `midstudy-calib: `."""
 
@@ -244,6 +325,6 @@ class WorkerRequest(TypedDict):
 
     # Echoed in the response.
     id: str
-    cmd: Literal["run", "fit", "light", "align", "ingest"]
+    cmd: Literal["run", "fit", "light", "align", "ingest", "align-room"]
     # The one-shot command's arguments after its name, as an argument list.
     args: list[str]

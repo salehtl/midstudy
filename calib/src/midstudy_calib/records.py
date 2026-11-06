@@ -3,16 +3,29 @@ CLI's choices, the diagnostic keys it adds to calib.json (calib.schema.json allo
 of any command."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, NotRequired, TypedDict, TypeGuard
 
-from .contract_types import AlignResult, Calib, CalibFloor, ErrorResult, IngestResult, LightDone, LightNone
+from .contract_types import Align, AlignResult, Calib, CalibFloor, ErrorResult, IngestResult, LightDone, LightNone
 
 type Model = Literal["vitl", "vitb", "vits"]
 type Device = Literal["auto", "cuda", "mps", "cpu"]
 type RealDevice = Literal["cuda", "mps", "cpu"]
-type Command = Literal["run", "fit", "light", "align", "ingest"]
+type Command = Literal["run", "fit", "light", "align", "ingest", "align-room"]
 MODELS: tuple[Model, ...] = ("vitl", "vitb", "vits")
 DEVICES: tuple[Device, ...] = ("auto", "cuda", "mps", "cpu")
+
+
+@dataclass(frozen=True)
+class AlignRoomArgs:
+    """align-room's arguments (contract §4.9; rooms/command.py runs it). `solver` as given: an unknown name is the
+    command's failure, not a usage error."""
+
+    scenes: list[Path]
+    out: Path
+    solver: str
+    device: Device
 
 
 class MogeInfo(TypedDict):
@@ -52,8 +65,8 @@ class ExifFacts(TypedDict):
     focal_mm: float | None
 
 
-# The last stdout line of a command (one-shot), or a worker response without its id.
-type Result = CalibOut | IngestResult | LightDone | LightNone | AlignResult | ErrorResult
+# The last stdout line of a command (one-shot), or a worker response without its id (align-room: align.json plus "ok").
+type Result = CalibOut | IngestResult | LightDone | LightNone | AlignResult | Align | ErrorResult
 
 
 def is_error(result: Result) -> TypeGuard[ErrorResult]:

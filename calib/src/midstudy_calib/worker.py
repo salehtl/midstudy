@@ -3,11 +3,12 @@
 A one-shot calibration spends most of its time getting ready: importing torch and MoGe, building and loading the
 network, and the first inference on a device (Metal and CUDA compile their kernels then). The worker is one process
 that answers the one-shot commands as JSON lines and keeps MoGe-2 loaded between them (moge_runner holds it), so from
-the second calibration on only the inference and the fit remain.
+the second calibration on only the inference and the fit remain. align-room's MASt3R stays loaded the same way
+(rooms/mast3r.py), next to MoGe-2.
 
 Protocol, on stdin and stdout, UTF-8, one JSON object per line:
 
-- request: {"id": "<1-200 characters>", "cmd": "run" | "fit" | "light" | "align" | "ingest", "args": [<the one-shot
+- request: {"id": "<1-200 characters>", "cmd": "run" | "fit" | "light" | "align" | "ingest" | "align-room", "args": [<the one-shot
   command's arguments after its name>]}, e.g. {"id": "c-1", "cmd": "fit", "args": ["/abs/scenes/x", "--no-depth"]};
 - response: {"id": <the request's id>, ...the one-shot command's last stdout line} (the same object, checked against
   the same schema; calib-cli.schema.json), in request order, one at a time;
@@ -35,7 +36,7 @@ from .util import log
 MAX_LINE = 64 * 1024  # bytes in one request line
 
 
-TARGETS: dict[str, validate.Target] = {"run": "run", "fit": "run", "light": "light", "align": "align", "ingest": "ingest"}
+TARGETS: dict[str, validate.Target] = {"run": "run", "fit": "run", "light": "light", "align": "align", "ingest": "ingest", "align-room": "align_room"}
 
 
 class Interrupted(Exception):

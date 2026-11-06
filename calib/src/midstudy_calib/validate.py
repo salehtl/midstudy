@@ -2,7 +2,8 @@
 result and the worker's responses. One that doesn't match is a bug in midstudy-calib: it is not written, and the
 command fails with the contract's error output instead (contract §4.3).
 
-The schemas are the copies in schemas/ of contract/'s calib.schema.json, lighting.schema.json and calib-cli.schema.json
+The schemas are the copies in schemas/ of contract/'s calib.schema.json, lighting.schema.json, room.schema.json,
+align.schema.json (align-room's align.json, contract §4.9) and calib-cli.schema.json
 (written by scripts/gen_contract_types.py; the server checks calib's results against the same calib-cli.schema.json),
 so the Nix package, which carries src/ only, validates exactly as the repo does.
 """
@@ -19,15 +20,16 @@ from jsonschema.exceptions import ValidationError
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012, Schema, SchemaRegistry
 
-FILES = ("calib.schema.json", "lighting.schema.json", "calib-cli.schema.json")
+FILES = ("calib.schema.json", "lighting.schema.json", "room.schema.json", "align.schema.json", "calib-cli.schema.json")
 BASE = "midstudy/"  # every schema's $id is midstudy/<file>
 
 # What can be checked: a whole file's schema, or one of calib-cli.schema.json's $defs.
-type Target = Literal["calib", "lighting", "run", "ingest", "light", "align", "error", "request"]
+type Target = Literal["calib", "lighting", "align_json", "run", "ingest", "light", "align", "align_room", "error", "request"]
 CLI = f"{BASE}calib-cli.schema.json#/$defs/"
 REFS: dict[Target, str] = {
     "calib": f"{BASE}calib.schema.json", "lighting": f"{BASE}lighting.schema.json", "run": f"{CLI}run", "ingest": f"{CLI}ingest",
     "light": f"{CLI}light", "align": f"{CLI}align", "error": f"{CLI}error", "request": f"{CLI}request",
+    "align_json": f"{BASE}align.schema.json", "align_room": f"{CLI}align_room",
 }
 
 
