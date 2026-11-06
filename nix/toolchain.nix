@@ -6,6 +6,8 @@
 #   nightly   the dated nightly that Kani 0.68.0 pins (nightly-2026-08-21, its rust-toolchain.toml) with miri, rust-src,
 #             llvm-tools and rustc-dev: Miri, cargo-fuzz and Kani (nix/kani.nix, aarch64-darwin) run on it.
 #
+# rustWasm is the default shell's Rust without the tool extensions, for the packaged wasm build (nix/wasm.nix).
+#
 # Rust comes from rust-overlay (oxalica) as the official binary distributions, pinned by flake.lock; nothing goes
 # through rustup, and nothing is installed into ~ (cargo keeps its registry cache in ~/.cargo as usual).
 {
@@ -25,6 +27,8 @@ let
     ];
     targets = [ "wasm32-unknown-unknown" ];
   };
+  # The same Rust with only what the packaged wasm build needs (nix/wasm.nix): rustc, cargo, the host and wasm32 std.
+  rustWasm = rust-bin.stable."1.95.0".minimal.override { targets = [ "wasm32-unknown-unknown" ]; };
 
   nightlyDate = "2026-08-21";
   rustNightly = rust-bin.nightly.${nightlyDate}.minimal.override {
@@ -58,6 +62,7 @@ in
 {
   inherit
     rustStable
+    rustWasm
     rustNightly
     nightlyDate
     tscert

@@ -53,19 +53,22 @@
         pkgs:
         let
           inherit (pkgs.stdenv.hostPlatform) system;
+          # The built tree (`npm ci && npm run build` in Nix): the planner bundle, the server, midstudy-add's sources,
+          # the wasm kernels (nix/wasm.nix, Rust 1.95.0 from rust-overlay) and the npm packages (nix/node-modules.nix).
+          midstudy-app = pkgs.callPackage ./nix/midstudy-app.nix { rust = (toolchain pkgs).rustWasm; };
         in
         rec {
-          # The furniture pipeline (contract §3) on nixpkgs' python3, with fal-client packaged in nix/fal-client.nix.
-          midstudy-add = pkgs.callPackage ./nix/midstudy-add.nix { };
-          fal-client = midstudy-add.fal-client;
-          # Photo ingest, MoGe-2 calibration and keep-room alignment (contract §4.3) on torch-bin: CUDA on Linux,
-          # MPS on macOS. torch-bin is unfree, so nix/midstudy-calib.nix allows it in its own nixpkgs instance
-          # (configured as nook's, so homeserver reuses nook's torch-bin); nothing else changes.
+          # The furniture CLI (contract §3): Node 22 + wasm (bin/midstudy-add). Its parts: .app, .wasm, .nodeModules.
+          midstudy-add = pkgs.callPackage ./nix/midstudy-add.nix { inherit midstudy-app; };
+          # Photo ingest, MoGe-2 calibration, lighting and keep-room alignment (contract §4.3), with the warm worker
+          # (`midstudy-calib serve`), on torch-bin: CUDA on Linux, MPS on macOS. torch-bin is unfree, so
+          # nix/midstudy-calib.nix allows it in its own nixpkgs instance (configured as nook's, so homeserver reuses nook's
+          # torch-bin); nothing else changes.
           midstudy-calib = import ./nix/midstudy-calib.nix { inherit nixpkgs system; };
           # The MoGe-2 ViT-L weights (1.32 GB, fixed-output) as a read-only Hugging Face cache; midstudy-calib's default.
           moge-weights = midstudy-calib.weights;
-          # The web app: planner/ and planner/serve.py, wired to the two above (bin/midstudy-web).
-          midstudy = pkgs.callPackage ./nix/midstudy.nix { inherit midstudy-add midstudy-calib; };
+          # The web app: the server (Node 22) and the planner bundle, wired to the two above (bin/midstudy-web).
+          midstudy = pkgs.callPackage ./nix/midstudy.nix { inherit midstudy-app midstudy-add midstudy-calib; };
           default = midstudy;
           # TScert built at the commit nix/tscert.nix pins: `tscert build` (the dev shell's command) builds it on first use.
           tscert = (import ./nix/tscert.nix { inherit pkgs; }).built;

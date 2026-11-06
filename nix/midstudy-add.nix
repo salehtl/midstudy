@@ -1,59 +1,50 @@
-# midstudy-add: the furniture pipeline (pipeline/, contract §3) as one executable, on nixpkgs' python3 (3.13; the
-# pipeline allows >=3.12,<3.14). planner/serve.py runs it for library jobs (§2.8) with --library <library-dir>.
-# Keeps pipeline/pyproject.toml next to the source, so midstudy-add finds its root the way it does in git; it never
-# writes there (the server always passes --library), and FAL_KEY comes from the environment (services.midstudy.falKeyFile).
-# Pure Python, so it builds on the Mac too (aarch64-darwin), where it was checked; homeserver runs the x86_64-linux one.
+# midstudy-add: a furniture photo or model to a normalized library item (pipeline/, contract §3) as one executable:
+# Node 22 running pipeline/src/cli.ts from the built tree (nix/midstudy-app.nix), with the wasm kernels (splats, images)
+# and the npm packages it loads (glTF-Transform, fflate, libheif-js, obj2gltf). The server runs it for library jobs
+# (§2.8) with --library <library-dir>; by hand, pass --library too (without it the CLI writes to the tree's library/,
+# which is read-only here). FAL_KEY comes from the environment (services.midstudy.falKeyFile); there is no .env in the
+# store. Platform-independent: built and run on the Mac (aarch64-darwin), the same files on homeserver (x86_64-linux).
 {
   lib,
   stdenvNoCC,
-  python3,
   makeWrapper,
+  midstudy-app,
 }:
 let
-  fal-client = python3.pkgs.callPackage ./fal-client.nix { };
-  py = python3.withPackages (ps: [
-    ps.numpy
-    ps.pillow
-    ps.pillow-heif
-    ps.trimesh
-    fal-client
-  ]);
+  inherit (midstudy-app) nodejs;
 in
 stdenvNoCC.mkDerivation {
   pname = "midstudy-add";
-  version = "0.2.0";
+  inherit (midstudy-app) version;
 
-  src = lib.fileset.toSource {
-    root = ../.;
-    fileset = lib.fileset.unions [
-      ../pipeline/src
-      ../pipeline/pyproject.toml
-    ];
-  };
-
+  dontUnpack = true;
   nativeBuildInputs = [ makeWrapper ];
-  dontBuild = true;
 
   installPhase = ''
     runHook preInstall
-    mkdir -p $out/share/midstudy $out/bin
-    cp -r pipeline $out/share/midstudy/
-    makeWrapper ${py}/bin/python3 $out/bin/midstudy-add \
-      --add-flags "-c 'from midstudy_pipeline.cli import main; main()'" \
-      --set PYTHONPATH $out/share/midstudy/pipeline/src
+    makeWrapper ${lib.getExe nodejs} $out/bin/midstudy-add \
+      --add-flags ${midstudy-app}/share/midstudy/pipeline/src/cli.ts
     runHook postInstall
   '';
 
   doInstallCheck = true;
   installCheckPhase = ''
+    runHook preInstallCheck
     $out/bin/midstudy-add --help >/dev/null
+    runHook postInstallCheck
   '';
 
-  passthru = { inherit fal-client; };
+  passthru = {
+    app = midstudy-app;
+    inherit (midstudy-app) wasm nodeModules;
+  };
 
   meta = {
     description = "midstudy-add: a furniture photo or model to a normalized midstudy library item";
     mainProgram = "midstudy-add";
-    platforms = lib.platforms.linux ++ lib.platforms.darwin;
+    platforms = [
+      "x86_64-linux"
+      "aarch64-darwin"
+    ];
   };
 }

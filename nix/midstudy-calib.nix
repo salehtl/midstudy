@@ -1,5 +1,7 @@
-# midstudy-calib (calib/, contract §4.3): photo ingest, the MoGe-2 floor fit and keep-room alignment as one
-# executable. planner/serve.py runs it for scene calibration (`run`, `fit`) and keep-room renders (`align`).
+# midstudy-calib (calib/, contract §4.3): photo ingest, the MoGe-2 floor fit, the lighting fit and keep-room alignment
+# as one executable. The server (server/src/main.ts) runs it for scene calibration and lighting through its warm worker
+# (`midstudy-calib serve`, MoGe-2 loaded once; `run`, `fit` and `light` one-shot when the worker fails) and for
+# keep-room renders (`align`, always one-shot).
 #
 # x86_64-linux (homeserver): torch-bin, PyTorch's CUDA 12.8 wheels; libcuda comes from the host driver
 # (/run/opengl-driver/lib on NixOS). aarch64-darwin: torch-bin's macOS wheel (MPS), so the packaging can be built and
@@ -67,9 +69,37 @@ let
     # CLI imports at start: without it even --help fails)
     ps.jsonschema
   ]);
-  # Every module the CLI imports lazily (ingest, fit, the MoGe runner, align, the worker) plus what they load, so a
-  # missing dependency fails the build instead of the first calibration.
-  imports = "midstudy_calib.cli, midstudy_calib.ingest, midstudy_calib.fit, midstudy_calib.floor, midstudy_calib.moge_runner, midstudy_calib.align, midstudy_calib.worker, midstudy_calib.validate, midstudy_calib.contract_types, moge.model.v2, torch, cv2, pillow_heif, numpy, PIL.ImageCms, jsonschema";
+  # Every module the CLI imports lazily (ingest, fit, the lighting fit, the MoGe runner, align, the worker) plus what
+  # they load, so a missing dependency fails the build instead of the first calibration.
+  imports = lib.concatStringsSep ", " [
+    "midstudy_calib.cli"
+    "midstudy_calib.ingest"
+    "midstudy_calib.fit"
+    "midstudy_calib.floor"
+    "midstudy_calib.lighting"
+    "midstudy_calib.moge_runner"
+    "midstudy_calib.align"
+    "midstudy_calib.worker"
+    "midstudy_calib.validate"
+    "midstudy_calib.contract_types"
+    "midstudy_calib.records"
+    "midstudy_calib.util"
+    "moge.model.v2"
+    "torch"
+    "cv2"
+    "pillow_heif"
+    "numpy"
+    "PIL.ImageCms"
+    "jsonschema"
+  ];
+  # validate.py reads the three schemas in src/midstudy_calib/schemas/ (copies of contract/'s, and calib-cli.schema.json)
+  # through importlib.resources when it first checks something: an empty calib.json must fail its schema, which loads
+  # them all. Without them every command would end in a contract error.
+  schemaCheck = ''
+    from midstudy_calib.validate import problems
+    assert problems("calib", {}), "calib.schema.json accepted {}"
+    assert not problems("request", {"id": "1", "cmd": "ingest", "args": ["a.jpg", "--out", "b"]}), "calib-cli.schema.json"
+  '';
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "midstudy-calib";
@@ -103,7 +133,9 @@ pkgs.stdenvNoCC.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
     $out/bin/midstudy-calib --help >/dev/null
+    $out/bin/midstudy-calib serve --help >/dev/null
     PYTHONPATH=$out/share/midstudy-calib/src ${py}/bin/python3 -P -c 'import ${imports}'
+    PYTHONPATH=$out/share/midstudy-calib/src ${py}/bin/python3 -P -c ${lib.escapeShellArg schemaCheck}
     runHook postInstallCheck
   '';
 
