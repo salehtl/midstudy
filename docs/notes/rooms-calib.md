@@ -1,4 +1,167 @@
-# rooms-calib: the Phase A solver spike (A2)
+# rooms-calib
+
+Track calib, branch `rooms-calib`. **Phase B** (this section): `midstudy-calib align-room`, built from CONTRACT §4.3
+and §4.9. **Phase A** (the solver spike that chose MASt3R at Gate A) is kept below, unchanged, from "Phase A".
+
+## Phase B: what exists
+
+`calib/src/midstudy_calib/rooms/` (a subpackage; the CLI imports it only for `align-room`, so the other commands start
+as before):
+
+| File | What |
+|---|---|
+| `command.py` | the command: reads the folders, the mock or a solver, scoring, `align.json` validated against `align.schema.json` and written atomically (`util.write_json`), the result line |
+| `photos.py` | a scene folder as align-room reads it (photo.jpg SHA-256 and size, calib.json's camera, depth.png in m) and §4.1's projection on depth.png's grid |
+| `geometry.py` | Rx/Ry/Rz, yaw wrapping into (−180, 180] exactly as §4.9 says, `Placement` (scene ↔ room), `relative_to` (the mock's re-expression), clamps |
+| `solver.py` | the `Solver` protocol (`name`, `uses_torch`, `solve(photos, device) -> [Candidate \| None]`), `from_views` (a learned solver's cameras → §4.9 poses and scales: Phase A's re-expression, unchanged), `resolve` (auto/mast3r/manhattan) |
+| `score.py` | residual, the constraint factor, confidence, `MIN_CONFIDENCE = 0.5`, the loop residual (every solver) |
+| `mast3r.py` | MASt3R: the untyped boundary (torch, MASt3R through `importlib` and `Any`); pinned code and weights fetched once into caches outside the repo |
+| `manhattan.py` | the no-dependency fallback (numpy + scipy's KD-tree; Phase A's algorithm) |
+| `mock.py` | `MIDSTUDY_CALIB_MOCK`: the key, the recorded answer renamed and re-expressed, the no-match answer |
+
+Also: `cli.py` (`align-room` subcommand, `--solver` any name so an unknown one is a one-sentence failure, not a usage
+error), `records.py` (`AlignRoomArgs`, `Command` gains `align-room`), `worker.py` (`align-room` requests, answered
+against `calib-cli.schema.json` `align_room`), `validate.py` (targets `align_json` and `align_room`; the registry
+holds `room.schema.json` and `align.schema.json` too), `scripts/gen_contract_types.py` (Phase A's failing check:
+`align_room` named, `room.schema.json` and `align.schema.json` added as sources, `anyOf`, `pattern`, `format` and
+`not` understood; `contract_types.py` gains `Align`, `AlignMember`, `Pose`, `MemberScale`, `PoseSource`, `RoomMember`;
+byte copies of both schemas in `src/midstudy_calib/schemas/`), `scripts/bench_rooms.py` (run time, one-shot and
+worker), `pyproject.toml` (`scipy` named as a direct dependency (it was already locked through MoGe); the optional
+extra **`rooms`** = roma, einops, safetensors, tqdm; the pytest marker `mast3r`), `uv.lock`.
+
+Tests: `tests/test_align_room.py` (28, no MASt3R: the convention, the fixtures' truth through the poses, the mock key
+against A1's two keys, renaming/reordering/re-expression with folders under other names, no match, a fixture that
+leaves the first photo unplaced, six one-sentence failures, validation before writing, the worker, auto/explicit
+solver choice and auto's fallback when MASt3R can't load, Manhattan on three photos, a photo without calib or depth,
+the constraint factor, truth scored confident with the bare wall unplaced, a 40 cm wrong placement unplaced,
+`from_views` recovering the truth exactly from cameras made from the fixtures in a random solver frame (two different
+first members), per-photo scale, MASt3R's pair graph) and `tests/test_align_room_golden.py` (5, marked `mast3r`,
+skipped without the extra: the golden room at the Phase A targets, and the four hard pairs never confidently wrong).
+
+## How to run
+
+```sh
+cd calib
+uv sync --extra rooms            # once: MASt3R's Python deps (without it: manhattan, or unplaced)
+uv run --extra rooms midstudy-calib align-room ../fixtures/scenes/living-wide ../fixtures/scenes/room-{1,2,3,4,5,6} \
+  --out ../evals/out/room-x [--solver auto|mast3r|manhattan] [--device auto|cuda|mps|cpu]
+MIDSTUDY_CALIB_MOCK=../fixtures/calib uv run midstudy-calib align-room <dirs...> --out <room-dir>   # the mock
+echo '{"id":"a-1","cmd":"align-room","args":["/abs/scenes/a","/abs/scenes/b","--out","/abs/rooms/r"]}' | uv run midstudy-calib serve
+
+uv run pytest -q -m "not mast3r"                  # 137 tests, ~50 s, no MASt3R
+uv run --extra rooms pytest -q -m mast3r          # the golden room with the real MASt3R, ~100 s on MPS (run it under the eval lock)
+uv run --extra rooms python scripts/bench_rooms.py ../fixtures/scenes/{living-wide,room-1,room-2,room-3,room-4,room-5,room-6}
+bash scripts/check.sh                             # gen_contract_types --check, ruff, pyright strict (note: its `uv sync` removes the extra)
+```
+
+First use of MASt3R (needs the network once; afterwards offline): `git clone --recursive https://github.com/naver/mast3r`
+at `f5209af` into `$MIDSTUDY_MAST3R_DIR` (default `~/.cache/midstudy-calib/mast3r`, 11 MB + submodules), and the
+weights `naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric` at revision `06e7259` (2.6 GB) into the Hugging Face
+cache. A checkout whose HEAD is the pinned commit is used as it is (no `git fetch`); the weights load with
+`local_files_only` first. No photo ever leaves the machine.
+
+## Phase B: results (this Mac, M3 Max 36 GB, MPS; every timed run under `eval-lock --exclusive`)
+
+**Golden room, real MASt3R** (`test_align_room_golden.py`, and `evals/out/ar/m1.out`): every target met.
+
+| photo | position (cm) | yaw (°) | scale (%) | confidence | residual (cm) |
+|---|---|---|---|---|---|
+| room-1 | 1.36 | 0.06 | 0.23 | 0.88 | 1.86 |
+| room-2 | 1.04 | 0.04 | 0.15 | 0.89 | 1.67 |
+| room-3 | 1.07 | 0.17 | 0.26 | 0.91 | 1.12 |
+| room-4 (little overlap) | 1.94 | 0.32 | 0.24 | 0.87 | 1.81 |
+| room-5 | 2.41 | 0.07 | 0.27 | 0.78 | 1.99 |
+| room-6 (bare wall) | unplaced | | | 0 | |
+
+Loop residual 1.9 cm. Hard pairs (low-overlap room-1→room-4 and living-wide→room-4, blank-wall room-3→room-6 and
+living-wide→room-6): the hard photo comes back unplaced or within target in all four (none confidently wrong).
+
+**Run time, 7 photos** (`scripts/bench_rooms.py`, `evals/out/bench-rooms-7*.json`; wall seconds of the whole request):
+
+| | MASt3R | Manhattan |
+|---|---|---|
+| one-shot, cold (fresh process: import torch, load MASt3R, solve) | 74.6, 73.3 | 9.8, 9.7 |
+| worker, first request (loads MASt3R) | 72.6 | 9.5 |
+| worker, second request (warm) | **65.4** | 8.8 |
+| mock (no solver) | 0.1 | |
+
+The cold extra is only ~8 s (import + a 5.5 s model load): MASt3R's pair matching dominates (~2.5 s a pair on MPS,
+21 pairs for 7 photos), so the worker saves little here, unlike MoGe. The first ever run also clones the code
+(~10 s here). **22 photos** (the 11 golden photos twice, sliding window, 110 pairs): 282 s, 15.8 GB peak footprint,
+worst position error 2.7 cm. Peak footprint for 7 photos: 11.6 GB (`/usr/bin/time -l`), as Phase A measured.
+
+## Phase B decisions
+
+1. **The frame is the first argument**, as §4.9 says (`members[0]`: pose 0, scale 1, confidence 1, residual null).
+   align-room doesn't pick a better origin itself: the server chooses the anchor and passes it first (§4.9 Align).
+   Phase A's open issue (a bare-wall first photo makes everything look wrong) stays: see open issues.
+2. **A photo without `calib.json` or `depth.png` (or with no depth) is unplaced**, never passed to a solver: the
+   re-expression needs its floor fit, and scoring needs its depth. If the first photo is one of them, or fewer than
+   two are usable, nothing is placed: `solver: "none"`, `device: null`, `diagnostics.nothing_placed` says why.
+3. **Scoring is Phase A's** (`CONF_*`, the constraint factor), with **MIN_CONFIDENCE 0.5** as recommended, and one
+   change: members below it are unplaced **one at a time, the least sure first, then everything is scored again**.
+   Dropping all at once unplaced good photos whose median residual a wrong neighbour had spoiled
+   (`test_a_wrong_placement_is_not_confident`).
+4. **`loop_residual_cm`**: the median pair residual when the overlapping placed photos (pairs with a residual) contain a
+   cycle; null otherwise (two photos, or a chain), as §4.9 asks. For a joint solver there is no loop to close, so it
+   is the pairwise agreement, as in Phase A.
+5. **`auto` falls back to Manhattan** when MASt3R is installed but can't load (no network for the first fetch, a
+   missing module): `diagnostics.fallback` says why. `--solver mast3r` then fails (exit 1, one sentence), as an
+   uninstalled named solver does (§4.9).
+6. **Device**: MASt3R uses `--device` (auto: cuda, mps, cpu); Manhattan reports `"cpu"`; the mock and `none`, `null`.
+7. **The mock** follows §4.9 to the letter, except that the frame (first argument) always gets confidence 1 and
+   residual null: §4.9 says both "everything else is copied" and "members[0] … confidence 1, residual null"; they
+   disagree when the recording gave the first argument a residual (golden-room answers give every non-first member 0).
+8. **MASt3R's pairs**: every pair up to 12 photos (Phase A measured 7 and 11), else a cyclic sliding window in room order
+   of `130 // n` (2–5) neighbours, so 32 photos (128 pairs, ~5.5 min estimated from 22 photos' 282 s) stay inside the
+   server's 600 s timeout. Not measured at 32.
+9. **Diagnostics**: a top-level `diagnostics` object (align.schema.json allows other keys): per member `usable`,
+   `overlap`, `constraint`, `tilt_deg`, `solver_confidence`, `scale_source`, `scale_by_depth`, Manhattan's
+   `peak_ratio`, and a rejected pose (`rejected_x_m`, …, `rejected_confidence`); `timing`; `fallback`; `nothing_placed`.
+10. MASt3R's tqdm bars are turned off (`TQDM_DISABLE=1`): they would flood stderr, which the server shows as progress.
+11. Manhattan stays Phase A's algorithm. I tried a similarity ICP (scale refined beyond the 2 % grid): it made room-1
+    and room-2 worse (15–20 cm), so it was reverted.
+
+## Open issues for integration
+
+1. **Getting MASt3R installed where the server runs.** The server's default `--calib` is `uv run --project calib
+   midstudy-calib`: `uv run` keeps an extra that `uv sync --extra rooms` installed (inexact sync), but any exact `uv sync`
+   (e.g. `calib/scripts/check.sh`, `npm run check:py` on a fresh worktree) removes it, and align-room silently answers
+   with Manhattan. Either the server's default becomes `uv run --project calib --extra rooms midstudy-calib`, or the
+   docs say to sync the extra. Integration's (and the user's) call; calib works either way.
+2. **Nix packaging** (`nix/midstudy-calib.nix`, packaging track): its import check should add `midstudy_calib.rooms.*`
+   (Manhattan needs only numpy, scipy, pillow: all already in the package). MASt3R isn't packaged (roma, einops and a
+   git checkout), so the Nix build answers `manhattan`; the schema copies `room.schema.json` and `align.schema.json`
+   must ship in `src/` (they do: `schemas/`).
+3. **`fixtures/stub_calib.py`** (evals track) still has no `align-room`; the contract says the stub implements the §4.9
+   mock. calib's tests only run the real CLI.
+4. The mock frame rule (decision 7): the stub should give members[0] confidence 1 and residual null too, or E18/E19
+   comparisons between the stub and the real CLI may differ by that one field.
+5. **The constraint factor unplaces correct photos that see one wall**: the golden `portrait` (constraint 0.04) was
+   placed 3 cm from truth but unplaced (confidence 0.34) in the 22-photo run. Safe (never confidently wrong) but the
+   user may have to place such photos by hand on the floor plan.
+6. **A bare-wall or stranger first photo**: everything is relative to it; its placement can't be checked (confidence 1
+   by contract). The server's anchor choice (§4.9) decides; a server could prefer an anchor whose photo isn't
+   `unplaced` in the previous answer.
+7. **Memory**: the worker keeps MoGe-2 (~1.3 GB) and MASt3R (2.6 GB of weights, 11–16 GB peak while solving) loaded
+   together. The server's idle timeout (§4.3: close stdin after ~10 min idle) gives it back.
+8. **Real photos**: everything above is on the synthetic golden room; Phase D (`eval:real-room`) measures real photos.
+   MASt3R is non-deterministic at ~0.5 cm run to run, so tests use tolerances.
+
+## Phase B checks run (this worktree)
+
+- `cd calib && uv run --extra rooms pytest -q` (final, under the eval lock): 142 passed, 1 skipped (the user's photo, absent) — includes the 5
+  `mast3r` tests with the real MASt3R.
+- Without the extra (`uv sync`, exact): `pytest -q`: 136 passed, 6 skipped (the 5 `mast3r` tests and the photo);
+  `align-room` answers `manhattan`; `--solver mast3r` exits 1 "the mast3r solver isn't installed (…)".
+- `npm run check:py` (pyright strict 0 errors, ruff clean), `calib/scripts/check.sh` (gen_contract_types current),
+  `npm run check:gen`, `node scripts/check-ownership.mjs calib --base rooms`.
+- Through the eval lock: `npm run eval:calib -- --mock` (E2 55/55), `npm run eval:render` (E6 38/38): the single-photo
+  path through the real calib CLI is unchanged.
+
+---
+
+# Phase A: the solver spike (A2)
 
 Track calib, branch `rooms-calib`, new files only under `calib/spike/`; nothing is wired into `midstudy-calib`.
 Plan: [docs/ROOMS.md](../ROOMS.md) §2, §3.1, §5 (A2). Stage 1 built the script and checked conventions; **stage 2

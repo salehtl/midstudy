@@ -1,7 +1,7 @@
 [project]
 name = "midstudy-calib"
 version = "0.1.0"
-description = "midstudy-calib: ingest a room photo and fit the scene camera (MoGe-2 floor plane), plus keep-room alignment"
+description = "midstudy-calib: ingest a room photo and fit the scene camera (MoGe-2 floor plane), keep-room alignment, and where each photo of a room was taken"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy>=2.0",
@@ -14,6 +14,20 @@ dependencies = [
     "jsonschema>=4.23",
     # MoGe-2 (v2.0.0), the last code commit before the MoGe-3 rewrite (74fbce0), which needs CUDA-only flex-gemm.
     "moge @ git+https://github.com/microsoft/MoGe@07444410f1e33f402353b99d6ccd26bd31e469e8",
+    # align-room: Manhattan's ICP uses scipy.spatial, MASt3R scipy too (already locked through MoGe).
+    "scipy>=1.13",
+]
+
+[project.optional-dependencies]
+# align-room's learned solver, MASt3R (Gate A, docs/ROOMS.md §2; rooms/mast3r.py): its Python dependencies beyond
+# calib's own. MASt3R's code (a pinned git checkout) and weights (a pinned Hugging Face revision) are fetched on first
+# use into caches outside the repo. Without this extra, align-room answers with manhattan (or unplaced).
+#   uv sync --project calib --extra rooms
+rooms = [
+    "roma>=1.5",
+    "einops>=0.8",
+    "safetensors>=0.4",
+    "tqdm>=4.66",
 ]
 
 [project.scripts]
@@ -30,6 +44,7 @@ exclude-dependencies = ["gradio", "opencv-python", "pipeline"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+markers = ["mast3r: runs the real MASt3R on the golden room (the rooms extra; skipped without it, about 2 minutes)"]
 
 # pyright --strict over src, tests and scripts (`calib/scripts/check.sh`, docs/REFACTOR.md §3 check:py). The one
 # untyped boundary is MoGe/torch, wrapped once in moge_runner.py.
