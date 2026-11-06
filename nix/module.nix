@@ -1,8 +1,10 @@
-# NixOS module for midstudy on a GPU host (homeserver): one service, the web app (planner/serve.py through the midstudy
-# package's midstudy-web), which runs midstudy-calib (MoGe-2 on the GPU) for each uploaded photo and midstudy-add for
-# each library item. It listens on 127.0.0.1 only; the host's proxy decides who can reach it and under which name
-# (allowedHosts). Paid fal calls (library adds from photos, Render) need falKeyFile and stay under dailySpendUsd.
-# Modelled on nook's nix/module.nix (same user/group pattern, tmpfiles and hardening).
+# NixOS module for midstudy on a GPU host (homeserver): one service, the web app (the Node server, server/src/main.ts,
+# through the midstudy package's midstudy-web), which calibrates each uploaded photo with midstudy-calib (MoGe-2 on the
+# GPU) through its warm worker (`midstudy-calib serve`, a child of the service that keeps MoGe-2 loaded and exits after
+# 10 idle minutes) and runs midstudy-add for each library item. It listens on 127.0.0.1 only; the host's proxy decides
+# who can reach it and under which name (allowedHosts). Paid fal calls (library adds from photos, Render) need
+# falKeyFile and stay under dailySpendUsd. Modelled on nook's nix/module.nix (same user/group pattern, tmpfiles and
+# hardening).
 self:
 {
   config,
@@ -14,6 +16,7 @@ let
   cfg = config.services.midstudy;
   dir = cfg.dataDir;
   calib = lib.getExe cfg.package.passthru.midstudy-calib;
+  add = lib.getExe cfg.package.passthru.midstudy-add;
   # `run`, `fit` and `light` take --device; `ingest` and `align` don't (contract §4.3); `serve --device X` makes X the
   # device of every worker request (§4.3 Worker). The server appends the subcommand and its arguments to --calib, so
   # the device goes last. "auto" needs no shim: the CLI's own default is auto.
@@ -46,7 +49,7 @@ in
       default = 8780;
       description = ''
         Web app port on 127.0.0.1. 8780 stays clear of nook's (its module defaults are 8096 for the web app and 8095
-        for nook-scan; serve.py's own default is 8765).
+        for nook-scan; the server's own default is 8765).
       '';
     };
 
@@ -158,6 +161,8 @@ in
         }
         // lib.optionalAttrs (cfg.falKeyFile != null) { EnvironmentFile = cfg.falKeyFile; }
         // {
+          # Both tools are named here, so the service never falls back to the server's own defaults (`uv run --project
+          # calib midstudy-calib` and `node pipeline/src/cli.ts`, which only work in a checkout).
           ExecStart = lib.escapeShellArgs (
             [
               (lib.getExe cfg.package)
@@ -175,6 +180,8 @@ in
               "${dir}/renders"
               "--calib"
               calibCmd
+              "--midstudy-add"
+              add
               "--daily-spend-usd"
               (toString cfg.dailySpendUsd)
             ]
