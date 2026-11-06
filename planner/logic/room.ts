@@ -319,7 +319,8 @@ export function gridLines(v: PlanView, w: number, h: number, step = 0.5): GridLi
 
 // --- the room's shape: depth points lifted into a member's frame, binned on the plan ----------------------------------
 
-/** A decoded depth.png: mm along the view axis (contract §4.1's d), 0 = no occluder; row-major from the top-left. */
+/** A decoded depth.png (core/js/web.ts decodeDepth): meters along the view axis (contract §4.1's d), 0 = no occluder;
+ *  row-major from the top-left. */
 export interface DepthLike {
   readonly data: ArrayLike<number>
   readonly width: number
@@ -339,7 +340,7 @@ export function liftDepth(depth: DepthLike, cam: Camera, scale: number, step: nu
   const f = (hgt / 2) * (half.c / half.s)
   const p = sinCosDeg(cam.pitch_deg)
   const r = sinCosDeg(cam.roll_deg)
-  const k = scale / 1000
+  const k = scale
   for (let j = 0; j < hgt; j += st) {
     const cy = -((j + 0.5 - hgt / 2) / f)
     for (let i = 0; i < w; i += st) {

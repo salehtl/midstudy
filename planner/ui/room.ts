@@ -75,7 +75,9 @@ export function mount(ctx: UiContext): void {
     alignRow, h('div.rm-canvas-wrap', canvas), hintEl)
   document.body.append(plan)
 
-  let shown = store.get(STORE_KEY) !== '0' // shown by default in a room view (desktop); remembered per device
+  // shown by default beside the view on the desktop, hidden on the phone (it covers the dock); remembered per device and mode
+  const shownKey = (): string => `${STORE_KEY}.${phone() ? 'phone' : 'desktop'}`
+  let shown = store.get(shownKey()) === null ? !phone() : store.get(shownKey()) === '1'
   let view: R.PlanView = { s: 60, ox: 180, oy: 180 }
   let fitted = false
   let alignSel: string | null = null // the photo Align photos works on (the last one grabbed, else the current one)
@@ -94,7 +96,7 @@ export function mount(ctx: UiContext): void {
 
   function show(on: boolean): void {
     shown = on
-    store.set(STORE_KEY, on ? '1' : '0')
+    store.set(shownKey(), on ? '1' : '0')
     if (on && phone() && shell.getOpenPanel()) shell.closePanel()
     sync()
   }
@@ -149,6 +151,7 @@ export function mount(ctx: UiContext): void {
   }
   function fit(): void {
     const { w, h: hh } = planRect()
+    viewSize = { w, h: hh }
     const pts: Xz[] = []
     for (const m of members()) if (m.pose) pts.push([m.pose.x_m, m.pose.z_m])
     for (const p of pieces()) pts.push(...p.corners)
@@ -253,11 +256,22 @@ export function mount(ctx: UiContext): void {
     drawQueued = true
     requestAnimationFrame(() => { drawQueued = false; paint() })
   }
+  // The view for the canvas as it is now: fitted the first time; when the canvas changes size (the Align photos row,
+  // a resize) the floor point at its centre stays at its centre.
+  let viewSize: { w: number; h: number } | null = null
+  function ensureView(): void {
+    const r = planRect()
+    if (!fitted || !viewSize) { fit(); viewSize = r; return }
+    if (r.w !== viewSize.w || r.h !== viewSize.h) {
+      view = R.planPan(view, (r.w - viewSize.w) / 2, (r.h - viewSize.h) / 2)
+      viewSize = r
+    }
+  }
   function paint(): void {
     if (plan.hidden) return
     sizeCanvas()
     const { w, h: hh } = planRect()
-    if (!fitted) fit()
+    ensureView()
     const g = canvas.getContext('2d')
     if (!g) return
     const k = canvas.width / w
@@ -351,6 +365,7 @@ export function mount(ctx: UiContext): void {
   }, { passive: false })
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return
+    ensureView()
     canvas.setPointerCapture(e.pointerId)
     const [x, y] = local(e)
     pointers.set(e.pointerId, { x, y })
@@ -544,11 +559,11 @@ export function mount(ctx: UiContext): void {
     const changed = plan.hidden === vis
     plan.hidden = !vis
     if (engine.getRoomState()?.floorPlan !== vis && room) engine.setFloorPlanShown(vis)
-    document.documentElement.dataset['rmPlan'] = vis ? (phone() ? 'phone' : 'desktop') : ''
-    document.documentElement.style.setProperty('--rm-plan-h', vis && phone() ? `${String(plan.offsetHeight)}px` : '0px')
     toggle.setAttribute('aria-pressed', String(vis))
     plan.classList.toggle('is-phone', phone())
     plan.style.height = phone() ? `${String(Math.round(window.innerHeight * PHONE_PLAN_FRACTION))}px` : ''
+    document.documentElement.dataset['rmPlan'] = vis ? (phone() ? 'phone' : 'desktop') : ''
+    document.documentElement.style.setProperty('--rm-plan-h', vis && phone() ? `${String(plan.offsetHeight)}px` : '0px')
     renderStrip()
     renderNote()
     syncAlign()
@@ -563,6 +578,7 @@ export function mount(ctx: UiContext): void {
       const a: readonly unknown[] = p
       const [x, z] = a
       if (typeof x !== 'number' || typeof z !== 'number') return null
+      ensureView()
       const r = canvas.getBoundingClientRect()
       const [cx, cy] = R.planToCanvas(view, [x, z])
       return { x: r.left + cx, y: r.top + cy }
@@ -582,7 +598,7 @@ export function mount(ctx: UiContext): void {
   engine.events.addEventListener('items', () => { if (visible()) draw() })
   engine.events.addEventListener('selection', () => { if (visible()) draw() })
   engine.events.addEventListener('camera', () => { if (visible()) draw() })
-  shell.events.addEventListener('mode', sync)
+  shell.events.addEventListener('mode', () => { const v = store.get(shownKey()); shown = v === null ? !phone() : v === '1'; sync() })
   shell.events.addEventListener('page', sync)
   shell.events.addEventListener('panel', sync)
   window.addEventListener('resize', () => { if (visible()) { sync(); draw() } })
