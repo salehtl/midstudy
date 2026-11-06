@@ -48,7 +48,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { azElOf, irradianceAt, maxBandScale, rotateSh, scaleBands, splatGain, turnBetween } from '../core/js/web.js'
 import { clearTarget, createCatcher, createEnvBake, isWebGPU, render } from './gpu/passes.js'
 import type { Frame, T } from './gpu/passes.js'
-import { keepPhoto, keepV1, penumbraTan, shadowFit } from './logic/look.js'
+import { keepPhoto, keepV1, neutralized, penumbraTan, shadowFit } from './logic/look.js'
 import type { InferredKey, KeyInUse, Vec3 } from './logic/look.js'
 import type { JsonObject } from './logic/num.js'
 
@@ -146,7 +146,8 @@ function lightData(lj: JsonObject | null): LightData | null {
   if (!direction || !color || typeof intensity !== 'number' || typeof softness !== 'number') return null
   const wb = lj['white_balance']
   const cct = isRecord(wb) ? wb['cct_k'] : null
-  return { sh, direction, color, intensity, softness, whiteBalance: isRecord(wb) ? rgbOf(wb['rgb']) : null, cctK: typeof cct === 'number' ? cct : null }
+  const d: LightData = { sh, direction, color, intensity, softness, whiteBalance: isRecord(wb) ? rgbOf(wb['rgb']) : null, cctK: typeof cct === 'number' ? cct : null }
+  return neutralized(d, lj['source'])
 }
 
 // The radiance the SH describes, as a small equirectangular image (three.js's equirect convention), for the

@@ -355,3 +355,27 @@ export function shadowFit(radius: number, maxY: number, dirY: number, tan: numbe
     bias: 0.004 / range,
   }
 }
+
+/** The room light as the lights read it from lighting.json (planner/lighting.ts LightData's colour part). */
+export interface RoomLight {
+  readonly sh: readonly Vec3[]
+  readonly color: Vec3
+  readonly intensity: number
+  readonly whiteBalance: Vec3 | null
+}
+
+// A phone photo is already white-balanced by the camera, so the room's light is (nearly) neutral in it. The fit's
+// colour comes from grey-world over the room's materials, which in a beige/wood room is mostly their colour, not the
+// light's: lighting the furniture with it counts the warmth twice (a yellow cast Warmth can't undo). So for any source
+// but "truth" the light is divided by white_balance.rgb (luminance 1, so the level stays): the room's light becomes
+// neutral, the key keeps its colour relative to the ambient (renormalized to max 1, the factor into its intensity), and
+// the shadow catcher's per-channel ratios are unchanged. Splats then get white balance [1, 1, 1]. Golden scenes
+// (source "truth": real light colours, no camera white balance) stay as given. (main ae46665)
+export function neutralized<L extends RoomLight>(l: L, source: unknown): L {
+  const wb = l.whiteBalance
+  if (source === 'truth' || !wb?.every((v) => v > 1e-4)) return l
+  const div = (c: Vec3): Vec3 => [c[0] / wb[0], c[1] / wb[1], c[2] / wb[2]]
+  const kc = div(l.color)
+  const m = Math.max(kc[0], kc[1], kc[2], 1e-9)
+  return { ...l, sh: l.sh.map(div), color: [kc[0] / m, kc[1] / m, kc[2] / m], intensity: l.intensity * m, whiteBalance: [1, 1, 1] }
+}
