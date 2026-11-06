@@ -77,7 +77,8 @@ const CTXS: readonly sizes.SizeCtx[] = [
 /** v2's answer for one request, in the oracle's shape ({ok} or {raised}). */
 function v2(req: Readonly<Record<string, unknown>>): unknown {
   try {
-    const text = String(req['text'] ?? '')
+    const rawText = req['text']
+    const text = typeof rawText === 'string' ? rawText : ''
     const lines = Array.isArray(req['lines']) ? req['lines'].map(String) : []
     const ctxIndex = Number(req['ctxIndex'] ?? 0)
     const ctx = CTXS[ctxIndex] ?? { is_rug: false, hint: null, is_bed: false }
@@ -122,7 +123,7 @@ function forV1(req: Readonly<Record<string, unknown>>): Record<string, unknown> 
   return out
 }
 
-test('generated size strings: v2 reads exactly what v1 read', { skip: !oracleAvailable() }, async () => {
+void test('generated size strings: v2 reads exactly what v1 read', { skip: !oracleAvailable() }, async () => {
   const r = prng(SEED)
   const reqs: Record<string, unknown>[] = []
   for (let i = 0; i < CASES; i++) {
