@@ -12,7 +12,10 @@ strip, a floor plan with a density map of the photos' depth, and Align photos fo
 the frame maps (Room.lean, 70 theorems) and a differential test checks `planner/logic/room.ts` against the Lean
 model. E18 (rooms API), E19 (room planner) and E20 `--mock` are in `eval:all`; E20 real is in `eval:calib`;
 `eval:real-room` is Phase D's. Every gate and its counts: [docs/notes/rooms-integrate.md](notes/rooms-integrate.md).
-Not yet: real photos of a real room, a GPU other than SwiftShader, the Nix package's align-room (Manhattan only).
+Not yet: real photos of a real room (and on the golden photos with real MoGe depth only one of six photos was placed
+confidently: Phase D's first question), a GPU other than SwiftShader, the Nix package's align-room (Manhattan only).
+Gates at integration: `npm run check` all ok; `eval:all` 18/18 evals, 1,635 checks, twice on WebGPU and once on WebGL2;
+`eval:calib` 106/106 (E20 real 34/34); calib pytest 142 passed; the room diff 9/9.
 
 ## What v2 is
 

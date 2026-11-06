@@ -109,9 +109,52 @@ ran, `main` was at `452a601` itself (`git log rooms..main` empty), so there was 
 
 ## Gate results (this worktree, final code unless said)
 
-GATES_PLACEHOLDER
+All on this Mac (M3 Max, MPS; browsers on SwiftShader), every eval through `scripts/eval-lock.mjs`.
+
+- `MIDSTUDY_TRACK=integration MIDSTUDY_FUZZ_SECONDS=20 nix develop -c npm run check`: **all ok** (final code):
+  ownership (248 paths, base `452a601`), gen, types, lint (186 files), dead, tests (5 suites, 175 passed), tscert
+  (834/876 certify, all 834 baselined), planner (18/18 groups, 232,021 logic-vs-v1 checks, bus 5), py (pyright 0,
+  ruff clean), rust (fmt, clippy, 205 tests, Miri on 5 crates, Kani), fuzz (14 targets × 20 s), proofs (26 files,
+  574 theorems). The first run had check:rust failing (item 20 above); fixed, then all ok.
+- `eval:all`, final code: **WebGPU twice** and **`MIDSTUDY_WEBGPU=0` once**, 18/18 evals and 1,635/1,635 checks in each
+  run (E1 235, E3 56, E4 21, E5 35, E6 38, E7 79, E8 72, E9 49, E11 29, E12 27, E13 51, E14 409, E15 135, E16 57,
+  E17 52, E18 175, E19 94, E20 `--mock` 21). Before the E18 fix, the same three runs passed except E18.37 once on
+  WebGL2 (a functional race in the eval, item 22); E18 then passed 3/3 alone and in all three final runs.
+- `eval:calib` (real MoGe-2, then E20 real with MASt3R; `--exclusive`): **E2 106/106**, including **E20 34/34** (every
+  placed golden photo within target, the hard pairs never confidently wrong, 66 s for seven photos cold on MPS, 65.7 s
+  warm, Manhattan answers, an unknown solver fails).
+- `cd calib && uv run --extra rooms pytest -q` (lock): **142 passed, 1 skipped** (the user's photo, absent), the 5
+  real-MASt3R golden tests among them.
+- `nix develop -c proofs/diff/room/run.sh` against `planner/logic/room.ts`: **all 9 checks ok**, 20,000 cases per map
+  (positions within 3.2e-10 relative, 7,605 and 5,428 bit for bit: room.ts has its own sin/cos; both rotations 20,000
+  bit for bit; all round trips).
+- `eval:selftest` 33/33; `eval:ui-smoke` 41/41 (after item 21; 40/41 twice before).
+- `planner/ui/test/rooms-ui.mjs` on the real server: 51/51 on WebGPU and 51/51 with `MIDSTUDY_WEBGPU=0`.
+- E19 alone during the seams: 90/92, then 93/94, then 94/94 (items 15, 16); ~60 s, not the ~5 min Phase B expected.
+- E20 `--mock --cli "uv run --project calib --extra rooms midstudy-calib"` (the real CLI's mock): 18/21, then 21/21
+  (item 17). `contract/tools/record-examples.mjs --check`: 128/128.
+- `eval:real-room -- --golden` (stub self-check): 18/18.
+- **The real worker against the server** (Phase B's untested seam): `eval:real-room` on the golden room's photos
+  (copies of `fixtures/scenes/*/photo.jpg` and measurements from truth, `--golden`'s files) with the **real**
+  calibration through the server (real MoGe-2 per photo, then `align-room` on the warm worker with MASt3R): the
+  plumbing works end to end (7 photos calibrated, the align job done in 71.5 s upload-to-aligned, solver `mast3r` on
+  `mps`, Set scale's PUT), but **11/18**: only room-1 was placed; the other five were unplaced by the scoring. Their
+  rejected poses have the right yaw (room-2: 35.09° vs 35° true) but positions 20–30 cm off and confidence 0.19–0.36,
+  so the residual between the photos' *MoGe* depth maps (not the golden depth E20 real uses) keeps them below 0.5.
+  Not a gate in the task; recorded under Phase D below.
+
+22. **E18.37** (two rooms in the same second get `-2`) failed once in the WebGL2 run: the rooms made just before in
+    the same second had taken the plain name and `-2`. Eval-side fix: wait for a fresh second first.
 
 ## What Phase D needs
+
+- **First, the scoring on real MoGe depth.** With MoGe-2's depth (not the golden fixtures' exact depth) MASt3R placed
+  only one of six golden photos above confidence 0.5, although its yaws were right (gate results above,
+  `evals/out/real-room/` in this worktree). The confidence (`calib/src/midstudy_calib/rooms/score.py`: residual and
+  the constraint factor, `MIN_CONFIDENCE = 0.5`) was tuned on fixture depth; MoGe's per-photo scale and depth errors
+  (Phase A measured 13–19 cm on real photos) dominate it. Expect the same on real photos: either recalibrate the
+  confidence on MoGe depth (e.g. score after a per-photo scale fit, or with a looser residual), or plan on Align
+  photos by hand. The positions were 20–30 cm off too, which a confidence change alone won't fix.
 
 - The user's 8–12 photos of one room (§7), one tape measurement and 3–4 spots measured from two walls, written as
   `evals/real_room.mjs`'s measurements file; then
