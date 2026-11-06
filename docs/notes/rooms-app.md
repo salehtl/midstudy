@@ -75,7 +75,9 @@ screenshots: `evals/out/rooms-app-ui/`.
     `[NaN, NaN]` and `photoToFloor` null on an unplaced photo. `setPose(scene, null)` makes a photo unplaced.
     `getState().items[].worldBounds` in a room view is the piece's box placed at its room place.
 11. **Renders panel in a room view** lists the room's renders (`GET /api/renders?room=`), every photo's.
-12. The single-scene path: outside a room nothing is added to the DOM but the hidden strip/plan elements and the
+12. **A server without rooms is never asked for `/api/rooms`** by the Scenes page (`engine.serverHasRooms()`: the scene
+    objects carry `room`, which a rooms server always sends, §4.4); otherwise its 404 was a console error in E9 and E11.
+13. The single-scene path: outside a room nothing is added to the DOM but the hidden strip/plan elements and the
     `room-new`/`room-files` controls on the Scenes page; the stage insets, layouts, landing and render bodies are as
     before (`getState()` gains `room: null`).
 
@@ -100,3 +102,13 @@ screenshots: `evals/out/rooms-app-ui/`.
 5. `check:rust` fails on the base branch (rooms-foundation open issue 1, `core/crates/geom/tests/golden.rs`); not run here.
 6. Not done: a shell (fitted walls), a plan legend, pinch-zoom on the plan was only checked by code, not in a test;
    the plan's density map for very large rooms grows its cell (max 400 × 400 cells).
+
+## Checks run (this worktree, final code)
+
+- `check:types`, `check:lint`, `check:dead`, `check:planner` (test:engine 18/18 groups, logic-vs-v1 232,021 checks, bus)
+- TScert: `--files planner/logic/room.ts` 39/39, `planner/ui/logic/rooms.ts` 11/11; `check:tscert` 774/816 with the two
+  pre-existing stale entries failing (open issue 4); baseline appended by hand (+49) instead of `--update`
+- `node scripts/check-ownership.mjs app --base rooms`: ok
+- Through the lock: `planner/ui/test/rooms-ui.mjs` 51/51 (WebGPU) and 51/51 (`MIDSTUDY_WEBGPU=0`); eval:planner 56/56,
+  eval:occlusion 21/21, eval:keys 52/52, eval:ux 29/29, eval:phone 49/49 (final code); eval:ux2 27/27 and eval:render
+  38/38 on the code before the last fix (decision 12, which only touches the Scenes page's rooms request)

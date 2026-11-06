@@ -30,7 +30,14 @@ export function mount(ctx: UiContext): void {
   const { dots } = textLogic
   let uploading: Uploading | null = null
   const root = h('div.sc-root')
-  const page = shell.registerPage({ id: 'scenes', label: 'Scenes', width: 940, mount: (body) => { body.append(root) }, onOpen: () => { quiet(scenes.refresh()); quiet(engine.listRoomsInternal().then(() => { render(); schedulePoll() }).catch(() => undefined)); render() } })
+  const page = shell.registerPage({ id: 'scenes', label: 'Scenes', width: 940, mount: (body) => { body.append(root) }, onOpen: () => { quiet(scenes.refresh()); refreshRooms(); render() } })
+  // the rooms (§4.9), from a server that has them (engine.serverHasRooms: its scene objects carry `room`)
+  let roomsAsked = false
+  function refreshRooms(): void {
+    if (!engine.serverHasRooms()) return
+    roomsAsked = true
+    quiet(engine.listRoomsInternal().then(() => { render(); schedulePoll() }).catch(() => undefined))
+  }
 
   // The file picker: accept="image/*" lets iOS offer the camera roll (and the camera); HEIC is listed for desktops.
   const file: HTMLInputElement = h('input.sc-file', { type: 'file', accept: 'image/*,.heic,.heif', 'aria-label': 'Photo of the room', dataset: { midstudy: 'scene-file' },
@@ -329,7 +336,7 @@ export function mount(ctx: UiContext): void {
     return h('section.sc-trash', h('h3.caps', 'Recently deleted'), h('div.sc-trash-list', { role: 'list' }, rows))
   }
 
-  scenes.events.addEventListener('scenes', render)
+  scenes.events.addEventListener('scenes', () => { if (!roomsAsked && page.isOpen()) refreshRooms(); render() })
   engine.events.addEventListener('rooms', () => { render() })
   engine.events.addEventListener('room', (e) => { if (e.detail.phase === 'aligned' || e.detail.phase === 'deleted' || e.detail.phase === 'restored') render() })
   scenes.events.addEventListener('ready', (e) => {

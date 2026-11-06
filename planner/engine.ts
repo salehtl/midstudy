@@ -2295,6 +2295,11 @@ function previewPose(scene: unknown, pose: unknown, scale?: unknown): void {
   emit('room', { phase: 'pose', name: room.name })
 }
 
+/** Whether the server has rooms (§4.9): its scene objects carry `room` (a rooms server always sends it, §4.4). A server
+ *  without rooms is never asked for /api/rooms by the Scenes page (it would answer 404, a console error). */
+function serverHasRooms(): boolean {
+  return room !== null || roomsList.length > 0 || scenesList.some((s) => 'room' in s)
+}
 async function listRoomsInternal(): Promise<RoomInfo[]> {
   let data: JsonObject | null
   try { data = rec(await apiJson('/api/rooms')) } catch (e) { throw reportError('Could not list the rooms', e) }
@@ -3180,7 +3185,7 @@ export const engine = {
   getRoomState: (): { name: string; title: string | null; photo: string | null; members: readonly RoomMember[]; info: RoomInfo; alignPhotos: boolean; floorPlan: boolean; unplaced: boolean } | null =>
     (room ? { name: room.name, title: room.title, photo: sceneName, members: room.members.map((m) => ({ ...m })), info: room.info, alignPhotos, floorPlan: floorPlanShown, unplaced: roomUnplaced() } : null),
   getRooms: (): RoomInfo[] => roomsList.slice(), getRoomsTrash: (): TrashedRoom[] => roomsTrash.map((t) => ({ ...t })),
-  getRoom, listRoomsInternal, getRoomInternal, createRoom, createRoomFromScenes, alignRoom, alignRoomWhenReady, waitForRoom, openRoom, setRoomPhoto,
+  getRoom, listRoomsInternal, serverHasRooms, getRoomInternal, createRoom, createRoomFromScenes, alignRoom, alignRoomWhenReady, waitForRoom, openRoom, setRoomPhoto,
   setPose, previewPose, resetPose, setRoomScale, renameRoom, addSceneToRoom, removeSceneFromRoom, deleteRoom, restoreRoom,
   setAlignPhotos, setFloorPlanShown, roomToSceneHook, sceneToRoomHook, addItemHook, moveItemHook, photoToFloorHook, floorToPhotoHook,
   loadDepthMap: (url: string): Promise<DepthMap> => loadDepth(url), depthScaleFor,
