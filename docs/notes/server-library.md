@@ -144,9 +144,10 @@ choice split in two smaller functions.
 **TScert's "tool errors" look like hangs, not slow units.** Four of the eight runs here ended with "verifier … did not
 finish within N s" (N = 180, 600, 900) and no verdict, on server-core's units more often than on these: `targetParts`,
 `slugifyDecomposed`, `checkMeta` (run 1), `engineOf` (run 3), `apiPathOf`, `urlHostname` (run 5), `parseIpv4`,
-`stalledMessage`, `mockSlug`, `pyFixed` (the first official run, 921 s). During run 3 and the first official run `ps` showed the waiting
-`stage-runner`s at 0 % CPU, each with a forked child that still showed as `stage-runner` (it had not exec'd the
-verifier), asleep, next to a zombie sibling; so a longer step limit only makes the run longer. The same checks then
+`stalledMessage`, `mockSlug`, `pyFixed` (the first official run, 921 s). In run 3 the waiting `stage-runner` sat at
+0 % CPU for its whole 600 s; in the first official run `ps` showed each waiting `stage-runner` at 0 % CPU with a forked
+child that still showed as `stage-runner` (it had not exec'd the verifier), asleep, next to a zombie sibling. So a
+longer step limit only makes the run longer. The same checks then
 passed in 8–18 s once the machine's load fell (12–35 → 2–3), with `MIDSTUDY_TSCERT_STEP_LIMIT=120`. A short step limit
 and a retry is the practical answer; worth a look by f-toolchain (stage-runner's fork and exec).
 
