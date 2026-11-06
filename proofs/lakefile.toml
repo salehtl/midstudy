@@ -17,3 +17,9 @@ name = "Midstudy"
 [[lean_exe]]
 name = "mediastrip"
 root = "StripMain"
+
+# The room maps of contract §4.9 over Float, the same expressions Midstudy/Room.lean proves (proofs/diff/room/
+# compares it with planner/logic/room.ts).
+[[lean_exe]]
+name = "roommodel"
+root = "RoomMain"
