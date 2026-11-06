@@ -221,6 +221,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
     fn tall_shrinks_run_the_vertical_pass_first() {
         // a gradient whose 8-bit rounding differs between the pass orders: both orders stay within one level, and
         // the 360 x 480 -> 256 x 256 (rows 60..420) case is the one Pillow 13 runs vertical-first

@@ -439,6 +439,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
     fn crops_the_margin_and_turns() {
         let t = rug_texture(rug_picture(), 160.0, 230.0).unwrap();
         assert_eq!(t.crop, Some([250, 150, 550, 650]));
@@ -450,6 +451,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
     fn mask_of_the_piece() {
         let (kind, share, png) = foreground_mask(rug_picture());
         assert_eq!(kind, MaskKind::Piece);

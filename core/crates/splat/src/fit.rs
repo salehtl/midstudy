@@ -396,6 +396,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
     fn fits_per_axis_and_stretches_covariances() {
         let bytes = splat(&grid(), &[("f_rest_0", 0.5)]);
         let p = FitParams {
@@ -429,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
     fn idol_frame_rotation_and_flat_refusal() {
         // frame_rotation("-Y", "+X"): rows (up × front, up, front) = ((0,0,-1)... see frames.py
         let r = [[0.0, 0.0, 1.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]];
