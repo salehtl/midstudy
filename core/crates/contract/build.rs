@@ -20,7 +20,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // roundtrip(name, json): parse json as the named type and write it back, or say why it didn't parse.
     let mut rt = String::from(
-        "/// Parses `value` as the contract type called `name` and serializes it back.\n\
+        "/// Parses `value` as the contract type called `name` and serializes it back (one match arm per type).\n\
+         #[allow(clippy::too_many_lines)]\n\
          fn roundtrip(name: &str, value: &serde_json::Value) -> Result<serde_json::Value, String> {\n    match name {\n",
     );
     for name in &names {
