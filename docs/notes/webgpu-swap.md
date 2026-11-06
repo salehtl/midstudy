@@ -27,6 +27,19 @@ renderer is kept alive (the thumbnails' second `WebGLRenderer` is gone too), no 
 
 ## Checks (static)
 
+Run on the final tree (each `nix develop -c npm run check -- <name>`):
+
+| Check | Result |
+|---|---|
+| `check:types` | ok: no errors in planner, core-web, core-node, contract (planner/gpu and the demo are in the planner area now: their own tsconfigs and `.ts` import specifiers are gone; the sort worker uses the DOM-typed `self`, as `engine.worker.ts` does) |
+| `check:lint` | ok: 60 `.ts` files, no problems (the spike's code made lint-clean: `void` on three's `render`/`clear`/`compute`, which return a Promise only before `init()`; a `RenderTarget` type guard instead of an `any` return; template numbers through `String`) |
+| `check:dead` | ok: knip, no unused files, exports or dependencies (the demo's `demo.ts` and `*.mjs` are entries; the spike's internal constants unexported; its `referenceOrder` and `debugShaders` removed) |
+| `check:tscert` | ok: 320/320 certified, all 320 baselined (no logic module changed) |
+| `check:planner` | ok: engine logic vs v1 11/11 groups; UI logic vs v1 204,019 checks; bus 5 cases |
+| `check:gen` | ok: contract/gen and the contract crate's schema are what the schemas generate (CONTRACT.md's splat paragraph changed: prose only) |
+| `node planner/gpu/demo/unit.mjs` | all passed (SPZ vs PLY decode, Σ = R S² Rᵀ, the CPU sort's order, stability and culling; 262,144 splats sorted in 6.6 ms in Node) |
+| `npm run build` | `planner/dist/app.js` 1,179,936 B + a 21 kB chunk, `engine.worker.js`, `sort.worker.js` (1.4 kB); no CDN URL. v2-int-planner: 378,295 B + a 535 kB chunk loaded at start (three's WebGL build, shared with Spark) + 21 kB, and Spark's 2.8 MB chunk on the first splat item. Start-up JavaScript 1,201 kB against 934 kB (+29 %: three's WebGPU build with its node system and both backends, 538 kB of it); no lazy 2.8 MB any more |
+
 ## The gate: every browser eval twice per backend
 
 ## The spike's check (planner/gpu/demo/check.mjs)
