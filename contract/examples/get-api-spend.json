@@ -9,7 +9,7 @@
       "type": "Spend",
       "note": null,
       "body": {
-        "day": "2026-11-05",
+        "day": "2026-11-06",
         "spent_usd": 0,
         "reserved_usd": 0,
         "cap_usd": 0
@@ -22,12 +22,12 @@
       "type": "Spend",
       "note": "a $0.03 cap",
       "body": {
-        "day": "2026-11-05",
+        "day": "2026-11-06",
         "spent_usd": 0,
         "reserved_usd": 0,
         "cap_usd": 0.03
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

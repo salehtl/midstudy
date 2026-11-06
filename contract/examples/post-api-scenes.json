@@ -19,17 +19,17 @@
       "note": "a golden photo",
       "body": {
         "job": {
-          "id": "c-20261105-182038-4057",
+          "id": "c-20261106-214601-0324",
           "kind": "calibrate",
-          "scene": "scene-20261105-182038",
+          "scene": "scene-20261106-214601",
           "status": "queued",
-          "created": "2026-11-05T18:20:38Z",
+          "created": "2026-11-06T21:46:01Z",
           "started": null,
           "finished": null,
           "message": "waiting for the calibration queue",
           "calib": null
         },
-        "scene": "scene-20261105-182038"
+        "scene": "scene-20261106-214601"
       }
     },
     {
@@ -50,19 +50,19 @@
       "note": "no title",
       "body": {
         "job": {
-          "id": "c-20261105-182039-97f9",
+          "id": "c-20261106-214602-b907",
           "kind": "calibrate",
-          "scene": "scene-20261105-182039",
+          "scene": "scene-20261106-214602",
           "status": "queued",
-          "created": "2026-11-05T18:20:39Z",
+          "created": "2026-11-06T21:46:02Z",
           "started": null,
           "finished": null,
           "message": "waiting for the calibration queue",
           "calib": null
         },
-        "scene": "scene-20261105-182039"
+        "scene": "scene-20261106-214602"
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

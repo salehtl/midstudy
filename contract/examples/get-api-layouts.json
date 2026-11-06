@@ -1,6 +1,6 @@
 {
   "route": "GET /api/layouts",
-  "contract": "§2.7",
+  "contract": "§2.7, §4.9",
   "examples": [
     {
       "kind": "response",
@@ -18,13 +18,13 @@
             "name": "corner",
             "title": null,
             "items": 1,
-            "updated": "2026-11-05T18:20:40Z"
+            "updated": "2026-11-06T21:46:02Z"
           },
           {
             "name": "front",
             "title": "Front",
             "items": 2,
-            "updated": "2026-11-05T18:20:40Z"
+            "updated": "2026-11-06T21:46:02Z"
           }
         ]
       }
@@ -38,7 +38,37 @@
       "body": {
         "error": "add ?scene=<name>: layouts belong to a scene"
       }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/layout-list.schema.json",
+      "type": "LayoutList",
+      "note": "a room's layouts",
+      "body": {
+        "layouts": [
+          "plan"
+        ],
+        "details": [
+          {
+            "name": "plan",
+            "title": null,
+            "items": 1,
+            "updated": "2026-11-06T21:46:03Z"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "response",
+      "status": 400,
+      "schema": "midstudy/api/error.schema.json",
+      "type": "ApiError",
+      "note": "both scene and room",
+      "body": {
+        "error": "give ?scene=<name> or ?room=<room>, not both: a layout belongs to one scene or one room"
+      }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

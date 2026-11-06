@@ -1,0 +1,52 @@
+{
+  "route": "rooms/<room>/align.json",
+  "contract": null,
+  "examples": [
+    {
+      "kind": "file rooms/<room>/align.json",
+      "schema": "midstudy/align.schema.json",
+      "type": "Align",
+      "note": "the calib mock's answer for the golden pair",
+      "body": {
+        "version": 1,
+        "solver": "truth",
+        "created": "2026-11-06T21:46:02.985Z",
+        "elapsed_s": 0,
+        "device": null,
+        "loop_residual_cm": null,
+        "members": [
+          {
+            "scene": "scene-20261106-214601",
+            "photo_sha256": "2538616d70a91609e96930ad92fde0ab80c4c199a1a8ecd4f111a1da2d3d956e",
+            "pose": {
+              "x_m": 0,
+              "z_m": 0,
+              "yaw_deg": 0
+            },
+            "scale": 1,
+            "confidence": 1,
+            "residual_cm": null
+          },
+          {
+            "scene": "scene-20261106-214602-2",
+            "photo_sha256": "f58f0390bce7799e1583689cafe15ca1f1e4d1278be438e8001d9ce1d9f40bf7",
+            "pose": {
+              "x_m": -1.15,
+              "z_m": 0.45,
+              "yaw_deg": -22
+            },
+            "scale": 1,
+            "confidence": 1,
+            "residual_cm": 0
+          }
+        ],
+        "unplaced": [],
+        "fixture": {
+          "name": "golden-pair",
+          "note": "the true poses of the golden room fixtures (fixtures/scenes/<scene>/truth.json pose_in_room), in living-wide's frame; scene is the fixture id, which the mock replaces with the scene folder whose photo.jpg has photo_sha256"
+        }
+      }
+    }
+  ],
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
+}

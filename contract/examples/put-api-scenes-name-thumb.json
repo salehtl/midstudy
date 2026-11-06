@@ -19,7 +19,7 @@
       "note": "the planner's thumbnail",
       "body": {
         "ok": true,
-        "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839"
+        "thumb_url": "/scenes/scene-20261106-214601/thumb.jpg?v=1794001561"
       }
     },
     {
@@ -33,5 +33,5 @@
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

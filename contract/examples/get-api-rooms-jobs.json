@@ -7,44 +7,30 @@
       "status": 200,
       "schema": "midstudy/api/room-jobs.schema.json",
       "type": "RoomJobs",
-      "note": "one waiting, one done",
+      "note": "two align jobs",
       "body": {
         "jobs": [
           {
-            "id": "a-20261106-102000-p2q4",
+            "id": "a-20261106-214603-fbe2",
             "kind": "align",
-            "room": "room-20261106-101530",
-            "status": "queued",
-            "created": "2026-11-06T10:20:00Z",
-            "started": null,
-            "finished": null,
-            "message": "waiting for 1 photo to calibrate",
-            "waiting_for": [
-              "scene-20261106-101502"
-            ],
-            "align": null
-          },
-          {
-            "id": "a-20261106-101531-k3m9",
-            "kind": "align",
-            "room": "room-20261106-101530",
+            "room": "room-20261106-214602",
             "status": "done",
-            "created": "2026-11-06T10:15:31Z",
-            "started": "2026-11-06T10:16:18Z",
-            "finished": "2026-11-06T10:16:40Z",
-            "message": "aligned 2 of 3 photos (vggt); 1 left to place by hand",
+            "created": "2026-11-06T21:46:03Z",
+            "started": "2026-11-06T21:46:03Z",
+            "finished": "2026-11-06T21:46:03Z",
+            "message": "aligned 1 of 3 photos (none); 2 left to place by hand",
             "waiting_for": [],
             "align": {
               "version": 1,
-              "solver": "vggt",
-              "created": "2026-11-06T10:16:40Z",
-              "elapsed_s": 21.4,
-              "device": "mps",
+              "solver": "none",
+              "created": "2026-11-06T21:46:03.297Z",
+              "elapsed_s": 0.001,
+              "device": null,
               "loop_residual_cm": null,
               "members": [
                 {
-                  "scene": "scene-20261106-101500",
-                  "photo_sha256": "3f1c0e8a4b6d2f7091a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7",
+                  "scene": "scene-20261106-214601",
+                  "photo_sha256": "2538616d70a91609e96930ad92fde0ab80c4c199a1a8ecd4f111a1da2d3d956e",
                   "pose": {
                     "x_m": 0,
                     "z_m": 0,
@@ -55,20 +41,16 @@
                   "residual_cm": null
                 },
                 {
-                  "scene": "scene-20261106-101501",
-                  "photo_sha256": "9b2d4f6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c",
-                  "pose": {
-                    "x_m": -1.87,
-                    "z_m": 0.62,
-                    "yaw_deg": -29.1
-                  },
-                  "scale": 1.021,
-                  "confidence": 0.86,
-                  "residual_cm": 3.2
+                  "scene": "scene-20261106-214602-3",
+                  "photo_sha256": "6d6f8fd47a88b48a2df49e77e3d3262627f42a3e7b7f879a89c03712d5f80649",
+                  "pose": null,
+                  "scale": null,
+                  "confidence": 0,
+                  "residual_cm": null
                 },
                 {
-                  "scene": "scene-20261106-101502",
-                  "photo_sha256": "c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6",
+                  "scene": "scene-20261106-214602-2",
+                  "photo_sha256": "f58f0390bce7799e1583689cafe15ca1f1e4d1278be438e8001d9ce1d9f40bf7",
                   "pose": null,
                   "scale": null,
                   "confidence": 0,
@@ -76,13 +58,64 @@
                 }
               ],
               "unplaced": [
-                "scene-20261106-101502"
+                "scene-20261106-214602-3",
+                "scene-20261106-214602-2"
               ]
+            }
+          },
+          {
+            "id": "a-20261106-214602-7bf1",
+            "kind": "align",
+            "room": "room-20261106-214602",
+            "status": "done",
+            "created": "2026-11-06T21:46:02Z",
+            "started": "2026-11-06T21:46:02Z",
+            "finished": "2026-11-06T21:46:02Z",
+            "message": "aligned 2 of 2 photos (truth)",
+            "waiting_for": [],
+            "align": {
+              "version": 1,
+              "solver": "truth",
+              "created": "2026-11-06T21:46:02.985Z",
+              "elapsed_s": 0,
+              "device": null,
+              "loop_residual_cm": null,
+              "members": [
+                {
+                  "scene": "scene-20261106-214601",
+                  "photo_sha256": "2538616d70a91609e96930ad92fde0ab80c4c199a1a8ecd4f111a1da2d3d956e",
+                  "pose": {
+                    "x_m": 0,
+                    "z_m": 0,
+                    "yaw_deg": 0
+                  },
+                  "scale": 1,
+                  "confidence": 1,
+                  "residual_cm": null
+                },
+                {
+                  "scene": "scene-20261106-214602-2",
+                  "photo_sha256": "f58f0390bce7799e1583689cafe15ca1f1e4d1278be438e8001d9ce1d9f40bf7",
+                  "pose": {
+                    "x_m": -1.15,
+                    "z_m": 0.45,
+                    "yaw_deg": -22
+                  },
+                  "scale": 1,
+                  "confidence": 1,
+                  "residual_cm": 0
+                }
+              ],
+              "unplaced": [],
+              "fixture": {
+                "name": "golden-pair",
+                "note": "the true poses of the golden room fixtures (fixtures/scenes/<scene>/truth.json pose_in_room), in living-wide's frame; scene is the fixture id, which the mock replaces with the scene folder whose photo.jpg has photo_sha256"
+              }
             }
           }
         ]
       }
     }
   ],
-  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

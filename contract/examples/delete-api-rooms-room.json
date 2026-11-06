@@ -10,9 +10,9 @@
       "note": "to the trash; the scenes stay",
       "body": {
         "ok": true,
-        "trash": "rooms/.trash/room-20261106-101530-20261106-103000"
+        "trash": "rooms/.trash/room-20261106-214603-20261106-214603"
       }
     }
   ],
-  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

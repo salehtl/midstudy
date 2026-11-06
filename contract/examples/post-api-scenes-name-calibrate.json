@@ -10,11 +10,11 @@
       "note": "recalibrate",
       "body": {
         "job": {
-          "id": "c-20261105-182039-bba1",
+          "id": "c-20261106-214601-8562",
           "kind": "calibrate",
-          "scene": "scene-20261105-182038",
+          "scene": "scene-20261106-214601",
           "status": "queued",
-          "created": "2026-11-05T18:20:39Z",
+          "created": "2026-11-06T21:46:01Z",
           "started": null,
           "finished": null,
           "message": "waiting for the calibration queue",
@@ -33,5 +33,5 @@
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

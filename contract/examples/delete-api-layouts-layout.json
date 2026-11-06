@@ -1,6 +1,6 @@
 {
   "route": "DELETE /api/layouts/{layout}",
-  "contract": "§2.7",
+  "contract": "§2.7, §4.9",
   "examples": [
     {
       "kind": "response",
@@ -11,10 +11,23 @@
       "body": {
         "ok": true,
         "name": "corner",
-        "scene": "scene-20261105-182038",
-        "trash": "layouts/scene-20261105-182038/.trash/corner-20261105-182040.json"
+        "scene": "scene-20261106-214601",
+        "trash": "layouts/scene-20261106-214601/.trash/corner-20261106-214602.json"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/layout-deleted.schema.json",
+      "type": "LayoutDeleted",
+      "note": "a room layout to the room's layout trash",
+      "body": {
+        "ok": true,
+        "name": "spare",
+        "room": "room-20261106-214602",
+        "trash": "layouts/@room-20261106-214602/.trash/spare-20261106-214603.json"
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

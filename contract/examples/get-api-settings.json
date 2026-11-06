@@ -7,19 +7,6 @@
       "status": 200,
       "schema": "midstudy/api/settings.schema.json",
       "type": "Settings",
-      "note": "the app's budget (no --daily-spend-usd)",
-      "body": {
-        "daily_spend_usd": 2,
-        "default_usd": 2,
-        "max_usd": 10000,
-        "locked": false
-      }
-    },
-    {
-      "kind": "response",
-      "status": 200,
-      "schema": "midstudy/api/settings.schema.json",
-      "type": "Settings",
       "note": "an agent's server: --daily-spend-usd 0",
       "body": {
         "daily_spend_usd": 0,
@@ -27,7 +14,20 @@
         "max_usd": 10000,
         "locked": true
       }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/settings.schema.json",
+      "type": "Settings",
+      "note": "the app's budget (no --daily-spend-usd)",
+      "body": {
+        "daily_spend_usd": 2,
+        "default_usd": 2,
+        "max_usd": 10000,
+        "locked": false
+      }
     }
   ],
-  "recorded": "hand-written from contract §2.9 Settings (the settings routes had no recorded examples); re-record with contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

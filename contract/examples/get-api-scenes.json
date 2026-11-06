@@ -22,28 +22,29 @@
       "body": {
         "scenes": [
           {
-            "name": "scene-20261105-182038",
+            "name": "scene-20261106-214601",
             "title": "Living room, morning",
-            "created": "2026-11-05T18:20:38Z",
-            "saved": "2026-11-05T18:20:39Z",
-            "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
-            "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839",
-            "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902839",
+            "created": "2026-11-06T21:46:01Z",
+            "saved": "2026-11-06T21:46:01Z",
+            "photo_url": "/scenes/scene-20261106-214601/photo.jpg?v=1794001561",
+            "thumb_url": "/scenes/scene-20261106-214601/thumb.jpg?v=1794001561",
+            "depth_url": "/scenes/scene-20261106-214601/depth.png?v=1794001562",
             "w": 1600,
             "h": 1200,
             "camera_source": "manual",
             "floor_found": true,
             "layouts": 0,
             "calib_status": "done",
-            "calib_error": null
+            "calib_error": null,
+            "room": null
           }
         ],
         "trash": [
           {
-            "name": "scene-20261105-182039",
+            "name": "scene-20261106-214602",
             "title": null,
-            "created": "2026-11-05T18:20:39Z",
-            "deleted": "2026-11-05T18:20:40Z"
+            "created": "2026-11-06T21:46:02Z",
+            "deleted": "2026-11-06T21:46:02Z"
           }
         ]
       }
@@ -57,41 +58,43 @@
       "body": {
         "scenes": [
           {
-            "name": "scene-20261105-182039",
+            "name": "scene-20261106-214602",
             "title": null,
-            "created": "2026-11-05T18:20:39Z",
+            "created": "2026-11-06T21:46:02Z",
             "saved": null,
-            "photo_url": "/scenes/scene-20261105-182039/photo.jpg?v=1793902839",
+            "photo_url": "/scenes/scene-20261106-214602/photo.jpg?v=1794001562",
             "thumb_url": null,
-            "depth_url": "/scenes/scene-20261105-182039/depth.png?v=1793902839",
+            "depth_url": "/scenes/scene-20261106-214602/depth.png?v=1794001562",
             "w": 1200,
             "h": 1600,
             "camera_source": "auto",
             "floor_found": true,
             "layouts": 0,
             "calib_status": "done",
-            "calib_error": null
+            "calib_error": null,
+            "room": null
           },
           {
-            "name": "scene-20261105-182038",
+            "name": "scene-20261106-214601",
             "title": "Living room, morning",
-            "created": "2026-11-05T18:20:38Z",
-            "saved": "2026-11-05T18:20:39Z",
-            "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
-            "thumb_url": "/scenes/scene-20261105-182038/thumb.jpg?v=1793902839",
-            "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902839",
+            "created": "2026-11-06T21:46:01Z",
+            "saved": "2026-11-06T21:46:01Z",
+            "photo_url": "/scenes/scene-20261106-214601/photo.jpg?v=1794001561",
+            "thumb_url": "/scenes/scene-20261106-214601/thumb.jpg?v=1794001561",
+            "depth_url": "/scenes/scene-20261106-214601/depth.png?v=1794001562",
             "w": 1600,
             "h": 1200,
             "camera_source": "manual",
             "floor_found": true,
             "layouts": 0,
             "calib_status": "done",
-            "calib_error": null
+            "calib_error": null,
+            "room": null
           }
         ],
         "trash": []
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

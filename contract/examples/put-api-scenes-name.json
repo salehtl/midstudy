@@ -32,8 +32,8 @@
       "body": {
         "version": 1,
         "title": "Living room, morning",
-        "created": "2026-11-05T18:20:38Z",
-        "saved": "2026-11-05T18:20:39Z",
+        "created": "2026-11-06T21:46:01Z",
+        "saved": "2026-11-06T21:46:01Z",
         "camera": {
           "fov_y_deg": 55,
           "height_m": 1.45,
@@ -53,16 +53,17 @@
           "auto_light": false,
           "cast_shadows": true
         },
-        "name": "scene-20261105-182038",
-        "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
+        "name": "scene-20261106-214601",
+        "photo_url": "/scenes/scene-20261106-214601/photo.jpg?v=1794001561",
         "thumb_url": null,
-        "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902838",
+        "depth_url": "/scenes/scene-20261106-214601/depth.png?v=1794001561",
         "w": 1600,
         "h": 1200,
         "floor_found": true,
         "layouts": 0,
         "calib_status": "done",
         "calib_error": null,
+        "room": null,
         "calib": {
           "version": 1,
           "source": "truth",
@@ -94,7 +95,7 @@
           },
           "exif": null,
           "device": null,
-          "elapsed_s": 0.002
+          "elapsed_s": 0.001
         },
         "lighting": {
           "version": 1,
@@ -216,8 +217,8 @@
       "body": {
         "version": 1,
         "title": "Living room, morning",
-        "created": "2026-11-05T18:20:38Z",
-        "saved": "2026-11-05T18:20:39Z",
+        "created": "2026-11-06T21:46:01Z",
+        "saved": "2026-11-06T21:46:01Z",
         "camera": {
           "fov_y_deg": 55,
           "height_m": 1.45,
@@ -236,16 +237,17 @@
           "auto_light": false,
           "cast_shadows": true
         },
-        "name": "scene-20261105-182038",
-        "photo_url": "/scenes/scene-20261105-182038/photo.jpg?v=1793902838",
+        "name": "scene-20261106-214601",
+        "photo_url": "/scenes/scene-20261106-214601/photo.jpg?v=1794001561",
         "thumb_url": null,
-        "depth_url": "/scenes/scene-20261105-182038/depth.png?v=1793902838",
+        "depth_url": "/scenes/scene-20261106-214601/depth.png?v=1794001561",
         "w": 1600,
         "h": 1200,
         "floor_found": true,
         "layouts": 0,
         "calib_status": "done",
         "calib_error": null,
+        "room": null,
         "calib": {
           "version": 1,
           "source": "truth",
@@ -277,7 +279,7 @@
           },
           "exif": null,
           "device": null,
-          "elapsed_s": 0.002
+          "elapsed_s": 0.001
         },
         "lighting": {
           "version": 1,
@@ -389,5 +391,5 @@
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

@@ -11,13 +11,13 @@
       "body": {
         "jobs": [
           {
-            "id": "c-20261105-182038-4057",
+            "id": "c-20261106-214601-0324",
             "kind": "calibrate",
-            "scene": "scene-20261105-182038",
+            "scene": "scene-20261106-214601",
             "status": "done",
-            "created": "2026-11-05T18:20:38Z",
-            "started": "2026-11-05T18:20:38Z",
-            "finished": "2026-11-05T18:20:38Z",
+            "created": "2026-11-06T21:46:01Z",
+            "started": "2026-11-06T21:46:01Z",
+            "finished": "2026-11-06T21:46:01Z",
             "message": "calibrated (truth)",
             "calib": {
               "version": 1,
@@ -50,7 +50,7 @@
               },
               "exif": null,
               "device": null,
-              "elapsed_s": 0.002
+              "elapsed_s": 0.001
             }
           }
         ]
@@ -65,13 +65,13 @@
       "body": {
         "jobs": [
           {
-            "id": "c-20261105-182039-bba1",
+            "id": "c-20261106-214601-8562",
             "kind": "calibrate",
-            "scene": "scene-20261105-182038",
+            "scene": "scene-20261106-214601",
             "status": "done",
-            "created": "2026-11-05T18:20:39Z",
-            "started": "2026-11-05T18:20:39Z",
-            "finished": "2026-11-05T18:20:39Z",
+            "created": "2026-11-06T21:46:01Z",
+            "started": "2026-11-06T21:46:01Z",
+            "finished": "2026-11-06T21:46:02Z",
             "message": "calibrated (truth)",
             "calib": {
               "version": 1,
@@ -108,25 +108,25 @@
             }
           },
           {
-            "id": "l-20261105-182039-4a48",
+            "id": "l-20261106-214601-6cb0",
             "kind": "light",
-            "scene": "scene-20261105-182038",
+            "scene": "scene-20261106-214601",
             "status": "done",
-            "created": "2026-11-05T18:20:39Z",
-            "started": "2026-11-05T18:20:39Z",
-            "finished": "2026-11-05T18:20:39Z",
+            "created": "2026-11-06T21:46:01Z",
+            "started": "2026-11-06T21:46:01Z",
+            "finished": "2026-11-06T21:46:01Z",
             "message": "lighting inferred (5493 K)",
             "calib": null,
             "lighting": true
           },
           {
-            "id": "c-20261105-182038-4057",
+            "id": "c-20261106-214601-0324",
             "kind": "calibrate",
-            "scene": "scene-20261105-182038",
+            "scene": "scene-20261106-214601",
             "status": "done",
-            "created": "2026-11-05T18:20:38Z",
-            "started": "2026-11-05T18:20:38Z",
-            "finished": "2026-11-05T18:20:38Z",
+            "created": "2026-11-06T21:46:01Z",
+            "started": "2026-11-06T21:46:01Z",
+            "finished": "2026-11-06T21:46:01Z",
             "message": "calibrated (truth)",
             "calib": {
               "version": 1,
@@ -159,12 +159,12 @@
               },
               "exif": null,
               "device": null,
-              "elapsed_s": 0.002
+              "elapsed_s": 0.001
             }
           }
         ]
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

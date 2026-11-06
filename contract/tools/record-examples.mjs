@@ -160,6 +160,72 @@ await call('POST', '/api/render', { image: TINY }, { forged: true, note: 'no X-M
 await call('GET', '/api/renders')
 await call('GET', `/api/renders?scene=${A}`)
 
+ev.section('rooms (§4.9)')
+{
+  const R1 = golden('room-1'), R2 = golden('room-2')
+  await call('GET', '/api/rooms', undefined, { note: 'no rooms yet' })
+  const up = async (g, file) => (await raw(B, 'POST', '/api/scenes', { headers: { 'X-Midstudy': '1', 'Content-Type': 'application/octet-stream', 'X-Midstudy-Filename': file }, body: fs.readFileSync(g.photo) })).json?.scene
+  const S1 = await up(R1, 'room-1.jpg')
+  await waitScene(B, S1)
+  const S2 = await up(R2, 'room-2.jpg')
+  // the golden pair (living-wide, room-1) has a recorded answer in fixtures/calib/rooms/: the calib mock gives the true pose
+  r = await call('POST', '/api/rooms', { title: 'Living room', scenes: [A, S1] }, { note: 'two photos: the first is the origin, the other unplaced' })
+  const RM = r.json?.name
+  await call('POST', '/api/rooms', { scenes: [S2, S2] }, { note: 'a scene twice' })
+  await call('POST', '/api/rooms', { scenes: ['scene-20000101-000000'] }, { note: 'an unknown scene' })
+  await call('POST', '/api/rooms', { scenes: [S1] }, { note: 'a scene in another room' })
+  r = await call('POST', `/api/rooms/${RM}/align`, undefined, { note: 'as the planner asks after New room' })
+  const al1 = r.json?.job?.id
+  const busy = await call('POST', `/api/rooms/${RM}/align`, {}, { note: 'while one is queued or running' })
+  if (busy.status !== 409) ev.note(`the second align answered ${busy.status} (the first had finished): no 409 example`)
+  if (al1) { await jobDone(`/api/rooms/jobs/${al1}`); await call('GET', `/api/rooms/jobs/${al1}`, undefined, { note: 'done: the calib mock\'s true pose' }) }
+  await call('GET', '/api/rooms/jobs/a-nope', undefined, { note: 'unknown job' })
+  await call('GET', `/api/rooms/${RM}`, undefined, { note: 'aligned' })
+  await call('GET', '/api/rooms/room-20000101-000000', undefined, { note: 'unknown room' })
+  const roomDir = path.join(srv.dirs.data, 'rooms', RM)
+  for (const [f, schema] of [['room.json', 'midstudy/room.schema.json'], ['align.json', 'midstudy/align.schema.json']]) {
+    const p = path.join(roomDir, f)
+    if (fs.existsSync(p)) keep(`files-${f}`, `rooms/<room>/${f}`, `file rooms/<room>/${f}`, schema, JSON.parse(fs.readFileSync(p, 'utf8')), f === 'align.json' ? 'the calib mock\'s answer for the golden pair' : 'an aligned room')
+  }
+  await call('PUT', `/api/rooms/${RM}`, { members: [{ scene: A }, { scene: S1, pose: { x_m: 1.2, z_m: 0.4, yaw_deg: 25 } }] }, { note: 'Align photos: the second photo dragged and turned' })
+  await call('PUT', `/api/rooms/${RM}`, { title: 'Living room, both ends' }, { note: 'rename' })
+  await call('PUT', `/api/rooms/${RM}`, { reset: [S1] }, { note: 'Align photos\' Reset' })
+  await call('PUT', `/api/rooms/${RM}`, { rescale: 1.04 }, { note: 'Set scale: the tape says 4 % longer' })
+  await call('PUT', `/api/rooms/${RM}`, { zoom: 2 }, { note: 'an unknown key' })
+  await waitScene(B, S2)
+  await call('PUT', `/api/rooms/${RM}`, { members: [{ scene: A }, { scene: S2 }, { scene: S1 }] }, { note: 'add a photo (unplaced) and reorder' })
+  r = await call('POST', `/api/rooms/${RM}/align`, { overwrite_manual: false }, { note: 'align again, keeping poses moved by hand' })
+  if (r.json?.job?.id) await jobDone(`/api/rooms/jobs/${r.json.job.id}`)
+  await call('GET', '/api/rooms/jobs', undefined, { note: 'two align jobs' })
+
+  ev.section('room layouts (§2.7 with ?room=) and render with a room (§4.7)')
+  await call('PUT', `/api/layouts/plan?room=${RM}`, { items: [{ uid: 'probe-box-1', id: 'probe-box', render: 'glb', position: [0.3, 0, -2.5], rotation_y_deg: 10, dims_cm: { w: 80, d: 50, h: 120 } }] }, { note: 'a room layout: positions in the room frame' })
+  await call('GET', `/api/layouts?room=${RM}`, undefined, { note: 'a room\'s layouts' })
+  await call('GET', `/api/layouts/plan?room=${RM}`, undefined, { note: 'a room layout' })
+  await call('GET', `/api/layouts?scene=${A}&room=${RM}`, undefined, { note: 'both scene and room' })
+  await call('POST', '/api/render', { image: TINY, scene: S1, room: RM, layout: 'plan' }, { note: 'a room view: the current photo, the room and its layout' })
+  await call('GET', `/api/renders?room=${RM}`, undefined, { note: 'a room\'s renders' })
+  await call('PUT', `/api/layouts/spare?room=${RM}`, { items: [] }, { note: 'an empty room layout' })
+  await call('DELETE', `/api/layouts/spare?room=${RM}`, undefined, { note: 'a room layout to the room\'s layout trash' })
+
+  ev.section('a member scene deleted and restored; rooms in the trash')
+  await call('DELETE', `/api/scenes/${S2}`, undefined, { note: 'a photo of a room: it leaves the room' })
+  for (const f of trashed(srv.dirs.scenes, 'trash.json')) {
+    const t = JSON.parse(fs.readFileSync(f, 'utf8'))
+    if (t.room) keep('files-trash.json', 'files beside a deleted scene or library item', 'file scenes/.trash/<name>-<stamp>/trash.json', 'midstudy/trash.schema.json#/$defs/scene', t, 'a deleted scene that was in a room')
+  }
+  await call('POST', `/api/scenes/${S2}/restore`, undefined, { note: 'back into its room at its place' })
+  r = await call('POST', '/api/rooms', { scenes: [P] }, { note: 'one photo' })
+  const RB = r.json?.name
+  await call('PUT', `/api/rooms/${RB}`, { reset: [P] }, { note: 'reset before any alignment' })
+  await call('POST', `/api/rooms/${RB}/align`, undefined, { note: 'fewer than two photos' })
+  await call('DELETE', `/api/rooms/${RB}`, undefined, { note: 'to the trash; the scenes stay' })
+  for (const f of trashed(path.join(srv.dirs.data, 'rooms'), 'trash.json')) keep('files-trash.json', 'files beside a deleted scene or library item', 'file rooms/.trash/<room>-<stamp>/trash.json', 'midstudy/trash.schema.json#/$defs/room', JSON.parse(fs.readFileSync(f, 'utf8')), 'a deleted room')
+  await call('GET', '/api/rooms', undefined, { note: 'one room, one in the trash' })
+  await call('POST', `/api/rooms/${RB}/restore`, undefined, { note: 'back from the trash' })
+  await call('POST', `/api/rooms/${RB}/restore`, undefined, { note: 'none left in the trash' })
+}
+
 ev.section('library (§2.8)')
 await call('GET', '/api/library', undefined, { note: 'the probe library' })
 r = await call('POST', '/api/library/items', undefined, { rawBody: fs.readFileSync(path.join(REPO, 'fixtures/models/arrow.glb')), headers: { 'X-Midstudy-Kind': 'model', 'X-Midstudy-Filename': 'arrow.glb' }, meta: { name: 'Arrow sign', dims_cm: { w: 100, d: 40, h: 30 }, category: 'decor' }, note: 'a GLB' })
@@ -216,6 +282,20 @@ ev.section('midstudy-add (§3.1): the summary line')
   add(['fixtures/models/arrow.glb', '--engine=glb', '--name=Arrow', '--id=cli-arrow', '--dims=100x40x30'], 'a GLB')
   add(['fixtures/fal/sam-3-3d-objects/input.jpg', '--name=Morris chair', '--id=cli-chair', '--dims=80x90x95'], 'a photo, Idol')
   add(['--rescale=cli-arrow', '--dims=120x40x30'], '--rescale')
+}
+
+ev.section('settings (§2.9)')
+await call('GET', '/api/settings', undefined, { note: "an agent's server: --daily-spend-usd 0" })
+await call('PUT', '/api/settings', { daily_spend_usd: 5 }, { note: 'fixed by --daily-spend-usd' })
+const app = await startServer(ev, { appBudget: true })
+if (app.up) {
+  const save = B
+  B = app.base
+  await call('GET', '/api/settings', undefined, { note: "the app's budget (no --daily-spend-usd)" })
+  await call('PUT', '/api/settings', { daily_spend_usd: 5 }, { note: 'raise the budget' })
+  await call('PUT', '/api/settings', { daily_spend_usd: -1 }, { note: 'out of range' })
+  B = save
+  await app.stop()
 }
 
 ev.section('the spend cap (§2.9)')

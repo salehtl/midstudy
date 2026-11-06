@@ -18,86 +18,59 @@
       "status": 200,
       "schema": "midstudy/api/room-list.schema.json",
       "type": "RoomList",
-      "note": "one room, aligned, one in the trash",
+      "note": "one room, one in the trash",
       "body": {
         "rooms": [
           {
-            "name": "room-20261106-101530",
-            "title": "Living room",
-            "created": "2026-11-06T10:15:30Z",
-            "saved": "2026-11-06T10:17:02Z",
+            "name": "room-20261106-214602",
+            "title": "Living room, both ends",
+            "created": "2026-11-06T21:46:02Z",
+            "saved": "2026-11-06T21:46:03Z",
             "aligned": {
-              "solver": "vggt",
-              "finished": "2026-11-06T10:16:40Z"
+              "solver": "none",
+              "finished": "2026-11-06T21:46:03Z"
             },
             "members": [
               {
-                "scene": "scene-20261106-101500",
+                "scene": "scene-20261106-214601",
                 "pose": {
                   "x_m": 0,
                   "z_m": 0,
                   "yaw_deg": 0
                 },
-                "scale": 1,
+                "scale": 1.04,
                 "pose_source": "origin",
                 "scene_object": {
-                  "name": "scene-20261106-101500",
-                  "title": null,
-                  "created": "2026-11-06T10:15:00Z",
-                  "saved": null,
-                  "photo_url": "/scenes/scene-20261106-101500/photo.jpg?v=1794000000",
-                  "thumb_url": "/scenes/scene-20261106-101500/thumb.jpg?v=1794000001",
-                  "depth_url": "/scenes/scene-20261106-101500/depth.png?v=1794000000",
+                  "name": "scene-20261106-214601",
+                  "title": "Living room, morning",
+                  "created": "2026-11-06T21:46:01Z",
+                  "saved": "2026-11-06T21:46:01Z",
+                  "photo_url": "/scenes/scene-20261106-214601/photo.jpg?v=1794001561",
+                  "thumb_url": "/scenes/scene-20261106-214601/thumb.jpg?v=1794001561",
+                  "depth_url": "/scenes/scene-20261106-214601/depth.png?v=1794001562",
                   "w": 1600,
                   "h": 1200,
-                  "camera_source": "auto",
+                  "camera_source": "manual",
                   "floor_found": true,
-                  "layouts": 0,
+                  "layouts": 1,
                   "calib_status": "done",
                   "calib_error": null,
-                  "room": "room-20261106-101530"
+                  "room": "room-20261106-214602"
                 }
               },
               {
-                "scene": "scene-20261106-101501",
-                "pose": {
-                  "x_m": -1.9,
-                  "z_m": 0.6,
-                  "yaw_deg": -29.4
-                },
-                "scale": 1.021,
-                "pose_source": "manual",
-                "scene_object": {
-                  "name": "scene-20261106-101501",
-                  "title": null,
-                  "created": "2026-11-06T10:15:01Z",
-                  "saved": null,
-                  "photo_url": "/scenes/scene-20261106-101501/photo.jpg?v=1794000000",
-                  "thumb_url": "/scenes/scene-20261106-101501/thumb.jpg?v=1794000001",
-                  "depth_url": "/scenes/scene-20261106-101501/depth.png?v=1794000000",
-                  "w": 1600,
-                  "h": 1200,
-                  "camera_source": "auto",
-                  "floor_found": true,
-                  "layouts": 0,
-                  "calib_status": "done",
-                  "calib_error": null,
-                  "room": "room-20261106-101530"
-                }
-              },
-              {
-                "scene": "scene-20261106-101502",
+                "scene": "scene-20261106-214602-3",
                 "pose": null,
                 "scale": 1,
                 "pose_source": "unplaced",
                 "scene_object": {
-                  "name": "scene-20261106-101502",
+                  "name": "scene-20261106-214602-3",
                   "title": null,
-                  "created": "2026-11-06T10:15:02Z",
+                  "created": "2026-11-06T21:46:02Z",
                   "saved": null,
-                  "photo_url": "/scenes/scene-20261106-101502/photo.jpg?v=1794000000",
-                  "thumb_url": "/scenes/scene-20261106-101502/thumb.jpg?v=1794000001",
-                  "depth_url": "/scenes/scene-20261106-101502/depth.png?v=1794000000",
+                  "photo_url": "/scenes/scene-20261106-214602-3/photo.jpg?v=1794001562",
+                  "thumb_url": null,
+                  "depth_url": "/scenes/scene-20261106-214602-3/depth.png?v=1794001562",
                   "w": 1600,
                   "h": 1200,
                   "camera_source": "auto",
@@ -105,7 +78,30 @@
                   "layouts": 0,
                   "calib_status": "done",
                   "calib_error": null,
-                  "room": "room-20261106-101530"
+                  "room": "room-20261106-214602"
+                }
+              },
+              {
+                "scene": "scene-20261106-214602-2",
+                "pose": null,
+                "scale": 1.04,
+                "pose_source": "unplaced",
+                "scene_object": {
+                  "name": "scene-20261106-214602-2",
+                  "title": null,
+                  "created": "2026-11-06T21:46:02Z",
+                  "saved": null,
+                  "photo_url": "/scenes/scene-20261106-214602-2/photo.jpg?v=1794001562",
+                  "thumb_url": null,
+                  "depth_url": "/scenes/scene-20261106-214602-2/depth.png?v=1794001562",
+                  "w": 1600,
+                  "h": 1200,
+                  "camera_source": "auto",
+                  "floor_found": true,
+                  "layouts": 0,
+                  "calib_status": "done",
+                  "calib_error": null,
+                  "room": "room-20261106-214602"
                 }
               }
             ],
@@ -116,14 +112,14 @@
         ],
         "trash": [
           {
-            "name": "room-20261106-090000",
+            "name": "room-20261106-214603",
             "title": null,
-            "created": "2026-11-06T09:00:00Z",
-            "deleted": "2026-11-06T09:30:12Z"
+            "created": "2026-11-06T21:46:03Z",
+            "deleted": "2026-11-06T21:46:03Z"
           }
         ]
       }
     }
   ],
-  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

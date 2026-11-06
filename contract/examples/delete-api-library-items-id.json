@@ -10,9 +10,9 @@
       "note": "to the trash",
       "body": {
         "ok": true,
-        "trash": ".trash/arrow-sign-20261105-182043"
+        "trash": ".trash/arrow-sign-20261106-214605"
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

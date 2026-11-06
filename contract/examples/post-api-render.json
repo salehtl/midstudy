@@ -9,7 +9,7 @@
       "note": "nano-banana with the scene photo as reference (mock: the result is the input)",
       "body": {
         "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAYACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDpvstvKSzxKW9cVBcx2VqVDW4Yv0C9T9KW+1COwgdzh3GMJnmsZvEhkYbrKJivQk5xWSSZbdjoIbe3ZFYQquex6097dGdFQAEHnFc5a3ttqOohrm38ohMB1dhgDtitlLy3WZIraRGESBcA8ipk1sEeZ69DktVuQmVPL5yeent9ayGnMmFeXYCw5Ve1FFZU9FZHpeyjON3uR+Y8MqvBM5wOvQ5rp7G5E0O4Bd4xuwOT6GiipqpNXKlTUErH/9k=",
-        "scene": "scene-20261105-182038",
+        "scene": "scene-20261106-214601",
         "layout": "front"
       }
     },
@@ -20,17 +20,17 @@
       "type": "RenderMeta",
       "note": "nano-banana with the scene photo as reference (mock: the result is the input)",
       "body": {
-        "name": "render-20261105-182040",
-        "url": "/renders/render-20261105-182040.jpg",
-        "input_url": "/renders/render-20261105-182040-input.jpg",
+        "name": "render-20261106-214602",
+        "url": "/renders/render-20261106-214602.jpg",
+        "input_url": "/renders/render-20261106-214602-input.jpg",
         "raw_url": null,
         "model": "nano-banana",
         "endpoint": "fal-ai/nano-banana/edit",
         "cost_usd": 0,
         "mock": true,
         "prompt": "Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or move anything.",
-        "created": "2026-11-05T18:20:40.060Z",
-        "scene": "scene-20261105-182038",
+        "created": "2026-11-06T21:46:02.583Z",
+        "scene": "scene-20261106-214601",
         "layout": "front",
         "reference": true,
         "keep_room": false,
@@ -50,7 +50,7 @@
         "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAYACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDpvstvKSzxKW9cVBcx2VqVDW4Yv0C9T9KW+1COwgdzh3GMJnmsZvEhkYbrKJivQk5xWSSZbdjoIbe3ZFYQquex6097dGdFQAEHnFc5a3ttqOohrm38ohMB1dhgDtitlLy3WZIraRGESBcA8ipk1sEeZ69DktVuQmVPL5yeent9ayGnMmFeXYCw5Ve1FFZU9FZHpeyjON3uR+Y8MqvBM5wOvQ5rp7G5E0O4Bd4xuwOT6GiipqpNXKlTUErH/9k=",
         "model": "kontext",
         "prompt": "Make it photoreal.",
-        "scene": "scene-20261105-182038"
+        "scene": "scene-20261106-214601"
       }
     },
     {
@@ -60,17 +60,17 @@
       "type": "RenderMeta",
       "note": "kontext, a given prompt",
       "body": {
-        "name": "render-20261105-182040-2",
-        "url": "/renders/render-20261105-182040-2.jpg",
-        "input_url": "/renders/render-20261105-182040-2-input.jpg",
+        "name": "render-20261106-214602-2",
+        "url": "/renders/render-20261106-214602-2.jpg",
+        "input_url": "/renders/render-20261106-214602-2-input.jpg",
         "raw_url": null,
         "model": "kontext",
         "endpoint": "fal-ai/flux-pro/kontext",
         "cost_usd": 0,
         "mock": true,
         "prompt": "Make it photoreal.",
-        "created": "2026-11-05T18:20:40.067Z",
-        "scene": "scene-20261105-182038",
+        "created": "2026-11-06T21:46:02.590Z",
+        "scene": "scene-20261106-214601",
         "layout": null,
         "reference": false,
         "keep_room": false,
@@ -88,7 +88,7 @@
       "note": "keep room (the calib stub's align never applies)",
       "body": {
         "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAYACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDpvstvKSzxKW9cVBcx2VqVDW4Yv0C9T9KW+1COwgdzh3GMJnmsZvEhkYbrKJivQk5xWSSZbdjoIbe3ZFYQquex6097dGdFQAEHnFc5a3ttqOohrm38ohMB1dhgDtitlLy3WZIraRGESBcA8ipk1sEeZ69DktVuQmVPL5yeent9ayGnMmFeXYCw5Ve1FFZU9FZHpeyjON3uR+Y8MqvBM5wOvQ5rp7G5E0O4Bd4xuwOT6GiipqpNXKlTUErH/9k=",
-        "scene": "scene-20261105-182038",
+        "scene": "scene-20261106-214601",
         "layout": "front",
         "keep_room": true,
         "mask": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABkAAAASwCAAAAACGatlLAAASCklEQVR4nO3UsQkDARDEwO+/aTszbHaZHjxTg9DzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADw8+FV6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAM7qYbLqHgDO6mGy6h4AzuphsuoeAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOCffAGNx2BXZiO5KAAAAABJRU5ErkJggg=="
@@ -101,17 +101,17 @@
       "type": "RenderMeta",
       "note": "keep room (the calib stub's align never applies)",
       "body": {
-        "name": "render-20261105-182040-3",
-        "url": "/renders/render-20261105-182040-3.jpg",
-        "input_url": "/renders/render-20261105-182040-3-input.jpg",
-        "raw_url": "/renders/render-20261105-182040-3-raw.jpg",
+        "name": "render-20261106-214602-3",
+        "url": "/renders/render-20261106-214602-3.jpg",
+        "input_url": "/renders/render-20261106-214602-3-input.jpg",
+        "raw_url": "/renders/render-20261106-214602-3-raw.jpg",
         "model": "nano-banana",
         "endpoint": "fal-ai/nano-banana/edit",
         "cost_usd": 0,
         "mock": true,
         "prompt": "Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or move anything.",
-        "created": "2026-11-05T18:20:40.077Z",
-        "scene": "scene-20261105-182038",
+        "created": "2026-11-06T21:46:02.600Z",
+        "scene": "scene-20261106-214601",
         "layout": "front",
         "reference": true,
         "keep_room": true,
@@ -158,6 +158,47 @@
       }
     },
     {
+      "kind": "request",
+      "schema": "midstudy/api/render-request.schema.json",
+      "type": "RenderRequest",
+      "note": "a room view: the current photo, the room and its layout",
+      "body": {
+        "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAYACADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDpvstvKSzxKW9cVBcx2VqVDW4Yv0C9T9KW+1COwgdzh3GMJnmsZvEhkYbrKJivQk5xWSSZbdjoIbe3ZFYQquex6097dGdFQAEHnFc5a3ttqOohrm38ohMB1dhgDtitlLy3WZIraRGESBcA8ipk1sEeZ69DktVuQmVPL5yeent9ayGnMmFeXYCw5Ve1FFZU9FZHpeyjON3uR+Y8MqvBM5wOvQ5rp7G5E0O4Bd4xuwOT6GiipqpNXKlTUErH/9k=",
+        "scene": "scene-20261106-214602-2",
+        "room": "room-20261106-214602",
+        "layout": "plan"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/render-meta.schema.json",
+      "type": "RenderMeta",
+      "note": "a room view: the current photo, the room and its layout",
+      "body": {
+        "name": "render-20261106-214603",
+        "url": "/renders/render-20261106-214603.jpg",
+        "input_url": "/renders/render-20261106-214603-input.jpg",
+        "raw_url": null,
+        "model": "nano-banana",
+        "endpoint": "fal-ai/nano-banana/edit",
+        "cost_usd": 0,
+        "mock": true,
+        "prompt": "Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or move anything.",
+        "created": "2026-11-06T21:46:03.579Z",
+        "scene": "scene-20261106-214602-2",
+        "layout": "plan",
+        "reference": true,
+        "keep_room": false,
+        "aligned": null,
+        "width": 32,
+        "height": 24,
+        "out_w": 32,
+        "out_h": 24,
+        "room": "room-20261106-214602"
+      }
+    },
+    {
       "kind": "response",
       "status": 402,
       "schema": "midstudy/api/spend-refused.schema.json",
@@ -170,5 +211,5 @@
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

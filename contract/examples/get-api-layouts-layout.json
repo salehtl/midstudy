@@ -1,6 +1,6 @@
 {
   "route": "GET /api/layouts/{layout}",
-  "contract": "§2.7",
+  "contract": "§2.7, §4.9",
   "examples": [
     {
       "kind": "response",
@@ -12,9 +12,9 @@
         "version": 1,
         "name": "front",
         "title": "Front",
-        "scene_name": "scene-20261105-182038",
+        "scene_name": "scene-20261106-214601",
         "library": "/library/library.json",
-        "updated": "2026-11-05T18:20:40Z",
+        "updated": "2026-11-06T21:46:02Z",
         "items": [
           {
             "uid": "probe-box-1",
@@ -58,9 +58,42 @@
       "type": "ApiError",
       "note": "no such layout",
       "body": {
-        "error": "scene 'scene-20261105-182038' has no layout named 'nope'"
+        "error": "scene 'scene-20261106-214601' has no layout named 'nope'"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/layout.schema.json",
+      "type": "Layout",
+      "note": "a room layout",
+      "body": {
+        "version": 1,
+        "name": "plan",
+        "title": null,
+        "room_name": "room-20261106-214602",
+        "library": null,
+        "updated": "2026-11-06T21:46:03Z",
+        "items": [
+          {
+            "uid": "probe-box-1",
+            "id": "probe-box",
+            "render": "glb",
+            "position": [
+              0.3,
+              0,
+              -2.5
+            ],
+            "rotation_y_deg": 10,
+            "dims_cm": {
+              "w": 80,
+              "d": 50,
+              "h": 120
+            }
+          }
+        ]
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

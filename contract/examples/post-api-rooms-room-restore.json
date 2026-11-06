@@ -9,17 +9,14 @@
       "type": "RoomObject",
       "note": "back from the trash",
       "body": {
-        "name": "room-20261106-101530",
-        "title": "Living room",
-        "created": "2026-11-06T10:15:30Z",
-        "saved": "2026-11-06T10:17:02Z",
-        "aligned": {
-          "solver": "vggt",
-          "finished": "2026-11-06T10:16:40Z"
-        },
+        "name": "room-20261106-214603",
+        "title": null,
+        "created": "2026-11-06T21:46:03Z",
+        "saved": null,
+        "aligned": null,
         "members": [
           {
-            "scene": "scene-20261106-101500",
+            "scene": "scene-20261106-214602",
             "pose": {
               "x_m": 0,
               "z_m": 0,
@@ -28,76 +25,26 @@
             "scale": 1,
             "pose_source": "origin",
             "scene_object": {
-              "name": "scene-20261106-101500",
+              "name": "scene-20261106-214602",
               "title": null,
-              "created": "2026-11-06T10:15:00Z",
+              "created": "2026-11-06T21:46:02Z",
               "saved": null,
-              "photo_url": "/scenes/scene-20261106-101500/photo.jpg?v=1794000000",
-              "thumb_url": "/scenes/scene-20261106-101500/thumb.jpg?v=1794000001",
-              "depth_url": "/scenes/scene-20261106-101500/depth.png?v=1794000000",
-              "w": 1600,
-              "h": 1200,
+              "photo_url": "/scenes/scene-20261106-214602/photo.jpg?v=1794001562",
+              "thumb_url": null,
+              "depth_url": "/scenes/scene-20261106-214602/depth.png?v=1794001562",
+              "w": 1200,
+              "h": 1600,
               "camera_source": "auto",
               "floor_found": true,
               "layouts": 0,
               "calib_status": "done",
               "calib_error": null,
-              "room": "room-20261106-101530"
-            }
-          },
-          {
-            "scene": "scene-20261106-101501",
-            "pose": {
-              "x_m": -1.9,
-              "z_m": 0.6,
-              "yaw_deg": -29.4
-            },
-            "scale": 1.021,
-            "pose_source": "manual",
-            "scene_object": {
-              "name": "scene-20261106-101501",
-              "title": null,
-              "created": "2026-11-06T10:15:01Z",
-              "saved": null,
-              "photo_url": "/scenes/scene-20261106-101501/photo.jpg?v=1794000000",
-              "thumb_url": "/scenes/scene-20261106-101501/thumb.jpg?v=1794000001",
-              "depth_url": "/scenes/scene-20261106-101501/depth.png?v=1794000000",
-              "w": 1600,
-              "h": 1200,
-              "camera_source": "auto",
-              "floor_found": true,
-              "layouts": 0,
-              "calib_status": "done",
-              "calib_error": null,
-              "room": "room-20261106-101530"
-            }
-          },
-          {
-            "scene": "scene-20261106-101502",
-            "pose": null,
-            "scale": 1,
-            "pose_source": "unplaced",
-            "scene_object": {
-              "name": "scene-20261106-101502",
-              "title": null,
-              "created": "2026-11-06T10:15:02Z",
-              "saved": null,
-              "photo_url": "/scenes/scene-20261106-101502/photo.jpg?v=1794000000",
-              "thumb_url": "/scenes/scene-20261106-101502/thumb.jpg?v=1794000001",
-              "depth_url": "/scenes/scene-20261106-101502/depth.png?v=1794000000",
-              "w": 1600,
-              "h": 1200,
-              "camera_source": "auto",
-              "floor_found": true,
-              "layouts": 0,
-              "calib_status": "done",
-              "calib_error": null,
-              "room": "room-20261106-101530"
+              "room": "room-20261106-214603"
             }
           }
         ],
-        "layouts": 1,
-        "align_status": "done",
+        "layouts": 0,
+        "align_status": "none",
         "align_error": null
       }
     },
@@ -108,19 +55,9 @@
       "type": "ApiError",
       "note": "none left in the trash",
       "body": {
-        "error": "'room-20261106-101530' isn't in the rooms' trash"
-      }
-    },
-    {
-      "kind": "response",
-      "status": 409,
-      "schema": "midstudy/api/error.schema.json",
-      "type": "ApiError",
-      "note": "a room by that name exists",
-      "body": {
-        "error": "a room 'room-20261106-101530' exists already"
+        "error": "'room-20261106-214603' isn't in the rooms' trash"
       }
     }
   ],
-  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

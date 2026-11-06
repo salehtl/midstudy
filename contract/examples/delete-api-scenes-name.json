@@ -10,9 +10,20 @@
       "note": "to the trash",
       "body": {
         "ok": true,
-        "trash": "scenes/.trash/scene-20261105-182039-20261105-182040"
+        "trash": "scenes/.trash/scene-20261106-214602-20261106-214602"
+      }
+    },
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/scene-deleted.schema.json",
+      "type": "SceneDeleted",
+      "note": "a photo of a room: it leaves the room",
+      "body": {
+        "ok": true,
+        "trash": "scenes/.trash/scene-20261106-214602-3-20261106-214603"
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

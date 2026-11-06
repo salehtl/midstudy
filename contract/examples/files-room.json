@@ -1,0 +1,46 @@
+{
+  "route": "rooms/<room>/room.json",
+  "contract": null,
+  "examples": [
+    {
+      "kind": "file rooms/<room>/room.json",
+      "schema": "midstudy/room.schema.json",
+      "type": "Room",
+      "note": "an aligned room",
+      "body": {
+        "version": 1,
+        "name": "room-20261106-214602",
+        "title": "Living room",
+        "created": "2026-11-06T21:46:02Z",
+        "saved": "2026-11-06T21:46:02Z",
+        "members": [
+          {
+            "scene": "scene-20261106-214601",
+            "pose": {
+              "x_m": 0,
+              "z_m": 0,
+              "yaw_deg": 0
+            },
+            "scale": 1,
+            "pose_source": "origin"
+          },
+          {
+            "scene": "scene-20261106-214602-2",
+            "pose": {
+              "x_m": -1.15,
+              "z_m": 0.45,
+              "yaw_deg": -22
+            },
+            "scale": 1,
+            "pose_source": "solver"
+          }
+        ],
+        "aligned": {
+          "solver": "truth",
+          "finished": "2026-11-06T21:46:02Z"
+        }
+      }
+    }
+  ],
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
+}

@@ -96,7 +96,7 @@
               "prompt": null,
               "cost_usd": 0,
               "mock": true,
-              "created": "2026-11-05T18:20:42Z"
+              "created": "2026-11-06T21:46:04Z"
             },
             "fit": {
               "glb_error_pct": {
@@ -130,11 +130,11 @@
             "default_render": "splat",
             "source": {
               "engine": "sam3d",
-              "input": "http://127.0.0.1:53658/media/cane-chair.jpg",
+              "input": "http://127.0.0.1:63823/media/cane-chair.jpg",
               "prompt": "chair",
               "cost_usd": 0,
               "mock": true,
-              "created": "2026-11-05T18:20:43Z"
+              "created": "2026-11-06T21:46:04Z"
             },
             "fit": {
               "glb_error_pct": {
@@ -155,11 +155,11 @@
           {
             "id": "arrow-sign",
             "name": "Arrow",
-            "deleted": "2026-11-05T18:20:43Z"
+            "deleted": "2026-11-06T21:46:05Z"
           }
         ]
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }

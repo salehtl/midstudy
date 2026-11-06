@@ -11,7 +11,7 @@
       "body": {
         "jobs": [
           {
-            "id": "l-20261105-182041-12bf",
+            "id": "l-20261106-214603-2ea6",
             "kind": "add",
             "item_id": "cane-chair",
             "status": "queued",
@@ -19,14 +19,14 @@
             "cost_usd_estimate": 0.02,
             "cost_usd": null,
             "mock": true,
-            "created": "2026-11-05T18:20:41Z",
+            "created": "2026-11-06T21:46:03Z",
             "started": null,
             "finished": null,
             "message": "waiting for the queue",
             "item": null
           },
           {
-            "id": "l-20261105-182041-c933",
+            "id": "l-20261106-214603-e788",
             "kind": "add",
             "item_id": "morris-chair",
             "status": "running",
@@ -34,14 +34,14 @@
             "cost_usd_estimate": 0.1,
             "cost_usd": null,
             "mock": true,
-            "created": "2026-11-05T18:20:41Z",
-            "started": "2026-11-05T18:20:41Z",
+            "created": "2026-11-06T21:46:03Z",
+            "started": "2026-11-06T21:46:03Z",
             "finished": null,
             "message": "making morris-chair (idol)",
             "item": null
           },
           {
-            "id": "l-20261105-182040-3e17",
+            "id": "l-20261106-214603-64d7",
             "kind": "add",
             "item_id": "arrow-sign",
             "status": "done",
@@ -49,9 +49,9 @@
             "cost_usd_estimate": 0,
             "cost_usd": 0,
             "mock": true,
-            "created": "2026-11-05T18:20:40Z",
-            "started": "2026-11-05T18:20:40Z",
-            "finished": "2026-11-05T18:20:40Z",
+            "created": "2026-11-06T21:46:03Z",
+            "started": "2026-11-06T21:46:03Z",
+            "finished": "2026-11-06T21:46:03Z",
             "message": "added arrow-sign",
             "item": {
               "id": "arrow-sign",
@@ -75,7 +75,7 @@
                 "prompt": null,
                 "cost_usd": 0,
                 "mock": true,
-                "created": "2026-11-05T18:20:40Z"
+                "created": "2026-11-06T21:46:03Z"
               },
               "fit": {
                 "glb_error_pct": {
@@ -92,5 +92,5 @@
       }
     }
   ],
-  "recorded": "planner/serve.py (MIDSTUDY_SERVER=legacy), contract/tools/record-examples.mjs"
+  "recorded": "node server/src/main.ts, contract/tools/record-examples.mjs"
 }
