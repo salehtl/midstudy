@@ -9,24 +9,30 @@
 // rects, drags, the ruler, SH rotation, the splats' colour level and the warmth tint, and the small maths the contract's
 // rules are made of: the camera block's ranges, default and clamp, the Look's clamps, the angle wraps, v1's round, the
 // elevation range, the rotate step and the occlusion depth's scale), with depth.png decoded in a worker
-// (planner/engine.worker.ts). Every render pass is planner/engine.passes.ts. three.js stays where three
-// needs it (rendering, loading, raycasting meshes).
+// (planner/engine.worker.ts). three.js stays where three needs it (rendering, loading, raycasting meshes).
+//
+// The renderer is three.js's WebGPURenderer: WebGPU where the browser has it, its WebGL2 backend otherwise (no
+// adapter, or ?webgpu=0). Every pass is TSL (planner/gpu/passes.ts), so one code path compiles to both; the frame's
+// order is planner/engine.passes.ts. The output colour space is linear and there is no tone mapping at the output: the
+// passes write sRGB bytes themselves.
 //
 // Drawing (each frame, on demand; engine.passes.ts drawFrame):
 //   1. furniture pass, into a half-float MSAA target: an optional depth pre-pass writes the photo's depth (depth.png,
 //      + 3 cm) into the depth buffer with colour writes off, then the pieces, their contact shadows and the floor grid
 //      draw on top of it (so the real sofa hides a piece behind it);
-//   2. splat pass (only while splat items are placed, §4.5 Splats): Spark draws the splats (camera layer SPLAT_LAYER,
-//      nothing else) into a second half-float target that shares the furniture pass's depth texture, so splats test
-//      against the photo's depth and the meshes (3 cm tolerance, like meshes) and write none. Their GLB (the stand-in
-//      box for idol) is in the scene but invisible: it picks, drags, bounds and casts the contact shadow.
+//   2. splat pass (only while splat items are placed, §4.5 Splats): planner/gpu/splat-layer.ts draws every placed
+//      splat into its own half-float target over the photo's depth and the pieces' meshes (depth only), so splats test
+//      against both (3 cm tolerance, like meshes) and write none; sorted back to front on the GPU (WebGPU: a compute
+//      radix sort) or in a worker (planner/gpu/sort.worker.ts). Their GLB (the stand-in box for idol) is in the scene but
+//      invisible: it picks, drags, bounds and casts the contact shadow.
 //   3. the screen: the photo, drawn exactly as its bytes are (no tone mapping, exposure or warmth), contain-fit in the
 //      uncovered part of the window (letterbox bars), then the furniture pass composited over it with the Look
 //      (exposure, warmth), ACES Filmic and sRGB applied to the furniture only, then the splat pass over that: splat
 //      colours are photo colours, so only exposure × warmth applies to them, as a plain multiplier (no ACES). Contact
 //      shadows live in the furniture pass, so they never darken a splat.
 //   Zoom and pan are 2D (camera.setViewOffset over the photo's rectangle); the camera block never changes for them.
-//   Renders capture the same passes at the photo's own resolution (no view offset, no UI), splats sorted first.
+//   Renders capture the same passes at the photo's own resolution (no view offset, no UI), splats sorted first; the
+//   read-back is asynchronous on both backends, so the view holds still meanwhile.
 //
 // Coordinates: "photo px" are contract §4.1 pixels on photo.jpg at its full size; "client px" are CSS pixels in the
 // window. photoToFloor() and floorToPhoto() implement §4.1 exactly (the kernels); picking uses the same rays.
@@ -75,13 +81,11 @@
 //   'error' { text }      'toast' { text, kind, ms }   'lighting' { status, error }
 // Performance marks (E17): performance.measure 'midstudy:<step>' for scene-open, photo, depth-decode, envmap (lighting.ts),
 // item-add, render-capture and mask-build.
-import * as THREE from 'three'
+import * as THREE from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import type { SparkRenderer, SplatMesh } from '@sparkjsdev/spark'
 import {
   DEFAULT_CAMERA, KernelWorker, SceneCamera, azElOf, boxCorners as kBoxCorners, clampCamera as kClampCamera, clampElevation,
   clampLook, decodeDepth, depthScale as kDepthScale, dirOf, dragHeight as kDragHeight, dragLift, dragMove, dragRotate,
@@ -91,9 +95,13 @@ import {
 import type { DepthMap, ItemBox, KeepRoomMask, Plane, Rect } from '../core/js/web.js'
 import { V1_KEY_DIR, V1_SOFTNESS, createLighting } from './lighting.js'
 import {
-  DEPTH_LAYER, SPLAT_LAYER, captureTarget, createPasses, drawFrame, drawMask, maskTarget, noRaycast, readPixels, setScreen,
-  sizeTargets, withFullFrame,
+  SHADOW_Y, captureTarget, createPasses, drawFrame, drawMask, makeContactShadow, maskTarget, noRaycast, onDepthLayer, readRgba, setScreen,
+  setSplatSource, sizeTargets, withFullFrame,
 } from './engine.passes.js'
+import { clearTarget, createFrame, createFurnitureComposite, depthTexture, photoTexture, render, setFrame } from './gpu/passes.js'
+import { decodeSplat } from './gpu/splat-data.js'
+import type { SplatData } from './gpu/splat-data.js'
+import { SplatLayer } from './gpu/splat-layer.js'
 import * as cameraLogic from './logic/camera.js'
 import type { Camera } from './logic/camera.js'
 import * as layoutLogic from './logic/layout.js'
@@ -248,6 +256,7 @@ function emit<K extends keyof EngineEvents>(name: K, detail: EngineEvents[K]): v
 // toast, a layout loading) stayed undrawn until the pointer moved.
 let awakeUntil = 0
 let framePending = false
+let holdFrames = 0 // > 0 while a capture holds the view (captureShot, captureMask)
 function wake(ms = 400): void {
   awakeUntil = Math.max(awakeUntil, performance.now() + ms)
   framePending = true
@@ -317,20 +326,24 @@ async function inWorker<T>(call: (k: KernelWorker) => Promise<T>, here: () => T)
 }
 
 // --- renderer -------------------------------------------------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, preserveDrawingBuffer: false })
+// WebGPU, or the WebGL2 backend three falls back to by itself when the browser has no WebGPU adapter (?webgpu=0 forces
+// it). init() picks the backend; everything below that makes GPU objects waits for it (the kernels load meanwhile).
+const renderer = new THREE.WebGPURenderer({ antialias: false, alpha: false, forceWebGL: params.get('webgpu') === '0' })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.autoClear = false
 renderer.toneMapping = THREE.NoToneMapping
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace // no output conversion: the passes write sRGB bytes themselves
 const canvas = renderer.domElement
+await renderer.init()
 const drawSize = new THREE.Vector2()
-const P = createPasses()
+const P = createPasses(renderer)
 
 // The furniture scene: lights, the depth pre-pass, the grid, the pieces.
 const scene = new THREE.Scene()
 // The lights (planner/lighting.ts, contract §4.8): lighting.json's probe, key and floor shadow, or the v1 lights. The
-// catcher reads the photo through the photo pass's texture and the composite's rectangle (v1 shared those uniforms).
-const lights = createLighting({ renderer, scene, photo: { tPhoto: P.photo.tPhoto, screen: P.comp.screen } })
+// catcher reads the photo through the photo pass's texture and the frame's rectangle.
+const lights = createLighting({ renderer, scene, photo: { node: P.photo.node, frame: P.frame } })
 scene.add(P.depth.mesh)
 const grid = P.grid
 scene.add(grid)
@@ -399,8 +412,7 @@ function updateView(): void {
   const off = viewLogic.viewOffset(t, photo, r)
   camera.setViewOffset(off.fullWidth, off.fullHeight, off.x, off.y, off.width, off.height)
   camera.updateProjectionMatrix()
-  setScreen(P, viewLogic.bufferRect(t, photo, r, k), drawSize)
-  P.depth.uProj.value.copy(camera.projectionMatrix)
+  setScreen(P, viewLogic.bufferRect(t, photo, r, k))
   wake()
 }
 // depth.png is metric in the calibration's frame, where the camera stood calib.json's height_m above the floor it found.
@@ -470,11 +482,11 @@ function resizeTargets(): void {
   sizeTargets(P, Math.max(1, drawSize.x), Math.max(1, drawSize.y))
 }
 // The splat pass is redrawn only when its key changes: the camera and view, the target size, the occlusion depth,
-// every placed piece's transform (meshes hide splats), and splatEpoch, which Spark's onDirty (a load, generate or sort
-// landed) and every rebuilt piece bump.
+// every placed piece's transform (meshes hide splats), and splatEpoch, which a landed worker sort (the layer's
+// onChange) and every rebuilt piece bump.
 let splatEpoch = 0
 function splatKey(): string {
-  const k: (string | number)[] = [splatEpoch, P.splatRT.width, P.splatRT.height, P.depth.mesh.visible ? 1 : 0, P.depth.uScale.value, photo.depthTexture?.id ?? -1, ...camera.projectionMatrix.elements, ...camera.matrixWorld.elements]
+  const k: (string | number)[] = [splatEpoch, P.furnRT.width, P.furnRT.height, P.depth.mesh.visible ? 1 : 0, P.depth.pass.scale.value, photo.depthTexture?.id ?? -1, ...camera.projectionMatrix.elements, ...camera.matrixWorld.elements]
   for (const r of items.values()) k.push(r.uid, ...r.group.matrixWorld.elements)
   return k.join(',')
 }
@@ -561,38 +573,6 @@ function planePointAt(plane: Plane, clientX: number, clientY: number): Vec3 | nu
 }
 
 // --- contact shadows (contract §2.6.3, as nook) -------------------------------------------------------------------------
-const shadowTex = ((): THREE.Texture => {
-  const c = document.createElement('canvas')
-  c.width = c.height = 128
-  const g = c.getContext('2d')
-  if (g) {
-    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-    grd.addColorStop(0, 'rgba(0,0,0,0.95)')
-    grd.addColorStop(0.45, 'rgba(0,0,0,0.85)')
-    grd.addColorStop(0.65, 'rgba(0,0,0,0.55)')
-    grd.addColorStop(0.82, 'rgba(0,0,0,0.2)')
-    grd.addColorStop(1, 'rgba(0,0,0,0)')
-    g.fillStyle = grd
-    g.fillRect(0, 0, 128, 128)
-  }
-  const t = new THREE.CanvasTexture(c)
-  t.colorSpace = THREE.SRGBColorSpace
-  return t
-})()
-const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, map: shadowTex, transparent: true, depthWrite: false, opacity: 0.75 })
-const SHADOW_Y = 0.004
-function makeContactShadow(box: THREE.Box3): THREE.Mesh {
-  const size = box.getSize(new THREE.Vector3())
-  const c = box.getCenter(new THREE.Vector3())
-  const shadow = new THREE.Mesh(shadowGeo, shadowMat)
-  shadow.name = 'contact-shadow'
-  shadow.position.set(c.x, SHADOW_Y, c.z)
-  shadow.scale.set(size.x * 1.45 + 0.06, 1, size.z * 1.45 + 0.06)
-  shadow.renderOrder = 2
-  shadow.raycast = noRaycast
-  return shadow
-}
 function setContactShadows(on: unknown): void {
   setLighting({ contact_shadows: !!on })
 }
@@ -622,7 +602,7 @@ interface ItemRec {
   sig: string
   readonly group: THREE.Group
   child: THREE.Object3D | null
-  splat: SplatMesh | null
+  splat: SplatData | null
   render: Render
   localBox: THREE.Box3 | null
   rotationDeg: number
@@ -698,7 +678,7 @@ function syncPlaced(): void {
       const a = libView(r.lib)
       const b = libView(l)
       for (const relPath of [a.glb, a.spz, a.splat, b.glb, b.spz, b.splat]) {
-        if (relPath) { glbCache.delete(assetUrl(relPath)); splatBytes.delete(assetUrl(relPath)) }
+        if (relPath) { glbCache.delete(assetUrl(relPath)); splatFiles.delete(assetUrl(relPath)) }
       }
     }
     r.sig = sig
@@ -709,7 +689,7 @@ async function rebuildItem(r: ItemRec, l: LibraryEntry): Promise<void> {
   const token = ++r.build
   let built: Built
   try { built = await buildChild(l) } catch (e) { throw reportError(`Could not reload "${libLogic.libName(libView(l))}"`, e) }
-  if (token !== r.build || items.get(r.uid) !== r) { disposeBuilt(built); return }
+  if (token !== r.build || items.get(r.uid) !== r) { disposeChild(built.obj); return }
   detachBuilt(r)
   r.lib = l
   attachBuilt(r, built)
@@ -721,7 +701,8 @@ async function rebuildItem(r: ItemRec, l: LibraryEntry): Promise<void> {
 // A GLB or OBJ add has no photo, so midstudy-add writes no thumb.jpg and the library showed initials. The planner
 // renders one (front three-quarter view, the room's lighting, 256 px), and PUT /api/library/items/<id>/thumb stores it
 // next to the model, so every device gets it. One at a time, once per item per page load; only for the server's own
-// library (a ?library= elsewhere is read-only). Its own small WebGL renderer, so the photo view is never disturbed.
+// library (a ?library= elsewhere is read-only). Drawn by the planner's own renderer into targets of its own, so the
+// photo view is never disturbed.
 const OWN_LIBRARY = ((): boolean => { const u = new URL(LIBRARY_URL, location.href); return u.origin === location.origin && u.pathname === '/library/library.json' })()
 const thumbTried = new Set<string>()
 let thumbsRunning = false
@@ -746,43 +727,56 @@ async function makeMissingThumbs(): Promise<void> {
     }
   } finally { thumbsRunning = false }
 }
+// v1's look: the model lit by RoomEnvironment and a key light, ACES Filmic and sRGB (the furniture composite, as the
+// renderer's output does no conversion), over a plain 0xe7e4df background, antialiased (4× MSAA).
+const THUMB_BG = new THREE.Color().setRGB(0xe7 / 255, 0xe4 / 255, 0xdf / 255, THREE.LinearSRGBColorSpace) // written as is: e7e4df
+let thumbPass: { size: number; model: THREE.RenderTarget; out: THREE.RenderTarget; quad: THREE.QuadMesh } | null = null
+function thumbTargets(size: number): NonNullable<typeof thumbPass> {
+  if (thumbPass?.size === size) return thumbPass
+  const model = new THREE.RenderTarget(size, size, { type: THREE.HalfFloatType, samples: 4, depthBuffer: true })
+  const out = new THREE.RenderTarget(size, size, { type: THREE.UnsignedByteType, depthBuffer: false })
+  const frame = createFrame()
+  setFrame(frame, [0, 0, size, size])
+  thumbPass = { size, model, out, quad: new THREE.QuadMesh(createFurnitureComposite(frame, model.texture).material) }
+  return thumbPass
+}
 async function modelThumbnail(l: LibraryEntry, size = 256): Promise<string> {
   const glb = libView(l).glb
   if (!glb) throw new Error('no GLB')
   const t = await loadGlbTemplate(assetUrl(glb))
+  const th = thumbTargets(size)
+  const sc = new THREE.Scene()
+  sc.environment = lights.roomEnvironment
+  const key = new THREE.DirectionalLight(0xffffff, 1.2)
+  key.position.set(2, 4, 3)
+  sc.add(key, t.scene.clone(true))
+  // the item frame: footprint centre at the origin, on the floor, front +Z; seen from front-right, a little above
+  const b = t.box
+  const c = b.getCenter(new THREE.Vector3())
+  const radius = Math.max(1e-3, b.getSize(new THREE.Vector3()).length() / 2)
+  const thumbCam = new THREE.PerspectiveCamera(30, 1, radius / 100, radius * 100)
+  const dir = new THREE.Vector3(0.55, 0.42, 1).normalize()
+  thumbCam.position.copy(c).addScaledVector(dir, (radius / Math.sin((30 * DEG) / 2)) * 1.02)
+  thumbCam.lookAt(c)
+  lights.withDiffuseIbl(() => {
+    try {
+      renderer.setRenderTarget(th.model)
+      renderer.setClearColor(0x000000, 0)
+      clearTarget(renderer)
+      render(renderer, sc, thumbCam)
+      renderer.setRenderTarget(th.out)
+      renderer.setClearColor(THUMB_BG, 1)
+      clearTarget(renderer)
+      th.quad.render(renderer)
+    } finally { renderer.setRenderTarget(null) }
+  })
+  const px = await readRgba(renderer, th.out, size, size)
   const cv = document.createElement('canvas')
   cv.width = cv.height = size
-  const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true })
-  try {
-    r.setPixelRatio(1)
-    r.setSize(size, size, false)
-    r.toneMapping = THREE.ACESFilmicToneMapping
-    r.outputColorSpace = THREE.SRGBColorSpace
-    const sc = new THREE.Scene()
-    sc.background = new THREE.Color(0xe7e4df)
-    const pm = new THREE.PMREMGenerator(r)
-    const envRT = pm.fromScene(new RoomEnvironment(), 0.04)
-    sc.environment = envRT.texture
-    const key = new THREE.DirectionalLight(0xffffff, 1.2)
-    key.position.set(2, 4, 3)
-    sc.add(key, t.scene.clone(true))
-    // the item frame: footprint centre at the origin, on the floor, front +Z; seen from front-right, a little above
-    const b = t.box
-    const c = b.getCenter(new THREE.Vector3())
-    const radius = Math.max(1e-3, b.getSize(new THREE.Vector3()).length() / 2)
-    const thumbCam = new THREE.PerspectiveCamera(30, 1, radius / 100, radius * 100)
-    const dir = new THREE.Vector3(0.55, 0.42, 1).normalize()
-    thumbCam.position.copy(c).addScaledVector(dir, (radius / Math.sin((30 * DEG) / 2)) * 1.02)
-    thumbCam.lookAt(c)
-    r.render(sc, thumbCam)
-    const url = cv.toDataURL('image/jpeg', 0.88)
-    pm.dispose()
-    envRT.dispose()
-    return url
-  } finally {
-    r.dispose()
-    r.forceContextLoss()
-  }
+  const g = cv.getContext('2d')
+  if (!g) throw new Error('no 2D canvas')
+  g.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), size, size), 0, 0)
+  return cv.toDataURL('image/jpeg', 0.88)
 }
 
 function loadGlbTemplate(url: string): Promise<{ scene: THREE.Object3D; box: THREE.Box3 }> {
@@ -805,57 +799,36 @@ function loadGlbTemplate(url: string): Promise<{ scene: THREE.Object3D; box: THR
   return p
 }
 
-// --- splats (contract §4.5 Splats): Spark 2.4.0 from the bundle, imported on the first splat item ------------------------
-// A splat item is its GLB (or a box at its dims), invisible, plus a SplatMesh: both children of the item's group, so
-// position, rotation and elevation move them together. The SplatMesh and the SparkRenderer live on SPLAT_LAYER only:
-// the furniture pass and the keep-room mask never draw them, and the raycaster (layer 0) picks the GLB, not the splat.
-// Spark settings: sortRadial false orders by depth along the view (as nook did); everything else is Spark's default
-// (nook kept the defaults on phones), with LoD off (furniture splats have no LoD tree). onDirty wakes the on-demand
-// render loop when a load or a sort lands, so a splat appears without the pointer moving.
-type SparkModule = typeof import('@sparkjsdev/spark')
-let sparkModule: Promise<SparkModule> | null = null
-let spark: SparkRenderer | null = null
-function loadSpark(): Promise<SparkModule> {
-  sparkModule ??= import('@sparkjsdev/spark').then((m) => {
-    if (!spark) {
-      const s = new m.SparkRenderer({ renderer, onDirty: () => { splatEpoch++; wake(50) }, sortRadial: false, enableLod: false })
-      s.name = 'spark'
-      s.layers.set(SPLAT_LAYER)
-      s.raycast = noRaycast
-      scene.add(s)
-      spark = s
-    }
-    return m
-  })
-  return sparkModule
+// --- splats (contract §4.5 Splats): planner/gpu/splat-layer.ts, made on the first splat item ------------------------
+// A splat item is its GLB (or a box at its dims), invisible, plus its splats in the layer, placed by the item's group:
+// position, rotation and elevation move them together. The layer draws in the splat pass only; the furniture pass and
+// the keep-room mask never draw it, and the raycaster picks the GLB, not the splat. The layer sorts on the GPU
+// (WebGPU) or in a worker (the WebGL2 fallback); a worker sort that lands wakes the on-demand render loop
+// (onChange), so a splat appears without the pointer moving.
+let splatLayer: SplatLayer | null = null
+function splats(): SplatLayer {
+  if (!splatLayer) {
+    splatLayer = new SplatLayer({ renderer, onChange: () => { splatEpoch++; wake(50) } })
+    setSplatSource(P, splatLayer.target.texture)
+  }
+  return splatLayer
 }
-const splatBytes = new Map<string, Promise<Uint8Array<ArrayBuffer>>>() // url -> bytes (Spark copies them before parsing, so they can be reused)
-function loadSplatBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
-  const cached = splatBytes.get(url)
+// url -> the decoded splats (splat.spz or splat.ply), shared by every placed copy of an item (the layer copies them).
+const splatFiles = new Map<string, Promise<SplatData>>()
+function loadSplatFile(url: string): Promise<SplatData> {
+  const cached = splatFiles.get(url)
   if (cached) return cached
-  const p = fetchBytes(url)
-  splatBytes.set(url, p)
-  p.catch(() => splatBytes.delete(url))
+  const p = fetchBytes(url).then(decodeSplat)
+  splatFiles.set(url, p)
+  p.catch(() => splatFiles.delete(url))
   return p
 }
-async function loadSplatMesh(l: LibView): Promise<SplatMesh> {
-  const { SplatMesh: Splat } = await loadSpark()
+async function loadSplat(l: LibView): Promise<SplatData> {
   const rel = libLogic.splatAsset(l)
   if (!rel) throw new Error('the item has no splat')
-  const url = assetUrl(rel)
-  const bytes = await loadSplatBytes(url)
-  const mesh = new Splat({ fileBytes: bytes, fileName: url.split(/[?#]/)[0] ?? url })
-  try {
-    await mesh.initialized
-    if (!(mesh.numSplats > 0)) throw new Error('the splat has no points')
-  } catch (e) {
-    try { mesh.dispose() } catch { /* ignore */ }
-    throw e
-  }
-  mesh.name = 'splat'
-  mesh.layers.set(SPLAT_LAYER)
-  mesh.raycast = noRaycast
-  return mesh
+  const data = await loadSplatFile(assetUrl(rel))
+  if (!(data.count > 0)) throw new Error('the splat has no points')
+  return data
 }
 // Splat items in the scene (their splat drawn): the splat pass runs only while there are some.
 function splatItemCount(): number {
@@ -864,33 +837,13 @@ function splatItemCount(): number {
   return n
 }
 const sleep = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms) })
-// Sorts the splats for the camera as it is now and waits for the sort (a capture reads the frame right after).
-// The view offset (zoom, pan) doesn't change the order: it depends on the camera's position and direction only.
-// Settled means a sort that started after the last generate has landed, for the splat set now in the scene: Spark shows
-// a new set (`display`) only once its own sort is done. update() always regenerates for the camera and marks the set for
-// sorting, but a sort can't start while the set is still changing (a piece just added): it stays dirty and the next
-// update() takes it from there. So: update, wait for that sort, and repeat until one settles.
-async function settleSplats(timeoutMs = 30000): Promise<void> {
-  const s = spark
-  if (!s || !splatItemCount()) return
-  const t0 = performance.now()
-  const left = (): boolean => performance.now() - t0 < timeoutMs
-  const settled = (): boolean => !s.sorting && !s.sortDirty && s.sortTimeoutId === undefined && s.display === s.current
-  for (;;) {
-    while (s.sorting && left()) await sleep(10)
-    // Spark reads each SplatMesh's world matrix from its parent's as it stands: a piece added since the last frame has
-    // never had its group's updated (v1's bounds refreshed it as a side effect; the kernels' don't), so its splats
-    // would be generated and sorted where the group was made (the origin), and the capture drawn in that order.
-    scene.updateMatrixWorld()
-    let p: Promise<void>
-    camera.layers.set(SPLAT_LAYER) // Spark picks up the SplatMeshes the camera's layers see
-    try { p = s.update({ scene, camera }) } finally { camera.layers.set(0) }
-    await p
-    const t1 = performance.now()
-    while (!settled() && left() && (s.sorting || performance.now() - t1 < 300)) await sleep(20)
-    if (settled() || !left()) break
-  }
-  if (!settled()) reportError('The splats were still sorting when the render was captured; try rendering again')
+// The order the splats are drawn in is for the camera as it is now and every placed piece (a capture reads the frame
+// right after). The view offset (zoom, pan) doesn't change the order: it depends on the camera's position and
+// direction only. The layer reads each piece's world matrix with its parents' (updateWorldMatrix(true, false)) when it
+// prepares a sort, so a piece added since the last frame sorts where it stands (v2's E13.24 race was Spark's stale one).
+async function settleSplats(): Promise<void> {
+  if (!splatLayer || !splatItemCount()) return
+  try { await splatLayer.settle(camera) } catch (e) { reportError('The splats were still sorting when the render was captured; try rendering again', e) }
 }
 
 // A piece the library doesn't have any more (§2.8), or one without a GLB (v1 draws GLB only): a dashed box at its dims.
@@ -927,22 +880,19 @@ async function glbChild(glb: string): Promise<Child> {
   return { obj: t.scene.clone(true), box: t.box.clone() }
 }
 interface Built extends Child {
-  splat: SplatMesh | null
+  splat: SplatData | null
   render: Render
 }
 // → { obj, box, splat, render }: obj is what picks, drags, bounds and shadows (the GLB, a box, or the missing box); with
-// render 'splat', obj is invisible and `splat` (a SplatMesh) is what's drawn. A splat that won't load falls back to
-// the GLB (for idol, its stand-in box), with a non-blocking error.
+// render 'splat', obj is invisible and `splat` (the decoded splats, drawn by the layer) is what's drawn. A splat that
+// won't load falls back to the GLB (for idol, its stand-in box), with a non-blocking error.
 async function buildChild(l: LibraryEntry): Promise<Built> {
   const v = libView(l)
   const dims = libLogic.validDims(l.dims_cm ?? null) ?? libLogic.MISSING_DIMS
   if (v.missing) return { ...missingChild(dims), splat: null, render: 'glb' }
   if (libLogic.pickRender(v) === 'splat') {
-    const [base, splat] = await Promise.allSettled([v.glb ? glbChild(v.glb) : Promise.resolve(boxChild(dims)), loadSplatMesh(v)])
-    if (base.status === 'rejected') {
-      if (splat.status === 'fulfilled') { try { splat.value.dispose() } catch { /* ignore */ } }
-      throw base.reason
-    }
+    const [base, splat] = await Promise.allSettled([v.glb ? glbChild(v.glb) : Promise.resolve(boxChild(dims)), loadSplat(v)])
+    if (base.status === 'rejected') throw base.reason
     if (splat.status === 'fulfilled') {
       base.value.obj.visible = false
       return { ...base.value, splat: splat.value, render: 'splat' }
@@ -954,23 +904,10 @@ async function buildChild(l: LibraryEntry): Promise<Built> {
   if (!v.glb) return { ...missingChild(dims), splat: null, render: 'glb' }
   return { ...(await glbChild(v.glb)), splat: null, render: 'glb' }
 }
-// GLB clones share geometry and materials with the cached template; the boxes and the splat are the item's own.
+// GLB clones share geometry and materials with the cached template, and splats their decoded file (the layer holds its
+// own copy); the boxes are the item's own.
 function disposeChild(obj: THREE.Object3D | null): void {
   if (obj?.name === 'missing-item' || obj?.name === 'splat-box') obj.traverse((c) => { if (isMesh(c) || isLine(c)) c.geometry.dispose() })
-}
-function disposeBuilt(b: { obj: THREE.Object3D | null; splat: SplatMesh | null }): void {
-  disposeChild(b.obj)
-  if (b.splat) { try { b.splat.dispose() } catch { /* ignore */ } }
-}
-// The pieces' meshes that write depth in the furniture pass go on DEPTH_LAYER too (engine.passes.ts), so a splat pass
-// that draws its own depth (the WebGPU swap) draws exactly them: not the placeholder's see-through fill, not the
-// contact shadows, not a splat item's hidden stand-in (invisible) or its shadow-only caster (added after this).
-function onDepthLayer(obj: THREE.Object3D): void {
-  obj.traverse((o) => {
-    if (!isMesh(o)) return
-    const mats = Array.isArray(o.material) ? o.material : [o.material]
-    if (mats.some((m) => m.depthWrite)) o.layers.enable(DEPTH_LAYER)
-  })
 }
 // Puts a built child (buildChild) into the item's group, with its contact shadow; detachBuilt takes it out again.
 function attachBuilt(r: ItemRec, b: Built): void {
@@ -982,7 +919,7 @@ function attachBuilt(r: ItemRec, b: Built): void {
   r.group.add(b.obj)
   lights.prepare(b.obj)
   if (r.splat) {
-    r.group.add(r.splat)
+    splats().add(r.uid, r.splat, r.group)
     r.caster = lights.caster(b.obj) // the hidden GLB or box casts the splat's floor shadow (§4.8)
     r.group.add(r.caster)
   }
@@ -994,10 +931,10 @@ function attachBuilt(r: ItemRec, b: Built): void {
 }
 function detachBuilt(r: ItemRec): void {
   splatEpoch++
-  for (const o of [r.child, r.splat, r.shadow, r.caster]) if (o) r.group.remove(o)
-  if (r.child) lights.forget(r.child)
+  for (const o of [r.child, r.shadow, r.caster]) if (o) r.group.remove(o)
+  if (r.splat) splatLayer?.remove(r.uid)
   r.caster = null
-  disposeBuilt({ obj: r.child, splat: r.splat })
+  disposeChild(r.child)
   r.child = null
   r.splat = null
   r.shadow = null
@@ -1513,31 +1450,12 @@ function setPhoto(img: HTMLImageElement, depth: DepthMap | null): void {
   photo.image = img
   photo.w = img.naturalWidth
   photo.h = img.naturalHeight
-  const t = new THREE.Texture(img)
-  t.flipY = false
-  t.colorSpace = THREE.NoColorSpace
-  t.minFilter = THREE.LinearMipmapLinearFilter
-  t.magFilter = THREE.LinearFilter
-  t.generateMipmaps = true
-  t.anisotropy = 4
-  t.needsUpdate = true
-  photo.texture = t
+  photo.texture = photoTexture(img)
   photo.has = true
-  P.photo.tPhoto.value = t
-  P.photo.uHas.value = 1
+  P.photo.setPhoto(photo.texture)
   photo.depth = depth
-  if (depth) {
-    const dt = new THREE.DataTexture(depth.data, depth.width, depth.height, THREE.RedFormat, THREE.FloatType)
-    dt.flipY = false
-    dt.minFilter = dt.magFilter = THREE.NearestFilter
-    dt.generateMipmaps = false
-    dt.needsUpdate = true
-    photo.depthTexture = dt
-    P.depth.tDepth.value = dt
-  } else {
-    photo.depthTexture = null
-    P.depth.tDepth.value = null
-  }
+  photo.depthTexture = depth ? depthTexture(depth.data, depth.width, depth.height) : null
+  P.depth.pass.setDepth(photo.depthTexture)
   syncOcclusion()
 }
 function clearPhoto(): void {
@@ -1548,9 +1466,8 @@ function clearPhoto(): void {
   photo.texture = null
   photo.depth = null
   photo.depthTexture = null
-  P.photo.tPhoto.value = null
-  P.photo.uHas.value = 0
-  P.depth.tDepth.value = null
+  P.photo.setPhoto(null)
+  P.depth.pass.setDepth(null)
   syncOcclusion()
 }
 const syncOcclusion = (): void => { P.depth.mesh.visible = occlusion && !!photo.depthTexture }
@@ -2009,13 +1926,13 @@ function resolvedLook(): ResolvedLook {
   return lookLogic.resolveLook(look, auto, !!lightingData, dirOf)
 }
 function applyLook(): void {
-  P.comp.uExposure.value = look.exposure
+  P.comp.exposure.value = look.exposure
   const tint = splatMultiplier(look.warmth, 1, [1, 1, 1]) // the kernels' warmth tint (× exposure 1 × gain 1, exactly)
-  P.comp.uTint.value.set(tint[0], tint[1], tint[2])
+  P.comp.tint.value.set(tint[0], tint[1], tint[2])
   lights.setLook(resolvedLook())
   // splats (§4.5, §4.8): a plain multiplier, the Look's exposure × warmth times the room's light colour and level
   const g = splatMultiplier(look.warmth, look.exposure, lights.splatGain())
-  P.splatComp.uGain.value.set(g[0], g[1], g[2])
+  P.splatGain.value.set(g[0], g[1], g[2])
   for (const r of items.values()) syncShadow(r)
   emitLook()
 }
@@ -2119,15 +2036,15 @@ async function inferLighting(): Promise<LightingReport | null> {
 // --- drawing ------------------------------------------------------------------------------------------------------------
 // The pieces that cast the key's shadow, as one world box (null without any): the shadow camera is fitted to it.
 function shadowBox(): THREE.Box3 | null {
-  if (!lights.key.castShadow || !items.size) return null
+  if (!lights.castsShadow() || !items.size) return null
   const b = new THREE.Box3()
   for (const r of items.values()) if (r.child && !r.missing) b.union(worldBounds(r))
   return b.isEmpty() ? null : b
 }
-function drawTo(target: THREE.WebGLRenderTarget | null, furniture = true): void {
-  P.depth.uScale.value = depthScale() // every frame: the camera or calib.json (Calibrate again) may have changed
+function drawTo(target: THREE.RenderTarget | null, furniture = true): void {
+  P.depth.pass.scale.value = depthScale() // every frame: the camera or calib.json (Calibrate again) may have changed
   if (furniture) lights.fitShadow(shadowBox())
-  drawFrame(P, target, { renderer, scene, camera, furniture, splatKey: spark && splatItemCount() > 0 ? splatKey : null })
+  drawFrame(P, target, { scene, camera, furniture, splats: splatLayer && splatItemCount() > 0 ? { layer: splatLayer, key: splatKey } : null })
 }
 function renderFrame(): void { drawTo(null, !!sceneName) }
 
@@ -2138,37 +2055,46 @@ export interface Shot {
   readonly height: number
 }
 
-// The full photo frame at the photo's resolution (or scaled to maxPx): photo + furniture, no view offset, no grid.
-function captureShot(maxPx: number | null, quality: number): Shot {
-  if (!photo.has) throw new Error('no photo is open')
+// The view draws nothing while a capture holds it (holdFrames): a capture changes the camera, the targets and (the
+// mask) the pieces' materials, and waits for its read-back and the splats' sort in between.
+async function holding<T>(fn: () => Promise<T>): Promise<T> {
+  holdFrames++
+  try { return await fn() } finally { holdFrames--; wake() }
+}
+
+// The full photo frame at the photo's resolution (or scaled to maxPx): photo + furniture + splats, no view offset, no
+// grid; the splats sorted for it first.
+function captureShot(maxPx: number | null, quality: number): Promise<Shot> {
+  if (!photo.has) return Promise.reject(new Error('no photo is open'))
   const t0 = performance.now()
   const k = maxPx ? Math.min(1, maxPx / Math.max(photo.w, photo.h)) : 1
   const w = Math.max(1, Math.round(photo.w * k)), h = Math.max(1, Math.round(photo.h * k))
-  const out = captureTarget(w, h)
-  try {
-    const pixels = withFullFrame(P, renderer, camera, photo.w / photo.h, w, h, () => { drawTo(out); return readPixels(renderer, out, w, h) }, updateView)
+  return holding(async () => {
+    const pixels = await withFullFrame(P, camera, photo.w / photo.h, w, h, async () => {
+      await settleSplats()
+      const out = captureTarget(P, w, h)
+      drawTo(out)
+      return readRgba(renderer, out, w, h)
+    }, updateView)
     const c = document.createElement('canvas')
     c.width = w
     c.height = h
     const ctx2 = c.getContext('2d')
     if (!ctx2) throw new Error('no 2D canvas')
-    const img = ctx2.createImageData(w, h)
-    for (let y = 0; y < h; y++) img.data.set(pixels.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4) // GL rows are bottom-up
-    ctx2.putImageData(img, 0, 0)
+    ctx2.putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer), w, h), 0, 0)
     const shot = { dataUrl: c.toDataURL('image/jpeg', quality), width: w, height: h }
     measure('render-capture', t0)
     return shot
-  } finally { out.dispose() }
+  })
 }
-// A Promise (WebGPU reads back asynchronously, Phase 4); the capture is made at once, and one that can't be made rejects.
+// A Promise: the read-back is asynchronous on both backends; a capture that can't be made rejects.
 function captureComposite(opts: { maxPx?: number | null; quality?: number } = {}): Promise<Shot> {
-  return new Promise((resolve) => { resolve(captureShot(opts.maxPx ?? null, opts.quality ?? 0.92)) })
+  return captureShot(opts.maxPx ?? null, opts.quality ?? 0.92)
 }
 // The keep-room mask (§4.7): items white on black at the photo's size (what the photo hides of them stays black),
 // dilated by 3 % of the photo's width, and twice that below each piece for its shadow, and its PNG: the kernels, here
 // (a few ms at 2048 × 1152: the worker's copy and round trip would cost more than they free).
 // → { dataUrl, width, height, coverage }
-/** */
 interface MaskShot {
   dataUrl: string
   width: number
@@ -2179,34 +2105,34 @@ async function captureMask(): Promise<MaskShot> {
   if (!photo.has) throw new Error('no photo is open')
   const t0 = performance.now()
   const w = photo.w, h = photo.h
-  const rt = maskTarget(w, h)
-  const swapped: [THREE.Mesh | THREE.Line, THREE.Material | THREE.Material[], boolean][] = []
-  const shown: THREE.Object3D[] = [] // a splat item's invisible GLB (or box) stands for its splat here (the mask is dilated anyway)
-  for (const r of items.values()) {
-    if (r.splat && r.child && !r.child.visible) { r.child.visible = true; shown.push(r.child) }
-    r.group.traverse((o) => {
-      if (isMesh(o) || isLine(o)) {
-        swapped.push([o, o.material, o.visible])
-        o.material = P.maskMat
-        if (isLine(o)) o.visible = false
-      }
-    })
-  }
-  let pixels: Uint8Array<ArrayBuffer>
-  lights.maskMode(true) // the pieces' cast shadow on the floor is part of what the render may change
-  try {
-    pixels = withFullFrame(P, renderer, camera, photo.w / photo.h, w, h, () => {
-      lights.fitShadow(shadowBox())
-      drawMask(P, renderer, scene, camera, rt)
-      return readPixels(renderer, rt, w, h)
-    }, updateView)
-  } finally {
-    lights.maskMode(false)
-    for (const [o, m, v] of swapped) { o.material = m; o.visible = v }
-    for (const o of shown) o.visible = false
-    rt.dispose()
-  }
-  const m: KeepRoomMask = keepRoomMask(pixels, w, h, { png: true })
+  const pixels = await holding(async () => {
+    const swapped: [THREE.Mesh | THREE.Line, THREE.Material | THREE.Material[], boolean][] = []
+    const shown: THREE.Object3D[] = [] // a splat item's invisible GLB (or box) stands for its splat here (the mask is dilated anyway)
+    for (const r of items.values()) {
+      if (r.splat && r.child && !r.child.visible) { r.child.visible = true; shown.push(r.child) }
+      r.group.traverse((o) => {
+        if (isMesh(o) || isLine(o)) {
+          swapped.push([o, o.material, o.visible])
+          o.material = P.maskMat
+          if (isLine(o)) o.visible = false
+        }
+      })
+    }
+    lights.maskMode(true) // the pieces' cast shadow on the floor is part of what the render may change
+    try {
+      return await withFullFrame(P, camera, photo.w / photo.h, w, h, () => {
+        lights.fitShadow(shadowBox())
+        const rt = maskTarget(P, w, h)
+        drawMask(P, scene, camera, rt)
+        return readRgba(renderer, rt, w, h)
+      }, updateView)
+    } finally {
+      lights.maskMode(false)
+      for (const [o, m, v] of swapped) { o.material = m; o.visible = v }
+      for (const o of shown) o.visible = false
+    }
+  })
+  const m: KeepRoomMask = keepRoomMask(pixels, w, h, { png: true, bottomUp: false })
   if (!m.png) throw new Error('the mask has no PNG')
   const dataUrl = await pngDataUrl(m.png)
   measure('mask-build', t0)
@@ -2275,18 +2201,13 @@ async function renderViewInternal(opts: unknown = {}): Promise<RenderMeta> {
   const a = msg.renderArgs(model, asText(model), o['prompt'], !!o['keepRoom'], Object.keys(RENDER_MODELS))
   if (!a.ok) throw reportError(a.error)
   if (!sceneName) throw reportError('Open a scene first, then render it')
-  // §4.7: the splats sorted for the capture camera first, with the view still drawing (a piece placed a moment ago
-  // only joins Spark's sorted set through those frames). Then the view holds still for the capture itself.
-  try { await settleSplats() } catch (e) { reportError('Could not sort the splats for the render', e) }
-  holdFrames++
+  // §4.7: the composite (the splats sorted for its camera first), then the keep-room mask; the view holds still meanwhile.
   let shot: Shot
   let mask: MaskShot | null = null
   try {
-    try {
-      shot = await captureComposite()
-      if (a.keepRoom) mask = await captureMask()
-    } catch (e) { throw reportError('Could not capture the view', e) }
-  } finally { holdFrames--; wake() }
+    shot = await captureComposite()
+    if (a.keepRoom) mask = await captureMask()
+  } catch (e) { throw reportError('Could not capture the view', e) }
   return postRender(shot, { model: a.model, prompt: a.prompt, keepRoom: a.keepRoom, mask })
 }
 async function listRendersInternal(): Promise<RenderMeta[]> {
@@ -2315,8 +2236,7 @@ try { await kernelsReady } catch (e) { reportError('Could not load the planner k
 applyCamera()
 const clock = new THREE.Clock()
 let renderErrorReported = false
-let holdFrames = 0 // > 0 while a render captures the view (renderViewInternal)
-renderer.setAnimationLoop(() => {
+void renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(clock.getDelta(), 0.1)
     if (holdFrames) return
@@ -2373,7 +2293,7 @@ function getState(): PlannerState {
     items: [...items.values()].map((r) => {
       const b = worldBounds(r)
       return {
-        uid: r.uid, id: r.id, render: r.render, ...(r.splat ? { splats: r.splat.numSplats } : {}),
+        uid: r.uid, id: r.id, render: r.render, ...(r.splat ? { splats: r.splat.count } : {}),
         position: [r.group.position.x, r.group.position.y, r.group.position.z], rotation_y_deg: r.rotationDeg,
         ...(r.missing ? { missing: true as const } : {}),
         worldBounds: { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] },

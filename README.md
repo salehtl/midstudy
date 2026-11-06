@@ -40,7 +40,7 @@ Everything comes from the flake's dev shell (Node 22, Python 3.12, uv, Rust with
 globally.
 
 ```sh
-nix develop -c npm ci                       # once: the Node packages (three.js, Spark, glTF-Transform, …)
+nix develop -c npm ci                       # once: the Node packages (three.js, glTF-Transform, …)
 nix develop -c uv sync --project calib      # once: MoGe-2 and torch, about 2.5 min, ~1 GB in calib/.venv
 nix develop -c npm run serve                # builds (wasm kernels, planner bundle), then http://127.0.0.1:8765/
 ```
@@ -90,9 +90,9 @@ The engines make different things:
   (Splat or Mesh), and pieces already placed switch at once.
 - **TRELLIS 2** makes a textured mesh with finer detail.
 
-The planner draws splats with [Spark](https://sparkjs.dev) 2.4.0. Their colours are the photo's own, so the
-**Look** sliders only brighten or warm them; meshes are lit and tone-mapped. The real furniture in the room photo
-hides both. Renders include splats like any other piece.
+The planner draws splats with its own splat renderer (WebGPU where the browser has it, else WebGL2). Their colours
+are the photo's own, so the **Look** sliders only brighten or warm them; meshes are lit and tone-mapped. The real
+furniture in the room photo hides both. Renders include splats like any other piece.
 
 ### From a product page
 

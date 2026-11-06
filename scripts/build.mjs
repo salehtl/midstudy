@@ -5,11 +5,11 @@
 //    wasm32-unknown-unknown (SIMD128 through core/.cargo/config.toml), wasm-bindgen 0.2.121 (--target web into
 //    build/wasm/web/, --target experimental-nodejs-module, Node ESM, into build/wasm/node/), then wasm-opt -O3 with SIMD.
 //    File names are wasm-bindgen's: <lib name>.js, <lib name>.d.ts, <lib name>_bg.wasm (+ _bg.wasm.d.ts).
-// 2. planner: esbuild bundles planner/main.ts with three.js and Spark from
-//    node_modules (no CDN, no importmap) into planner/dist/: app.js, content-hashed chunks (the lazy Spark import is one),
-//    assets/, linked sourcemaps; minified for es2022 and safari16. Files named *.worker.ts under planner/ or
-//    core/js/ are bundled as their own entries, planner/dist/<name>.worker.js, for `new Worker(new URL('./<name>.worker.js',
-//    import.meta.url), { type: 'module' })`. The web wasm (build/wasm/web/*.wasm) is copied next to the chunks, so
+// 2. planner: esbuild bundles planner/main.ts with three.js (three/webgpu, three/tsl and the addons) from node_modules
+//    (no CDN, no importmap) into planner/dist/: app.js, content-hashed chunks, assets/, linked sourcemaps; minified for
+//    es2022 and safari16. Files named *.worker.ts under planner/ or core/js/ are bundled as their own entries,
+//    planner/dist/<name>.worker.js, for `new Worker(new URL('./<name>.worker.js', import.meta.url), { type: 'module' })`:
+//    engine.worker.js (the kernels) and sort.worker.js (planner/gpu: the splats' sort on the WebGL2 fallback). The web wasm (build/wasm/web/*.wasm) is copied next to the chunks, so
 //    wasm-bindgen's `new URL('<lib>_bg.wasm', import.meta.url)` resolves. three's decoders (Draco, Basis) are copied to
 //    planner/dist/libs/ for DRACOLoader/KTX2Loader.
 //
@@ -190,6 +190,12 @@ const DECODERS = [
 ]
 const CDN = /https?:\/\/(cdn\.jsdelivr\.net|unpkg\.com|esm\.sh|cdnjs\.cloudflare\.com|cdn\.skypack\.dev)\/[^\s'"`)]*/g
 
+// The addons (GLTFLoader, KTX2Loader, RoomEnvironment…) import 'three': resolved to three's WebGPU build, the one the
+// planner renders with (three.module.js is three.core.js + WebGLRenderer, which nothing uses), as three's own import
+// map for WebGPU does. An addon that needed a WebGL-only export would fail the build.
+const THREE_WEBGPU = path.join(ROOT, 'node_modules/three/build/three.webgpu.js')
+const threeWebGPU = { name: 'three-webgpu', setup(b) { b.onResolve({ filter: /^three$/ }, () => ({ path: THREE_WEBGPU })) } }
+
 function plannerEntries() {
   const main = path.join(PLANNER, 'main.ts')
   if (!fs.existsSync(main)) throw new Error('planner: no planner/main.ts')
@@ -229,12 +235,13 @@ async function buildPlanner() {
       entryNames: '[name]',
       chunkNames: '[name]-[hash]',
       assetNames: 'assets/[name]-[hash]',
-      loader: { '.wasm': 'file', '.png': 'file', '.svg': 'file', '.jpg': 'file', '.glsl': 'text' },
+      loader: { '.wasm': 'file', '.png': 'file', '.svg': 'file', '.jpg': 'file' },
       metafile: true,
       write: false,
       logLevel: 'silent',
       legalComments: 'linked',
       charset: 'utf8',
+      plugins: [threeWebGPU],
     }).catch((e) => { throw new Error(`planner: esbuild failed\n${(e.errors || []).slice(0, 10).map((m) => `  ${m.location ? `${m.location.file}:${m.location.line}: ` : ''}${m.text}`).join('\n') || e.message}`) })
     for (const w of result.warnings) log(`planner: warning: ${w.location ? `${w.location.file}:${w.location.line}: ` : ''}${w.text}`)
     // Chunks, assets and maps first, entries after, so app.js never names a chunk that is not there yet.
