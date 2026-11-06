@@ -17,7 +17,6 @@ import type { Camera } from './camera.js'
 
 /** The contract's Pose (contract/gen/types.ts, room.schema.json $defs/pose): {x_m, z_m, yaw_deg}. */
 export type Pose = ContractPose
-export type Vec3 = [number, number, number]
 /** A point on the floor, [x, z] in meters. */
 export type Xz = readonly [number, number]
 
@@ -100,18 +99,8 @@ export function effectiveCamera(cam: Camera, scale: number): Camera {
   return { fov_y_deg: cam.fov_y_deg, height_m: h, pitch_deg: cam.pitch_deg, roll_deg: cam.roll_deg }
 }
 
-/** Where a placed photo's camera stands in the room frame, and the floor direction it looks along (Ry(yaw)·(0, 0, −1)). */
-export interface CameraInRoom {
-  readonly position: Vec3
-  readonly forward: Xz
-}
-export function cameraInRoom(pose: Pose, eff: Camera): CameraInRoom {
-  const { s, c } = sinCosDeg(pose.yaw_deg)
-  return { position: [pose.x_m, eff.height_m, pose.z_m], forward: [-s, -c] }
-}
-
 /** tan of half the horizontal field of view of a camera on a photo `aspect` (w / h) wide. */
-export function tanHalfHfov(fovYDeg: number, aspect: number): number {
+function tanHalfHfov(fovYDeg: number, aspect: number): number {
   const { s, c } = sinCosDeg(fovYDeg / 2)
   return (s / c) * aspect
 }
@@ -161,7 +150,7 @@ export function footprintXz(position: Xz, rotationDeg: number, min: Xz, max: Xz)
 }
 
 /** Whether a floor point is inside a polygon (crossing count; a point on an edge may go either way). */
-export function insidePolygon(p: Xz, poly: readonly Xz[]): boolean {
+function insidePolygon(p: Xz, poly: readonly Xz[]): boolean {
   let inside = false
   const n = poly.length
   for (let i = 0, j = n - 1; i < n; j = i, i += 1) {
@@ -227,7 +216,7 @@ export function planHit(p: Xz, r: number, photos: readonly PlanPhoto[], pieces: 
 }
 
 /** The middle of a polygon's corners. */
-export function middleOf(pts: readonly Xz[]): Xz {
+function middleOf(pts: readonly Xz[]): Xz {
   let x = 0
   let z = 0
   for (const q of pts) { x += q[0]; z += q[1] }
@@ -244,8 +233,8 @@ export interface PlanView {
   readonly oy: number
 }
 /** The plan's zoom range, px per meter. */
-export const PLAN_MIN_S = 8
-export const PLAN_MAX_S = 600
+const PLAN_MIN_S = 8
+const PLAN_MAX_S = 600
 
 export function planToCanvas(v: PlanView, p: Xz): Xz {
   return [v.ox + v.s * p[0], v.oy + v.s * p[1]]

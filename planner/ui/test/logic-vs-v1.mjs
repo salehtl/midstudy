@@ -19,7 +19,7 @@ const N = arg('--n', 4000)
 // --- the logic, bundled ---------------------------------------------------------------------------------------------------
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-logic-'))
 const entry = path.join(dir, 'entry.ts')
-const mods = ['text', 'chrome', 'workspace', 'sundial', 'scenes', 'layouts', 'library', 'look', 'libforms', 'product', 'renders', 'lists', 'glyphs']
+const mods = ['text', 'chrome', 'workspace', 'sundial', 'scenes', 'layouts', 'library', 'look', 'libforms', 'product', 'renders', 'lists', 'glyphs', 'rooms']
 fs.writeFileSync(entry, [...mods.map((m) => `export * as ${m} from ${JSON.stringify(path.join(ROOT, 'planner/ui/logic', `${m}.ts`))}`), `export * as k from ${JSON.stringify(path.join(ROOT, 'core/js/web.ts'))}`].join('\n'))
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: path.join(dir, 'logic.mjs'), logLevel: 'error' })
 const L = await import(path.join(dir, 'logic.mjs'))
@@ -290,6 +290,37 @@ for (let i = 0; i < N; i++) {
   same('sameDims', v1.sameDims(cand, now), L.product.sameDims({ ...cand, label: null, unit_note: null, notes: [], quote: null, source: null }, now), [cand, now])
 }
 same('rays', v1.rays(), D.sunRays(Math), 'rays')
+
+// --- rooms (contract §4.9; no v1): ui/logic/rooms.ts against the words the contract and docs/ROOMS.md §7 give -----------
+{
+  const RM = L.rooms
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
+  for (let i = 0; i < N; i++) {
+    const photos = int(0, 12), calibrating = rnd() < 0.3 ? int(0, photos) : 0, placed = int(0, photos), layouts = int(0, 3)
+    const alignStatus = pick(['none', 'pending', 'running', 'done', 'failed'])
+    const f = { photos, calibrating, placed, layouts, alignStatus, alignError: rnd() < 0.5 ? null : 'no solver' }
+    const busy = calibrating > 0 ? `Calibrating ${plural(calibrating, 'photo')}…` : alignStatus === 'pending' || alignStatus === 'running' ? 'Aligning…' : null
+    same('roomBusyText', busy, RM.roomBusyText(f), f)
+    const date = pick(['', 'Today, 09:36'])
+    same('roomMeta', [date || null, plural(photos, 'photo'), placed < photos ? `${placed} placed` : null, layouts ? plural(layouts, 'layout') : null].filter(Boolean).join(' · '), RM.roomMeta(f, date), [f, date])
+    const flag = alignStatus === 'failed' ? 'Alignment failed' : photos > 1 && placed < 2 && calibrating === 0 && alignStatus !== 'pending' && alignStatus !== 'running' ? 'Place the photos' : null
+    same('roomFlag', flag, RM.roomFlag(f), f)
+    const placedP = rnd() < 0.5, src = pick(['origin', 'solver', 'manual', 'unplaced']), conf = pick([null, 0, 0.2, 0.49, 0.5, 0.9, 1]), solverUnplaced = rnd() < 0.5
+    const note = !placedP ? (solverUnplaced ? "The alignment couldn't place this photo: place it on the floor plan" : 'Place this photo on the floor plan')
+      : src === 'solver' && conf !== null && conf < 0.5 ? 'This photo may be misplaced: check it on the floor plan' : null
+    same('photoNote', note, RM.photoNote(placedP, src, conf, solverUnplaced), [placedP, src, conf, solverUnplaced])
+    const title = maybe(word), created = pick(['', 'Sun 26 Oct, 09:36'])
+    const t = (title ?? '').trim()
+    same('roomTitleText', t || (created ? `Room, ${created}` : '') || 'room-20261106-101530', RM.roomTitleText(title, created, 'room-20261106-101530'), [title, created])
+    const k = pick([1, 1.1, 0.9, 1.0004, 0.5, 2.25])
+    const pct = Math.round((k - 1) * 1000) / 10
+    same('roomScaleText', pct === 0 ? 'The room already reads that length' : `Room scaled ${pct > 0 ? 'up' : 'down'} ${Math.abs(pct)} %: every photo now reads it`, RM.roomScaleText(k), k)
+    const idx = int(0, 40)
+    same('photoHue', [205, 150, 280, 20, 330, 95, 250, 175, 50][idx % 9], RM.photoHue(idx), idx)
+  }
+  same('newRoomHelp', 3, RM.newRoomHelp().length, 'help')
+  same('newRoomStep', ['Uploading photo 2 of 7…', 'Making the room…', 'Aligning the photos…'], [RM.newRoomStep('upload', 2, 7), RM.newRoomStep('room', 0, 7), RM.newRoomStep('align', 0, 7)], 'steps')
+}
 for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', 'x']) {
   for (const shift of [false, true]) {
     let az = 170, el = 87

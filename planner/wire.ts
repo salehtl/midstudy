@@ -271,7 +271,7 @@ export const renderMetas = (v: unknown): RenderMeta[] => readList(v, renderMeta)
 // --- rooms (contract §4.9) ------------------------------------------------------------------------------------------
 
 /** A pose (room.schema.json $defs/pose). */
-export interface PoseInfo {
+interface PoseInfo {
   readonly x_m: number
   readonly z_m: number
   readonly yaw_deg: number
@@ -289,7 +289,7 @@ const CAMERA: Fields = { fov_y_deg: num, height_m: num, pitch_deg: num, roll_deg
 const isCamera = (v: unknown): v is CameraInfo => isObject(v) && conforms(v, CAMERA)
 
 /** A member of a room: room.json's record, plus (room object, detail) its scene object and (detail) its cameras. */
-export interface RoomMemberInfo {
+interface RoomMemberInfo {
   readonly scene: string
   readonly pose: PoseInfo | null
   readonly scale: number
@@ -303,7 +303,7 @@ function isMember(v: unknown): v is RoomMemberInfo {
   return isObject(v) && conforms(v, MEMBER)
 }
 /** align.json's answer for one photo (align.schema.json AlignMember). */
-export interface AlignMemberInfo {
+interface AlignMemberInfo {
   readonly scene: string
   readonly pose?: PoseInfo | null
   readonly confidence?: number | null
@@ -312,7 +312,7 @@ export interface AlignMemberInfo {
 const ALIGN_MEMBER: Fields = { scene: str, pose: opt(isPose), confidence: opt(num), residual_cm: opt(num) }
 const isAlignMember = (v: unknown): v is AlignMemberInfo => isObject(v) && conforms(v, ALIGN_MEMBER)
 /** align.json as the planner reads it. */
-export interface AlignInfo {
+interface AlignInfo {
   readonly solver?: string | null
   readonly members: readonly AlignMemberInfo[]
   readonly unplaced?: readonly string[] | null
