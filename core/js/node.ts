@@ -399,8 +399,18 @@ export const DATA_URI_ERRORS = ['not-data-uri', 'base64'] as const
 export type DataUriCode = (typeof DATA_URI_ERRORS)[number]
 
 /** The bytes of `data:image/jpeg;base64,…` (or `jpg`; `png` for a mask), whitespace allowed in the base64, decoded
- *  strictly (contract §2.6, §2.8, §4.4, §4.7; v1's decode_data_uri). */
+ *  strictly (contract §2.6, §2.8, §4.4, §4.7; v1's decode_data_uri). A payload that is exactly the base64 of its own
+ *  bytes (canonical, what a browser's `toDataURL` makes) is decoded by Node's decoder, on which CPython's strict decode
+ *  (the kernel's `decode_python`) agrees, ~50× faster for a render-size image (int-backend: 2.5 ms → 0.05 ms for
+ *  260 kB); anything else (whitespace, odd padding or trailing bits, foreign characters, errors) is the kernel's. */
 export function decodeImageDataUri(value: string, type: 'jpeg' | 'png'): Result<Uint8Array, MediaError<DataUriCode>> {
+  const prefixes = type === 'png' ? ['data:image/png;base64,'] : ['data:image/jpeg;base64,', 'data:image/jpg;base64,']
+  const prefix = prefixes.find((p) => value.startsWith(p))
+  if (prefix !== undefined && value.length > prefix.length) {
+    const payload = value.slice(prefix.length)
+    const bytes = Buffer.from(payload, 'base64')
+    if (bytes.toString('base64') === payload) return { ok: true, value: new Uint8Array(bytes) }
+  }
   return decode(raw().data_uri_image(value, type === 'png'), DATA_URI_ERRORS, (p) => p.rest())
 }
 

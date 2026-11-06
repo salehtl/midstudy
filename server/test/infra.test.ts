@@ -12,6 +12,7 @@ import { utcDay } from '../../common/logic/time.ts'
 import { JobStore, newJobId, SerialQueue } from '../src/jobs.ts'
 import { SpendCap } from '../src/spend.ts'
 import { addError, addMessage, lastJsonLine, outputLines, runTool, splitCommand, summaryOf, toolError } from '../../common/tools.ts'
+import { decodeImageDataUri } from '../../core/js/node.ts'
 import { REPO, SCRATCH } from './helpers.ts'
 
 const DIR = path.join(SCRATCH, 'infra-' + String(process.pid))
@@ -246,5 +247,44 @@ void describe('files', () => {
     assert.equal(readJsonFile(path.join(DIR, 'missing.json')), null)
     fs.writeFileSync(path.join(DIR, 'bad.json'), '{')
     assert.equal(readJsonFile(path.join(DIR, 'bad.json')), null)
+  })
+})
+
+void describe('image data URIs (core/js/node.ts)', () => {
+  // The face decodes a canonical payload itself (Node's base64: one that re-encodes to itself) and leaves everything
+  // else to the media kernel. The kernel drops whitespace before its strict decode, so a payload with a space put in is
+  // the kernel's answer for the same base64: the two must agree on every payload (odd trailing bits, both padding
+  // lengths).
+  void test('the canonical fast path decodes exactly as the kernel; anything else is the kernel\'s', () => {
+    let seed = 20261106
+    const rnd = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed % n
+    }
+    const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    const cases: string[] = ['AAAA', 'AA==', 'AB==', 'AAA=', 'AAB=', '////', '+/+/', 'QUJD', 'QUI=', 'QQ==', 'Qf==', 'Qh==', 'QUJ=']
+    for (let i = 0; i < 3000; i++) {
+      const quads = 1 + rnd(40)
+      let s = ''
+      for (let j = 0; j < quads * 4; j++) s += ALPHA.charAt(rnd(64))
+      const pad = rnd(3)
+      cases.push(s.slice(0, s.length - pad) + '='.repeat(pad))
+    }
+    // and canonical by construction (the fast path's case), every length mod 3
+    for (let i = 0; i < 3000; i++) cases.push(Buffer.from(Array.from({ length: 1 + rnd(300) }, () => rnd(256))).toString('base64'))
+    for (const payload of cases) {
+      for (const [prefix, type] of [['data:image/jpeg;base64,', 'jpeg'], ['data:image/jpg;base64,', 'jpeg'], ['data:image/png;base64,', 'png']] as const) {
+        const fast = decodeImageDataUri(prefix + payload, type)
+        const at = 1 + rnd(payload.length - 1)
+        const kernel = decodeImageDataUri(prefix + payload.slice(0, at) + ' ' + payload.slice(at), type)
+        assert.deepEqual(fast, kernel, payload)
+      }
+    }
+    // not canonical: the kernel decides (whitespace, misplaced or excess padding, foreign characters, the wrong type)
+    const kernelOnly: [string, 'jpeg' | 'png', boolean][] = [['data:image/jpeg;base64,AA=A', 'jpeg', false], ['data:image/jpeg;base64,=AAA', 'jpeg', false],
+      ['data:image/jpeg;base64,A===', 'jpeg', false], ['data:image/jpeg;base64,AAA', 'jpeg', false], ['data:image/jpeg;base64,AA-_', 'jpeg', false],
+      ['data:image/png;base64,AAAA', 'jpeg', false], ['data:image/jpeg;base64,AAAA', 'png', false], ['data:image/jpeg;base64,AA AA', 'jpeg', true],
+      ['data:image/jpeg;base64,AA\nAA', 'jpeg', true], ['data:image/JPEG;base64,AAAA', 'jpeg', false], ['data:image/jpeg;base64,', 'jpeg', false]]
+    for (const [uri, type, ok] of kernelOnly) assert.equal(decodeImageDataUri(uri, type).ok, ok, uri)
   })
 })

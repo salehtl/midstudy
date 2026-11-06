@@ -414,9 +414,23 @@ export class RequestContext {
   }
 }
 
+/** Whether `text` holds at most `limit` brackets (`[` and `{`): then it can't nest deeper than that. A native scan,
+ *  so a large body of few brackets (a render's data URI) skips the character walk below. */
+function fewBrackets(text: string, limit: number): boolean {
+  let n = 0
+  for (const bracket of ['[', '{']) {
+    for (let i = text.indexOf(bracket); i >= 0; i = text.indexOf(bracket, i + 1)) {
+      n += 1
+      if (n > limit) return false
+    }
+  }
+  return true
+}
+
 /** JSON nested deeper than Python's json module reads (its recursion limit, about 1000): v1 answered "it is nested
  *  too deeply". Brackets inside strings don't count. */
 function jsonTooDeep(text: string, limit = 990): boolean {
+  if (fewBrackets(text, limit)) return false
   let depth = 0
   let inString = false
   for (let i = 0; i < text.length; i++) {
