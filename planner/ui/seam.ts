@@ -12,7 +12,7 @@ import type { Keymap } from '../keymap.js'
 
 export type { DeletedLayout, Engine, ItemInfo, ItemSnapshot, LightingReport, Shot } from '../engine.js'
 export type { Library } from '../data.js'
-export type { LayoutSummary, LibraryEntry, LibraryJob, RenderMeta, SceneSummary, Spend, TrashedItem, TrashedScene } from '../wire.js'
+export type { LayoutSummary, LibraryEntry, LibraryJob, RenderMeta, RoomInfo, SceneSummary, Spend, TrashedItem, TrashedRoom, TrashedScene } from '../wire.js'
 export type { DimsCm } from '../logic/text.js'
 export { CAMERA_RANGE, MAX_ELEVATION, RENDER_MODELS, dimsText, fmtUsd, quiet, renderPrice } from '../engine.js'
 export { DEFAULT_IMAGE_ENGINE, LIB_PRICE, clock, estimateCost, fmtBytes, friendlyDate, relDate, sceneTitle, shortDate } from '../data.js'
@@ -27,6 +27,8 @@ export type CameraPatch = Partial<Camera>
 /** What the workspace adds to the context (ui/workspace.ts): the Scene panel opens Adjust floor through it. */
 interface WorkspaceApi {
   readonly setAdjust: (on: boolean) => void
+  /** the stage (the part of the window the photo uses) again: a room view's strip or floor plan changed (ui/room.ts) */
+  readonly syncStage: () => void
 }
 
 /** What the Shortcuts sheet adds (ui/shortcuts.ts). */
@@ -51,6 +53,14 @@ interface ExporterApi {
 interface SettingsApi {
   readonly open: () => void
 }
+/** What the room view adds (ui/room.ts): the floor plan's page point of a room-frame floor point (CSS px; null while
+ *  the plan is hidden), and showing it. */
+interface FloorPlanApi {
+  readonly pointOf: (p: unknown) => { readonly x: number; readonly y: number } | null
+  readonly show: (on: boolean) => void
+  /** what the photo strip (top) and the plan (right on desktop; bottom on the phone, from the window's bottom) cover, CSS px */
+  readonly insets: () => { readonly top: number; readonly right: number; readonly bottom: number }
+}
 
 /** ctx: what planner/main.ts passes to every area's mount(ctx); the workspace, the Shortcuts sheet, Export and Settings
  *  add their APIs to it. keys: the keymap every shortcut registers in (keymap.ts). */
@@ -66,4 +76,5 @@ export interface UiContext {
   shortcuts?: ShortcutsApi
   exporter?: ExporterApi
   settings?: SettingsApi
+  floorPlan?: FloorPlanApi
 }

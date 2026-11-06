@@ -22,6 +22,7 @@ import * as scenesPage from './ui/scenes.js'
 import * as shortcuts from './ui/shortcuts.js'
 import * as exporter from './ui/export.js'
 import * as settings from './ui/settings.js'
+import * as roomView from './ui/room.js'
 import type { UiContext } from './ui/seam.js'
 import { renderSettingsArgs } from './logic/messages.js'
 
@@ -46,7 +47,7 @@ window.midstudyCtx = ctx
 // Panels register in rail/dock order: Library, In scene, Layouts, Scene, Renders.
 // Shortcuts and Export first: the panels show their keys (keys.lookup) when they mount.
 const areas: [string, { mount: (c: UiContext) => void }][] = [
-  ['shortcuts', shortcuts], ['exporter', exporter], ['settings', settings], ['workspace', workspace], ['library', library], ['inscene', inscene], ['layouts', layouts], ['scene', scenePanel], ['renders', renders], ['scenes', scenesPage],
+  ['shortcuts', shortcuts], ['exporter', exporter], ['settings', settings], ['workspace', workspace], ['library', library], ['inscene', inscene], ['layouts', layouts], ['scene', scenePanel], ['renders', renders], ['scenes', scenesPage], ['room', roomView],
 ]
 for (const [name, mod] of areas) {
   try { mod.mount(ctx) } catch (e) { engine.reportError(`Could not set up the ${name} UI`, e) }
@@ -75,11 +76,12 @@ const hook = {
   errors: engine.errors,
   // library and items (§2.4)
   getLibrary: () => engine.getLibrary(),
+  // in a room view, positions and turns are in the room frame (§4.9 Hook); elsewhere the scene's, as before
   addItem: (id: unknown, opts?: unknown) => {
     const o = isObject(opts) ? opts : {}
-    return engine.addItemInternal(id, { position: o['position'], rotation_y_deg: o['rotation_y_deg'] })
+    return engine.addItemHook(id, o['position'], o['rotation_y_deg'])
   },
-  moveItem: (uid: unknown, opts: unknown) => { engine.moveItemInternal(uid, opts) },
+  moveItem: (uid: unknown, opts: unknown) => { engine.moveItemHook(uid, opts) },
   selectItem: (uid: unknown) => { engine.select(uid ?? null) },
   removeItem: (uid: unknown) => { engine.removeItemInternal(uid) },
   clearItems: () => { engine.clearItemsInternal() },
@@ -128,8 +130,26 @@ const hook = {
   setAdjustFloor: (on: unknown) => { engine.setAdjustFloor(!!on) },
   setOcclusion: (on: unknown) => { engine.setOcclusion(!!on) },
   getScreenRect: (uid: unknown) => engine.getScreenRect(uid),
-  photoToFloor: (px: unknown, py: unknown) => engine.photoToFloor(px, py),
-  floorToPhoto: (p: unknown) => engine.floorToPhoto(pointOf(p)),
+  photoToFloor: (px: unknown, py: unknown) => engine.photoToFloorHook(px, py),
+  floorToPhoto: (p: unknown) => engine.floorToPhotoHook(pointOf(p)),
+  // rooms (§4.9 Hook)
+  listRooms: () => engine.listRoomsInternal(),
+  createRoom: (files: unknown, meta?: unknown) => engine.createRoom(files, meta),
+  waitForRoom: (name: unknown) => engine.waitForRoom(name),
+  openRoom: async (name: unknown, photo?: unknown) => {
+    shell.closePage()
+    await engine.openRoom(name, photo)
+    await nextFrame()
+  },
+  setRoomPhoto: async (scene: unknown) => {
+    await engine.setRoomPhoto(scene)
+    await nextFrame()
+  },
+  getRoom: () => engine.getRoom(),
+  setPose: async (scene: unknown, partial: unknown) => { await engine.setPose(scene, partial) },
+  roomToScene: (p: unknown, scene?: unknown) => engine.roomToSceneHook(p, scene),
+  sceneToRoom: (p: unknown, scene?: unknown) => engine.sceneToRoomHook(p, scene),
+  floorPlanPoint: (p: unknown) => ctx.floorPlan?.pointOf(p) ?? null,
 }
 /** The hook's floorToPhoto takes [x, y, z] (or {x, y, z}); anything else projects as NaN, as v1's did. */
 function pointOf(p: unknown): readonly number[] | { x: number; y: number; z: number } {

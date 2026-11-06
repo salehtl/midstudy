@@ -1,0 +1,106 @@
+/* Rooms (contract §4.9): the room view's photo strip, its note and the floor plan (ui/room.ts), and the Scenes page's
+   room cards and New room sheet (ui/scenes.ts). Root attributes (room.ts): data-rm-plan="desktop|phone" while the plan
+   shows, --rm-plan-h its height on the phone. Nothing here applies outside a room view but the room cards. */
+
+:root { --rm-plan-w: 360px; --rm-plan-h: 0px; }
+
+/* --- the photo strip ------------------------------------------------------------------------------------------- */
+.rm-strip {
+  position: fixed; z-index: 15; display: flex; align-items: center; gap: 8px; padding: 6px;
+  background: var(--color-chrome); border: 1px solid var(--color-line); border-radius: 14px; box-shadow: var(--shadow-float);
+  max-width: calc(100vw - var(--chrome-left) - 24px);
+}
+.rm-strip[hidden] { display: none; }
+[data-mode="desktop"] .rm-strip { top: calc(var(--topbar-h) + 8px); left: calc(var(--chrome-left) + 12px); }
+[data-mode="desktop"][data-rm-plan="desktop"] .rm-strip { max-width: calc(100vw - var(--chrome-left) - var(--rm-plan-w) - 24px); }
+[data-mode="phone"] .rm-strip { top: calc(var(--safe-top) + 60px); left: calc(var(--safe-left) + 12px); right: calc(var(--safe-right) + 12px); }
+.rm-photos { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; min-width: 0; flex: 1 1 auto; }
+.rm-photos::-webkit-scrollbar { display: none; }
+.rm-photo {
+  position: relative; flex-shrink: 0; width: 60px; height: 44px; border-radius: 8px; overflow: hidden; padding: 0;
+  background: var(--color-ground); border: 2px solid transparent; opacity: .82;
+}
+.rm-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.rm-photo-none { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--color-muted); }
+.rm-photo.is-current { border-color: var(--color-accent); opacity: 1; }
+.rm-photo.is-unplaced img { filter: grayscale(.8) brightness(.8); }
+.rm-num {
+  position: absolute; left: 3px; top: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: #131417D8; color: var(--color-text); font: 600 10px/16px var(--font-text); text-align: center;
+}
+.rm-photo.is-current .rm-num { background: var(--color-accent); color: var(--color-accent-ink); }
+@media (hover: hover) { .rm-photo:hover { opacity: 1; } }
+.rm-plan-toggle {
+  flex-shrink: 0; height: 44px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; border-radius: 10px;
+  background: var(--color-raised); border: 1px solid var(--color-line); color: var(--color-text); font-weight: 600;
+}
+.rm-plan-toggle[aria-pressed="true"] { background: color-mix(in srgb, var(--color-accent) 18%, var(--color-raised)); }
+.rm-plan-toggle[aria-pressed="true"] svg { color: var(--color-accent); }
+[data-mode="phone"] .rm-plan-toggle span { display: none; }
+[data-mode="phone"] .rm-plan-toggle { width: 44px; padding: 0; justify-content: center; }
+
+/* the one-line note over an unplaced or doubtful photo */
+.rm-note {
+  position: fixed; z-index: 15; padding: 6px 12px; border-radius: var(--radius-pill); background: #131417E6;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); font-weight: 500;
+  max-width: calc(100vw - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.rm-note[hidden] { display: none; }
+[data-mode="desktop"] .rm-note { top: calc(var(--topbar-h) + 76px); left: calc(var(--chrome-left) + 12px); }
+[data-mode="phone"] .rm-note { top: calc(var(--safe-top) + 128px); left: calc(var(--safe-left) + 12px); font-size: 13px; }
+
+/* --- the floor plan -------------------------------------------------------------------------------------------- */
+.rm-plan {
+  position: fixed; z-index: 21; display: flex; flex-direction: column; background: var(--color-chrome);
+  border-left: 1px solid var(--color-line);
+}
+.rm-plan[hidden] { display: none; }
+[data-mode="desktop"] .rm-plan { top: var(--topbar-h); right: 0; bottom: 0; width: var(--rm-plan-w); }
+.rm-plan.is-phone {
+  z-index: 25; left: var(--safe-left); right: var(--safe-right); bottom: calc(var(--safe-bottom) + 8px); border-left: 0;
+  border-radius: var(--radius-sheet); border: 1px solid var(--color-line); box-shadow: var(--shadow-float); margin: 0 8px;
+}
+.rm-plan-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 14px; min-height: 52px; flex-shrink: 0; }
+.rm-plan-head b { font-weight: 600; white-space: nowrap; }
+.rm-status { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); font-weight: 500; white-space: nowrap; }
+.rm-status:empty { display: none; }
+.rm-spacer { flex: 1 1 0; }
+.rm-btn {
+  height: 32px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: var(--radius-control);
+  background: var(--color-raised); border: 1px solid var(--color-line); color: var(--color-text); font-weight: 600; white-space: nowrap;
+}
+.rm-btn.is-quiet { background: transparent; border-color: transparent; font-weight: 500; }
+.rm-btn[aria-pressed="true"] { background: var(--color-accent); color: var(--color-accent-ink); border-color: transparent; }
+.rm-btn:disabled { opacity: .45; }
+[data-mode="phone"] .rm-btn { height: 44px; padding: 0 12px; }
+.rm-close { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--color-muted); }
+[data-mode="phone"] .rm-close { width: 44px; height: 44px; }
+@media (hover: hover) { .rm-btn:not(:disabled):hover, .rm-close:hover { background: var(--color-hover); color: var(--color-text); } .rm-btn[aria-pressed="true"]:hover { background: var(--color-accent); color: var(--color-accent-ink); } }
+.rm-align-row { display: flex; align-items: center; gap: 6px; padding: 0 8px 8px 14px; flex-shrink: 0; }
+.rm-align-row[hidden] { display: none; }
+.rm-align-label { color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rm-canvas-wrap { position: relative; flex: 1 1 0; min-height: 0; margin: 0 8px; border-radius: var(--radius-panel); overflow: hidden; background: #16171b; }
+.rm-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.rm-hint { margin: 0; padding: 8px 14px 12px; color: var(--color-muted); font-size: 12px; line-height: 16px; }
+.rm-hint[hidden] { display: none; }
+.rm-plan:not(.is-phone) .rm-canvas-wrap { margin-bottom: 8px; }
+
+/* the photo view's bars stay beside (desktop) or above (phone) the plan */
+[data-mode="desktop"][data-rm-plan="desktop"] #modebar { right: var(--rm-plan-w); }
+/* phone: the plan covers the dock and the tool row (closing it brings them back); the bars ride above it */
+[data-mode="phone"][data-rm-plan="phone"] #modebar { bottom: calc(var(--safe-bottom) + 16px + var(--rm-plan-h)); }
+
+/* --- the Scenes page: room cards and New room ------------------------------------------------------------------ */
+.sc-room-new { gap: 6px; }
+[data-mode="phone"] .sc-room-new { height: 44px; padding: 0 14px; border-radius: 14px; }
+[data-mode="phone"] .sc-room-new span { display: none; }
+.rm-card { grid-column: span 2; }
+.sc-root.is-phone .rm-card { grid-column: 1 / -1; }
+.rm-card-thumbs { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; aspect-ratio: 8 / 3; background: var(--color-ground); overflow: hidden; }
+.rm-card-thumbs .rm-t { position: relative; overflow: hidden; background: var(--color-ground); }
+.rm-card-thumbs img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.rm-card-thumbs .rm-t-more { display: flex; align-items: center; justify-content: center; color: var(--color-muted); font-weight: 600; }
+.rm-card .sc-flag.is-room { background: color-mix(in srgb, var(--color-accent) 22%, #131417); color: var(--color-accent); }
+.rm-new-help { margin: 0; padding-left: 18px; color: var(--color-muted); display: flex; flex-direction: column; gap: 6px; }
+.rm-new-files { color: var(--color-muted); }
+.rm-new-progress { display: flex; align-items: center; gap: 8px; color: var(--color-text); font-weight: 500; }

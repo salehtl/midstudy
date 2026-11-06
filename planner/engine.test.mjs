@@ -18,7 +18,7 @@ const SEED = Number(process.env.SEED ?? 20261106) >>> 0
 const N = Number(process.env.N ?? 4000)
 
 // --- the logic modules and the kernels' face, bundled (their .js specifiers name .ts files) --------------------------
-const LOGIC = ['num', 'camera', 'look', 'view', 'layout', 'text', 'money', 'messages', 'input', 'library', 'scenes', 'keymap', 'selection']
+const LOGIC = ['num', 'camera', 'look', 'view', 'layout', 'text', 'money', 'messages', 'input', 'library', 'scenes', 'keymap', 'selection', 'room']
 const entry = [
   ...LOGIC.map((m) => `export * as ${m} from './planner/logic/${m}.ts'`),
   "export * as k from './core/js/web.ts'",
@@ -502,6 +502,122 @@ run('selection: select, toggle, add; a group turns about its middle (main a292ee
   check('selection: select, toggle, add; a group turns about its middle (main a292ee2)', { uids: [...got.uids], primary: got.primary }, selectV1(uids, uid, known, how), { uids, uid, known, how })
   const c = [uni(-5, 5), uni(-5, 5)], x = uni(-5, 5), z = uni(-5, 5), deg = uni(-360, 360)
   check('selection: select, toggle, add; a group turns about its middle (main a292ee2)', [...L.selection.turnAbout(c, x, z, deg)], turnAboutV1({ x: c[0], z: c[1] }, x, z, deg), { c, x, z, deg })
+})
+
+// --- rooms (contract §4.9; no v1): planner/logic/room.ts against this file's own reading of the contract, with Math's
+// sin and cos (the module has its own; they agree to a few ulps and are exact at multiples of 90°) -------------------
+const near = (a, b, tol = 1e-12) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b))
+const nearAll = (a, b, tol) => a.length === b.length && a.every((v, i) => near(v, b[i], tol))
+const refRy = (deg, x, z) => { const t = (deg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t); return [c * x + s * z, -s * x + c * z] }
+const refWrap = (d) => { let y = (((d + 180) % 360) + 360) % 360 - 180; if (y === -180) y = 180; return y }
+const pose = () => ({ x_m: uni(-8, 8), z_m: uni(-8, 8), yaw_deg: pick([0, 90, -90, 180, -180, 45, 360, uni(-720, 720)]) })
+run('room: §4.9 frames both ways, rotation sign, sin and cos', () => {
+  const name = 'room: §4.9 frames both ways, rotation sign, sin and cos'
+  const P = pose(), p = [uni(-10, 10), uni(0, 3), uni(-10, 10)]
+  const [rx, rz] = refRy(P.yaw_deg, p[0], p[2])
+  const want = [rx + P.x_m, p[1], rz + P.z_m]
+  const got = L.room.sceneToRoom(p, P)
+  check(name, nearAll(got, want, 1e-12), true, { P, p, got, want })
+  const back = L.room.roomToScene(got, P)
+  check(name, nearAll(back, p, 1e-12), true, { P, p, back })
+  const [sx, sz] = refRy(-P.yaw_deg, p[0] - P.x_m, p[2] - P.z_m)
+  check(name, nearAll(L.room.roomToScene(p, P), [sx, p[1], sz], 1e-12), true, { P, p })
+  // the item's own +X axis turned into the room is the same as turning by its room rotation (rotation sign = yaw sign)
+  const r = uni(-180, 180)
+  const roomRot = L.room.rotationToRoom(r, P)
+  const a = refRy(r, 1, 0), b = refRy(P.yaw_deg, a[0], a[1]), c = refRy(roomRot, 1, 0)
+  check(name, nearAll(b, c, 1e-9) && roomRot > -180 && roomRot <= 180 && near(L.room.rotationToScene(roomRot, P), refWrap(r), 1e-9), true, { P, r, roomRot })
+  check(name, L.room.wrapYaw(P.yaw_deg) === refWrap(P.yaw_deg) && L.room.wrapYaw(-180) === 180, true, P.yaw_deg)
+  const d = pick([0, 90, 180, 270, -90, 360, -270, 45, uni(-1000, 1000)])
+  const sc = L.room.sinCosDeg(d)
+  // exact at multiples of 90°; elsewhere within 1e-15 of Math's on the angle reduced in degrees first (as the module does)
+  const q = (((d % 360) + 360) % 360) / 90
+  const ok = Number.isInteger(q)
+    ? Math.abs(sc.s) === [0, 1, 0, 1][q] && Math.abs(sc.c) === [1, 0, 1, 0][q] && Math.sign(sc.s || 0) === [0, 1, 0, -1][q] && Math.sign(sc.c || 0) === [1, 0, -1, 0][q]
+    : Math.abs(sc.s - Math.sin(((d % 360) * Math.PI) / 180)) < 1e-15 && Math.abs(sc.c - Math.cos(((d % 360) * Math.PI) / 180)) < 1e-15
+  check(name, ok, true, { d, sc })
+})
+run('room: effective camera, clamps, Set scale factor', () => {
+  const name = 'room: effective camera, clamps, Set scale factor'
+  const cam = { fov_y_deg: uni(20, 110), height_m: uni(0.2, 3), pitch_deg: uni(-80, 30), roll_deg: uni(-20, 20) }
+  const k = pick([1, 0.25, 4, 0.1, 10, NaN, -1, 0, uni(0.2, 5)])
+  const kk = Number.isFinite(k) && k > 0 ? Math.min(4, Math.max(0.25, k)) : 1
+  check(name, L.room.effectiveCamera(cam, k), { fov_y_deg: cam.fov_y_deg, height_m: Math.min(3, Math.max(0.2, cam.height_m * kk)), pitch_deg: cam.pitch_deg, roll_deg: cam.roll_deg }, { cam, k })
+  check(name, L.room.clampScale(k), kk, k)
+  const P = { x_m: uni(-80, 80), z_m: uni(-80, 80), yaw_deg: uni(-1000, 1000) }
+  check(name, L.room.clampPose(P), { x_m: Math.min(50, Math.max(-50, P.x_m)), z_m: Math.min(50, Math.max(-50, P.z_m)), yaw_deg: refWrap(P.yaw_deg) }, P)
+  const m = pick([0, -1, NaN, 2, uni(0.1, 5)]), t = pick([0, 2, NaN, uni(0.1, 5)])
+  const f = Number.isFinite(m) && Number.isFinite(t) && m > 0 && t > 0 && t / m !== 1 ? t / m : null
+  check(name, L.room.rescaleFactor(m, t), f, { m, t })
+})
+run('room: wedge, footprint, hit tests, plan view', () => {
+  const name = 'room: wedge, footprint, hit tests, plan view'
+  const P = pose(), cam = { fov_y_deg: uni(30, 100), height_m: 1.4, pitch_deg: -10, roll_deg: 0 }, aspect = pick([4 / 3, 3 / 4, 16 / 9])
+  const w = L.room.wedgeOf(P, cam, aspect, Math.sqrt)
+  const yaw = (P.yaw_deg * Math.PI) / 180, half = Math.atan(Math.tan((cam.fov_y_deg * Math.PI) / 360) * aspect)
+  const edge = (a) => [P.x_m - 1.5 * Math.sin(yaw + a), P.z_m - 1.5 * Math.cos(yaw + a)]
+  check(name, nearAll([...w.left, ...w.right, ...w.handle], [...edge(half), ...edge(-half), P.x_m - 0.75 * Math.sin(yaw), P.z_m - 0.75 * Math.cos(yaw)], 1e-9), true, { P, cam, aspect, w })
+  const toward = [P.x_m + uni(-3, 3), P.z_m + uni(-3, 3)]
+  const ty = L.room.yawToward([P.x_m, P.z_m], toward, Math.atan2)
+  const fwd = [-Math.sin((ty * Math.PI) / 180), -Math.cos((ty * Math.PI) / 180)], dv = [toward[0] - P.x_m, toward[1] - P.z_m], len = Math.hypot(...dv)
+  check(name, near(fwd[0], dv[0] / len, 1e-9) && near(fwd[1], dv[1] / len, 1e-9), true, { P, toward, ty })
+  const at = [uni(-5, 5), uni(-5, 5)], rot = uni(-180, 180), min = [-uni(0.1, 1), -uni(0.1, 1)], max = [uni(0.1, 1), uni(0.1, 1)]
+  const fp = L.room.footprintXz(at, rot, min, max)
+  const ref = [[min[0], min[1]], [max[0], min[1]], [max[0], max[1]], [min[0], max[1]]].map(([x, z]) => { const [a, b] = refRy(rot, x, z); return [at[0] + a, at[1] + b] })
+  check(name, nearAll(fp.flat(), ref.flat(), 1e-9), true, { at, rot })
+  // a point inside the footprint (its middle) hits the piece; one far away hits nothing; Align photos grabs the dot
+  const pieces = [{ uid: 'a', corners: fp }]
+  check(name, [L.room.planHit(at, 0.01, [], pieces, false).kind, L.room.planHit([at[0] + 50, at[1]], 0.1, [], pieces, false).kind], ['item', 'none'], { at })
+  const photos = [{ scene: 's', wedge: w, current: true }]
+  check(name, [L.room.planHit(w.handle, 0.05, photos, pieces, true).kind, L.room.planHit([P.x_m, P.z_m], 0.05, photos, pieces, true).kind], [Math.hypot(w.handle[0] - P.x_m, w.handle[1] - P.z_m) > 0.05 ? 'handle' : 'handle', 'photo'], { P })
+  const v = { s: uni(10, 200), ox: uni(-500, 500), oy: uni(-500, 500) }, q = [uni(-5, 5), uni(-5, 5)]
+  const c = L.room.planToCanvas(v, q), back = L.room.canvasToPlan(v, c[0], c[1])
+  const z = L.room.planZoom(v, uni(0.5, 2), c[0], c[1]), stay = L.room.planToCanvas(z, q)
+  check(name, nearAll(back, q, 1e-9) && nearAll(c, [v.ox + v.s * q[0], v.oy + v.s * q[1]], 1e-12) && (z.s === 8 || z.s === 600 || nearAll(stay, c, 1e-9)), true, { v, q })
+})
+run('room: depth lifted into the frame, binned on the plan', () => {
+  const name = 'room: depth lifted into the frame, binned on the plan'
+  const cam = { fov_y_deg: uni(40, 90), height_m: uni(1, 2), pitch_deg: uni(-30, 5), roll_deg: uni(-5, 5) }
+  const W = int(4, 12), H = int(3, 9), data = new Float32Array(W * H).map(() => (rnd() < 0.2 ? 0 : uni(0.5, 6)))
+  const scale = pick([1, uni(0.8, 1.2)])
+  const got = L.room.liftDepth({ data, width: W, height: H }, cam, scale, 1)
+  const want = []
+  const f = H / 2 / Math.tan((cam.fov_y_deg * Math.PI) / 360), pr = (cam.pitch_deg * Math.PI) / 180, rr = (cam.roll_deg * Math.PI) / 180
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const d = data[j * W + i] * scale
+    if (!(d > 0)) continue
+    const v = [((i + 0.5 - W / 2) / f) * d, (-(j + 0.5 - H / 2) / f) * d, -d]
+    const u = [Math.cos(rr) * v[0] - Math.sin(rr) * v[1], Math.sin(rr) * v[0] + Math.cos(rr) * v[1], v[2]]
+    const y = Math.cos(pr) * u[1] - Math.sin(pr) * u[2] + cam.height_m
+    if (y < 0.1 || y > 2) continue
+    want.push(u[0], Math.sin(pr) * u[1] + Math.cos(pr) * u[2])
+  }
+  check(name, nearAll(got, want, 1e-9), true, { cam, W, H })
+  const P = pose(), g = L.room.gridOver({ minX: -10, maxX: 10, minZ: -10, maxZ: 10 }, 0.25)
+  const cells = L.room.cellsOf(got, P, g)
+  const ref = []
+  for (let i = 0; i + 1 < got.length; i += 2) {
+    const [x, z] = refRy(P.yaw_deg, got[i], got[i + 1])
+    const ci = Math.floor((x + P.x_m - g.x0) / g.cell), cj = Math.floor((z + P.z_m - g.z0) / g.cell)
+    ref.push(ci < 0 || cj < 0 || ci >= g.nx || cj >= g.nz ? -1 : cj * g.nx + ci)
+  }
+  // a point exactly on a cell edge may fall either side with the two sins: allow one cell's difference, rarely
+  const off = cells.filter((c, i) => c !== ref[i]).length
+  check(name, off <= Math.max(1, Math.floor(cells.length / 100)), true, { off, n: cells.length })
+})
+run('room: which photo opens, keys 1–9, the PUT bodies', () => {
+  const name = 'room: which photo opens, keys 1–9, the PUT bodies'
+  const ms = ['a', 'b', 'c', 'd'].slice(0, int(0, 4)).map((s) => ({ scene: s, placed: rnd() < 0.6 }))
+  const want = pick([null, 'a', 'c', 'x']), last = pick([null, 'b', 'd', 'y'])
+  const has = (n) => n !== null && ms.some((m) => m.scene === n)
+  const ref = has(want) ? want : has(last) ? last : (ms.find((m) => m.placed) ?? ms[0])?.scene ?? null
+  check(name, L.room.photoToOpen(ms, want, last), ref, { ms, want, last })
+  const key = pick(['0', '1', '5', '9', 'a', '10', '', '3'])
+  const scenes = ms.map((m) => m.scene)
+  check(name, L.room.photoForKey(key, scenes), /^[1-9]$/.test(key) ? scenes[Number(key) - 1] ?? null : null, { key, scenes })
+  const P = pose()
+  const body = L.room.membersWithPose(scenes, 'b', P, pick([null, 2]))
+  check(name, body.map((m) => m.scene).join() === scenes.join() && body.every((m) => (m.scene === 'b' ? m.pose && near(m.pose.yaw_deg, refWrap(P.yaw_deg), 1e-12) : !('pose' in m))), true, { scenes, body })
 })
 
 let failed = 0
