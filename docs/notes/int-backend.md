@@ -123,7 +123,7 @@ fail a check). The calib results the stub and the real CLI gave in these evals w
 | check:py | ok: pyright strict 0 errors, ruff clean; calib pytest **102 passed, 1 skipped** (the photo test) |
 | check:rust | ok: fmt, clippy `-D warnings`, 205 tests, Miri on media, raster, geom, **splat, imaging**, Kani 21 harnesses (`-j 4`), 636 s |
 | check:ownership | `check-ownership.mjs int-backend --base 979677c`: ok |
-| check:tscert | ok: **384/418 certified, all 384 baselined still certify** (45 files). Baseline 225 → 384: +100 scenes logic (server-scenes' 99 + `calibResultSchema`), +59 library, +15 product (`text.ts`, `unescape.ts`), +5 common (`fmtCostShort`, `jsonChar`, `jsonString`, `jsonNumber`, `isList`), +1 pipeline (`reprValue`); −21, exactly the functions moved to `common/` or deleted (the list in the commit). The 34 that don't certify are the tracks' known ones (product's `PyValue` alias cycle, 22; pipeline's, 10: its eleventh, `pyFloat`, is now common's, which certifies; scenes' `isRecord`) and `jsonLine` (`Object.entries` over an index signature). Four earlier runs here (load 10–27) ended in 4–5 tool errors each, on different units every time, and gave no verdict: see the TScert note below |
+| check:tscert | ok: **384/418 certified, all 384 baselined still certify** (45 files). Baseline 225 → 384: +100 scenes logic (server-scenes' 99 + `calibResultSchema`), +59 library, +15 product (`text.ts`, `unescape.ts`), +5 common (`fmtCostShort`, `jsonChar`, `jsonString`, `jsonNumber`, `isList`), +1 pipeline (`reprValue`); −21, exactly the functions moved to `common/` or deleted (the list in the commit). The 34 that don't certify are the tracks' known ones (product's `PyValue` alias cycle, 22; pipeline's, 10: its eleventh, `pyFloat`, is now common's, which certifies; scenes' `isRecord`) and `jsonLine` (`Object.entries` over an index signature). Three earlier runs here (load 10–27; step limits 240, 300 and 600 s) each ended in 4 tool errors, on different units every time, and gave no verdict: see the TScert note below |
 
 ### E17: the server and CLI metrics
 
@@ -243,7 +243,7 @@ nix develop -c uv run --project calib python calib/scripts/gen_contract_types.py
   before `scripts/tscert.mjs` set it. `nix/tscert.nix` now sets it for the whole run. The two runs after the change
   (load 2–3) had no timeout at all, so the retry itself is untested under load; what made units time out in the first
   place (server-library saw a forked stage-runner that never exec'd) is not understood.
-- Not run here: `check:fuzz` (no fuzz target changed), `check:proofs` (no Lean changed; proofs-final is on `v2`),
+- Not run here: `check:fuzz` (no fuzz target changed here; kernels-hardening's and pipeline's ran in their tracks), `check:proofs` (no Lean changed; proofs-final is on `v2`),
   `eval:real` and the real-MoGe `eval:calib` (the worker with real MoGe-2 ran through HTTP in E17's calib suite, 12
   calibrations), `eval:product-live` (needs `fixtures/pages/`).
 - The midstudy-calib Nix package fix is evaluated, not built.
