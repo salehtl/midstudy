@@ -307,6 +307,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "midstudy-product"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "regex",
+ "regex-syntax",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "midstudy-raster"
 version = "0.1.0"
 dependencies = [
@@ -322,6 +333,14 @@ name = "midstudy-wasm-node"
 version = "0.1.0"
 dependencies = [
  "midstudy-media",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "midstudy-wasm-product"
+version = "0.1.0"
+dependencies = [
+ "midstudy-product",
  "wasm-bindgen",
 ]
 

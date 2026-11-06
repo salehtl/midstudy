@@ -44,6 +44,7 @@
     "test:server": "node --test --test-concurrency=1 server/test/*.test.ts",
     "test:scenes": "node --test --test-concurrency=1 server/test/scenes/*.test.ts",
     "test:library": "node --test --test-concurrency=1 server/test/library/*.test.ts",
+    "test:product": "node --test --test-concurrency=1 server/test/product/*.test.ts",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {
