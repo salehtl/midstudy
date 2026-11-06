@@ -1,11 +1,16 @@
 // Prices (contract §2.6 renders, §2.8/§3.2 library adds): what a render or an add will cost, as v1 shows it before
 // asking (engine.js RENDER_MODELS and renderPrice; data.js LIB_PRICE, estimateCost). Pure, for TScert.
 
-export type RenderModel = 'nano-banana' | 'kontext' | 'qwen'
+export type RenderModel = 'nano-banana' | 'kontext' | 'qwen' | 'gpt-image'
 
 /** The render models, the default first (Nano Banana takes the scene photo as a reference). */
 export function isRenderModel(m: string): m is RenderModel {
-  return m === 'nano-banana' || m === 'kontext' || m === 'qwen'
+  return m === 'nano-banana' || m === 'kontext' || m === 'qwen' || m === 'gpt-image'
+}
+
+/** Nano Banana and GPT Image take the scene photo as a reference (image 2, contract §4.7). */
+export function takesReference(m: string): boolean {
+  return m === 'nano-banana' || m === 'gpt-image'
 }
 
 export function renderLabel(m: RenderModel): string {
@@ -16,6 +21,8 @@ export function renderLabel(m: RenderModel): string {
       return 'FLUX.1 Kontext [pro]'
     case 'qwen':
       return 'Qwen Image Edit'
+    case 'gpt-image':
+      return 'GPT Image 2 edit'
   }
 }
 
@@ -28,6 +35,8 @@ export function renderModelPrice(m: RenderModel, megapixels: number): number {
       return 0.04
     case 'qwen':
       return 0.03 * megapixels
+    case 'gpt-image':
+      return 0.07 // billed by tokens on fal: the server's estimate
   }
 }
 

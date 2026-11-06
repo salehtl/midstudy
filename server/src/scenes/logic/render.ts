@@ -6,30 +6,42 @@ import { isSlug } from '../../../../common/logic/slug.ts'
 import { isNum, isRecord, pyStr, pyTruthy } from './values.ts'
 
 /** The render models, in v1's order. */
-export type RenderModel = 'kontext' | 'nano-banana' | 'qwen'
+export type RenderModel = 'kontext' | 'nano-banana' | 'qwen' | 'gpt-image'
+
+/** The models that take the scene photo as image 2 with REFERENCE_RENDER_PROMPT (§4.7). */
+export function takesReference(model: RenderModel): boolean {
+  return model === 'nano-banana' || model === 'gpt-image'
+}
 
 /** One model's fal endpoint and the argument its image goes in. */
 export interface ModelSpec {
-  readonly endpoint: 'fal-ai/flux-pro/kontext' | 'fal-ai/nano-banana/edit' | 'fal-ai/qwen-image-edit'
+  readonly endpoint: 'fal-ai/flux-pro/kontext' | 'fal-ai/nano-banana/edit' | 'fal-ai/qwen-image-edit' | 'openai/gpt-image-2/edit'
   readonly imageKey: 'image_url' | 'image_urls'
+  /** Arguments of the model's own, sent with the image, prompt and output_format. */
+  readonly extra: Readonly<Record<string, string>>
 }
 
 /** v1 RENDER_MODELS (contract §2.6's table). */
 export function modelSpec(model: RenderModel): ModelSpec {
   switch (model) {
-    case 'kontext': return { endpoint: 'fal-ai/flux-pro/kontext', imageKey: 'image_url' }
-    case 'nano-banana': return { endpoint: 'fal-ai/nano-banana/edit', imageKey: 'image_urls' }
-    case 'qwen': return { endpoint: 'fal-ai/qwen-image-edit', imageKey: 'image_url' }
+    case 'kontext': return { endpoint: 'fal-ai/flux-pro/kontext', imageKey: 'image_url', extra: {} }
+    case 'nano-banana': return { endpoint: 'fal-ai/nano-banana/edit', imageKey: 'image_urls', extra: {} }
+    case 'qwen': return { endpoint: 'fal-ai/qwen-image-edit', imageKey: 'image_url', extra: {} }
+    // OpenAI's model on fal (added 2026-11-05, main 7a4f425): medium quality, about the input's size.
+    case 'gpt-image': return { endpoint: 'openai/gpt-image-2/edit', imageKey: 'image_urls', extra: { quality: 'medium', image_size: 'auto' } }
   }
 }
 
 /** The price recorded for a render (§2.6): kontext $0.04, nano-banana $0.0398, qwen $0.03 a megapixel of the input
- *  (rounded to 4 places). */
+ *  (rounded to 4 places), gpt-image an estimated $0.07. */
 export function renderPrice(model: RenderModel, width: number, height: number): number {
   switch (model) {
     case 'kontext': return 0.04
     case 'nano-banana': return 0.0398
     case 'qwen': return pyRound(0.03 * ((width * height) / 1e6), 4)
+    // Billed by tokens on fal, so an estimate: its table gives $0.043–0.068 at medium for 1–3.7 MP with one input image;
+    // the scene photo is a second one.
+    case 'gpt-image': return 0.07
   }
 }
 
@@ -38,7 +50,7 @@ export const DEFAULT_RENDER_PROMPT = 'Turn this 3D planning render into a photor
   + 'room geometry, and every piece of furniture with its position, size, shape and color. Realistic materials, '
   + 'soft natural daylight, subtle contact shadows. Do not add, remove or move anything.'
 
-/** v1 REFERENCE_RENDER_PROMPT (§4.7: nano-banana with the scene photo as image 2). */
+/** v1 REFERENCE_RENDER_PROMPT (§4.7: nano-banana and gpt-image with the scene photo as image 2). */
 export const REFERENCE_RENDER_PROMPT = 'Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. '
   + "Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, "
   + "reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in "
@@ -71,10 +83,10 @@ function modelRepr(v: unknown): string {
 /** v1: `model = body.get("model") or "nano-banana"`, then it must name one of RENDER_MODELS. */
 export function modelChoice(v: unknown): ModelChoice {
   if (!pyTruthy(v)) return { kind: 'model', model: 'nano-banana' }
-  if (v === 'kontext' || v === 'nano-banana' || v === 'qwen') return { kind: 'model', model: v }
+  if (v === 'kontext' || v === 'nano-banana' || v === 'qwen' || v === 'gpt-image') return { kind: 'model', model: v }
   if (Array.isArray(v)) return { kind: 'crash', error: "TypeError: unhashable type: 'list'" }
   if (isRecord(v)) return { kind: 'crash', error: "TypeError: unhashable type: 'dict'" }
-  return { kind: 'refused', error: 'unknown model ' + modelRepr(v) + ' (choose from kontext, nano-banana, qwen)' }
+  return { kind: 'refused', error: 'unknown model ' + modelRepr(v) + ' (choose from kontext, nano-banana, qwen, gpt-image)' }
 }
 
 /** The layout a render records: the request's `layout` when it is a slug, else null. */

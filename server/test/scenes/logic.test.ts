@@ -46,8 +46,8 @@ void test('direct cases: statuses, names, values, render choices, worker lines',
 
   assert.deepEqual(modelChoice(''), { kind: 'model', model: 'nano-banana' })
   assert.deepEqual(modelChoice(0), { kind: 'model', model: 'nano-banana' })
-  assert.deepEqual(modelChoice(true), { kind: 'refused', error: 'unknown model True (choose from kontext, nano-banana, qwen)' })
-  assert.deepEqual(modelChoice(1.5), { kind: 'refused', error: 'unknown model 1.5 (choose from kontext, nano-banana, qwen)' })
+  assert.deepEqual(modelChoice(true), { kind: 'refused', error: 'unknown model True (choose from kontext, nano-banana, qwen, gpt-image)' })
+  assert.deepEqual(modelChoice(1.5), { kind: 'refused', error: 'unknown model 1.5 (choose from kontext, nano-banana, qwen, gpt-image)' })
   assert.equal(renderPrice('qwen', 4000, 3000), 0.36)
   assert.equal(renderPrice('qwen', 1600, 1200), 0.0576)
   assert.equal(renderPrompt(null, true), REFERENCE_RENDER_PROMPT)

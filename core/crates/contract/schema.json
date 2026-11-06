@@ -2450,14 +2450,16 @@
           "enum": [
             "kontext",
             "nano-banana",
-            "qwen"
+            "qwen",
+            "gpt-image"
           ]
         },
         "endpoint": {
           "enum": [
             "fal-ai/flux-pro/kontext",
             "fal-ai/nano-banana/edit",
-            "fal-ai/qwen-image-edit"
+            "fal-ai/qwen-image-edit",
+            "openai/gpt-image-2/edit"
           ]
         },
         "cost_usd": {
@@ -2555,7 +2557,8 @@
           "enum": [
             "kontext",
             "nano-banana",
-            "qwen"
+            "qwen",
+            "gpt-image"
           ]
         },
         "prompt": {

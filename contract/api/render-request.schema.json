@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "image": { "$ref": "common.schema.json#/$defs/jpegDataUri", "description": "The capture: the full photo frame with the furniture." },
-    "model": { "description": "Default nano-banana.", "enum": ["kontext", "nano-banana", "qwen"] },
+    "model": { "description": "Default nano-banana.", "enum": ["kontext", "nano-banana", "qwen", "gpt-image"] },
     "prompt": { "description": "Replaces the default prompt when it isn't blank.", "type": "string" },
     "scene": { "$ref": "common.schema.json#/$defs/slug", "description": "The scene rendered; required for the reference photo and keep-room (§4.7)." },
     "layout": { "description": "The layout shown; a value that isn't a slug is recorded as null.", "type": "string" },

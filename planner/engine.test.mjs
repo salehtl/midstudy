@@ -242,6 +242,7 @@ const RENDER_MODELS = {
   'nano-banana': { label: 'Nano Banana edit', price: () => 0.0398 },
   kontext: { label: 'FLUX.1 Kontext [pro]', price: () => 0.04 },
   qwen: { label: 'Qwen Image Edit', price: (mp) => 0.03 * mp },
+  'gpt-image': { label: 'GPT Image 2 edit', price: () => 0.07 },
 }
 const fmtUsd = (v) => `$${Math.abs(v * 100 - Math.round(v * 100)) < 1e-6 ? v.toFixed(2) : v.toFixed(4)}`
 function renderPrice(model, shot) { return RENDER_MODELS[model].price(shot ? (shot.width * shot.height) / 1e6 : 1) }
@@ -427,7 +428,7 @@ run('text and money: dimsText, fmtUsd, fmtBytes, renderPrice, estimateCost', () 
   const d = rnd() < 0.1 ? null : { w: pick([50, 50.25, 0.1, 120, uni(1, 400)]), d: pick([40, 33.333]), h: pick([1, 99.95, uni(1, 300)]) }
   const v = pick([0, 0.0398, 0.04, 0.1, 0.25, 1.5, uni(0, 5), 0.03 * uni(0, 4)])
   const n = pick([0, -1, 1, 999, 1000, 1499, 1500, 1e6 - 1, 1e6, 2.5e6, 1e9, 3.3e9, NaN, uni(0, 5e9)])
-  const model = pick(['nano-banana', 'kontext', 'qwen'])
+  const model = pick(['nano-banana', 'kontext', 'qwen', 'gpt-image'])
   const shot = rnd() < 0.3 ? null : { width: int(1, 4000), height: int(1, 3000) }
   const name = 'text and money: dimsText, fmtUsd, fmtBytes, renderPrice, estimateCost'
   const price = L.money.renderModelPrice(model, shot ? L.money.megapixels(shot.width, shot.height) : 1)

@@ -10,7 +10,7 @@ import type { RouteModule } from '../http/router.ts'
 import { isFile } from '../../../common/files.ts'
 import type { RenderService } from '../scenes/render.ts'
 import {
-  KEEP_ROOM_NEEDS_MASK, KEEP_ROOM_NEEDS_SCENE, NOT_JPEG_URI, NO_FRAME, NO_PHOTO_YET, maskSizeProblem, modelChoice, renderLayout, renderPrice,
+  KEEP_ROOM_NEEDS_MASK, KEEP_ROOM_NEEDS_SCENE, NOT_JPEG_URI, NO_FRAME, NO_PHOTO_YET, maskSizeProblem, modelChoice, renderLayout, renderPrice, takesReference,
   renderPrompt,
 } from '../scenes/logic/render.ts'
 import { noScene } from '../scenes/logic/scene.ts'
@@ -86,7 +86,7 @@ async function postRender(ctx: RequestContext, scenes: SceneService, renders: Re
       return
     }
   }
-  const reference = choice.model === 'nano-banana' && photo !== null
+  const reference = takesReference(choice.model) && photo !== null
   const size = jpegFrame(image)
   if (!size.ok) {
     // The price can depend on the size (qwen: $0.03 a megapixel), so a composite whose frame header can't be read isn't

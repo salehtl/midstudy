@@ -2,6 +2,7 @@
 // render's row, why a render failed, the confirm's labels, the viewer's lines and Keep room's result. Pure,
 // TScert-checked.
 
+import { takesReference } from '../../logic/money.js'
 import { dots, money } from './text.js'
 
 export const ABOUT_S = 25 // seconds a render usually takes
@@ -23,13 +24,13 @@ interface AlignFacts {
 
 /** A model's short name ("Nano Banana"), else its long label, else its key. */
 export function modelShort(model: string | null | undefined, label: string | null | undefined): string {
-  const short = model === 'nano-banana' ? 'Nano Banana' : model === 'kontext' ? 'FLUX Kontext' : model === 'qwen' ? 'Qwen' : ''
+  const short = model === 'nano-banana' ? 'Nano Banana' : model === 'kontext' ? 'FLUX Kontext' : model === 'qwen' ? 'Qwen' : model === 'gpt-image' ? 'GPT Image' : ''
   return short || (label ?? '') || (model ?? '')
 }
 
 /** What each model is like, under its name in the confirm. */
 export function modelNote(model: string): string {
-  return model === 'nano-banana' ? 'Uses the photo as a reference' : model === 'kontext' ? 'Freer light, may move things' : model === 'qwen' ? 'Restyles more, slower' : ''
+  return model === 'nano-banana' ? 'Uses the photo as a reference' : model === 'kontext' ? 'Freer light, may move things' : model === 'qwen' ? 'Restyles more, slower' : model === 'gpt-image' ? 'OpenAI, uses the photo as a reference' : ''
 }
 
 /** A prompt that is one of the server's defaults reads as no prompt (planner/serve.py's two). */
@@ -99,7 +100,7 @@ export function sentWhat(again: boolean, pieces: number): string {
   return again ? "That render's picture" : `The photo with ${String(pieces)} ${pieces === 1 ? 'piece' : 'pieces'}`
 }
 export function sentCaption(what: string, size: string, model: string): string {
-  return `${what} · ${size}${model === 'nano-banana' ? ' · plus the photo as a reference' : ''}`
+  return `${what} · ${size}${takesReference(model) ? ' · plus the photo as a reference' : ''}`
 }
 
 /** Keep room's result in the viewer ("" without Keep room). */

@@ -57,12 +57,20 @@ function rig(options: { readonly cap?: number; readonly key?: string | null; rea
 function job(model: RenderJob['model'], extra: Partial<RenderJob> = {}): RenderJob {
   return {
     image: new Uint8Array(LIVING), width: 1600, height: 1200, model, prompt: 'P', scene: 'scene-20261105-120000', layout: null,
-    reference: model === 'nano-banana' ? new Uint8Array(LIVING) : null, keepRoom: false, mask: null, price: renderPrice(model, 1600, 1200), ...extra,
+    reference: model === 'nano-banana' || model === 'gpt-image' ? new Uint8Array(LIVING) : null, keepRoom: false, mask: null, price: renderPrice(model, 1600, 1200), ...extra,
   }
 }
 
 const uri = (b: Buffer): string => 'data:image/jpeg;base64,' + b.toString('base64')
 const rows = (costs: string): string[] => fs.readFileSync(costs, 'utf8').slice(HEADER.length).split('\n').filter((l) => l !== '')
+
+void test('gpt-image with the scene: both images, quality medium and image_size auto, an estimated $0.07', async () => {
+  const r = rig()
+  const out = await r.renders.render(job('gpt-image'))
+  assert.equal(out.kind, 'done')
+  assert.deepEqual(r.calls, [{ endpoint: 'openai/gpt-image-2/edit', key: 'test-key', args: { image_urls: [uri(LIVING), uri(LIVING)], prompt: 'P', output_format: 'jpeg', quality: 'medium', image_size: 'auto' } }])
+  assert.equal(out.kind === 'done' ? out.meta.cost_usd : null, 0.07)
+})
 
 void test('nano-banana with the scene: both images as data URIs, the result downloaded, the meta and a billed cost row', async () => {
   const r = rig()

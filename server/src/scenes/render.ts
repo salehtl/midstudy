@@ -37,7 +37,7 @@ export interface RenderJob {
   readonly prompt: string
   readonly scene: string | null
   readonly layout: string | null
-  /** The scene photo, sent as image 2 (nano-banana with a scene), or null. */
+  /** The scene photo, sent as image 2 (nano-banana or gpt-image with a scene), or null. */
   readonly reference: Uint8Array | null
   readonly keepRoom: boolean
   /** The keep-room mask (PNG), or null. */
@@ -155,7 +155,7 @@ export class RenderService {
       const image = spec.imageKey === 'image_urls'
         ? [dataUri(job.image), ...(job.reference === null ? [] : [dataUri(job.reference)])]
         : dataUri(job.image)
-      const args = { [spec.imageKey]: image, prompt: job.prompt, output_format: 'jpeg' }
+      const args = { [spec.imageKey]: image, prompt: job.prompt, output_format: 'jpeg', ...spec.extra }
       let answer: unknown
       try {
         answer = await this.#fal.call(spec.endpoint, args, key)

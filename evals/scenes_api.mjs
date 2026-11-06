@@ -499,7 +499,7 @@ if (srv2.up) {
   const S2 = up2.json?.scene
   await waitScene(srv2.base, S2 || '_', 30000)
   const costs0 = fs.readFileSync(srv2.dirs.costs, 'utf8')
-  for (const model of ['nano-banana', 'kontext', 'qwen']) {
+  for (const model of ['nano-banana', 'kontext', 'qwen', 'gpt-image']) {
     r = await api.send(srv2.base, 'POST', '/api/render', { image: dataUri('image/jpeg', livingBytes), scene: S2, model })
     ev.check(`W2 /api/render ${model} with a scene over the $0.03 cap → 402 {error, spent_usd, cap_usd}`, r.status === 402 && typeof r.json?.error === 'string' && 'spent_usd' in (r.json || {}) && r.json?.cap_usd === 0.03, st(r))
   }

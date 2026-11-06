@@ -2149,11 +2149,12 @@ function pngDataUrl(png: Uint8Array): Promise<string> {
 }
 
 // --- render (contract §2.6, §4.7) ---------------------------------------------------------------------------------------
-/** The render models, the default first (Nano Banana takes the scene photo as a reference, image 2). */
+/** The render models, the default first (Nano Banana and GPT Image take the scene photo as a reference, image 2). */
 export const RENDER_MODELS: Readonly<Record<RenderModel, { readonly label: string; readonly price: (megapixels: number) => number }>> = {
   'nano-banana': { label: money.renderLabel('nano-banana'), price: (mp) => money.renderModelPrice('nano-banana', mp) },
   kontext: { label: money.renderLabel('kontext'), price: (mp) => money.renderModelPrice('kontext', mp) },
   qwen: { label: money.renderLabel('qwen'), price: (mp) => money.renderModelPrice('qwen', mp) },
+  'gpt-image': { label: money.renderLabel('gpt-image'), price: (mp) => money.renderModelPrice('gpt-image', mp) },
 }
 export const fmtUsd = (v: number): string => text.fmtUsd(v)
 /** A render's price before asking: qwen by the capture's megapixels (1 MP without a capture). */

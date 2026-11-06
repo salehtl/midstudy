@@ -668,8 +668,8 @@ export type RenderMeta = {
   readonly input_url: string
   /** fal's output before keep-room's align; null without keep-room. */
   readonly raw_url: string | null
-  readonly model: "kontext" | "nano-banana" | "qwen"
-  readonly endpoint: "fal-ai/flux-pro/kontext" | "fal-ai/nano-banana/edit" | "fal-ai/qwen-image-edit"
+  readonly model: "kontext" | "nano-banana" | "qwen" | "gpt-image"
+  readonly endpoint: "fal-ai/flux-pro/kontext" | "fal-ai/nano-banana/edit" | "fal-ai/qwen-image-edit" | "openai/gpt-image-2/edit"
   readonly cost_usd: Usd
   readonly mock: boolean
   /** The prompt sent (the default one when none was given). */
@@ -697,7 +697,7 @@ export type RenderRequest = {
   /** The capture: the full photo frame with the furniture. */
   readonly image: JpegDataUri
   /** Default nano-banana. */
-  readonly model?: "kontext" | "nano-banana" | "qwen"
+  readonly model?: "kontext" | "nano-banana" | "qwen" | "gpt-image"
   /** Replaces the default prompt when it isn't blank. */
   readonly prompt?: string
   /** The scene rendered; required for the reference photo and keep-room (§4.7). */
