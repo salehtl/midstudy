@@ -38,7 +38,7 @@ export class Ctx {
 }
 
 /** v1's `_parse_size_text`: a structured size string ("W 48 x D 55 x H 82 cm", "7' 6\" x 9' 6\"", "3*4"). */
-export function parseSize(text: string, ctx: Ctx, source: string, label: string | null = null, pairOk = true, warnUnitless = true): Reading | null {
+function parseSize(text: string, ctx: Ctx, source: string, label: string | null = null, pairOk = true, warnUnitless = true): Reading | null {
   const prepared = squash(cpPrefix(unescape(text), 2000))
   return ctx.took(sizes.parseSizeText(prepared, ctx.size, source, label, pairOk, warnUnitless))
 }

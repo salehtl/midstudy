@@ -30,7 +30,7 @@ interface Capture {
 type Closer = 'title' | 'h1' | 'skip' | 'out' | 'item' | Capture
 
 /** A link (<base href> or a microdata src) Python's urljoin refused: v1's parse stopped there (its ValueError). */
-export class ParseStopped extends Error {
+class ParseStopped extends Error {
   constructor() {
     super('the page stopped parsing at a link urljoin refused')
     this.name = 'ParseStopped'

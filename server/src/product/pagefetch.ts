@@ -51,7 +51,7 @@ function failure(f: FetchFailure): Error {
 
 /** v1's `_get`: a GET under §2.9's rules; the body is read only for a 200. Throws ProductError, PageTimeout, or an
  *  Error v1 had no sentence for. */
-export async function getPage(url: string, budget: Budget, maxBytes: number, accept: string, sameOrigin?: string): Promise<FetchResult> {
+async function getPage(url: string, budget: Budget, maxBytes: number, accept: string, sameOrigin?: string): Promise<FetchResult> {
   try {
     return await safeFetch(url, {
       budget,

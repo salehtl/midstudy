@@ -36,6 +36,19 @@ def item(it):
             "num_text": it.num_text, "to": it.to}
 
 
+def tagged(v):
+    """A JSON value with Python's types kept apart: ints and floats tagged, dicts as ordered pairs."""
+    if isinstance(v, bool) or v is None or isinstance(v, str):
+        return v
+    if isinstance(v, int):
+        return {"int": str(v)}
+    if isinstance(v, float):
+        return {"float": repr(v)}
+    if isinstance(v, list):
+        return [tagged(x) for x in v]
+    return {"dict": [[k, tagged(x)] for k, x in v.items()]}
+
+
 def jsonable(v):
     if isinstance(v, float) and not math.isfinite(v):
         return repr(v)
@@ -97,6 +110,17 @@ def run(req):
         return round(req["value"] + 1e-9, 1)
     if op == "unescape":
         return pp.html.unescape(req["text"])
+    if op == "loads":
+        v = pp.json.loads(req["text"], strict=req["strict"])
+        return "parsed" if req.get("deep") else tagged(v)
+    if op == "loads_lenient":
+        return tagged(pp._loads_lenient(req["text"]))
+    if op == "literals":
+        return list(pp._literals(req["text"]))
+    if op == "js_unescape":
+        return pp._js_unescape(req["text"])
+    if op == "system_prompt":
+        return pp.SYSTEM_PROMPT
     if op == "squash":
         return pp._squash(req["text"])
     raise ValueError(f"unknown op {op}")
@@ -109,5 +133,5 @@ for line in sys.stdin:
         out = {"ok": jsonable(run(json.loads(line)))}
     except Exception as e:  # noqa: BLE001 - the oracle reports what v1 raised
         out = {"raised": type(e).__name__, "message": str(e)[:300]}
-    sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(out) + "\n")
     sys.stdout.flush()

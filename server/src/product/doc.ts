@@ -4,7 +4,7 @@
 import { pyStrip } from '../../../common/logic/pyfmt.ts'
 import { HTML5_ENTITIES, INVALID_CHARREFS, INVALID_CODEPOINTS } from './entities.ts'
 import type { MicroItem, Page } from './html.ts'
-import { asList, get, has, isDict, isList, isNumber, or, toFloat, type PyDict } from './logic/py.ts'
+import { get, isDict, isList, isNumber, or, toFloat, type PyDict } from './logic/py.ts'
 import { loadsLenient, type PyValue } from './logic/pyjson.ts'
 import { collapseWs } from './logic/text.ts'
 import { pyUnescape } from './logic/unescape.ts'
@@ -18,7 +18,7 @@ export function unescape(s: string): string {
 }
 
 /** v1's `_fmt(float(v))` for a JSON number; v1 raised (OverflowError, ValueError) on one that isn't finite. */
-export function fmtFloat(v: bigint | number): string {
+function fmtFloat(v: bigint | number): string {
   const f = toFloat(v)
   if (!Number.isFinite(f)) throw new Error(`cannot round ${String(f)}`)
   return fmtNum(f)
@@ -136,9 +136,3 @@ export class Doc {
   }
 }
 
-/** `p.get(key)` on the product node, or undefined without one. */
-export function productField(doc: Doc, key: string): PyValue | undefined {
-  return doc.product?.get(key)
-}
-
-export { asList, get, has }

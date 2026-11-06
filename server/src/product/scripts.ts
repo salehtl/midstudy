@@ -57,8 +57,9 @@ const JS_ESCAPE = /\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[^\n])/gu
 /** v1's `_js_unescape`: a script string literal's escapes read (\n, \t and \r as line breaks, \b \f \v \0 dropped). */
 export function jsUnescape(s: string): string {
   return s.replace(JS_ESCAPE, (_m: string, e: string) => {
-    if (e.startsWith('u') && e.length === 5) return String.fromCharCode(parseInt(e.slice(1), 16))
-    if (e.startsWith('x') && e.length === 3) return String.fromCharCode(parseInt(e.slice(1), 16))
+    // a \u or \x without its hex digits is dropped (v1's int('', 16) raised ValueError, answered with '')
+    if (e.startsWith('u')) return e.length === 5 ? String.fromCharCode(parseInt(e.slice(1), 16)) : ''
+    if (e.startsWith('x')) return e.length === 3 ? String.fromCharCode(parseInt(e.slice(1), 16)) : ''
     switch (e) {
       case 'n': return '\n'
       case 't': return '\t'

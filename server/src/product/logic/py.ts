@@ -60,7 +60,7 @@ export function asList(v: PyValue | undefined): readonly PyValue[] {
 }
 
 /** Python's `repr` of a JSON value (what `str()` prints inside a list or dict). */
-export function pyReprValue(v: PyValue | undefined): string {
+function pyReprValue(v: PyValue | undefined): string {
   if (v === undefined || v === null) return 'None'
   if (v === true) return 'True'
   if (v === false) return 'False'
