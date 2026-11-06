@@ -9,13 +9,15 @@
 //   dead       knip (knip.json): no unused files, exports or dependencies
 //   gen        scripts/gen-contract.mjs (when it exists), then contract/gen/ must equal what is committed
 //   tscert     scripts/tscert-ratchet.mjs: TScert over the logic/ modules, tscert/baseline.json still certifies
+//   planner    the planner's own tests, no browser: its logic against v1 (npm run test:engine, test:ui) and the typed bus
+//              against an EventTarget (they load the wasm kernels)
 //   rust       in core/: cargo fmt --check, clippy -D warnings, tests; Miri (nightly shell) on core/miri.txt's
 //              crates; Kani harnesses when Kani is available
 //   fuzz       a smoke run per cargo-fuzz target under core/ (MIDSTUDY_FUZZ_SECONDS, default 60), nightly shell
 //   proofs     lake build in proofs/; no sorry or admit, no axiom outside proofs/axioms.txt
 //   py         pyright (strict) and ruff on calib/
-//   tests      every `npm run test:*` suite (node:test: the contract, the server's core, scenes, library and product
-//              routes, midstudy-add), FAL_KEY unset; one line with the counts
+//   tests      every `npm run test:*` suite but the planner's (node:test: the contract, the server's core, scenes, library
+//              and product routes, midstudy-add), FAL_KEY unset; one line with the counts
 //   ownership  scripts/check-ownership.mjs for MIDSTUDY_TRACK (default: the track of a v2-<track> branch)
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -26,10 +28,12 @@ let ts
 try { ts = (await import('typescript')).default } catch { console.error('check: typescript missing: run `nix develop -c npm install`'); process.exit(1) }
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
-const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tests', 'tscert', 'py', 'rust', 'fuzz', 'proofs']
+const ORDER = ['ownership', 'gen', 'types', 'lint', 'dead', 'tests', 'tscert', 'planner', 'py', 'rust', 'fuzz', 'proofs']
 const wanted = argv.filter((a) => !a.startsWith('--'))
 for (const w of wanted) if (!ORDER.includes(w)) { console.error(`check: unknown check ${w} (${ORDER.join(', ')})`); process.exit(2) }
 const exists = (p) => fs.existsSync(path.join(ROOT, p))
+// The planner's suites print their own summaries (not node:test's); check:planner runs them, check:tests skips them.
+const PLANNER_SUITES = ['test:engine', 'test:ui']
 const bin = (name) => path.join(ROOT, 'node_modules/.bin', name)
 
 function walk(dir, skip = new Set(['node_modules', 'dist', 'target', '.lake', '.venv', 'build', '.git']), out = []) {
@@ -115,7 +119,7 @@ const checks = {
 
   tests() {
     const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts ?? {}
-    const suites = Object.keys(scripts).filter((k) => k.startsWith('test:')).sort()
+    const suites = Object.keys(scripts).filter((k) => k.startsWith('test:') && !PLANNER_SUITES.includes(k)).sort()
     if (!suites.length) return { ok: true, line: 'nothing to check (no test:* scripts)' }
     // the tests never read a real key: FAL_KEY is dropped for them (the fal tests skip themselves when it is set)
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'FAL_KEY'))
@@ -138,6 +142,19 @@ const checks = {
     const r = sh('node', ['scripts/tscert-ratchet.mjs'])
     const last = r.out.trim().split('\n').at(-1) || ''
     return { ok: r.code === 0, line: last.replace(/^tscert: /, ''), out: r.out }
+  },
+
+  planner() {
+    if (!exists('planner/engine.test.mjs')) return { ok: true, line: 'nothing to check (no planner tests yet)' }
+    const b = sh('node', ['scripts/build.mjs', '--wasm-only', '--quiet'])
+    if (b.code !== 0) return { ok: false, line: 'the wasm build failed (the planner tests load the kernels)', out: b.out }
+    const lines = []
+    for (const t of PLANNER_SUITES) {
+      const r = sh('npm', ['run', '--silent', t])
+      if (r.code !== 0) return { ok: false, line: `npm run ${t} failed`, out: r.out }
+      lines.push(...r.out.trim().split('\n').filter((l) => /groups pass|^logic-vs-v1: ok|^bus: ok/.test(l)).map((l) => l.replace(/ \(seed.*$/, '').replace(': ok — ', ': ')))
+    }
+    return { ok: true, line: lines.join('; ') }
   },
 
   py() {

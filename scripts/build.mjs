@@ -5,9 +5,9 @@
 //    wasm32-unknown-unknown (SIMD128 through core/.cargo/config.toml), wasm-bindgen 0.2.121 (--target web into
 //    build/wasm/web/, --target experimental-nodejs-module, Node ESM, into build/wasm/node/), then wasm-opt -O3 with SIMD.
 //    File names are wasm-bindgen's: <lib name>.js, <lib name>.d.ts, <lib name>_bg.wasm (+ _bg.wasm.d.ts).
-// 2. planner: esbuild bundles planner/main.ts (planner/main.js while it exists) with three.js and Spark from
+// 2. planner: esbuild bundles planner/main.ts with three.js and Spark from
 //    node_modules (no CDN, no importmap) into planner/dist/: app.js, content-hashed chunks (the lazy Spark import is one),
-//    assets/, linked sourcemaps; minified for es2022 and safari16. Files named *.worker.ts (or .js) under planner/ or
+//    assets/, linked sourcemaps; minified for es2022 and safari16. Files named *.worker.ts under planner/ or
 //    core/js/ are bundled as their own entries, planner/dist/<name>.worker.js, for `new Worker(new URL('./<name>.worker.js',
 //    import.meta.url), { type: 'module' })`. The web wasm (build/wasm/web/*.wasm) is copied next to the chunks, so
 //    wasm-bindgen's `new URL('<lib>_bg.wasm', import.meta.url)` resolves. three's decoders (Draco, Basis) are copied to
@@ -191,15 +191,15 @@ const DECODERS = [
 const CDN = /https?:\/\/(cdn\.jsdelivr\.net|unpkg\.com|esm\.sh|cdnjs\.cloudflare\.com|cdn\.skypack\.dev)\/[^\s'"`)]*/g
 
 function plannerEntries() {
-  const main = ['main.ts', 'main.js'].map((f) => path.join(PLANNER, f)).find((f) => fs.existsSync(f))
-  if (!main) throw new Error('planner: no planner/main.ts or planner/main.js')
+  const main = path.join(PLANNER, 'main.ts')
+  if (!fs.existsSync(main)) throw new Error('planner: no planner/main.ts')
   const workers = [
     ...walk(PLANNER, (p, e) => e.isDirectory() && (p === DIST || e.name === 'node_modules')),
     ...walk(path.join(ROOT, 'core/js')),
-  ].filter((f) => /\.worker\.(ts|js)$/.test(f))
+  ].filter((f) => /\.worker\.ts$/.test(f))
   const entries = { app: main }
   for (const w of workers) {
-    const name = path.basename(w).replace(/\.(ts|js)$/, '')
+    const name = path.basename(w).replace(/\.ts$/, '')
     if (entries[name]) throw new Error(`planner: two workers named ${name}: ${rel(entries[name])}, ${rel(w)}`)
     entries[name] = w
   }

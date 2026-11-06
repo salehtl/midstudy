@@ -25,6 +25,7 @@
     "eval:real": "node evals/real_path.mjs",
     "eval:selftest": "node evals/harness_selftest.mjs",
     "eval:perf": "node evals/perf.mjs",
+    "eval:ui-smoke": "node planner/ui/test/smoke.mjs",
     "fixtures:scenes": "node fixtures/make_scene.mjs",
     "check:scenes": "evals/py fixtures/check_scenes.py",
     "build": "node scripts/build.mjs",
@@ -34,6 +35,7 @@
     "check:dead": "node scripts/check.mjs dead",
     "check:gen": "node scripts/check.mjs gen",
     "check:tscert": "node scripts/check.mjs tscert",
+    "check:planner": "node scripts/check.mjs planner",
     "check:rust": "node scripts/check.mjs rust",
     "check:fuzz": "node scripts/check.mjs fuzz",
     "check:proofs": "node scripts/check.mjs proofs",
@@ -47,6 +49,8 @@
     "test:library": "node --test --test-concurrency=1 server/test/library/*.test.ts",
     "test:product": "node --test --test-concurrency=1 server/test/product/*.test.ts",
     "test:pipeline": "node --test --test-concurrency=1 pipeline/test/*.test.ts",
+    "test:engine": "node planner/engine.test.mjs",
+    "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {
