@@ -76,7 +76,8 @@ mod tests {
 
     #[test]
     fn every_half_round_trips() {
-        for h in 0..=u16::MAX {
+        // Every value natively; every 251st under Miri, which interprets each.
+        for h in (0..=u16::MAX).step_by(if cfg!(miri) { 251 } else { 1 }) {
             let f = f16_to_f32(h);
             if f.is_nan() {
                 assert!(f16_to_f32(f32_to_f16(f)).is_nan());
@@ -98,7 +99,7 @@ mod tests {
         assert_eq!(f32_to_f16(-0.0), 0x8000);
         // Monotone and nearest on a sweep.
         let mut prev = 0;
-        for i in 0..200_000_u32 {
+        for i in (0..200_000_u32).step_by(if cfg!(miri) { 997 } else { 1 }) {
             #[allow(clippy::cast_precision_loss)]
             let x = i as f32 * 0.37;
             let h = f32_to_f16(x);

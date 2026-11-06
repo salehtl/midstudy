@@ -57,20 +57,24 @@ pub fn content_length(values: &[&str]) -> Result<Option<u64>, ContentLengthError
         [one] => py_strip(one),
         _ => return Err(ContentLengthError::Multiple),
     };
-    if value.is_empty()
-        || value.len() > MAX_LENGTH_DIGITS
-        || !value.bytes().all(|b| b.is_ascii_digit())
-    {
-        return Err(ContentLengthError::NotDigits);
-    }
-    value
-        .bytes()
-        .try_fold(0u64, |n, b| {
-            n.checked_mul(10)?
-                .checked_add(u64::from(b.wrapping_sub(b'0')))
-        })
+    digits_value(value.as_bytes())
         .map(Some)
         .ok_or(ContentLengthError::NotDigits)
+}
+
+/// The number written by 1 to [`MAX_LENGTH_DIGITS`] ASCII digits, or `None` for anything else. Below 10¹⁵, so the fold
+/// never overflows (proved for every input up to 16 bytes by `proofs::digits_value_is_exact`).
+pub(crate) fn digits_value(digits: &[u8]) -> Option<u64> {
+    if digits.is_empty()
+        || digits.len() > MAX_LENGTH_DIGITS
+        || !digits.iter().all(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    digits.iter().try_fold(0u64, |n, &b| {
+        n.checked_mul(10)?
+            .checked_add(u64::from(b.wrapping_sub(b'0')))
+    })
 }
 
 /// A `Host` value's name, lowercased and without its port (`[::1]:8765` → `[::1]`), or `None` when it isn't exactly

@@ -77,6 +77,8 @@ EXPECTED = {
     "glb-packing": "v1's pipeline packed every buffer into one before scrubbing; the strip takes a GLB whose images "
                    "are in its own binary chunk (the v2 pipeline packs with gltf-transform first)",
     "zip-bad-name": "v1 cut a name at its first NUL (or crashed on a name flagged UTF-8 that isn't); v2 refuses it",
+    "path-v1-crash": "v1's urlsplit raised ValueError on the target (unbalanced or invalid brackets in a netloc, or a "
+                     "netloc that NFKC changes), so v1's handler crashed and dropped the connection; v2 answers",
     "zip-v1-copies": "v1's two zip checks disagreed on an entry like a.obj/. (serve.py counted it as an .obj by its "
                      "path suffix, objzip.py didn't, by the name's ending); v2 follows serve.py, which decides first",
 }

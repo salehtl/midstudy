@@ -10,6 +10,7 @@
 //! v1 Python each one replaces is cited in `docs/notes/k-media.md`, and `tests/diff_v1.py` checks that both make
 //! the same decisions and write the same bytes. Malformed input can never panic, read out of bounds or wrap: the
 //! crate denies indexing, unchecked arithmetic and truncating casts.
+#![deny(missing_docs)]
 #![deny(
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
@@ -33,7 +34,10 @@ pub mod jpeg;
 mod json;
 pub mod meta;
 pub mod path;
+pub mod plan;
 pub mod png;
+#[cfg(kani)]
+mod proofs;
 pub mod slug;
 pub mod sniff;
 pub mod zip;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Builds build/wasm/web/ (what core/js/web.ts loads) until f-toolchain's build script takes over: the wasm32 release
-# build with SIMD128, wasm-bindgen 0.2.121 --target web, then wasm-opt -O3. Tools from the flake's pinned nixpkgs.
-# Usage, from the repo root: core/crates/wasm-web/build-web.sh [--no-simd]
+# `npm run build` (scripts/build.mjs) builds build/wasm/web/. This script stays for one thing: the build without SIMD128
+# that tests/bench.mjs compares against (`--no-simd` writes build/wasm/web-nosimd/). Tools from the flake's pinned
+# nixpkgs. Usage, from the repo root: core/crates/wasm-web/build-web.sh [--no-simd]
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 NP=github:nixos/nixpkgs/1f607aa79b6356ed45d3cd3c8079c196e79efa2c

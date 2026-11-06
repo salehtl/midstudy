@@ -7,6 +7,7 @@
 //!   `planner/serve.py`.
 
 use crate::bytes::{be32, usize_from};
+use crate::plan::Plan;
 
 /// The 8-byte PNG signature.
 pub const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -75,11 +76,31 @@ pub struct Stripped {
 /// [`PngError`] when there's no signature, a chunk runs past the end, or there is no IEND (v1's `clean_png` refused
 /// exactly these).
 pub fn strip(data: &[u8]) -> Result<Stripped, PngError> {
+    let (plan, removed) = strip_plan(data)?;
+    Ok(Stripped {
+        bytes: plan.apply(data),
+        removed,
+    })
+}
+
+/// What [`strip`] writes, as a [`Plan`] over `data` (the signature and every kept chunk, adjacent ones merged; no
+/// bytes of its own), and what it removed. `strip(data)` is exactly `plan.apply(data)`.
+///
+/// # Errors
+/// As [`strip`].
+pub fn strip_plan(data: &[u8]) -> Result<(Plan, Removed), PngError> {
+    let mut plan = Plan::default();
+    let removed = walk(data, |start, end| plan.copy(start, end))?;
+    Ok((plan, removed))
+}
+
+/// The chunk walk behind [`strip_plan`]: calls `keep(start, end)` for the signature and every kept chunk, in order,
+/// and returns what was removed. Allocates nothing (the Kani harness `png_walk_short` proves it on its own).
+pub(crate) fn walk(data: &[u8], mut keep: impl FnMut(usize, usize)) -> Result<Removed, PngError> {
     if !data.starts_with(&SIGNATURE) {
         return Err(PngError::NotPng);
     }
-    let mut out = Vec::with_capacity(data.len());
-    out.extend_from_slice(&SIGNATURE);
+    keep(0, SIGNATURE.len());
     let mut removed = Removed::default();
     let mut i = SIGNATURE.len();
     while i.checked_add(12).is_some_and(|e| e <= data.len()) {
@@ -99,15 +120,12 @@ pub fn strip(data: &[u8]) -> Result<Stripped, PngError> {
             b"eXIf" => removed.exif = removed.exif.saturating_add(1),
             b"tEXt" | b"iTXt" | b"zTXt" => removed.text = removed.text.saturating_add(1),
             b"tIME" => removed.time = removed.time.saturating_add(1),
-            _ => out.extend_from_slice(data.get(i..end).ok_or(PngError::Truncated { at: i })?),
+            _ => keep(i, end),
         }
         i = end;
         if kind == b"IEND" {
             removed.trailing_bytes = data.len().saturating_sub(end);
-            return Ok(Stripped {
-                bytes: out,
-                removed,
-            });
+            return Ok(removed);
         }
     }
     Err(PngError::NoEnd)
@@ -186,6 +204,21 @@ mod tests {
         );
         assert_eq!(strip(&clean).unwrap().bytes, clean);
         assert_eq!(size(&clean), Some((7, 5)));
+    }
+
+    /// Found by the `png_strip` fuzz target: `size` reads bytes 16..24 whatever IHDR's length says (v1's `png_size`
+    /// does the same), so with a zero-length IHDR the "height" is the next chunk's length, which the strip may
+    /// remove. Kept as v1 (the keep-room mask it checks is a browser-made PNG); pinned here.
+    #[test]
+    fn size_reads_fixed_offsets_like_v1() {
+        let mut p = SIGNATURE.to_vec();
+        p.extend(chunk(b"IHDR", &[]));
+        p.extend(chunk(b"tEXt", &[]));
+        p.extend(chunk(b"gAMA", &[0, 0, 0, 122]));
+        p.extend(chunk(b"IEND", &[]));
+        assert_eq!(size(&p), Some((0x0102_0304, 0)));
+        let s = strip(&p).unwrap();
+        assert_eq!(size(&s.bytes), Some((0x0102_0304, 4)));
     }
 
     #[test]

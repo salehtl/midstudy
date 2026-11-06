@@ -50,7 +50,12 @@ Properties (each is a theorem to prove; the matching Rust test is in brackets):
 7. **Signs (contract §4.1)**: with roll 0, `horizonAt(px) = H/2 − f · tan(−pitch·deg)` for every `px`, which is
    `< H/2` when `pitch < 0` (looking down puts the horizon above the centre). `d horizonAt / d px = tan(roll·deg)`, so
    positive roll makes the horizon fall to the right (`horizonAt(W) > horizonAt(0)`). Up in the world is up in the
-   photo at roll 0: `∂py/∂y < 0` for points in front. [golden `horizon_and_signs_are_pinned`, camera unit tests]
+   photo at roll 0 **for points ahead of the camera's foot** (in front, `d > 0`, and `z < 0`): raising a point by `δ`
+   moves its pixel by exactly `Δpy = f·δ·z / (d·d')` rows (`d`, `d'` its depths before and after), so `Δpy < 0` iff
+   `z < 0`. "For points in front" alone is too broad: looking steeply down, a point in front can be behind the foot
+   (`z > 0`), and raising it moves it *down* the photo; at `z = 0` the row doesn't change. (Corrected after the proofs
+   track: `floorToPhoto_raise`, `floorToPhoto_up` in `proofs/Midstudy/Depth.lean`.) [golden
+   `horizon_and_signs_are_pinned`, camera unit tests]
 8. **Horizon and pitch invert**: for `|pitch| < 90`, `pitchFromHorizon(horizonAt(W/2)) = pitch`. [props
    `horizon_pitch_inverse`]
 9. **Scale (contract §4.5, depth scaling, the ruler)**: for the same angles and `h' = s·h` (`s > 0`),
@@ -83,7 +88,14 @@ clampElevation(y) = clamp(y, 0, 4)
 12. `wrapDeg(x) ∈ (−180, 180]`, `wrapDeg(x) ≡ x (mod 360)`, `wrapDeg ∘ wrapDeg = wrapDeg`; `wrapAz(a) ∈ [−180, 180]`,
     `≡ a (mod 360)`. (Over f64, v1's `wrapAz` is idempotent only to an ulp of 360: the extra `+ 360` rounds. Kept for
     bit-compatibility with v1; the tests allow 2 ulps.) [props `wraps_in_range`]
-13. `rotateBy(r, 90)` four times from `round6(wrapDeg(r))` returns it. [props `four_quarter_turns`]
+13. `rotateBy(r, 90)` four times from `r₀ = round6(wrapDeg(r))` returns the same direction,
+    `wrapDeg(rotateBy⁴(r₀)) = wrapDeg(r₀)`, and returns `r₀` itself **unless `r₀ = −180`**: `round6` can round an angle
+    within 5·10⁻⁷ of −180 (in `(−180, 180]` after `wrapDeg`) down to −180, and four quarter turns then end on 180
+    (`wrapDeg(−180 + 360) = 180`). The earlier statement ("returns it") is false for those angles, e.g. `r = −179.9999999`
+    (proved by the proofs track: `rotateBy_four_quarters_exception`; the rest is `rotateBy_four_quarters_stored`).
+    v1 behaves the same, so the code is unchanged and the property is restated. [props `four_quarter_turns`, which
+    draws one case in ten next to ±180, and `four_quarter_turns_from_minus_180`, which pins the four exceptional
+    angles `k/10⁷`, `k ∈ [−1 799 999 999, −1 799 999 996]`]
 
 ## 3. Items (`item.rs`)
 

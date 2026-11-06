@@ -1,0 +1,7 @@
+# Crates whose tests check:rust runs under Miri (cargo miri test -p <crate>, in the nightly shell; scripts/check.mjs).
+# Under Miri their proptest blocks run 4 cases with no failure file (Miri isolates the test: no getcwd), the exhaustive
+# loops sample (every 251st value, 8 dilation trials), and the tests that read fixtures from disk are ignored.
+# docs/notes/kernels-hardening.md has the timings.
+midstudy-media
+midstudy-raster
+midstudy-geom
