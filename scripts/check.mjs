@@ -190,7 +190,8 @@ const checks = {
     if (harnesses.length) {
       const k = nightly(['cargo', 'kani', '--version'], { cwd })
       if (k.code === 0) {
-        const run = nightly(['cargo', 'kani', '--workspace'], { cwd })
+        // four harnesses at a time (kernels-hardening: 244 s instead of 627 s for the 21 harnesses), one line each
+        const run = nightly(['cargo', 'kani', '--workspace', '-j', '4', '--output-format', 'terse'], { cwd })
         if (run.code !== 0) return { ok: false, line: 'Kani found a failing harness', out: run.out }
         steps.push(`Kani (${harnesses.length} file(s) with harnesses)`)
       } else steps.push(`Kani unavailable: ${harnesses.length} file(s) with harnesses not run`)

@@ -34,13 +34,8 @@
     "contract/gen/**"
   ],
   "ignoreDependencies": [
-    "@gltf-transform/core",
-    "@gltf-transform/extensions",
-    "@gltf-transform/functions",
-    "fflate",
     "libheif-js",
-    "obj2gltf",
-    "parse5"
+    "obj2gltf"
   ],
   "ignoreBinaries": [
     "nix",

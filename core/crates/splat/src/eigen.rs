@@ -237,6 +237,13 @@ mod tests {
     }
 
     proptest! {
+        // 256 cases natively; under Miri (core/miri.txt) 4, since every case is interpreted. No failure file: Miri's
+        // isolation has no `getcwd`, which proptest needs to find one (as the hardened crates do).
+        #![proptest_config(ProptestConfig {
+            cases: if cfg!(miri) { 4 } else { 256 },
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        })]
         #[test]
         fn rebuilds_any_covariance(
             q in prop::array::uniform4(-1.0f64..1.0),

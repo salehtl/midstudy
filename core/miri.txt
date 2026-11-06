@@ -5,3 +5,7 @@
 midstudy-media
 midstudy-raster
 midstudy-geom
+# midstudy-add's kernels (pipeline track: no proptest blocks; the tests over thousands of splats or pixels are
+# cfg_attr(miri, ignore); 8 s and 20 s). midstudy-product is not listed: its regex crate under Miri takes 24 min.
+midstudy-splat
+midstudy-imaging

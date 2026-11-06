@@ -52,7 +52,6 @@
   "dependencies": {
     "@gltf-transform/core": "4.5.1",
     "@gltf-transform/extensions": "4.5.1",
-    "@gltf-transform/functions": "4.5.1",
     "fflate": "0.8.3",
     "libheif-js": "1.23.5",
     "obj2gltf": "3.2.0",
