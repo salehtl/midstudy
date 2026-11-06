@@ -43,5 +43,5 @@ judge it in Safari or Helium on Metal, with and without `?webgpu=0`.
   TS re-implementations of the proved slug and photo-extension rules, Python-compatibility helpers duplicated) are
   in `.claude/worktrees/rf-verify-*/evals/out/`, not fixed.
 - `v2-webgpu`'s last commit (lazy environment maps, `25a9c3a`) is left out: it broke E16.33.
-- Fuzz corpora are committed in bulk (~18 MB); trim to seeds.
+- Fuzz corpora trimmed to 40 seeds per target (332 files, ~1.3 MB); fuzz runs grow the rest locally.
 - Not verified: live fal, a real GPU or phone, the Linux packaging (Nix is evaluated, not built on Linux).
