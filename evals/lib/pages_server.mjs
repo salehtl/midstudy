@@ -1,4 +1,4 @@
-// A local stand-in for shops on the web, on one port, for the product page evals (contract §2.11). serve.py reaches it
+// A local stand-in for shops on the web, on one port, for the product page evals (contract §2.11). The server reaches it
 // through MIDSTUDY_FETCH_ALLOW=127.0.0.1:<port> (the one private address it may fetch; everything else stays refused).
 //
 //   syntheticPages()              → { routes, cases, refused, dir }   from fixtures/product-pages/manifest.json

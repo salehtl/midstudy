@@ -1,4 +1,4 @@
-// E1 eval:scenes-api — the scenes API of planner/serve.py (PLAN.md §6.2 E1; contract §4.4, §2.7, §2.9). No browser.
+// E1 eval:scenes-api — the scenes API of the server (PLAN.md §6.2 E1; contract §4.4, §2.7, §2.9). No browser.
 // Upload → 202, listed pending, calibrates (calib stub + MIDSTUDY_CALIB_MOCK), photo.jpg ≤ 2048, the scene has the
 // camera; PUT camera round-trips; calibrate; delete moves to the trash; layouts per scene don't leak; static rules;
 // W1 (forged), W2 (Host), W4 (paths) on every new route; the spend cap covers /api/render. fal mocked, $0.
@@ -43,7 +43,7 @@ const srv = await startServer(ev, {
   calib: `python3 ${path.join(REPO, 'evals/lib/gated_calib.py')}`,
   env: { MIDSTUDY_EVAL_CALIB_GATE: GATE, MIDSTUDY_EVAL_CALIB_LOG: CALLOG, MIDSTUDY_EVAL_CALIB_TARGET: `python3 ${path.join(REPO, 'fixtures/stub_calib.py')}` },
 })
-ev.check('serve.py starts with --scenes-dir, --calib and scratch dirs', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts with --scenes-dir, --calib and scratch dirs', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const B = srv.base
 const scenesDir = srv.dirs.scenes
@@ -709,7 +709,7 @@ if (srv5.up) {
   await srv5.stop()
 }
 
-// the server MIDSTUDY_SERVER picks (the harness's command), as startServer runs it
+// the server's command (the harness's), as startServer runs it
 const badCmd = serverCommand(['--port', '0', '--daily-spend-usd', '0', '--allowed-host', 'https://midstudy.example.com', '--calib', 'python3 fixtures/stub_calib.py'])
 const bad = spawnSync(badCmd.cmd, badCmd.args,
   { cwd: REPO, encoding: 'utf8', timeout: 15000, env: { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), FAL_KEY: '' } })

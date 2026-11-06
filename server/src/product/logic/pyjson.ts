@@ -16,7 +16,7 @@ const NAN = 0 / 0
 const MAX_DEPTH = 9997
 
 /** Not JSON to Python (v1 caught JSONDecodeError, ValueError and RecursionError alike). */
-export class PyJsonError extends Error {}
+class PyJsonError extends Error {}
 
 /** A container being filled: its values, or its keys and values. */
 interface Frame {

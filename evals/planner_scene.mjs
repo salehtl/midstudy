@@ -23,7 +23,7 @@ const HOOK = ['listScenes', 'createScene', 'waitForScene', 'openScene', 'deleteS
 const shot = (page, name) => page.screenshot({ path: path.join(ev.out, `${name}.png`) }).catch(() => {})
 
 const srv = await startServer(ev)
-ev.check('serve.py starts (calib stub + MIDSTUDY_CALIB_MOCK, scratch dirs, probe library)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (calib stub + MIDSTUDY_CALIB_MOCK, scratch dirs, probe library)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const names = {}
 for (const id of GOLDEN) {

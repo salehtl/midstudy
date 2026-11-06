@@ -1,6 +1,7 @@
 // Tests core/js/node.ts against the wasm build in build/wasm/node/ (build it with `nix develop -c npm run build`):
-// every function on known inputs, the wasm outputs against the native build (examples/difftool) on the GPS-canary
-// corpus diff_v1.py leaves in evals/out/media-diff/corpus/, and random inputs into every export (a panic in wasm would
+// every function on known inputs, the wasm outputs against the native build (examples/difftool) on the tracked fuzz
+// corpora of the JPEG, PNG and GLB strippers (core/crates/media/fuzz/corpus/, seeded with evals/lib/metadata.py's GPS
+// canaries), and random inputs into every export (a panic in wasm would
 // throw "RuntimeError: unreachable").
 //
 //   nix develop -c node --test core/crates/wasm-node/js-test/face.test.ts
@@ -231,15 +232,21 @@ void test('zip plans', () => {
   assert.equal(neg.error.code, 'bad-input')
 })
 
-void test('the wasm build writes what the native build writes (GPS-canary corpus)', (t) => {
-  const corpus = join(REPO, 'evals/out/media-diff/corpus')
+void test('the wasm build writes what the native build writes (the JPEG, PNG and GLB fuzz corpora)', (t) => {
   const tool = join(REPO, 'core/target/release/examples/difftool')
-  if (!existsSync(corpus) || !existsSync(tool)) {
-    t.skip('run core/crates/media/tests/diff_v1.py first (it builds the corpus; the difftool is built for it)')
+  if (!existsSync(tool)) {
+    t.skip('build the native side first: (cd core && cargo build --release --example difftool -p midstudy-media)')
     return
   }
-  const files = readdirSync(corpus).map((f) => join(corpus, f))
-  const ops = files.map((f) => (f.endsWith('.glb') ? 'glb-compact' : f.endsWith('.png') ? 'png-strip' : 'jpeg-strip'))
+  const files: string[] = []
+  const ops: string[] = []
+  for (const [dir, op] of [['jpeg_strip', 'jpeg-strip'], ['png_strip', 'png-strip'], ['glb_strip', 'glb-compact']] as const) {
+    const corpus = join(REPO, 'core/crates/media/fuzz/corpus', dir)
+    for (const f of readdirSync(corpus)) {
+      files.push(join(corpus, f))
+      ops.push(op)
+    }
+  }
   const input = files.map((f, k) => `${ops[k] ?? ''}\t@${f}`).join('\n') + '\n'
   const run = spawnSync(tool, [], { input, encoding: 'utf8', maxBuffer: 1 << 30 })
   assert.equal(run.status, 0, run.stderr)

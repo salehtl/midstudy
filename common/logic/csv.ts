@@ -53,7 +53,7 @@ export function costsText(existing: string | null, row: CostRow): string {
 
 /** Python's `csv.reader` (excel dialect, not strict) over a whole text: records end at `\r\n`, `\n` or `\r` outside
  *  quotes; `""` inside quotes is a quote; text after a closing quote joins the field; an empty line is `[]`. */
-export function parseCsv(text: string): string[][] {
+function parseCsv(text: string): string[][] {
   const rows: string[][] = []
   let row: string[] = []
   let field = ''

@@ -4,10 +4,10 @@
 import { pyRepr } from '../../../common/logic/pyfmt.ts'
 import { pyFloat } from '../../../common/logic/csv.ts'
 
-/** v1's default --calib. */
+/** The default --calib: calib/'s midstudy-calib (its warm worker, `midstudy-calib serve`, is tried first; contract §4.3). */
 const DEFAULT_CALIB = 'uv run --project calib midstudy-calib'
-/** v1's default --midstudy-add. */
-const DEFAULT_MIDSTUDY_ADD = 'uv run --project pipeline midstudy-add'
+/** The default --midstudy-add: the furniture CLI (contract §3.1), run by Node from the repository. */
+const DEFAULT_MIDSTUDY_ADD = 'node pipeline/src/cli.ts'
 
 /** The parsed flags, before paths are resolved. */
 interface CliOptions {
@@ -61,7 +61,7 @@ export function help(prog: string): string {
 }
 
 /** Python's `int(s)` for ASCII text: surrounding whitespace, a sign, `_` between digits; null where it raises. */
-export function pyInt(s: string): number | null {
+function pyInt(s: string): number | null {
   const t = s.trim()
   if (!/^[+-]?\d(?:_?\d)*$/.test(t)) return null
   return parseInt(t.replace(/_/g, ''), 10)

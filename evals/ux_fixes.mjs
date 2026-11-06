@@ -40,7 +40,7 @@ for (const f of fs.readdirSync(cssDir).filter((f) => f.endsWith('.css'))) {
 ev.check('every planner stylesheet has balanced braces (a stray "}" makes the browser drop the next rule)', braces.every((b) => b.ok), fmt(braces.filter((b) => !b.ok)) || 'all balanced')
 
 const srv = await startServer(ev)
-ev.check('serve.py starts (stub calibration + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (stub calibration + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const S = await seedScene(srv, 'living-wide', 'Living room')
 ev.check('golden living-wide calibrated (its true camera)', S.name && !S.why, S.why || S.name)

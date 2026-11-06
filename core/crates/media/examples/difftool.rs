@@ -1,4 +1,5 @@
-//! The Rust side of `tests/diff_v1.py` (the differential test against v1's Python): reads cases from stdin, one per
+//! The native side of differential tests (until the v2 cutover, `tests/diff_v1.py` against v1's Python; now the wasm
+//! build against the native one, `crates/wasm-node/js-test/face.test.ts`): reads cases from stdin, one per
 //! line, `<op>\t<arg>[\t<arg>…]`, each argument hex-encoded bytes (or `@<path>` for a file), and prints one JSON
 //! object per case. Byte outputs are hex too, or written to `<out-dir>/<case>.bin` when `out-dir` is given and the
 //! output is large. Only for tests: it reads files and stdin, which the library never does.

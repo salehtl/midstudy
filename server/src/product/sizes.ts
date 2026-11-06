@@ -68,17 +68,6 @@ export interface Finished {
   readonly thickness_used: boolean
 }
 
-/** One measurement on a line (for tests). */
-export interface ItemView {
-  readonly start: number
-  readonly end: number
-  readonly value: number
-  readonly unit: Unit | null
-  readonly axis: string | null
-  readonly num_text: string
-  readonly to: number | null
-}
-
 /** An exception v1 raised inside its size rules (v1's read() answered its generic 422). */
 export class PyRaised extends Error {
   constructor(name: string) {
@@ -167,13 +156,6 @@ function reading(v: unknown): Reading {
     w: num(field(v, 'w')), d: num(field(v, 'd')), h: optNum(field(v, 'h')), unit: unit(field(v, 'unit')),
     label: optStr(field(v, 'label')), unit_note: optStr(field(v, 'unit_note')), notes: strings(field(v, 'notes')),
     quote: str(field(v, 'quote')), source: str(field(v, 'source')),
-  }
-}
-
-function item(v: unknown): ItemView {
-  return {
-    start: num(field(v, 'start')), end: num(field(v, 'end')), value: num(field(v, 'value')), unit: optUnit(field(v, 'unit')),
-    axis: optStr(field(v, 'axis')), num_text: str(field(v, 'num_text')), to: optNum(field(v, 'to')),
   }
 }
 
@@ -361,29 +343,6 @@ export function firstItem(text: string): readonly [number, Unit | null, string] 
   return [num(value), optUnit(u), str(t)]
 }
 
-/** v1's `_text_readings`. */
-export function textReadings(lines: readonly string[], ctx: SizeCtx): Reading[] {
-  return list(field(call('text_readings', { lines: joinLines(lines), ctx }), 'readings')).map(reading)
-}
-
-/** v1's `_unit_hint`. */
-export function unitHint(lines: readonly string[]): Unit | null {
-  return optUnit(call('unit_hint', { lines: joinLines(lines) }))
-}
-
-/** A rug's thickness from the page: [cm, v1's note], or null. */
-export function thickness(lines: readonly string[], hint: Unit | null): readonly [number, string] | null {
-  const v = call('thickness', { lines: joinLines(lines), hint })
-  if (v === null) return null
-  const [cm, note] = list(v)
-  return [num(cm), str(note)]
-}
-
-/** v1's `_llm_text`. */
-export function llmText(lines: readonly string[]): string {
-  return str(call('llm_text', { lines: joinLines(lines) }))
-}
-
 /** v1's `_quote_numbers`. */
 export function quoteNumbers(quote: string): number[] {
   return list(call('quote_numbers', { text: quote })).map(num)
@@ -417,14 +376,4 @@ export function axisOf(text: string): string | null {
 /** v1's `_fmt`. */
 export function fmtNum(value: number): string {
   return str(call('fmt', { value }))
-}
-
-/** v1's `_line_chains` (tests and diagnostics). */
-export function lineChains(text: string): ItemView[][] {
-  return list(field(call('line_chains', { text }), 'chains')).map((c) => list(c).map(item))
-}
-
-/** v1's `_items` (tests and diagnostics). */
-export function items(text: string): ItemView[] {
-  return list(call('items', { text })).map(item)
 }

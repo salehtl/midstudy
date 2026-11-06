@@ -1,7 +1,7 @@
 // The fal client (pipeline/src/fal.ts) without the network: LiveFal against a scripted fetch speaks fal-client
 // 1.0.3's protocol (what v1's upload_file and subscribe sent), retries what it retried and words failures as v1 did;
-// MockFal replays fixtures/fal and logs every request (common/fal.ts's request log) as v1's
-// pipeline/test/v1_mock_log.py does; the key is common/fal.ts's.
+// MockFal replays fixtures/fal and logs every request (common/fal.ts's request log, contract §3.3) in the format v1's
+// CLI was compared in before the cutover; the key is common/fal.ts's.
 //
 //   nix develop -c node --test pipeline/test/fal.test.ts
 import assert from 'node:assert/strict'
@@ -168,7 +168,7 @@ void test('download: a failed fetch is v1\'s sentence; LiveFal.fetch saves under
   assert.equal(fs.readFileSync(out, 'utf8'), 'ply')
 })
 
-void test('MockFal replays fixtures/fal and logs the requests as v1_mock_log.py does; run() retries SAM 3D', async () => {
+void test('MockFal replays fixtures/fal and logs the requests (MIDSTUDY_FAL_MOCK_LOG); run() retries SAM 3D', async () => {
   const dir = fresh('mock')
   const log = path.join(dir, 'log.jsonl')
   const image = path.join(dir, 'engine-input.jpg')

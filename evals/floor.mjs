@@ -18,7 +18,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(ev.out, `${name}.
 const deg = (r) => (r * 180) / Math.PI
 
 const srv = await startServer(ev)
-ev.check('serve.py starts (calib stub + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (calib stub + MIDSTUDY_CALIB_MOCK)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const S = await seedScene(srv, 'living-wide')
 ev.check('golden living-wide calibrated: camera_source auto, truth camera', S.name && !S.why && S.scene.camera_source === 'auto' && camEq(S.scene.camera, TRUTH), S.why || fmt(S.scene?.camera))

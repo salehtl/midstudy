@@ -712,7 +712,7 @@ export type RenderRequest = {
 
 export type Rgb = readonly [number, number, number]
 
-/** Written by planner/serve.py: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes. */
+/** Written by the server: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes. */
 export type Scene = {
   readonly version: 1
   /** Free text, set on upload (X-Midstudy-Meta) or by rename; null shows the date. */

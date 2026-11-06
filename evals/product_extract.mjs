@@ -1,6 +1,6 @@
 // E14 eval:product — the product page reader (contract §2.11, §2.9 Page fetches), no browser, $0.
 // The synthetic shop pages in fixtures/product-pages/ are served on one local port by evals/lib/pages_server.mjs, which
-// serve.py may reach only through MIDSTUDY_FETCH_ALLOW=127.0.0.1:<port>. The language model is mocked
+// the server may reach only through MIDSTUDY_FETCH_ALLOW=127.0.0.1:<port>. The language model is mocked
 // (fixtures/fal/openrouter-router/), and MIDSTUDY_FAL_MOCK_LOG records what would have been sent to it.
 // Checks: every manifest case against its "expect"; every refused_urls entry is 400 within 3 s with no connection;
 // forged requests are 403; what reached the pages server (no pictures, no cookies, the honest User-Agent, feeds only to
@@ -30,7 +30,7 @@ ev.onCleanup(pages.stop)
 const allow = `127.0.0.1:${pages.port}`
 const mockLog = path.join(ev.out, 'fal-mock-1.jsonl')
 const srv = await startServer(ev, { env: { MIDSTUDY_FETCH_ALLOW: allow, MIDSTUDY_FAL_MOCK_LOG: mockLog } })
-ev.check('serve.py starts with MIDSTUDY_FETCH_ALLOW for the pages server', srv.up, srv.up ? `${srv.base}, pages ${pages.base}` : srv.why)
+ev.check('the server starts with MIDSTUDY_FETCH_ALLOW for the pages server', srv.up, srv.up ? `${srv.base}, pages ${pages.base}` : srv.why)
 if (!srv.up) await ev.finish(1)
 
 const read = (base, url, extra = {}, o = {}) => api.send(base, 'POST', '/api/library/product', url === undefined ? extra : { url, ...extra }, { timeoutMs: 90000, ...o })

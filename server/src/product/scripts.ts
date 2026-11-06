@@ -12,7 +12,7 @@ import { cpLength, squash } from './logic/text.ts'
 import { hasSize } from './sizes.ts'
 
 /** v1's `_literals`: the contents of the "…" and '…' string literals (4 to 200,000 characters) in `text`. */
-export function literals(text: string): string[] {
+function literals(text: string): string[] {
   const out: string[] = []
   const n = text.length
   let i = 0
@@ -55,7 +55,7 @@ export function literals(text: string): string[] {
 const JS_ESCAPE = /\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[^\n])/gu
 
 /** v1's `_js_unescape`: a script string literal's escapes read (\n, \t and \r as line breaks, \b \f \v \0 dropped). */
-export function jsUnescape(s: string): string {
+function jsUnescape(s: string): string {
   return s.replace(JS_ESCAPE, (_m: string, e: string) => {
     // a \u or \x without its hex digits is dropped (v1's int('', 16) raised ValueError, answered with '')
     if (e.startsWith('u')) return e.length === 5 ? String.fromCharCode(parseInt(e.slice(1), 16)) : ''

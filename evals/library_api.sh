@@ -1,29 +1,18 @@
 #!/usr/bin/env bash
-# Library API eval (contract §2.8 L8–L11, §2.9 W1–W4): planner/serve.py on a scratch library, fal mocked ($0).
+# Library API eval (contract §2.8 L8–L11, §2.9 W1–W4): the server on a scratch library, fal mocked ($0).
 # A local image server stands in for the web (MIDSTUDY_FETCH_ALLOW lets the fetcher reach it and nothing else private),
 # and a canary port records any connection the fetcher should never have made.
 # Usage: bash evals/library_api.sh   (or npm run eval:library). Output lands in evals/out/library-api/.
 # The first server runs with --daily-spend-usd 0: mock calls count for nothing, so the mocked adds still go through.
-# v2 switches (contract §0): MIDSTUDY_SERVER=legacy|next (planner/serve.py, or node server/src/main.ts with the same
-# flags), MIDSTUDY_ADD=legacy|next (the --midstudy-add the server gets: uv run --project pipeline midstudy-add, or node
-# pipeline/src/cli.ts); either next sets MIDSTUDY_STRICT=1. node scripts/build.mjs runs first when it exists.
+# The server is node server/src/main.ts and the --midstudy-add it gets node pipeline/src/cli.ts, both in strict mode
+# (MIDSTUDY_STRICT=1, contract §0). node scripts/build.mjs runs first.
 # MIDSTUDY_RECORD_API=<dir> records each API call made through add/call/wait_job (contract/tools/check-recordings.mjs).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-case "${MIDSTUDY_SERVER:-legacy}" in
-  legacy) SERVER_CMD=(python3 planner/serve.py) ;;
-  next) SERVER_CMD=(node server/src/main.ts) ;;
-  *) echo "FAIL MIDSTUDY_SERVER must be legacy or next, not ${MIDSTUDY_SERVER}"; exit 2 ;;
-esac
-case "${MIDSTUDY_ADD:-legacy}" in
-  legacy) ADD_CMD="uv run --project pipeline midstudy-add" ;;
-  next) ADD_CMD="node pipeline/src/cli.ts" ;;
-  *) echo "FAIL MIDSTUDY_ADD must be legacy or next, not ${MIDSTUDY_ADD}"; exit 2 ;;
-esac
-STRICT=""
-if [ "${MIDSTUDY_SERVER:-legacy}" = next ] || [ "${MIDSTUDY_ADD:-legacy}" = next ]; then STRICT=1; fi
-echo "E7 library-api: server ${MIDSTUDY_SERVER:-legacy} (${SERVER_CMD[*]}), furniture CLI ${MIDSTUDY_ADD:-legacy} ($ADD_CMD)${STRICT:+, MIDSTUDY_STRICT=1}${MIDSTUDY_RECORD_API:+, recording /api calls to $MIDSTUDY_RECORD_API}"
+SERVER_CMD=(node server/src/main.ts)
+ADD_CMD="node pipeline/src/cli.ts"
+echo "E7 library-api: server ${SERVER_CMD[*]}, furniture CLI $ADD_CMD, MIDSTUDY_STRICT=1${MIDSTUDY_RECORD_API:+, recording /api calls to $MIDSTUDY_RECORD_API}"
 
 OUT=evals/out/library-api
 LIB="$OUT/library"
@@ -139,7 +128,7 @@ WEB_PID=$!
 SERVER_PID=""
 start_server() {  # start_server [server args...]
   env -u FAL_KEY MIDSTUDY_NO_DOTENV=1 NOOK_NO_DOTENV=1 MIDSTUDY_FAL_MOCK=fixtures/fal MIDSTUDY_FETCH_ALLOW="127.0.0.1:$IMGPORT" ${MIDSTUDY_FAL_MOCK_COST:+MIDSTUDY_FAL_MOCK_COST=1} \
-    ${STRICT:+MIDSTUDY_STRICT=1} "${SERVER_CMD[@]}" --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --scenes-dir "$OUT/scenes" \
+    MIDSTUDY_STRICT=1 "${SERVER_CMD[@]}" --port "$PORT" --library-dir "$LIB" --costs-file "$LIB/costs.csv" --scenes-dir "$OUT/scenes" \
     --layouts-dir "$OUT/layouts" --renders-dir "$OUT/renders" --midstudy-add "$ADD_CMD" "$@" >>"$OUT/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 50); do curl -sf "$BASE/api/library" >/dev/null && return 0; sleep 0.2; done
@@ -147,13 +136,8 @@ start_server() {  # start_server [server args...]
 }
 stop_server() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null && wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""; }
 trap 'stop_server; kill "$WEB_PID" 2>/dev/null' EXIT
-if [ "${MIDSTUDY_ADD:-legacy}" = legacy ]; then
-  uv sync -q --project pipeline || { echo "FAIL uv sync --project pipeline"; exit 1; }
-fi
-if [ -f scripts/build.mjs ]; then
-  node scripts/build.mjs >"$OUT/build.log" 2>&1; built=$?
-  check "node scripts/build.mjs builds the planner" '[ "$built" = 0 ]' "$(tail -n 3 "$OUT/build.log" | tr '\n' ' ')"
-fi
+node scripts/build.mjs >"$OUT/build.log" 2>&1; built=$?
+check "node scripts/build.mjs builds the planner" '[ "$built" = 0 ]' "$(tail -n 3 "$OUT/build.log" | tr '\n' ' ')"
 start_server --daily-spend-usd 0 || { echo "FAIL ${SERVER_CMD[*]} did not answer GET /api/library (log: $OUT/server.log)"; tail -n 5 "$OUT/server.log"; exit 1; }
 
 # --- reads ------------------------------------------------------------------------------------------------------------------------

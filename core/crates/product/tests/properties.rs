@@ -1,6 +1,7 @@
 //! Properties of the size reader on arbitrary text (proptest): nothing panics, every answer is well formed (sizes in
 //! range, spans inside the line and in order, JSON that parses), and the formatting helpers round-trip. Exact
-//! agreement with v1 is the differential test's job (server/test/product/sizes.test.ts against v1's own Python).
+//! agreement with v1 was the differential test's job until the v2 cutover deleted v1 (server/test/product/sizes.test.ts
+//! against v1's own Python, in git history); E14 (eval:product) checks the reader end to end.
 use midstudy_product::api;
 use proptest::prelude::*;
 use serde_json::Value;

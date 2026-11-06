@@ -2,7 +2,7 @@
 // client speaks fal-client 1.0.3's protocol exactly (what v1's `fal_client.upload_file` and `fal_client.subscribe`
 // send: the CDN v3 upload with its storage fallback, the queue's submit, status polls with logs, the result, retries
 // and backup domains). The key, the mock switches, the request log (MIDSTUDY_FAL_MOCK_LOG: every upload, call and fetch
-// as one JSON line, the same lines v1 writes through pipeline/test/v1_mock_log.py) and downloads are the server's too:
+// as one JSON line, the lines v1's CLI was checked against before the cutover) and downloads are the server's too:
 // common/fal.ts.
 import { randomInt } from 'node:crypto'
 import fs from 'node:fs'

@@ -1,5 +1,5 @@
 // Records contract/examples/<route>.json: real requests and answers of every /api route, from the server the eval
-// harness starts (MIDSTUDY_SERVER: v1's planner/serve.py by default), with the eval mocks (fal mocked, $0; the calib
+// harness starts (node server/src/main.ts in strict mode), with the eval mocks (fal mocked, $0; the calib
 // stub with MIDSTUDY_CALIB_MOCK; the made-up shop pages of fixtures/product-pages). Only fixtures go in: the golden
 // scenes, fixtures/models, fixtures/fal; never fixtures/photos/. Each answer is checked against the schema
 // contract/api/routes.json names for it, and the run fails when one doesn't match.
@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
-  createEval, startServer, waitScene, waitFor, raw, api, b64json, dataUri, maskPng, golden, sleep, clip, SERVER, ADD, ADD_CMD, STRICT,
+  createEval, startServer, waitScene, waitFor, raw, api, b64json, dataUri, maskPng, golden, sleep, clip, SERVER_CMD, ADD_CMD,
 } from '../../evals/lib/harness.mjs'
 import { syntheticPages, startPagesServer } from '../../evals/lib/pages_server.mjs'
 import { makeAjv, loadRoutes, matchRoute, responseSchema, errorText, REPO, CONTRACT } from './schemas.mjs'
@@ -87,7 +87,7 @@ const synth = syntheticPages()
 const pages = await startPagesServer({ routes: synth.routes, dir: synth.dir })
 ev.onCleanup(pages.stop)
 const srv = await startServer(ev, { env: { MIDSTUDY_FETCH_ALLOW: `127.0.0.1:${pages.port}` } })
-ev.check(`the server starts (${SERVER}, furniture CLI ${ADD})`, srv.up, srv.up ? srv.base : srv.why)
+ev.check(`the server starts (${SERVER_CMD.join(' ')}, furniture CLI ${ADD_CMD})`, srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish(1)
 let B = srv.base
 const LW = golden('living-wide'), PT = golden('portrait')
@@ -199,11 +199,11 @@ await call('POST', '/api/library/product', { llm: true }, { note: 'neither url n
 
 ev.section('midstudy-add (§3.1): the summary line')
 {
-  // The furniture CLI the harness picks (MIDSTUDY_ADD), with the environment the server gives it; a relative --library,
+  // The furniture CLI the harness gives the server, with the environment the server gives it; a relative --library,
   // so the paths in the line are repo-relative.
   const lib = path.relative(REPO, path.join(ev.out, 'cli-library'))
   const [cmd, ...pre] = ADD_CMD.split(' ')
-  const env = { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), ...(STRICT ? { MIDSTUDY_STRICT: '1' } : {}) }
+  const env = { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), MIDSTUDY_STRICT: '1' }
   delete env.FAL_KEY
   delete env.MIDSTUDY_FAL_MOCK_COST
   const add = (args, note) => {
@@ -233,7 +233,7 @@ if (capped.up) {
 fs.mkdirSync(OUT_DIR, { recursive: true })
 const leak = /\/Users\/|\/home\/|fixtures\/photos/
 for (const [file, doc] of [...files.entries()].sort()) {
-  const text = `${JSON.stringify({ ...doc, recorded: `${SERVER === 'next' ? 'node server/src/main.ts' : 'planner/serve.py'} (MIDSTUDY_SERVER=${SERVER}), contract/tools/record-examples.mjs` }, null, 2)}\n`
+  const text = `${JSON.stringify({ ...doc, recorded: `${SERVER_CMD.join(' ')}, contract/tools/record-examples.mjs` }, null, 2)}\n`
   if (leak.test(text)) { problems++; ev.check(`${file} holds no local path or photo`, false, text.match(leak)[0]); continue }
   fs.writeFileSync(path.join(OUT_DIR, file), text)
 }

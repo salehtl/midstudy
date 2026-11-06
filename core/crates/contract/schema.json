@@ -2588,7 +2588,7 @@
       "maxItems": 3
     },
     "Scene": {
-      "description": "Written by planner/serve.py: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes.",
+      "description": "Written by the server: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes.",
       "type": "object",
       "required": [
         "version",

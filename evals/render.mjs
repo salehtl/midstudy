@@ -66,7 +66,7 @@ const srv = await startServer(ev, {
   calib: `python3 ${path.join(REPO, 'evals/lib/gated_calib.py')}`,
   env: { MIDSTUDY_EVAL_CALIB_TARGET: `python3 ${path.join(REPO, 'fixtures/stub_calib.py')}`, ...(calibBuilt ? { MIDSTUDY_EVAL_ALIGN_TARGET: ALIGN_CMD } : {}) },
 })
-ev.check('serve.py starts (stub calibration, real align)', srv.up, srv.up ? srv.base : srv.why)
+ev.check('the server starts (stub calibration, real align)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
 const S = await seedScene(srv, 'living-wide')
 ev.check('golden living-wide calibrated', S.name && !S.why, S.why || S.name)

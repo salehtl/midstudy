@@ -1,10 +1,10 @@
-// midstudy's server (contract §2.1, §4.4; v2 of planner/serve.py): `node server/src/main.ts` with exactly v1's
-// flags, defaults and startup refusals.
+// midstudy's server (contract §2.1, §4.4): `node server/src/main.ts`, with v1's flags and startup refusals (v1 was
+// planner/serve.py, deleted at the v2 cutover).
 //
 //   node server/src/main.ts [--port 8765] [--host 127.0.0.1] [--scenes-dir scenes] [--layouts-dir layouts]
 //                           [--renders-dir renders] [--library-dir library] [--costs-file <library-dir>/costs.csv]
 //                           [--calib "uv run --project calib midstudy-calib"]
-//                           [--midstudy-add "uv run --project pipeline midstudy-add"] [--daily-spend-usd 2]
+//                           [--midstudy-add "node pipeline/src/cli.ts"] [--daily-spend-usd 2]
 //                           [--allowed-host NAME ...]
 //
 // Relative paths are resolved against the repository. FAL_KEY comes from the environment, else from <repo>/.env

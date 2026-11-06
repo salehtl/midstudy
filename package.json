@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "serve": "python3 planner/serve.py",
+    "serve": "node server/src/main.ts",
     "preserve": "node scripts/build.mjs",
     "eval:scenes-api": "node evals/scenes_api.mjs",
     "eval:calib": "evals/py evals/calib_eval.py",
@@ -47,7 +47,6 @@
     "test:server": "node --test --test-concurrency=1 server/test/*.test.ts",
     "test:scenes": "node --test --test-concurrency=1 server/test/scenes/*.test.ts",
     "test:library": "node --test --test-concurrency=1 server/test/library/*.test.ts",
-    "test:product": "node --test --test-concurrency=1 server/test/product/*.test.ts",
     "test:pipeline": "node --test --test-concurrency=1 pipeline/test/*.test.ts",
     "test:engine": "node planner/engine.test.mjs",
     "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
