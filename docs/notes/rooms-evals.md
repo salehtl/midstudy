@@ -53,7 +53,7 @@ shown upright, so they survive the 2048 px downsizing. `-- --golden` writes an e
   floorPlanPoint`, `addItem() failed: Open a scene first`). 22/89 pass (the eval's own geometry, no page errors on the
   Scenes page). When the hook is missing, photo waits are cut to 3 s so it fails in ~90 s.
 - `eval:real-room -- --golden` against today's server: fails at `--rooms-dir`, as expected.
-- `eval:all`: see the end of this file (run after the wiring).
+- `eval:all` (once, after the wiring, WebGPU): **E1, E3–E17 all pass unchanged** (E1 235/235, E3 56/56, E4 21/21, E5 35/35, E6 38/38, E7 79/79, E8 72/72, E9 49/49, E11 29/29, E12 27/27, E13 51/51, E14 409/409, E15 135/135, E16 57/57, E17 52/52); **E20 --mock 21/21**; E18 30/170 and E19 18/92 fail for the missing routes and hook (no harness exception). The single-photo evals were not edited.
 - `node scripts/check-ownership.mjs evals --base rooms`: ok. `npm run check:dead` (knip): ok.
 - Not run: E20 real (no `align-room` in this worktree's `calib/`; calib builds it in parallel), `eval:real-room` on real
   photos (Phase D), E18/E19 against a rooms server (none exists yet).
