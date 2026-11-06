@@ -8,8 +8,6 @@ import { dictGet, inNumbers, noneOrEmpty, numberOf, pyTruthy, pyValueRepr, type 
 /** A validation's result: the value, or v1's one sentence (a 400). */
 export type Checked<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string }
 
-/** The image engines (§3.2), idol the default. */
-type ImageEngine = 'idol' | 'sam3d' | 'trellis2' | 'rug'
 /** Every engine a job can name: a model upload is `glb`. */
 export type Engine = 'idol' | 'sam3d' | 'trellis2' | 'rug' | 'glb'
 /** What an upload is (X-Midstudy-Kind). */
@@ -79,9 +77,16 @@ export function checkDims(dims: PyValue | undefined): Checked<CheckedDims> {
   return { ok: true, value: { w, d, h, arg: dimText(wv, w) + 'x' + dimText(dv, d) + 'x' + dimText(hv, h) } }
 }
 
-/** Whether a text names an image engine. */
-function isImageEngine(s: string): s is ImageEngine {
-  return s === 'idol' || s === 'sam3d' || s === 'trellis2' || s === 'rug'
+/** The image engine a value names (a str: idol, sam3d, trellis2 or rug), or null. */
+function imageEngineOf(v: PyValue): Engine | null {
+  if (v.kind !== 'str') return null
+  switch (v.value) {
+    case 'idol': return 'idol'
+    case 'sam3d': return 'sam3d'
+    case 'trellis2': return 'trellis2'
+    case 'rug': return 'rug'
+    default: return null
+  }
 }
 
 /** v1 `ENGINE_PRICE`: idol $0.10, sam3d $0.02, trellis2 $0.25/$0.30/$0.35 by resolution, glb and rug $0. */
@@ -124,15 +129,20 @@ export function sameNumber(n: number | null, allowed: readonly number[], fallbac
   return fallback
 }
 
-/** The engine: a model's is glb (any other but None or "" is v1's 400); an image's is idol when missing or falsy. */
+/** A model's engine: glb, None, "" or missing; anything else is v1's 400. */
+function modelEngineOf(v: PyValue | undefined): Checked<Engine> {
+  if (v === undefined || noneOrEmpty(v)) return { ok: true, value: 'glb' }
+  if (v.kind === 'str' && v.value === 'glb') return { ok: true, value: 'glb' }
+  return fail('engine must be glb for a 3D model (or left out), got ' + pyValueRepr(v))
+}
+
+/** The engine: a model's is glb; an image's is idol when missing or falsy (v1's `meta.get("engine") or "idol"`). */
 function engineOf(v: PyValue | undefined, kind: UploadKind): Checked<Engine> {
-  if (kind === 'model') {
-    if (v === undefined || noneOrEmpty(v) || (v.kind === 'str' && v.value === 'glb')) return { ok: true, value: 'glb' }
-    return fail('engine must be glb for a 3D model (or left out), got ' + pyValueRepr(v))
-  }
+  if (kind === 'model') return modelEngineOf(v)
   if (v === undefined || !pyTruthy(v)) return { ok: true, value: 'idol' }
-  if (v.kind === 'str' && isImageEngine(v.value)) return { ok: true, value: v.value }
-  return fail('engine must be idol, sam3d, trellis2 or rug for an image, got ' + pyValueRepr(v))
+  const engine = imageEngineOf(v)
+  if (engine === null) return fail('engine must be idol, sam3d, trellis2 or rug for an image, got ' + pyValueRepr(v))
+  return { ok: true, value: engine }
 }
 
 /** v1 `check_meta`: the validated meta of an add, or the first rule it breaks in v1's order (name, dims_cm, id,
@@ -185,19 +195,19 @@ export function checkMeta(meta: PyValue, kind: UploadKind): Checked<AddMeta> {
 /** v1 `add_command`: midstudy-add's argument list for an add. Every value is `--opt=<v>` and the input an absolute
  *  path, so a name like `-Shelf` is never read as a flag; `src` and `library` are already resolved. */
 export function addArgv(base: readonly string[], src: string, library: string, label: string, m: AddMeta): string[] {
-  let argv = base.concat([src, '--name=' + m.name, '--id=' + m.id, '--dims=' + m.dims.arg, '--engine=' + m.engine, '--library=' + library, '--source-input=' + label])
-  if (m.category !== null) argv = argv.concat(['--category=' + m.category])
-  if (m.mount !== null) argv = argv.concat(['--mount=' + m.mount])
-  if (m.yaw !== 0) argv = argv.concat(['--yaw=' + String(m.yaw)])
-  if (m.engine === 'sam3d' && m.prompt !== null) argv = argv.concat(['--prompt=' + m.prompt])
-  if (m.engine === 'trellis2') argv = argv.concat(['--resolution=' + String(m.resolution)])
+  const argv: string[] = [...base, src, '--name=' + m.name, '--id=' + m.id, '--dims=' + m.dims.arg, '--engine=' + m.engine, '--library=' + library, '--source-input=' + label]
+  if (m.category !== null) argv.push('--category=' + m.category)
+  if (m.mount !== null) argv.push('--mount=' + m.mount)
+  if (m.yaw !== 0) argv.push('--yaw=' + String(m.yaw))
+  if (m.engine === 'sam3d' && m.prompt !== null) argv.push('--prompt=' + m.prompt)
+  if (m.engine === 'trellis2') argv.push('--resolution=' + String(m.resolution))
   return argv
 }
 
 /** midstudy-add's argument list for a rescale (v1 `patch_library_item`): new dims and/or a turn relative to now. */
 export function rescaleArgv(base: readonly string[], itemId: string, library: string, dims: CheckedDims | null, yaw: number): string[] {
-  let argv = base.concat(['--rescale=' + itemId, '--library=' + library])
-  if (dims !== null) argv = argv.concat(['--dims=' + dims.arg])
-  if (yaw !== 0) argv = argv.concat(['--yaw=' + String(yaw)])
+  const argv: string[] = [...base, '--rescale=' + itemId, '--library=' + library]
+  if (dims !== null) argv.push('--dims=' + dims.arg)
+  if (yaw !== 0) argv.push('--yaw=' + String(yaw))
   return argv
 }

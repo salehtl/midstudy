@@ -41,7 +41,9 @@ export interface PatchPlan {
 /** The body's shape (v1, before the lock): a non-empty object with only PATCH_KEYS; the unknown keys are named sorted. */
 export function patchShape(body: PyValue): Checked<ReadonlyMap<string, PyValue>> {
   if (body.kind !== 'dict' || body.entries.size === 0) return { ok: false, error: PATCH_SHAPE }
-  const unknown = pySorted([...body.entries.keys()].filter((k) => !PATCH_KEYS.includes(k)))
+  const keys: string[] = []
+  for (const [key] of body.entries.entries()) if (!PATCH_KEYS.includes(key)) keys.push(key)
+  const unknown = pySorted(keys)
   if (unknown.length > 0) return { ok: false, error: unknown.join(', ') + " can't be edited: use name, category, mount, yaw, default_render or dims_cm" }
   return { ok: true, value: body.entries }
 }
