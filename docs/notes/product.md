@@ -122,8 +122,8 @@ Before the worker thread (below) the same pages held v2's event loop for 1.1–2
 adversarial test in release: every reader on 14 adversarial lines grows by 7.4–8.7× for 8× the input (linear is 8,
 quadratic 64), the slowest 800,000-character line read by all readers in 475 ms natively. `check:rust` (whole
 workspace): ok, fmt, clippy `-D warnings` (pedantic, the workspace lints), 157 tests. **Fuzz** (nightly shell, address
-sanitizer): `size_reader` 120 s, 231,129 runs, no crash; `size_json` 120 s, 2,061,344 runs, no crash. **Miri**: see
-"Miri" below.
+sanitizer): `size_reader` 120 s, 231,129 runs, no crash; `size_json` 120 s, 2,061,344 runs, no crash. **Miri**: no
+undefined behaviour (below).
 
 **TypeScript gates**: `check:types` ok, `check:lint` ok (60 files), `check:dead` ok (knip), `check:ownership product
 --base v2-server-core` ok. `npm run test:server`: 93/94; the one failure is server-core's own test that every stage-B
@@ -191,7 +191,11 @@ Every one is either invisible to the evals and the differential tests or deliber
 
 ### Miri
 
-`cargo miri test -p midstudy-product --lib --tests` (nightly shell, `MIRIFLAGS=-Zmiri-disable-isolation`, `PROPTEST_CASES=2`, sysroot in `build/miri/`) was still running when these notes were written; see the final report.
+`cargo miri test -p midstudy-product --lib --tests` (nightly shell, rustc 1.100.0-nightly 2026-08-21,
+`MIRIFLAGS=-Zmiri-disable-isolation`, `PROPTEST_CASES=2`, sysroot in `build/miri/`): **no undefined behaviour**. Unit
+tests 17 passed, 1 ignored under Miri (`regex_word_matches_regex_syntax`, every code point) in 648 s; the five proptest
+properties passed in 809 s (the regex crate's compilation under Miri is most of it); the adversarial test is ignored
+as everywhere. 24 min of CPU in all, which is why it isn't in a routine gate.
 
 ### Requests
 
