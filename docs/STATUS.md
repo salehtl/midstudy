@@ -2,6 +2,18 @@
 
 As of 2026-11-06, branch `v2`. The plan is [REFACTOR.md](REFACTOR.md); each track's notes are in `docs/notes/`.
 
+## Rooms (docs/ROOMS.md; integrated 2026-11-07 on `rooms-integrate`)
+
+Built; Phase D (the user's own room) pending. A room groups several photos (scenes) into one room frame (contract
+§4.9): `midstudy-calib align-room` gives each photo a pose and scale (MASt3R from the optional `rooms` extra, chosen
+at Gate A; Manhattan without it; the calib mock gives the golden room's true poses), the server keeps rooms in
+`rooms/` with align jobs on the calibration queue, and the planner shows room layouts in every photo, with a photo
+strip, a floor plan with a density map of the photos' depth, and Align photos for moving photos by hand. Lean proves
+the frame maps (Room.lean, 70 theorems) and a differential test checks `planner/logic/room.ts` against the Lean
+model. E18 (rooms API), E19 (room planner) and E20 `--mock` are in `eval:all`; E20 real is in `eval:calib`;
+`eval:real-room` is Phase D's. Every gate and its counts: [docs/notes/rooms-integrate.md](notes/rooms-integrate.md).
+Not yet: real photos of a real room, a GPU other than SwiftShader, the Nix package's align-room (Manhattan only).
+
 ## What v2 is
 
 - **Planner, server, `midstudy-add`:** strict TypeScript (no `any`, `!` or casts; eslint strict-type-checked, knip),

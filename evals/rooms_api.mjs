@@ -160,7 +160,9 @@ for (const p of [`/rooms/${A}/room.json`, `/./rooms/${A}/room.json`, `/planner/.
 }
 
 ev.section('same-second names and the list order')
-await waitFor(() => new Date().getMilliseconds() < 300, { timeoutMs: 2000, intervalMs: 5 })
+// a fresh second (rooms made earlier in this second would take its plain name and -2), early in it
+const sec0 = Math.floor(Date.now() / 1000)
+await waitFor(() => Math.floor(Date.now() / 1000) > sec0 && new Date().getMilliseconds() < 300, { timeoutMs: 3000, intervalMs: 5 })
 const [c1, c2] = await Promise.all([C.send('POST', '/api/rooms', { title: 'C one', scenes: [LC] }), C.send('POST', '/api/rooms', { title: 'C two', scenes: [LWm] })])
 const pairNames = [c1.json?.name, c2.json?.name].filter(Boolean).sort()
 ev.check('two rooms created in the same second: the second is <name>-2', c1.status === 201 && c2.status === 201 && pairNames.length === 2 && pairNames[1] === `${pairNames[0]}-2`, fmt(pairNames))
