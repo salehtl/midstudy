@@ -32,8 +32,8 @@ render). It is a fork of nook without the room scan, for the user's personal use
 
 ## 3. Repo layout
 
-The code is at `git@github.com:salehtl/midstudy.git`. v2 lives on branch `v2` until it is merged into `main`; v1 (the
-Python server) is `main` before that merge.
+The code is at `git@github.com:salehtl/midstudy.git`. v2 is `main` since `84dd8ad` (2026-11-06); v1 (the Python
+server) is `fc82c5c`, the commit before it, if you ever need to roll back.
 
 | Path | What |
 |---|---|
@@ -212,9 +212,8 @@ ExecStart is `midstudy-web --host 127.0.0.1 --port <webPort> --scenes-dir <dataD
 never falls back to the server's own defaults (`uv run --project calib midstudy-calib`, `node pipeline/src/cli.ts`),
 which only work in a checkout.
 
-`main` (v1) has since made `dailySpendUsd` nullable (null leaves the budget to the app's Settings, `fc82c5c`); that
-needs the server's settings route, which v2 gets when `main`'s commits are ported (docs/REFACTOR.md §5, the finish
-agent). Until then v2's option is the number above.
+`dailySpendUsd` may be null: the budget is then set in the app's Settings (`GET/PUT /api/settings`, saved as
+`<dataDir>/library/settings.json`). A number locks the budget (the Settings PUT answers 409), 0–10000.
 
 Example, in homeserver's system flake (add this repo as an input, say `midstudy`):
 
