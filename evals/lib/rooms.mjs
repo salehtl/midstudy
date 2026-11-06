@@ -11,7 +11,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { REPO, BROWSER, BROWSER_ARGS, PHONE, DESKTOP, PROBE, boxGlb, golden, api, clip, fmt, sleep, waitFor, seedScene } from './harness.mjs'
+import { REPO, BROWSER, BROWSER_ARGS, PHONE, DESKTOP, PROBE, boxGlb, golden, api, clip, fmt, sleep, waitFor, seedScene, project, photoToFloor } from './harness.mjs'
 import { matchRoute, responseSchema } from '../../contract/gen/routes.js'
 import { violation } from '../../contract/gen/validate.js'
 
@@ -248,4 +248,78 @@ export async function waitPhoto(page, scene, timeoutMs = 30000) {
 }
 export const roomState = async (page) => page.evaluate(() => { try { return JSON.parse(JSON.stringify(window.midstudy?.getState?.() ?? null)) } catch (e) { return { error: String(e) } } }).catch((e) => ({ error: String(e) }))
 export const fmtPose = (p) => (p ? `(${p.x_m.toFixed(3)}, ${p.z_m.toFixed(3)}, ${p.yaw_deg.toFixed(2)}°)` : 'null')
+
+// --- eval:real-room measurements -----------------------------------------------------------------------------------------------------
+// A photo position (fractions of its width and height) → the room-frame floor point, through the member's effective
+// camera (its scene.json camera with height_m × scale) and its pose; null for an unplaced photo or above the horizon.
+export function uvToRoom(member, uv) {
+  if (!member?.pose || !member.w) return null
+  const cam = effectiveCamera(member.camera, member.scale ?? 1)
+  const q = photoToFloor(cam, member.w, member.h, uv[0] * member.w, uv[1] * member.h)
+  return q ? sceneToRoom(member.pose, q) : null
+}
+// measurements.json (evals/real_room.mjs) read through members {<photo file>: {pose, scale, camera, w, h}}: the scale
+// segment's measured length, the walls' lines in the room frame, and each spot's distances to them per photo.
+export function measureSpots(meas, members) {
+  const a = uvToRoom(members[meas.scale.photo], meas.scale.a), b = uvToRoom(members[meas.scale.photo], meas.scale.b)
+  const walls = Object.fromEntries(Object.entries(meas.walls).map(([name, pts]) => {
+    const [p, q] = pts.map((pt) => uvToRoom(members[pt.photo], pt.uv))
+    if (!p || !q) return [name, null]
+    const L = Math.hypot(q[0] - p[0], q[2] - p[2])
+    return [name, { p: p.map((v) => +v.toFixed(4)), n: [-(q[2] - p[2]) / L, 0, (q[0] - p[0]) / L].map((v) => +v.toFixed(5)) }]
+  }))
+  const spots = meas.spots.map((s) => {
+    const rows = Object.entries(s.seen).map(([photo, uv]) => {
+      const q = uvToRoom(members[photo], uv)
+      const row = { photo, room: q && q.map((v) => +v.toFixed(3)) }
+      for (const [wn, w] of Object.entries(walls)) row[wn] = q && w ? +Math.abs((q[0] - w.p[0]) * w.n[0] + (q[2] - w.p[2]) * w.n[2]).toFixed(4) : null
+      row.err_cm = Math.max(...Object.keys(s.from).map((wn) => (row[wn] == null ? Infinity : Math.abs(row[wn] - s.from[wn]) * 100)))
+      return row
+    })
+    const placed = rows.filter((x) => x.room)
+    let spread = 0
+    for (const p of placed) for (const q of placed) spread = Math.max(spread, Math.hypot(p.room[0] - q.room[0], p.room[2] - q.room[2]))
+    return { name: s.name, from: s.from, rows, spread_cm: +(spread * 100).toFixed(1) }
+  })
+  return { scale_measured_m: a && b ? Math.hypot(a[0] - b[0], a[2] - b[2]) : null, walls, spots }
+}
+// The golden room as eval:real-room input (its --golden self-check): copies of the seven photos, named in room order,
+// and measurements.json from truth.json: the scale on two of living-wide's open-floor points, the back wall (from room-1's
+// wall_check) and the left wall (room-4's) by two floor points each, and the table's four legs as spots.
+export function goldenMeasurements(dir) {
+  const photos = path.join(dir, 'photos')
+  fs.mkdirSync(photos, { recursive: true })
+  const G = ROOM_IDS.map((id, i) => { const g = golden(id); const file = `${i + 1}-${id}.jpg`; fs.copyFileSync(g.photo, path.join(photos, file)); return { id, file, g, pose: g.truth.pose_in_room || { x_m: 0, z_m: 0, yaw_deg: 0 } } })
+  const uvOf = (m, pRoom) => {
+    const { w: W, h: H } = m.g.truth.image
+    const p = project(m.g.truth.camera, W, H, roomToScene(m.pose, pRoom))
+    return p.d > 0.3 && p.px > 1 && p.px < W - 1 && p.py > 1 && p.py < H - 1 && photoToFloor(m.g.truth.camera, W, H, p.px, p.py) ? [p.px / W, p.py / H] : null
+  }
+  const wallLine = (id) => {
+    const m = G.find((x) => x.id === id), w = m.g.truth.wall_check
+    const p = sceneToRoom(m.pose, [w.point[0], 0, w.point[2]]), n = sceneToRoom({ ...m.pose, x_m: 0, z_m: 0 }, w.normal)
+    return { p, n, dir: [-n[2], 0, n[0]] }
+  }
+  const walls = { back: wallLine('room-1'), left: wallLine('room-4') }
+  const annotate = (pRoom) => { for (const m of G) { const uv = uvOf(m, pRoom); if (uv) return { photo: m.file, uv } } return null }
+  const wallsOut = {}
+  for (const [k, w] of Object.entries(walls)) {
+    const pts = []
+    for (const t of [-1.5, -1, -0.5, 0, 0.5, 1, 1.5]) { const a = annotate([w.p[0] + t * w.dir[0], 0, w.p[2] + t * w.dir[2]]); if (a) pts.push(a); if (pts.length === 2) break }
+    wallsOut[k] = pts
+  }
+  const dist = (q, w) => Math.abs((q[0] - w.p[0]) * w.n[0] + (q[2] - w.p[2]) * w.n[2])
+  const lwT = G[0].g.truth
+  const spots = lwT.objects.table.parts.filter((p) => p.name.startsWith('leg')).map((leg) => {
+    const q = [leg.center[0], 0, leg.center[2]]
+    const seen = Object.fromEntries(G.map((m) => [m.file, uvOf(m, q)]).filter(([, uv]) => uv))
+    return { name: `table ${leg.name}`, from: { back: +dist(q, walls.back).toFixed(4), left: +dist(q, walls.left).toFixed(4) }, seen }
+  })
+  const fa = lwT.floor_points[0], fb = lwT.floor_points.at(-1), W = lwT.image.w, H = lwT.image.h
+  const meas = { scale: { photo: G[0].file, a: [fa.px[0] / W, fa.px[1] / H], b: [fb.px[0] / W, fb.px[1] / H], length_m: +Math.hypot(fa.world[0] - fb.world[0], fa.world[2] - fb.world[2]).toFixed(4) }, walls: wallsOut, spots }
+  fs.writeFileSync(path.join(dir, 'measurements.json'), JSON.stringify(meas, null, 2))
+  // The members as the truth has them (for the self-test): file → {pose, scale 1, camera, w, h}.
+  const truthMembers = Object.fromEntries(G.map((m) => [m.file, { pose: m.pose, scale: 1, camera: m.g.truth.camera, w: m.g.truth.image.w, h: m.g.truth.image.h }]))
+  return { photos, measurements: path.join(dir, 'measurements.json'), meas, truthMembers }
+}
 export { fmt }

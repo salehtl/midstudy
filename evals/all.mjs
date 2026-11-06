@@ -1,6 +1,6 @@
 // E10 eval:all — runs E1 and E3–E9 one after another (PLAN.md §6.2), then E11 and E12 (the verify round 1 and 2 UX regressions), E13 (v1.1 splats), E14 and E15 (product page reader and form),
-// E16 (lighting inferred from the photo), E17 (shortcuts, multi-select, Export),
-// and E2 (real MoGe, then --mock) only with --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
+// E16 (lighting inferred from the photo), E17 (shortcuts, multi-select, Export), E18–E20 (rooms: the API, the room
+// planner, align-room's mock through the stub), and E2 (real MoGe and E20's real solver, then --mock) only with --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
 // Usage: node evals/all.mjs [--with-calib] [--only E3,E4]   (or npm run eval:all [-- --with-calib])
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -27,6 +27,9 @@ const steps = [
   ['E15', 'product-ui', 'node', ['evals/product_ui.mjs']],
   ['E16', 'lighting', 'node', ['evals/lighting.mjs']],
   ['E17', 'keys', 'node', ['evals/keys_export.mjs']],
+  ['E18', 'rooms-api', 'node', ['evals/rooms_api.mjs']],
+  ['E19', 'room-planner', 'node', ['evals/room_planner.mjs']],
+  ['E20', 'align --mock', 'node', ['evals/align_eval.mjs', '--mock']],
 ].filter(([id]) => !only || only.includes(id))
 
 const run = (cmd, argv) => new Promise((resolve) => {
