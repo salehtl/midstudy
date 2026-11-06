@@ -13,9 +13,9 @@ import { dict, dumps, entry, equal, get, int, list, numeric, parse, plain, str }
 import type { PyValue } from './logic/pyjson.ts'
 import { decodeUtf8, osError } from './pytext.ts'
 
-export const COSTS_HEADER = 'date,id,engine,cost_usd,mock,input'
+const COSTS_HEADER = 'date,id,engine,cost_usd,mock,input'
 
-export function strict(): boolean {
+function strict(): boolean {
   const v = process.env['MIDSTUDY_STRICT']
   return v !== undefined && v !== '' && v !== '0'
 }
@@ -64,7 +64,7 @@ export function load(libDir: string): PyValue {
 }
 
 /** The library.json text v1 writes. */
-export function libraryText(data: PyValue): string {
+function libraryText(data: PyValue): string {
   const d = dumps(data, { indent: 2, ensureAscii: false })
   if (!d.ok) throw new UnexpectedError('ValueError', d.error)
   return `${d.text}\n`

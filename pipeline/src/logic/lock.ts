@@ -6,7 +6,7 @@
 /** Waiters poll this often. */
 export const POLL_MS = 50
 /** The tool timeout (the server's midstudy-add timeout): a lock older than this is stale whoever holds it. */
-export const STALE_MS = 3600 * 1000
+const STALE_MS = 3600 * 1000
 
 export interface Owner {
   readonly pid: number

@@ -5,6 +5,7 @@
 // line, the same lines v1 writes through pipeline/test/v1_mock_log.py, so the two can be diffed.
 import { createHash, randomInt } from 'node:crypto'
 import fs from 'node:fs'
+import { STATUS_CODES } from 'node:http'
 import path from 'node:path'
 
 import { MidstudyError, NoMasks, UnexpectedError } from './errors.ts'
@@ -150,6 +151,14 @@ class FalClientHTTPError extends Error {
 
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>
 
+/** httpx's `raise_for_status()` error for a response that isn't 2xx. */
+function httpStatusError(res: Response, url: string): UnexpectedError {
+  const kind = res.status >= 500 && res.status < 600 ? 'Server error' : res.status >= 400 ? 'Client error' : res.status >= 300 ? 'Redirect response' : 'Informational response'
+  const reason = STATUS_CODES[res.status] ?? ''
+  const where = res.status >= 300 && res.status < 400 && res.headers.has('location') ? `\nRedirect location: '${res.headers.get('location') ?? ''}'` : ''
+  return new UnexpectedError('HTTPStatusError', `${kind} '${String(res.status)} ${reason}' for url '${url}'${where}\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/${String(res.status)}`)
+}
+
 /** Real fal calls with the key loadFalKey found, sent as fal-client sends FAL_KEY. */
 export class LiveFal implements Fal {
   readonly mock = false
@@ -157,6 +166,7 @@ export class LiveFal implements Fal {
   readonly #key: string
   readonly #fetch: FetchFn
   readonly #sleep: (ms: number) => Promise<void>
+  #token: { readonly type: string; readonly token: string; readonly expires: number } | null = null
 
   constructor(key: string, fetchFn: FetchFn = fetch, sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))) {
     this.#key = key
@@ -219,33 +229,49 @@ export class LiveFal implements Fal {
     return parsed.value
   }
 
+  /** fal-client's CDNTokenManager: a token for the CDN upload, kept until it expires. Plain httpx: no retries, and a
+   *  failure here fails the upload (fal-client builds the CDN client before its fallback chain). */
+  async #cdnToken(): Promise<{ readonly type: string; readonly token: string }> {
+    if (this.#token !== null && Date.now() < this.#token.expires) return this.#token
+    const url = `${REST_URL}/storage/auth/token?storage_type=fal-cdn-v3`
+    const res = await this.#fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Key ${this.#key}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: '{}',
+      redirect: 'manual',
+    })
+    if (res.status < 200 || res.status >= 300) throw httpStatusError(res, url)
+    const data = await this.#json(res)
+    const field = (k: string): string => {
+      const v = get(data, k)
+      if (v === undefined) throw new UnexpectedError('KeyError', repr(k))
+      return pyStr(v)
+    }
+    const token = { type: field('token_type'), token: field('token') }
+    field('base_url')
+    const expires = Date.parse(field('expires_at'))
+    if (Number.isNaN(expires)) throw new UnexpectedError('ValueError', `Invalid isoformat string: ${repr(field('expires_at'))}`)
+    this.#token = { ...token, expires }
+    return this.#token
+  }
+
+  /** fal-client's `upload_file`: the CDN v3 upload, falling back to the storage upload (both with its retries). */
   async upload(file: string): Promise<string> {
     try {
       const data = new Uint8Array(fs.readFileSync(file))
       const mime = guessType(file) ?? 'application/octet-stream'
       const fileName = path.basename(file)
+      const token = await this.#cdnToken()
       let url: string
       try {
-        const token = await this.#json(await this.#fetch(`${REST_URL}/storage/auth/token?storage_type=fal-cdn-v3`, {
-          method: 'POST',
-          headers: { Authorization: `Key ${this.#key}`, Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: '{}',
-        }))
-        const tokenType = get(token, 'token_type')
-        const tokenValue = get(token, 'token')
         const res = await this.#request(`${CDN_URL}/files/upload`, {
           method: 'POST',
-          headers: {
-            Authorization: `${tokenType?.kind === 'str' ? tokenType.value : ''} ${tokenValue?.kind === 'str' ? tokenValue.value : ''}`,
-            'User-Agent': USER_AGENT,
-            'Content-Type': mime,
-            'X-Fal-File-Name': fileName,
-          },
+          headers: { Authorization: `${token.type} ${token.token}`, 'User-Agent': USER_AGENT, 'Content-Type': mime, 'X-Fal-File-Name': fileName },
           body: data,
         }, 120_000)
         const access = get(await this.#json(res), 'access_url')
-        if (access?.kind !== 'str') throw new UnexpectedError('KeyError', "'access_url'")
-        url = access.value
+        if (access === undefined) throw new UnexpectedError('KeyError', "'access_url'")
+        url = pyStr(access)
       } catch {
         // fal-client's fallback repository: the storage upload
         const init = await this.#json(await this.#request(`${REST_URL}/storage/upload/initiate?storage_type=gcs`, {
@@ -254,10 +280,11 @@ export class LiveFal implements Fal {
           body: JSON.stringify({ file_name: fileName, content_type: mime }),
         }, 120_000))
         const uploadUrl = get(init, 'upload_url')
+        if (uploadUrl === undefined) throw new UnexpectedError('KeyError', "'upload_url'")
         const fileUrl = get(init, 'file_url')
-        if (uploadUrl?.kind !== 'str' || fileUrl?.kind !== 'str') throw new UnexpectedError('KeyError', "'upload_url'")
-        await this.#request(uploadUrl.value, { method: 'PUT', headers: { ...this.#authHeaders(), 'Content-Type': mime }, body: data }, null)
-        url = fileUrl.value
+        if (fileUrl === undefined) throw new UnexpectedError('KeyError', "'file_url'")
+        await this.#request(pyStr(uploadUrl), { method: 'PUT', headers: { ...this.#authHeaders(), 'Content-Type': mime }, body: data }, null)
+        url = pyStr(fileUrl)
       }
       log(uploadRecord(file, url))
       return url

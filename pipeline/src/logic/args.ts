@@ -5,12 +5,12 @@
 
 import { repr, strip } from './pyformat.ts'
 
-export const ENGINES = ['idol', 'sam3d', 'trellis2', 'glb', 'rug'] as const
+const ENGINES = ['idol', 'sam3d', 'trellis2', 'glb', 'rug'] as const
 export type Engine = (typeof ENGINES)[number]
-export const YAWS = [0, 90, 180, 270] as const
-export const RESOLUTIONS = [512, 1024, 1536] as const
-export const MOUNTS = ['floor', 'wall'] as const
-export type Mount = (typeof MOUNTS)[number]
+const YAWS = [0, 90, 180, 270] as const
+const RESOLUTIONS = [512, 1024, 1536] as const
+const MOUNTS = ['floor', 'wall'] as const
+type Mount = (typeof MOUNTS)[number]
 
 export interface Options {
   readonly input: string | null
@@ -124,7 +124,7 @@ function digitValue(ch: string): number {
 }
 
 /** Python's `int(s)` for a string, or null. */
-export function pyInt(s: string): number | null {
+function pyInt(s: string): number | null {
   const t = strip(s)
   let i = 0
   let negative = false

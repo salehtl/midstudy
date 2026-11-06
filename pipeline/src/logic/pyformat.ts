@@ -128,7 +128,7 @@ export function strip(s: string): string {
 }
 
 /** `s.split()` (runs of whitespace). */
-export function splitWs(s: string): string[] {
+function splitWs(s: string): string[] {
   const out: string[] = []
   let cur = ''
   for (let i = 0; i < s.length; i++) {
@@ -197,7 +197,7 @@ export function pyFloat(s: string): number | null {
 }
 
 /** Python's `repr()` of a parsed JSON value. */
-export function pyRepr(v: PyValue): string {
+function pyRepr(v: PyValue): string {
   switch (v.kind) {
     case 'null': return 'None'
     case 'bool': return v.value ? 'True' : 'False'

@@ -65,7 +65,7 @@ function uriBytes(uri: string, base: string): Uint8Array<ArrayBuffer> {
 }
 
 /** v1's `read_glb` + `load_model`: the model as a Document, refusing what v1 refused with its sentences. */
-export async function loadModel(file: string): Promise<Document> {
+async function loadModel(file: string): Promise<Document> {
   let json: PyValue
   let blob: Uint8Array<ArrayBuffer> | null = null
   const bytes = new Uint8Array(fs.readFileSync(file))
@@ -140,7 +140,7 @@ function detail(e: unknown): string {
 }
 
 /** The default scene's bounds as trimesh measures them, or null when it draws no geometry. */
-export function measure(doc: Document): Bounds | null {
+function measure(doc: Document): Bounds | null {
   const root = doc.getRoot()
   for (const mesh of root.listMeshes()) {
     for (const prim of mesh.listPrimitives()) {
@@ -267,14 +267,14 @@ function f32(v: number): number {
 }
 
 /** Python's `json.dumps(doc, separators=(",", ":"))`. */
-export function compact(v: PyValue): string {
+function compact(v: PyValue): string {
   const d = dumps(v, { indent: null, ensureAscii: true, compact: true, allowNan: true })
   if (!d.ok) throw new MidstudyError(d.error)
   return d.text
 }
 
 /** v1's `write_glb`: the JSON chunk padded with spaces, the binary chunk with zeros. */
-export function glbBytes(jsonText: string, blob: Uint8Array): Uint8Array {
+function glbBytes(jsonText: string, blob: Uint8Array): Uint8Array {
   const j = Buffer.from(jsonText, 'utf8')
   const jPad = (4 - (j.length % 4)) % 4
   const bPad = (4 - (blob.length % 4)) % 4

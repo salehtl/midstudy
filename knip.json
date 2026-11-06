@@ -5,6 +5,7 @@
     "planner/**/*.worker.{ts,js}",
     "server/src/main.ts",
     "pipeline/src/cli.ts",
+    "pipeline/test/*.test.ts",
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",
     "scripts/*.mjs",

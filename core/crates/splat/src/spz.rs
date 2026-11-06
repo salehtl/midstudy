@@ -312,6 +312,8 @@ mod tests {
     }
 
     #[test]
+    // 263,144 splats: hours under Miri; the native run covers it
+    #[cfg_attr(miri, ignore)]
     fn keeps_the_ones_that_cover_the_most() {
         let n = MAX_SPLATS + 1000;
         let b = ply(n, |i| {

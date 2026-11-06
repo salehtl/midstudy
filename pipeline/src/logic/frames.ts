@@ -19,11 +19,11 @@ export interface MathFns {
 
 export const IDENTITY: Mat3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 
-export type Axis = '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z'
+type Axis = '+X' | '-X' | '+Y' | '-Y' | '+Z' | '-Z'
 export type Asset = 'glb' | 'splat'
 
 /** (up, front) of each engine's assets, measured on real captures (NOTES.md). */
-export function engineFrame(engine: string, asset: Asset): readonly [Axis, Axis] | null {
+function engineFrame(engine: string, asset: Asset): readonly [Axis, Axis] | null {
   if (asset === 'glb') {
     return engine === 'sam3d' || engine === 'trellis2' || engine === 'idol' || engine === 'glb' || engine === 'rug' ? ['+Y', '+Z'] : null
   }
@@ -44,7 +44,7 @@ function axisVector(a: Axis): Vec3 {
 }
 
 /** The rotation taking `up` to +Y and `front` to +Z: rows (up × front, up, front). */
-export function frameRotation(up: Axis, front: Axis): Mat3 | null {
+function frameRotation(up: Axis, front: Axis): Mat3 | null {
   const u = axisVector(up)
   const f = axisVector(front)
   if (u[0] * f[0] + u[1] * f[1] + u[2] * f[2] !== 0) return null
@@ -115,7 +115,7 @@ export function quatXyzw(r: Mat3, m: MathFns): Quat {
 }
 
 /** The rotation of a quaternion [w, x, y, z] of any length (v1's `quat_wxyz_matrix`). */
-export function quatWxyzMatrix(q: Quat, m: MathFns): Mat3 {
+function quatWxyzMatrix(q: Quat, m: MathFns): Mat3 {
   const n = m.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
   const w = q[0] / n
   const x = q[1] / n

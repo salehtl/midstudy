@@ -7,7 +7,7 @@ import { bool, dict, entry, int, list, str } from './pyjson.ts'
 import { isPySpace } from './pyformat.ts'
 import type { Engine } from './args.ts'
 
-export const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
+const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 /** `SLUG.fullmatch(s)` (no trailing newline slips through). */
 export function isSlug(s: string): boolean {
@@ -106,7 +106,7 @@ export function endpoint(e: FalEngine): string {
 }
 
 /** Idol's Gaussians: fal's default and its measured output. */
-export const IDOL_GAUSSIANS = 262_144
+const IDOL_GAUSSIANS = 262_144
 
 /** v1's `cost_usd(engine, resolution)`. */
 export function costUsd(e: Engine, resolution: number): number {

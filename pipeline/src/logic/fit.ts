@@ -8,13 +8,13 @@ import { fixed, general, percent, pyRound, thousands } from './pyformat.ts'
 import type { Vec3 } from './frames.ts'
 
 /** §1 tolerances (the same as evals/validate_library.py). */
-export const GLB_DIM_TOL = 0.02
-export const GLB_CENTER_TOL = 0.01
-export const GLB_FLOOR_TOL = 0.005
-export const SPLAT_DIM_TOL = 0.02
-export const SPLAT_FLOOR_TOL = 0.01
-export const SPLAT_CENTER_TOL = 0.01
-export const SPZ_POS_CHECK = 0.00025
+const GLB_DIM_TOL = 0.02
+const GLB_CENTER_TOL = 0.01
+const GLB_FLOOR_TOL = 0.005
+const SPLAT_DIM_TOL = 0.02
+const SPLAT_FLOOR_TOL = 0.01
+const SPLAT_CENTER_TOL = 0.01
+const SPZ_POS_CHECK = 0.00025
 
 /** An axis-aligned box: min and max corners. */
 export interface Bounds {

@@ -119,7 +119,7 @@ interface Cursor {
 type Step = { readonly ok: true; readonly value: PyValue } | { readonly ok: false; readonly msg: string; readonly pos: number }
 
 /** The message of a JSONDecodeError: `<msg>: line L column C (char P)`, P counting code points. */
-export function decodeError(text: string, msg: string, pos: number): string {
+function decodeError(text: string, msg: string, pos: number): string {
   const before = text.slice(0, pos)
   const lineno = before.split('\n').length
   const lastNl = before.lastIndexOf('\n')
@@ -420,7 +420,7 @@ function hex4(n: number): string {
 }
 
 /** A Python string literal in JSON: `py_encode_basestring(_ascii)`. */
-export function quote(s: string, ensureAscii: boolean): string {
+function quote(s: string, ensureAscii: boolean): string {
   let out = '"'
   for (let i = 0; i < s.length; i++) {
     const ch = s.charCodeAt(i)

@@ -32,6 +32,15 @@ const MATH = { sqrt: Math.sqrt, cos: Math.cos, sin: Math.sin }
 /** Staging folders to remove if the run is interrupted. */
 const scratch = new Set<string>()
 
+/** Lets a pending Ctrl-C or SIGTERM in between two steps. The steps run synchronously (the kernels; a mocked fal
+ *  answers at once), and Node only sees a signal when its event loop turns: v1's KeyboardInterrupt came between any
+ *  two bytecodes. */
+function tick(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve)
+  })
+}
+
 function say(msg: string): void {
   out(`midstudy-add: ${msg}`)
 }
@@ -206,6 +215,7 @@ async function add(p: AddPlan): Promise<void> {
       const dl = path.join(staging, 'download')
       fs.mkdirSync(dl)
       local = await download(p.rawInput, path.join(dl, urlBasename(p.rawInput)))
+      await tick()
     }
     let ext = suffix(local).toLowerCase()
     if (p.imageInput) {
@@ -218,12 +228,14 @@ async function add(p: AddPlan): Promise<void> {
     copy2(local, path.join(staging, sourceName))
     if (ext === '.zip') {
       local = await objzip.toGlb(local, path.join(staging, 'unzipped'), path.join(staging, 'converted.glb'))
+      await tick()
       ext = '.glb'
     }
     if (p.imageInput) {
       // the engines and the thumbnail get a metadata-free, upright copy (raw/engine-input.<ext>); source.<ext> keeps
       // the original as given and is never served (contract §2.8)
       local = await engineInput(local, path.join(staging, 'raw'))
+      await tick()
     }
 
     let modelSrc: string | null = local
@@ -235,10 +247,12 @@ async function add(p: AddPlan): Promise<void> {
       thumbSrc = path.join(staging, 'raw', 'rug-texture.jpg')
       modelSrc = path.join(staging, 'raw', 'rug.glb')
       for (const n of await rug.build(local, w, d, h, modelSrc, thumbSrc)) say(`note: ${n}`)
+      await tick()
     } else if (isFalEngine(engine)) {
       fal = mock ? new MockFal(p.mockDir) : new LiveFal(p.falKey ?? '')
       say(`${engine}${mock ? ' (mock, $0)' : ` ($${fixed(cost, 2)})`}: ${p.rawInput}`)
       const outputs = await runEngine(fal, engine, local, p.prompt, p.resolution, path.join(staging, 'raw'))
+      await tick()
       modelSrc = outputs.glb
       splatSrc = outputs.splat
       splatToGlb = outputs.splatToGlb
@@ -255,6 +269,7 @@ async function add(p: AddPlan): Promise<void> {
       glbFit = await normalizeGlb(modelSrc, orientation(engine, 'glb', o.yaw, MATH) ?? IDENTITY, dims, path.join(staging, 'model.glb'), MATH)
       say(`model.glb fit to ${numText(w)} x ${numText(d)} x ${numText(h)} cm (error % w/d/h: ${fitText(glbFit)})`)
     }
+    await tick()
     if (splatSrc !== null) {
       hasSplat = true
       const rotation = mul3(orientation(engine, 'splat', o.yaw, MATH) ?? IDENTITY, splatToGlb)
@@ -262,10 +277,13 @@ async function add(p: AddPlan): Promise<void> {
       splatFit = r.fit
       for (const n of r.notes) say(`note: ${n}`)
       say(`splat.ply fitted per axis to ${numText(w)} x ${numText(d)} x ${numText(h)} cm (error % w/d/h: ${fitText(r.fit)})`)
+      await tick()
       const spz = splat.writeSpz(path.join(staging, 'splat.ply'), path.join(staging, 'splat.spz'))
       say(spzLine(spz.count, spz.bytes, spz.dropped))
+      await tick()
     }
     if (p.imageInput) makeThumb(thumbSrc, path.join(staging, 'thumb.jpg'))
+    await tick()
     for (const s of ['download', 'unzipped', 'converted.glb', 'converted.jpg']) rmtree(path.join(staging, s))
 
     // commit: the item folder, then library.json, then costs.csv
@@ -422,13 +440,16 @@ async function refit(o: Options, id: string, libDir: string, newDims: Dims | nul
   try {
     glbFit = await normalizeGlb(glbSrc, rotation, dims, path.join(staging, 'model.glb'), MATH)
     say(`model.glb refit to ${numText(w)} x ${numText(d)} x ${numText(h)} cm, yaw +${String(o.yaw)} (error % w/d/h: ${fitText(glbFit)})`)
+    await tick()
     if (splatSrc !== null) {
       const r = splat.normalize(splatSrc, rotation, dims, path.join(staging, 'splat.ply'), engine)
       splatFit = r.fit
       for (const n of r.notes) say(`note: ${n}`)
       say(`splat.ply refit per axis (error % w/d/h: ${fitText(r.fit)})`)
+      await tick()
       const spz = splat.writeSpz(path.join(staging, 'splat.ply'), path.join(staging, 'splat.spz'))
       say(spzLine(spz.count, spz.bytes, spz.dropped))
+      await tick()
     }
     // commit: every file passed its self-check, so they are replaced in place
     replace(path.join(staging, 'model.glb'), glbSrc)
