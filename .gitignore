@@ -56,12 +56,16 @@ fixtures/photos/
 # eval scratch output
 evals/out/
 
-# user data written by the tools; decisions (library.json, costs.csv) are versioned
-library/*/
-library/_inbox/
-library/.lock
-library/.trash/
-library/costs.csv.lock
+# user data written by the tools; decisions (library.json, costs.csv) are versioned. Anchored with `/` (git anchors a
+# pattern with a slash anyway; knip, which reads this file, would otherwise skip server/src/library/ and friends). The
+# v2 locks are folders: <library>/.lock.d and costs.csv.lock.d (contract §2.8 One writer)
+/library/*/
+/library/_inbox/
+/library/.lock
+/library/.lock.d/
+/library/.trash/
+/library/costs.csv.lock
+/library/costs.csv.lock.d/
 /scenes/
 /layouts/
 /renders/

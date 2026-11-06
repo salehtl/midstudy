@@ -10,7 +10,7 @@ import type { RequestContext } from './context.ts'
 export type RouteModule = (deps: ServerDeps) => readonly ApiRoute[]
 
 /** The methods an /api route answers. A GET route also answers HEAD (v1 `do_HEAD = do_GET`), without the body. */
-export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 /** One /api route. */
 export interface ApiRoute {

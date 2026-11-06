@@ -16,8 +16,6 @@ export const BAD_LENGTH = "the Content-Length header isn't a number of bytes"
 export const LENGTH_AND_CHUNKED = 'the request has both a Content-Length and a Transfer-Encoding header'
 /** §2.8 One writer: a library write that waited 60 s for a running midstudy-add. */
 export const LIBRARY_BUSY = 'the library is busy with another change (a midstudy-add run): try again in a minute'
-/** The routes the server doesn't implement yet (v2 stage A: stage-B tracks replace them). */
-export const NOT_IMPLEMENTED = 'not implemented in v2 yet'
 /** v1's PUT outside /api. */
 export const PUT_ONLY_API = 'PUT is only supported under /api'
 

@@ -1,5 +1,5 @@
 // `node server/src/main.ts` as the evals start it: v1's startup refusals, the static allowlist (contract §2.1, §2.8,
-// §4.4; E1's W4 spellings and evals/library_api.sh's), GET /api/spend, the route stubs, and strict mode on.
+// §4.4; E1's W4 spellings and evals/library_api.sh's), GET /api/spend, every route implemented, and strict mode on.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -162,17 +162,21 @@ void describe('the API', () => {
     assert.equal((await api(srv.base, 'PUT', '/api/spend', { cap_usd: 100 })).status, 404)
     assert.equal((await api(srv.base, 'POST', '/api/spend', { cap_usd: 100 })).status, 404)
   })
-  void test('every stage-B route answers 501 {"error": "not implemented in v2 yet"} past the gate, and 403 before it', async () => {
+  void test('every /api route is implemented (none answers 501), and every mutation is 403 without X-Midstudy', async () => {
     for (const [m, p] of [['GET', '/api/scenes'], ['GET', '/api/scenes/jobs'], ['GET', '/api/scenes/' + SCENE], ['POST', '/api/scenes'], ['PUT', '/api/scenes/' + SCENE],
       ['PUT', '/api/scenes/x/thumb'], ['POST', '/api/scenes/x/calibrate'], ['POST', '/api/scenes/x/light'], ['POST', '/api/scenes/x/restore'], ['DELETE', '/api/scenes/x'],
       ['GET', '/api/layouts?scene=x'], ['GET', '/api/layouts/a?scene=x'], ['PUT', '/api/layouts/a?scene=x'], ['DELETE', '/api/layouts/a?scene=x'], ['POST', '/api/render'],
       ['GET', '/api/renders'], ['GET', '/api/library'], ['GET', '/api/library/jobs'], ['GET', '/api/library/jobs/l-1'], ['POST', '/api/library/items'],
       ['POST', '/api/library/items/from-url'], ['POST', '/api/library/product'], ['PATCH', '/api/library/items/x'], ['DELETE', '/api/library/items/x'],
       ['POST', '/api/library/items/x/restore'], ['PUT', '/api/library/items/x/thumb']] as const) {
-      const a = m === 'GET' ? await request(srv.base, m, p) : await api(srv.base, m, p, {})
-      assert.equal(a.status, 501, m + ' ' + p)
-      assert.equal(errorOf(a), 'not implemented in v2 yet')
-      if (m !== 'GET') assert.equal((await request(srv.base, m, p, { body: '{}' })).status, 403, m + ' ' + p)
+      if (m === 'GET') {
+        const a = await request(srv.base, m, p)
+        assert.notEqual(a.status, 501, m + ' ' + p)
+        continue
+      }
+      // the gate first: without X-Midstudy nothing reaches the route (§2.9 Forged requests); past it, the route answers
+      assert.equal((await request(srv.base, m, p, { body: '{}' })).status, 403, m + ' ' + p)
+      assert.notEqual((await api(srv.base, m, p, {})).status, 501, m + ' ' + p)
     }
     assert.equal((await api(srv.base, 'PUT', '/api/scenes/jobs', {})).status, 404)
     assert.equal((await api(srv.base, 'DELETE', '/api/scenes/jobs')).status, 404)
