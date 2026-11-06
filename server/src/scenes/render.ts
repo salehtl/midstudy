@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { appendCost } from '../../../common/costs.ts'
-import { FalError, NO_KEY, countsAgainstCap, download, falCall, falKey, falMock, mockCost } from '../../../common/fal.ts'
+import { FalError, NO_KEY, download, falCall, falKey, falMock, mockCost } from '../../../common/fal.ts'
 import { isoUtc, isoUtcMs } from '../../../common/logic/time.ts'
 import { isRenderName, jpegFrame } from '../../../core/js/node.ts'
 import type { SpendCap, SpendRefusal } from '../spend.ts'
@@ -47,6 +47,19 @@ export type RenderOutcome =
   | { readonly kind: 'refused'; readonly body: SpendRefusal }
   | { readonly kind: 'error'; readonly status: number; readonly error: string }
 
+/** How the render reaches fal: common/fal.ts (the environment's mock switch and key, https://fal.run). Tests give a
+ *  stand-in so the billed path (cost rows, 502s) runs offline without a key in the environment. */
+export interface FalAccess {
+  /** MIDSTUDY_FAL_MOCK is set: no network calls, the capture is the result. */
+  readonly mock: () => boolean
+  /** Mock calls count at their price (MIDSTUDY_FAL_MOCK_COST=1, evals only). */
+  readonly mockCost: () => boolean
+  /** The key for a live call, or null (503). */
+  readonly key: () => string | null
+  readonly call: (endpoint: string, args: unknown, key: string) => Promise<unknown>
+  readonly download: (url: string) => Promise<Uint8Array>
+}
+
 export interface RenderServiceOptions {
   readonly rendersDir: string
   readonly costsFile: string
@@ -57,6 +70,8 @@ export interface RenderServiceOptions {
   /** The scene photo of `scene`: <scenes>/<scene>/photo.jpg. */
   readonly scenePhoto: (scene: string) => string
   readonly now?: () => number
+  /** Tests only; default common/fal.ts. */
+  readonly fal?: FalAccess
 }
 
 /** Python's `'<type>' object has no attribute 'startswith'` for a result URL that isn't text (v1's download crashed). */
@@ -73,6 +88,7 @@ export class RenderService {
   readonly dir: string
   readonly #options: RenderServiceOptions
   readonly #now: () => number
+  readonly #fal: FalAccess
   /** Names given to renders still being made (v1 `reserved_names`): a name stays taken after a failure. */
   readonly #reserved = new Set<string>()
 
@@ -80,6 +96,13 @@ export class RenderService {
     this.dir = options.rendersDir
     this.#options = options
     this.#now = options.now ?? Date.now
+    this.#fal = options.fal ?? {
+      mock: () => falMock(),
+      mockCost: () => mockCost(),
+      key: () => falKey(options.repo),
+      call: (endpoint, args, key) => falCall(endpoint, args, key),
+      download: (url) => download(url),
+    }
   }
 
   /** v1 `reserve_render_name`: `render-YYYYMMDD-HHMMSS`, `-2`, `-3`… past names reserved or with any file. */
@@ -98,12 +121,12 @@ export class RenderService {
   /** v1 `post_render` from the spend cap on: reserves the price (mock calls count only with MIDSTUDY_FAL_MOCK_COST=1),
    *  renders, releases. The checks before it are the handler's. */
   async render(job: RenderJob): Promise<RenderOutcome> {
-    const mock = falMock()
-    const key = mock ? null : falKey(this.#options.repo)
+    const mock = this.#fal.mock()
+    const key = mock ? null : this.#fal.key()
     if (!mock && key === null) return { kind: 'error', status: 503, error: NO_KEY }
     const now = this.#now()
     const name = this.#reserveName(now)
-    const refused = this.#options.spend.reserve(name, countsAgainstCap() ? job.price : 0)
+    const refused = this.#options.spend.reserve(name, !mock || this.#fal.mockCost() ? job.price : 0)
     if (refused !== null) {
       this.#reserved.delete(name)
       return { kind: 'refused', body: refused }
@@ -116,7 +139,7 @@ export class RenderService {
   }
 
   async #make(job: RenderJob, mock: boolean, key: string | null, now: number, name: string): Promise<RenderOutcome> {
-    let cost = mock && mockCost() ? job.price : 0
+    let cost = mock && this.#fal.mockCost() ? job.price : 0
     const stamp = isoUtc(now)
     const spec = modelSpec(job.model)
     const engine = 'render:' + job.model
@@ -131,7 +154,7 @@ export class RenderService {
       const args = { [spec.imageKey]: image, prompt: job.prompt, output_format: 'jpeg' }
       let answer: unknown
       try {
-        answer = await falCall(spec.endpoint, args, key)
+        answer = await this.#fal.call(spec.endpoint, args, key)
       } catch (e) {
         if (e instanceof FalError) return { kind: 'error', status: 502, error: e.message }
         throw e
@@ -143,7 +166,7 @@ export class RenderService {
       if (url === null) return { kind: 'error', status: 502, error: noImage(spec.endpoint, cost) }
       try {
         if (typeof url !== 'string') throw new Error(notTextUrl(url))
-        result = await download(url)
+        result = await this.#fal.download(url)
       } catch (e) {
         return { kind: 'error', status: 502, error: downloadFailed(e instanceof Error ? e.message : String(e), cost) }
       }
