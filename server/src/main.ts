@@ -2,7 +2,7 @@
 // planner/serve.py, deleted at the v2 cutover).
 //
 //   node server/src/main.ts [--port 8765] [--host 127.0.0.1] [--scenes-dir scenes] [--layouts-dir layouts]
-//                           [--renders-dir renders] [--library-dir library] [--costs-file <library-dir>/costs.csv]
+//                           [--renders-dir renders] [--rooms-dir rooms] [--library-dir library] [--costs-file <library-dir>/costs.csv]
 //                           [--calib "uv run --project calib midstudy-calib"]
 //                           [--midstudy-add "node pipeline/src/cli.ts"] [--daily-spend-usd N]
 //                           [--allowed-host NAME ...]
@@ -29,6 +29,7 @@ import { splitCommand } from '../../common/tools.ts'
 import { routes as libraryRoutes } from './routes/library.ts'
 import { routes as layoutsRoutes } from './routes/layouts.ts'
 import { routes as renderRoutes } from './routes/render.ts'
+import { routes as roomsRoutes } from './routes/rooms.ts'
 import { routes as scenesRoutes } from './routes/scenes.ts'
 import { routes as spendRoutes } from './routes/spend.ts'
 import { routes as productRoutes } from './product/route.ts'
@@ -41,6 +42,7 @@ const PROG = 'main.ts'
 function allRoutes(deps: ServerDeps): readonly ApiRoute[] {
   return [
     ...scenesRoutes(deps),
+    ...roomsRoutes(deps),
     ...layoutsRoutes(deps),
     ...renderRoutes(deps),
     ...libraryRoutes(deps),
@@ -113,6 +115,7 @@ async function main(argv: readonly string[]): Promise<void> {
     host: o.host,
     port: o.port,
     scenesDir: resolvePath(o.scenesDir),
+    roomsDir: resolvePath(o.roomsDir),
     layoutsDir: resolvePath(o.layoutsDir),
     rendersDir: resolvePath(o.rendersDir),
     libraryDir,

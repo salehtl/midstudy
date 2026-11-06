@@ -3,8 +3,9 @@
 import { pyRound } from '../../../../common/logic/pyfmt.ts'
 import { isNum, pyStr, pyTruthy } from './values.ts'
 
-/** What a calibration-queue job runs: `<calib> run|fit|light <args>` (or the same request to the worker). */
-export type CalibCommand = 'run' | 'fit' | 'light'
+/** What a calibration-queue job runs: `<calib> run|fit|light|align-room <args>` (or the same request to the worker;
+ *  align-room: a room's align job, contract §4.9). */
+export type CalibCommand = 'run' | 'fit' | 'light' | 'align-room'
 
 /** v1's message of a queued job. */
 export const QUEUED = 'waiting for the calibration queue'

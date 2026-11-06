@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { jobId } from './logic/jobs.ts'
 
 /** A new job id, `<prefix>-YYYYMMDD-HHMMSS-<4 hex>` (UTC now). */
-export function newJobId(prefix: 'c' | 'l', now: number = Date.now()): string {
+export function newJobId(prefix: 'c' | 'l' | 'a', now: number = Date.now()): string {
   return jobId(prefix, now, randomBytes(2).toString('hex'))
 }
 

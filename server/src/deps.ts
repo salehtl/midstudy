@@ -13,6 +13,8 @@ export interface ServerConfig {
   /** The port listened on (the real one when --port was 0). */
   readonly port: number
   readonly scenesDir: string
+  /** --rooms-dir (contract §4.9; default rooms/). */
+  readonly roomsDir: string
   readonly layoutsDir: string
   readonly rendersDir: string
   readonly libraryDir: string

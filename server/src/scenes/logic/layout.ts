@@ -158,3 +158,47 @@ export function layoutSummary(name: string, data: unknown, mtimeIso: string): La
     updated: typeof updated === 'string' ? updated : mtimeIso,
   }
 }
+
+/** A room's layout as stored (layout.schema.json with room_name, contract §4.9), in the scene layout's key order. */
+interface StoredRoomLayout {
+  readonly version: 1
+  readonly name: string
+  readonly title: string | null
+  readonly room_name: string
+  readonly library: string | null
+  readonly updated: string
+  readonly items: readonly StoredItem[]
+  readonly notes?: string
+}
+
+export type RoomLayoutCheck = { readonly ok: true; readonly layout: StoredRoomLayout } | { readonly ok: false; readonly error: string }
+
+/** PUT /api/layouts/<layout>?room=<room> (§4.9 Layouts): the same checks and layout as a scene's, with `room_name`
+ *  instead of `scene_name` (a `scene_name` in the body is dropped, as every server-set key). */
+export function checkRoomLayout(body: unknown, name: string, room: string, updated: string): RoomLayoutCheck {
+  const c = checkLayout(body, name, room, updated)
+  if (!c.ok) return { ok: false, error: c.error }
+  const l = c.layout
+  const base = { version: l.version, name: l.name, title: l.title, room_name: room, library: l.library, updated: l.updated, items: l.items }
+  return { ok: true, layout: l.notes === undefined ? base : { ...base, notes: l.notes } }
+}
+
+/** The layouts routes' `?scene=` / `?room=` (§2.7, §4.9): exactly one of the two. Each is the query value, null when
+ *  absent; a blank one counts as absent. The refusal (400) of both, of a room that isn't a slug, and of neither (the
+ *  scene routes' sentence), or which one it names. */
+export function layoutOwner(scene: string | null, room: string | null): { readonly kind: 'scene'; readonly name: string | null } | { readonly kind: 'room'; readonly name: string } | { readonly kind: 'refused'; readonly error: string } {
+  if (room === null || room === '') return { kind: 'scene', name: scene }
+  if (scene !== null && scene !== '') return { kind: 'refused', error: 'give ?scene=<name> or ?room=<room>, not both: a layout belongs to one scene or one room' }
+  if (!isSlug(room)) return { kind: 'refused', error: 'room must be a slug (a-z, 0-9, -): ' + pyRepr(room) }
+  return { kind: 'room', name: room }
+}
+
+/** The 404 for a layout the room doesn't have. */
+export function noRoomLayout(room: string, name: string): string {
+  return 'room ' + pyRepr(room) + ' has no layout named ' + pyRepr(name)
+}
+
+/** The 500 for a room layout file that can't be read. */
+export function unreadableRoomLayout(room: string, name: string): string {
+  return 'layout ' + pyRepr(name) + ' of room ' + pyRepr(room) + ' is unreadable: fix or delete it'
+}

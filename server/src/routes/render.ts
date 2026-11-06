@@ -1,4 +1,4 @@
-// Render (contract §2.6, §4.7): v1's post_render checks (planner/serve.py), in v1's order and with its sentences,
+// Render (contract §2.6, §4.7, §4.9 `room`): v1's post_render checks (planner/serve.py), in v1's order and with its sentences,
 // then server/src/scenes/render.ts (the spend cap through deps.spend, fal through common/fal.ts, cost rows through
 // common/costs.ts, align one-shot through server/src/tools.ts); and list_renders. The patterns are v1's.
 import fs from 'node:fs'
@@ -16,6 +16,8 @@ import {
 import { noScene } from '../scenes/logic/scene.ts'
 import { isRecord } from '../scenes/logic/values.ts'
 import type { SceneService } from '../scenes/service.ts'
+import { RENDER_ROOM_NEEDS_SCENE, noRoom, renderSceneNotMember } from '../rooms/logic/room.ts'
+import type { RoomService } from '../rooms/service.ts'
 import { scenesFor } from '../scenes/shared.ts'
 
 /** The bytes of a data URI of `type`, or null (v1 `decode_data_uri`: anything but such a string is None). */
@@ -26,7 +28,7 @@ function dataUriBytes(v: unknown, type: 'jpeg' | 'png'): Uint8Array | null {
 }
 
 /** v1 `post_render`. */
-async function postRender(ctx: RequestContext, scenes: SceneService, renders: RenderService): Promise<void> {
+async function postRender(ctx: RequestContext, scenes: SceneService, rooms: RoomService, renders: RenderService): Promise<void> {
   const body = await ctx.readJson()
   if (!isRecord(body)) {
     await ctx.error(400, 'body must be a JSON object')
@@ -56,6 +58,24 @@ async function postRender(ctx: RequestContext, scenes: SceneService, renders: Re
     return
   }
   const scene = typeof sceneValue === 'string' ? sceneValue : null
+  // §4.9: a render made in a room names it; the capture, reference and keep-room stay that photo's.
+  const roomValue = body['room']
+  let room: string | null = null
+  if (roomValue !== undefined && roomValue !== null) {
+    if (typeof roomValue !== 'string' || !rooms.exists(roomValue)) {
+      await ctx.error(404, noRoom(typeof roomValue === 'string' ? roomValue : ''))
+      return
+    }
+    if (scene === null) {
+      await ctx.error(400, RENDER_ROOM_NEEDS_SCENE)
+      return
+    }
+    if (!(rooms.read(roomValue)?.members ?? []).some((m) => m.scene === scene)) {
+      await ctx.error(400, renderSceneNotMember(scene, roomValue))
+      return
+    }
+    room = roomValue
+  }
   const layout = renderLayout(body['layout'])
   const keepRoom = body['keep_room'] === true
   let photo: Buffer | null = null
@@ -96,7 +116,7 @@ async function postRender(ctx: RequestContext, scenes: SceneService, renders: Re
   }
   const { width, height } = size.value
   const outcome = await renders.render({
-    image, width, height, model: choice.model, prompt: renderPrompt(typeof prompt === 'string' ? prompt : null, reference, choice.model === 'gpt-image' && scene !== null), scene, layout,
+    image, width, height, model: choice.model, prompt: renderPrompt(typeof prompt === 'string' ? prompt : null, reference, choice.model === 'gpt-image' && scene !== null), scene, layout, room,
     reference: reference ? photo : null, keepRoom, mask, price: renderPrice(choice.model, width, height),
   })
   switch (outcome.kind) {
@@ -113,12 +133,12 @@ async function postRender(ctx: RequestContext, scenes: SceneService, renders: Re
 }
 
 export const routes: RouteModule = (deps) => {
-  const { scenes, renders } = scenesFor(deps)
+  const { scenes, rooms, renders } = scenesFor(deps)
   return [
-    { method: 'POST', path: /^\/api\/render$/, handle: (ctx) => postRender(ctx, scenes, renders) },
+    { method: 'POST', path: /^\/api\/render$/, handle: (ctx) => postRender(ctx, scenes, rooms, renders) },
     {
       method: 'GET', path: /^\/api\/renders$/, handle: async (ctx) => {
-        await ctx.send(200, { renders: renders.list(ctx.query('scene')), mock: falMock() })
+        await ctx.send(200, { renders: renders.list(ctx.query('scene'), ctx.query('room')), mock: falMock() })
       },
     },
   ]
