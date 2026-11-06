@@ -27,7 +27,7 @@ import { isoFromTimestamp, pyInt } from './logic/time.ts'
 import { cmpCodePoints, isRecord, pyStr, pyTruthy } from './logic/values.ts'
 
 /** v1 CALIB_TIMEOUT: one calibration (or light) job, 600 s. */
-export const CALIB_TIMEOUT_SECONDS = 600
+const CALIB_TIMEOUT_SECONDS = 600
 /** The calibration worker's stdin is closed after this long idle. */
 const WORKER_IDLE_MS = 10 * 60 * 1000
 /** v1 TRASH_META: {name, title, deleted} in a trashed scene's folder. */

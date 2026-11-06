@@ -430,7 +430,7 @@ function writtenFiles(dir: string, norm: (v: unknown) => unknown): Map<string, u
   return out
 }
 
-test('v1 and v2 answer the scenes, layouts and render routes the same way', { skip, timeout: 600_000 }, async () => {
+void test('v1 and v2 answer the scenes, layouts and render routes the same way', { skip, timeout: 600_000 }, async () => {
   const v1 = await start('v1')
   const v2 = await start('v2')
   try {
@@ -455,7 +455,7 @@ test('v1 and v2 answer the scenes, layouts and render routes the same way', { sk
     for (const k of new Set([...f1.keys(), ...f2.keys()])) {
       if (JSON.stringify(f1.get(k)) !== JSON.stringify(f2.get(k))) diffs.push('file ' + k + ':\n  v1 ' + JSON.stringify(f1.get(k)) + '\n  v2 ' + JSON.stringify(f2.get(k)))
     }
-    assert.ok(!/contract violation/.test(v2.log()), 'strict mode found a contract violation:\n' + v2.log().split('\n').filter((l) => l.includes('contract violation')).join('\n'))
+    assert.ok(!v2.log().includes('contract violation'), 'strict mode found a contract violation:\n' + v2.log().split('\n').filter((l) => l.includes('contract violation')).join('\n'))
     assert.equal(diffs.length, 0, String(diffs.length) + ' of ' + String(a.steps.length) + ' exchanges or files differ:\n' + diffs.join('\n'))
     fs.writeFileSync(path.join(SCRATCH, 'steps.json'), JSON.stringify(b.steps.map((x) => ({ label: x.label, status: x.status, body: n2(x.body) })), null, 1))
     process.stdout.write('# compared ' + String(a.steps.length) + ' exchanges and ' + String(f1.size) + ' files\n')

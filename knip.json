@@ -6,6 +6,8 @@
     "server/src/main.ts",
     "server/test/*.test.ts",
     "server/test/lock-child.ts",
+    "server/test/scenes/*.test.ts",
+    "server/test/scenes/fake-calib.ts",
     "pipeline/src/cli.ts",
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",

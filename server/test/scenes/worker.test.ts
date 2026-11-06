@@ -87,7 +87,7 @@ async function calibrateAll(r: Rig, n: number): Promise<JobView[]> {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-test('a working worker: started on the first job, kept for the next ones, never at startup', async () => {
+void test('a working worker: started on the first job, kept for the next ones, never at startup', async () => {
   const r = rig(3, 'ok')
   await sleep(200)
   assert.equal(calls(r).starts.length, 0, 'nothing runs before the first calibration')
@@ -113,7 +113,7 @@ test('a working worker: started on the first job, kept for the next ones, never 
   assert.equal(calls(r).eofs, 1, 'shutdown closes its stdin and it exits')
 })
 
-test('the environment reaches the worker (MIDSTUDY_CALIB_MOCK) and the one-shot runs', async () => {
+void test('the environment reaches the worker (MIDSTUDY_CALIB_MOCK) and the one-shot runs', async () => {
   process.env['MIDSTUDY_CALIB_MOCK'] = path.join(REPO, 'fixtures/calib')
   try {
     const r = rig(1, 'ok')
@@ -125,7 +125,7 @@ test('the environment reaches the worker (MIDSTUDY_CALIB_MOCK) and the one-shot 
   }
 })
 
-test('no `serve` (the stub exits 2 at once): each job runs one-shot; after 3 failures in a row no worker is started again', async () => {
+void test('no `serve` (the stub exits 2 at once): each job runs one-shot; after 3 failures in a row no worker is started again', async () => {
   const r = rig(5, 'exit2')
   const jobs = await calibrateAll(r, 5)
   for (const j of jobs) assert.equal(j.status, 'done', JSON.stringify(j))
@@ -138,7 +138,7 @@ test('no `serve` (the stub exits 2 at once): each job runs one-shot; after 3 fai
 })
 
 for (const [mode, why] of [['garbled', "isn't JSON"], ['wrong-id', "doesn't carry the request's id"], ['crash', 'exited (code 1)']] as const) {
-  test('a worker that ' + mode + 's is killed, that job runs one-shot, the next job starts a new worker', async () => {
+  void test('a worker that ' + mode + 's is killed, that job runs one-shot, the next job starts a new worker', async () => {
     const r = rig(2, mode)
     const jobs = await calibrateAll(r, 2)
     for (const j of jobs) assert.equal(j.status, 'done', JSON.stringify(j))
@@ -147,7 +147,7 @@ for (const [mode, why] of [['garbled', "isn't JSON"], ['wrong-id', "doesn't carr
   })
 }
 
-test('an `ok: false` answer is the job\'s failure (its sentence), not the worker\'s: the worker stays', async () => {
+void test('an `ok: false` answer is the job\'s failure (its sentence), not the worker\'s: the worker stays', async () => {
   const r = rig(4, 'fail')
   const jobs = await calibrateAll(r, 4)
   for (const j of jobs) {
@@ -159,7 +159,7 @@ test('an `ok: false` answer is the job\'s failure (its sentence), not the worker
   await r.scenes.shutdown()
 })
 
-test('failures must be in a row: an answer starts the count again', async () => {
+void test('failures must be in a row: an answer starts the count again', async () => {
   const r = rig(6, 'second-crash')
   const jobs = await calibrateAll(r, 6)
   for (const j of jobs) assert.equal(j.status, 'done', JSON.stringify(j))
@@ -170,7 +170,7 @@ test('failures must be in a row: an answer starts the count again', async () => 
   await r.scenes.shutdown()
 })
 
-test('a request still running at the timeout fails the job with the timeout sentence; the worker is killed', async () => {
+void test('a request still running at the timeout fails the job with the timeout sentence; the worker is killed', async () => {
   const r = rig(2, 'hang', { timeoutMs: 1500 })
   const t0 = Date.now()
   const jobs = await calibrateAll(r, 2)
@@ -183,7 +183,7 @@ test('a request still running at the timeout fails the job with the timeout sent
   assert.deepEqual(calls(r).starts, [['serve'], ['serve']], 'a new worker for the next job, no one-shot')
 })
 
-test('an idle worker gets its stdin closed; the next calibration starts another', async () => {
+void test('an idle worker gets its stdin closed; the next calibration starts another', async () => {
   const r = rig(2, 'ok', { idleMs: 300 })
   await calibrateAll(r, 1)
   await sleep(1000)
@@ -193,14 +193,14 @@ test('an idle worker gets its stdin closed; the next calibration starts another'
   await r.scenes.shutdown()
 })
 
-test('a calibration tool that is not there: the worker cannot start, the one-shot says so as v1 did', async () => {
+void test('a calibration tool that is not there: the worker cannot start, the one-shot says so as v1 did', async () => {
   const r = rig(1, 'ok', { calib: ['/nonexistent/midstudy-calib'] })
   const [job] = await calibrateAll(r, 1)
   assert.equal(job?.status, 'failed')
   assert.equal(job.message, "the calibration tool isn't installed here (/nonexistent/midstudy-calib not found): set --calib")
 })
 
-test('light jobs go to the worker too and never touch scene.json', async () => {
+void test('light jobs go to the worker too and never touch scene.json', async () => {
   const r = rig(1, 'ok')
   const before = fs.readFileSync(path.join(r.dir, 'scenes', sceneName(1), 'scene.json'), 'utf8')
   const res = r.scenes.light(sceneName(1))
@@ -219,7 +219,7 @@ test('light jobs go to the worker too and never touch scene.json', async () => {
 const REAL = ['uv', 'run', '--project', path.join(REPO, 'calib'), 'midstudy-calib']
 const realSkip = !fs.existsSync(path.join(REPO, 'calib/pyproject.toml')) && 'calib/ is missing'
 
-test('the real `midstudy-calib serve` (MIDSTUDY_CALIB_MOCK): the same calib.json and job as the one-shot command', { skip: realSkip, timeout: 300_000 }, async () => {
+void test('the real `midstudy-calib serve` (MIDSTUDY_CALIB_MOCK): the same calib.json and job as the one-shot command', { skip: realSkip, timeout: 300_000 }, async () => {
   process.env['MIDSTUDY_CALIB_MOCK'] = path.join(REPO, 'fixtures/calib')
   try {
     const viaWorker = rig(2, 'ok', { calib: REAL, timeoutMs: 240_000 })

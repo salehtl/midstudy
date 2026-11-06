@@ -9,7 +9,7 @@ import { codePointLength, collapseSpaces, isNum, isRecord } from './values.ts'
 const MAX_LAYOUT_TITLE = 120
 
 /** One stored layout item, in v1's key order. */
-export interface StoredItem {
+interface StoredItem {
   readonly uid: string
   readonly id: string
   readonly render: 'glb' | 'splat'
@@ -20,7 +20,7 @@ export interface StoredItem {
 }
 
 /** The stored layout (layout.schema.json), in v1's key order. */
-export interface StoredLayout {
+interface StoredLayout {
   readonly version: 1
   readonly name: string
   readonly title: string | null
