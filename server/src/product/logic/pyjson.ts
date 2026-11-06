@@ -9,16 +9,14 @@ import { pyStrip } from '../../../../common/logic/pyfmt.ts'
 /** A JSON value as Python holds it: int as bigint, float as number, object as a key-ordered Map. */
 export type PyValue = null | boolean | bigint | number | string | readonly PyValue[] | ReadonlyMap<string, PyValue>
 
+/** Python's float('nan'). */
+const NAN = 0 / 0
+
 /** The deepest nesting Python 3.12 parsed in v1's server before raising RecursionError (measured: 9997). */
 const MAX_DEPTH = 9997
 
 /** Not JSON to Python (v1 caught JSONDecodeError, ValueError and RecursionError alike). */
-export class PyJsonError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'PyJsonError'
-  }
-}
+export class PyJsonError extends Error {}
 
 /** A container being filled: its values, or its keys and values. */
 interface Frame {
@@ -121,9 +119,9 @@ function readScalar(s: string, i: number, strict: boolean): readonly [PyValue, n
   if (s.startsWith('null', i)) return [null, i + 4]
   if (s.startsWith('true', i)) return [true, i + 4]
   if (s.startsWith('false', i)) return [false, i + 5]
-  if (s.startsWith('NaN', i)) return [Number.NaN, i + 3]
-  if (s.startsWith('Infinity', i)) return [Number.POSITIVE_INFINITY, i + 8]
-  if (s.startsWith('-Infinity', i)) return [Number.NEGATIVE_INFINITY, i + 9]
+  if (s.startsWith('NaN', i)) return [NAN, i + 3]
+  if (s.startsWith('Infinity', i)) return [1 / 0, i + 8]
+  if (s.startsWith('-Infinity', i)) return [-1 / 0, i + 9]
   const n = readNumber(s, i)
   if (n === null) throw new PyJsonError('Expecting value')
   return n

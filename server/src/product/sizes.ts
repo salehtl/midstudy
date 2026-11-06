@@ -7,6 +7,7 @@
 // Lines of page text cross as one string joined by "\n" (squashed lines never hold one).
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { Worker } from 'node:worker_threads'
 
 /** A unit a page measures in. */
 export type Unit = 'cm' | 'mm' | 'm' | 'in' | 'ft'
@@ -176,9 +177,18 @@ function item(v: unknown): ItemView {
   }
 }
 
+/** One op on the wasm, JSON text in and out (the worker thread runs this too). */
+export function callText(op: string, input: string): string {
+  return raw().call(op, input)
+}
+
 /** One op; v1's exceptions as PyRaised, anything else (a bug here) as an Error. */
 function call(op: string, input: unknown): unknown {
-  const out: unknown = JSON.parse(raw().call(op, JSON.stringify(input)))
+  return checked(op, callText(op, JSON.stringify(input)))
+}
+
+function checked(op: string, text: string): unknown {
+  const out: unknown = JSON.parse(text)
   const err = field(out, 'error')
   if (typeof err === 'string') {
     if (err === 'KeyError') throw new PyRaised(err)
@@ -193,6 +203,126 @@ function made(v: unknown): Made {
 }
 
 const joinLines = (lines: readonly string[]): string => lines.join('\n')
+
+// --- the reads over a whole page, off the main thread ------------------------------------------------------------------
+// A page's lines can hold megabytes; each read over them is linear, but a 9 MB line still takes a second or two, and the
+// server must keep answering meanwhile (contract §2.11: no page can hold the server). Above WORKER_CHARS they run in a
+// worker thread (its own instance of the same wasm, so the same answers), bounded by the read's deadline: a worker
+// still busy when the deadline passes is stopped, and the jobs queued behind it start again on a new one.
+
+const WORKER_CHARS = 200_000
+const WORKER_URL = new URL('./size-worker.ts', import.meta.url)
+
+/** The read's deadline was reached while the worker was still busy. */
+export class WorkerTimeout extends Error {}
+
+interface Job {
+  readonly id: number
+  readonly op: string
+  readonly input: string
+  readonly resolve: (text: string) => void
+  readonly reject: (e: Error) => void
+}
+
+class SizeWorker {
+  #worker: Worker | null = null
+  #jobs: Job[] = []
+  #next = 0
+
+  #start(): Worker {
+    if (this.#worker !== null) return this.#worker
+    const w = new Worker(WORKER_URL)
+    w.unref()
+    w.on('message', (m: unknown) => {
+      const id = field(m, 'id')
+      const out = field(m, 'out')
+      const at = this.#jobs.findIndex((j) => j.id === id)
+      const job = this.#jobs[at]
+      if (job === undefined || typeof out !== 'string') return
+      this.#jobs.splice(at, 1)
+      job.resolve(out)
+    })
+    w.on('error', (e: Error) => {
+      this.#restart(e)
+    })
+    this.#worker = w
+    return w
+  }
+
+  /** Stops the worker; `failed` (the job that ran out of time, if any) fails, the others start again. */
+  #restart(e: Error, failed?: Job): void {
+    const w = this.#worker
+    this.#worker = null
+    void w?.terminate()
+    if (failed !== undefined) {
+      this.#jobs = this.#jobs.filter((j) => j !== failed)
+      failed.reject(e)
+    }
+    const again = this.#jobs
+    if (failed === undefined) {
+      this.#jobs = []
+      for (const j of again) j.reject(e)
+      return
+    }
+    const fresh = this.#start()
+    for (const j of again) fresh.postMessage({ id: j.id, op: j.op, input: j.input })
+  }
+
+  run(op: string, input: string, timeoutMs: number): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const id = ++this.#next
+      const job: Job = {
+        id, op, input,
+        resolve: (text) => {
+          clearTimeout(timer)
+          resolve(text)
+        },
+        reject: (e) => {
+          clearTimeout(timer)
+          reject(e)
+        },
+      }
+      const timer = setTimeout(() => {
+        this.#restart(new WorkerTimeout('the size reader ran out of time'), job)
+      }, Math.max(1, timeoutMs))
+      this.#jobs.push(job)
+      this.#start().postMessage({ id, op, input })
+    })
+  }
+}
+
+const worker = new SizeWorker()
+
+/** `call`, in the worker when the input is large. */
+async function callLarge(op: string, input: Readonly<Record<string, unknown>>, size: number, timeoutMs: number): Promise<unknown> {
+  if (size <= WORKER_CHARS) return call(op, input)
+  return checked(op, await worker.run(op, JSON.stringify(input), timeoutMs))
+}
+
+const sizeOf = (lines: readonly string[]): number => lines.reduce((n, l) => n + l.length + 1, 0)
+
+/** textReadings, off the main thread for a large page. */
+export async function textReadingsAsync(lines: readonly string[], ctx: SizeCtx, timeoutMs: number): Promise<Reading[]> {
+  return list(field(await callLarge('text_readings', { lines: joinLines(lines), ctx }, sizeOf(lines), timeoutMs), 'readings')).map(reading)
+}
+
+/** unitHint, off the main thread for a large page. */
+export async function unitHintAsync(lines: readonly string[], timeoutMs: number): Promise<Unit | null> {
+  return optUnit(await callLarge('unit_hint', { lines: joinLines(lines) }, sizeOf(lines), timeoutMs))
+}
+
+/** thickness, off the main thread for a large page. */
+export async function thicknessAsync(lines: readonly string[], hint: Unit | null, timeoutMs: number): Promise<readonly [number, string] | null> {
+  const v = await callLarge('thickness', { lines: joinLines(lines), hint }, sizeOf(lines), timeoutMs)
+  if (v === null) return null
+  const [cm, note] = list(v)
+  return [num(cm), str(note)]
+}
+
+/** llmText, off the main thread for a large page. */
+export async function llmTextAsync(lines: readonly string[], timeoutMs: number): Promise<string> {
+  return str(await callLarge('llm_text', { lines: joinLines(lines) }, sizeOf(lines), timeoutMs))
+}
 
 // --- the reader ------------------------------------------------------------------------------------------------------
 

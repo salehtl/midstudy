@@ -266,6 +266,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "every code point: far too slow under Miri")]
     fn regex_word_matches_regex_syntax() {
         let b = Regex::new(r"\A\w").unwrap_or_else(|_| unreachable!());
         let mut buf = [0u8; 4];

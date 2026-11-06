@@ -5,12 +5,12 @@ import { pyStrip } from '../../../common/logic/pyfmt.ts'
 import type { ServerDeps } from '../deps.ts'
 import { Budget } from '../fetch.ts'
 import { Doc, unescape } from './doc.ts'
-import { BLOCKED, COULD_NOT_READ, Deadline, PageTimeout, ProductError, TIMEOUT } from './errors.ts'
+import { BLOCKED, COULD_NOT_READ, Deadline, PageTimeout, ProductError, TIMEOUT, TOO_LONG } from './errors.ts'
 import { extract, isRobotCheck, pageText, readFeeds, PY_B, type ProductResult } from './extract.ts'
 import { parsePage } from './html.ts'
 import { cpLength, cpPrefix } from './logic/text.ts'
 import { BUDGET_MS, PAGE_MAX, contentTypeOf, fetchPage } from './pagefetch.ts'
-import { PyRaised } from './sizes.ts'
+import { PyRaised, WorkerTimeout } from './sizes.ts'
 import { publicUrl, target } from './urls.ts'
 
 /** v1's EXTRACT_S: the work after the download. */
@@ -114,6 +114,7 @@ export async function readProduct(url: string | null, llm: boolean, html: string
   } catch (e) {
     if (e instanceof ProductError) return { status: e.status, body: e.body() }
     if (e instanceof PageTimeout) return { status: 422, body: { error: TIMEOUT } }
+    if (e instanceof WorkerTimeout) return { status: 422, body: { error: TOO_LONG } }
     // a page this reader can't handle is a 422, never a 500 (v1's `except Exception`, which v1's own exceptions in its
     // size rules, PyRaised here, also reached)
     if (!(e instanceof PyRaised)) logUnexpected(e)

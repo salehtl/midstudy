@@ -39,10 +39,25 @@ export class PageTimeout extends Error {
  *  Each call also lets the event loop answer other requests (v1 ran each request in its own thread). */
 export class Deadline {
   #at: number | null = null
+  #yielded = performance.now()
 
   /** Starts the 10 s for the work after the download. */
   start(ms: number): void {
     this.#at = performance.now() + ms
+  }
+
+  /** What is left of the 10 s, in ms (before they start: all of them). */
+  remaining(): number {
+    return this.#at === null ? 10_000 : Math.max(0, this.#at - performance.now())
+  }
+
+  /** In a long loop: a turn of the event loop when 20 ms have passed since the last one, then check(). */
+  async pause(): Promise<void> {
+    if (performance.now() - this.#yielded > 20) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      this.#yielded = performance.now()
+    }
+    this.check()
   }
 
   /** Throws TOO_LONG past the deadline. */
@@ -53,6 +68,7 @@ export class Deadline {
   /** check(), after a turn of the event loop. */
   async tick(): Promise<void> {
     await new Promise<void>((resolve) => setImmediate(resolve))
+    this.#yielded = performance.now()
     this.check()
   }
 }

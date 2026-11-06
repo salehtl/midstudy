@@ -74,7 +74,7 @@ const LINK_START = /^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u{1680}\u{2000}-\u{200a}\u{20
 
 /** v1's `_script_strings`: the string values in inline scripts that mention a size, as text lines (HTML in them
  *  stripped), each once, at most about 400. */
-export function scriptStrings(scripts: readonly (readonly [string, string])[], deadline: Deadline): string[] {
+export async function scriptStrings(scripts: readonly (readonly [string, string])[], deadline: Deadline): Promise<string[]> {
   const out: string[] = []
   const seen = new Set<string>()
   const take = (s: string): void => {
@@ -87,25 +87,25 @@ export function scriptStrings(scripts: readonly (readonly [string, string])[], d
       }
     }
   }
-  const walk = (x: PyValue, depth: number): void => {
+  const walk = async (x: PyValue, depth: number): Promise<void> => {
     if (depth > 40 || out.length > 400) return
-    deadline.check()
+    await deadline.pause()
     if (typeof x === 'string') {
       const st = pyStrip(x)
       if ((st === '' || st.startsWith('{') || st.startsWith('[')) && cpLength(st) > 20) {
         const inner = loadsLenient(st)
         if (inner !== null) {
-          walk(inner, depth + 1)
+          await walk(inner, depth + 1)
           return
         }
       }
       take(x)
     } else if (isList(x)) {
-      for (const y of x) walk(y, depth + 1)
+      for (const y of x) await walk(y, depth + 1)
     } else if (isDict(x)) {
       for (const [k, v] of x) {
         if (SKIP_KEYS.test(k)) continue
-        walk(v, depth + 1)
+        await walk(v, depth + 1)
       }
     }
   }
@@ -114,14 +114,14 @@ export function scriptStrings(scripts: readonly (readonly [string, string])[], d
     if (kind.includes('json')) {
       const data = loadsLenient(text)
       if (data !== null) {
-        walk(data, 0)
+        await walk(data, 0)
         continue
       }
     }
     for (const lit of literals(text)) {
-      deadline.check()
+      await deadline.pause()
       if (!hasSize(lit)) continue
-      walk(jsUnescape(lit), 0)
+      await walk(jsUnescape(lit), 0)
     }
   }
   return out

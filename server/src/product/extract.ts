@@ -326,10 +326,10 @@ export async function extract(doc: Doc, warnings: string[], llm: boolean, deps: 
   }
   const desc = p?.get('description')
   if (typeof desc === 'string') extra.push(...textLines(desc))
-  const scriptLines = scriptStrings(page.scripts, deadline)
+  const scriptLines = await scriptStrings(page.scripts, deadline)
   const allLines = [...page.lines, ...extra, ...scriptLines]
   await deadline.tick()
-  const hint = sizes.unitHint([...allLines, ...page.outLines])
+  const hint = await sizes.unitHintAsync([...allLines, ...page.outLines], deadline.remaining())
   const ctx = new Ctx(isRug, hint, warnings, category === 'bed')
   const sz = new Sizes()
   shopifySizes(doc, ctx, sz, used)
@@ -341,8 +341,8 @@ export async function extract(doc: Doc, warnings: string[], llm: boolean, deps: 
   const anyVariant = (): boolean => sz.variants.some(([, r]) => r !== null)
   if (!anyVariant() && sz.cands.length === 0) {
     await deadline.tick()
-    let text = sizes.textReadings(allLines, ctx.size)
-    if (text.length === 0 && page.outLines.length > 0) text = sizes.textReadings(page.outLines, ctx.size)
+    let text = await sizes.textReadingsAsync(allLines, ctx.size, deadline.remaining())
+    if (text.length === 0 && page.outLines.length > 0) text = await sizes.textReadingsAsync(page.outLines, ctx.size, deadline.remaining())
     if (text.length > 0) {
       sz.cands.push(...text)
       used.add('text')
@@ -356,7 +356,7 @@ export async function extract(doc: Doc, warnings: string[], llm: boolean, deps: 
   let mock = false
   if (!anyVariant() && sz.cands.length === 0) {
     if (llm) {
-      const got = await runLlm(doc.url, allLines, ctx, deps)
+      const got = await runLlm(doc.url, allLines, ctx, deps, deadline)
       cost = got.cost
       mock = got.mock
       if (got.asked) used.add('llm')
@@ -378,7 +378,7 @@ export async function extract(doc: Doc, warnings: string[], llm: boolean, deps: 
   }
   // --- candidates: the shop's sizes first, then the layers in order; rugs get their thickness
   await deadline.tick()
-  const thick = isRug ? sizes.thickness(allLines, hint) : null
+  const thick = isRug ? await sizes.thicknessAsync(allLines, hint, deadline.remaining()) : null
   const fin = sizes.finish(sz.variants.map(([, r]) => r), sz.cands, isRug, thick)
   if (fin.thickness_used) used.add('text')
   const variants = sz.variants.length > 1 ? sz.variants.map(([label], i) => ({ label, dims_index: fin.variant_index[i] ?? null })) : []

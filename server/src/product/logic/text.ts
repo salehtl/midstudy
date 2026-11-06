@@ -13,9 +13,14 @@ function squashCell(cell: string): string {
 
 /** v1's `_squash`: whitespace runs to one space, table cells kept apart by one tab (empty cells dropped). */
 export function squash(text: string): string {
-  const cells = text.split('\t').map(squashCell)
-  if (cells.length > 1) return cells.filter((c) => c !== '').join('\t')
-  return cells[0] ?? ''
+  const raw = text.split('\t')
+  if (raw.length === 1) return squashCell(text)
+  const kept: string[] = []
+  for (const cell of raw) {
+    const c = squashCell(cell)
+    if (c !== '') kept.push(c)
+  }
+  return kept.join('\t')
 }
 
 /** Python's `re.sub(r"\s+", " ", s)`. */

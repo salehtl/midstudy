@@ -1,0 +1,35 @@
+# cargo-fuzz targets for the product page size reader (docs/REFACTOR.md: cargo-fuzz on every parser). Its own workspace,
+# so the core workspace never builds libFuzzer. Each target checks invariants, not only "no panic".
+#
+#   cd core/crates/product && RUSTC_BOOTSTRAP=1 cargo fuzz run size_reader -s none -- -max_total_time=300
+#   (the nightly shell runs it with the address sanitizer: `nix develop .#nightly -c cargo fuzz run size_reader`)
+[package]
+name = "midstudy-product-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+midstudy-product = { path = ".." }
+serde_json = "1"
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "size_reader"
+path = "fuzz_targets/size_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "size_json"
+path = "fuzz_targets/size_json.rs"
+test = false
+doc = false
+bench = false

@@ -11,6 +11,7 @@ import { slugify } from '../../../common/logic/slug.ts'
 import { isoUtc } from '../../../common/logic/time.ts'
 import type { ServerDeps } from '../deps.ts'
 import { urlHostname, urlsplit, urlunsplit } from '../logic/url.ts'
+import type { Deadline } from './errors.ts'
 import type { Ctx } from './layers.ts'
 import { asList, isDict, isNumber, or, pyStr, toFloat, type PyDict } from './logic/py.ts'
 import { pyLoads, type PyValue } from './logic/pyjson.ts'
@@ -152,7 +153,7 @@ function field(o: unknown, k: string): unknown {
 }
 
 /** v1's `_run_llm`: layer 4. Warnings go to ctx.warnings. */
-export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, deps: ServerDeps): Promise<LlmResult> {
+export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, deps: ServerDeps, deadline: Deadline): Promise<LlmResult> {
   const mock = falMock()
   const key = mock ? null : falKey(deps.config.repo)
   if (!mock && key === null) {
@@ -166,7 +167,7 @@ export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, de
     return { sizes: [], name: null, cost: 0, mock: false, asked: false }
   }
   try {
-    const text = sizes.llmText(lines)
+    const text = await sizes.llmTextAsync(lines, deadline.remaining())
     const args = { model: LLM_MODEL, system_prompt: SYSTEM_PROMPT, prompt: `<page>\n${text}\n</page>`, temperature: 0, max_tokens: LLM_MAX_TOKENS }
     const stamp = isoUtc(Date.now())
     let output: unknown
