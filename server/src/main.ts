@@ -11,11 +11,11 @@
 // (unless MIDSTUDY_NO_DOTENV=1). MIDSTUDY_FAL_MOCK makes every fal call a mock; MIDSTUDY_STRICT=1 checks every answer
 // and written file against the contract's schemas; MIDSTUDY_SOCKET_TIMEOUT (evals) shortens the 30 s socket timeout;
 // MIDSTUDY_FETCH_ALLOW=<host>:<port> (evals) lets the URL fetcher reach that one address.
-import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { hostName } from '../../core/js/node.ts'
 import { falMock } from '../../common/fal.ts'
+import { resolvePath as pathResolve } from '../../common/files.ts'
 import { pyFloat } from '../../common/logic/csv.ts'
 import type { ServerConfig, ServerDeps } from './deps.ts'
 import type { ApiRoute } from './http/router.ts'
@@ -58,21 +58,6 @@ function resolvePath(p: string): string {
   return path.isAbsolute(expanded) ? path.normalize(expanded) : path.join(REPO, expanded)
 }
 
-/** Python's `Path.resolve()` (strict off): symlinks resolved as far as the path exists, the rest appended. */
-function realish(p: string): string {
-  const rest: string[] = []
-  let at = path.resolve(p)
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(at), ...rest.reverse())
-    } catch {
-      const parent = path.dirname(at)
-      if (parent === at) return path.join(at, ...rest.reverse())
-      rest.push(path.basename(at))
-      at = parent
-    }
-  }
-}
 
 async function main(argv: readonly string[]): Promise<void> {
   const parsed = parseCli(argv)
@@ -102,7 +87,7 @@ async function main(argv: readonly string[]): Promise<void> {
   const costsFile = o.costsFile === null ? path.join(libraryDir, 'costs.csv') : resolvePath(o.costsFile)
   // midstudy-add always writes <library-dir>/costs.csv, so the cap would miss its rows (library adds would be
   // unlimited) if this read another file: refuse any other --costs-file (§2.9 W2).
-  if (realish(costsFile) !== realish(path.join(libraryDir, 'costs.csv'))) {
+  if (pathResolve(costsFile) !== pathResolve(path.join(libraryDir, 'costs.csv'))) {
     process.stderr.write(costsFileProblem(costsFile, path.join(libraryDir, 'costs.csv')) + '\n')
     process.exit(1)
   }
