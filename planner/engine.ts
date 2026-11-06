@@ -878,6 +878,10 @@ async function settleSplats(timeoutMs = 30000): Promise<void> {
   const settled = (): boolean => !s.sorting && !s.sortDirty && s.sortTimeoutId === undefined && s.display === s.current
   for (;;) {
     while (s.sorting && left()) await sleep(10)
+    // Spark reads each SplatMesh's world matrix from its parent's as it stands: a piece added since the last frame has
+    // never had its group's updated (v1's bounds refreshed it as a side effect; the kernels' don't), so its splats
+    // would be generated and sorted where the group was made (the origin), and the capture drawn in that order.
+    scene.updateMatrixWorld()
     let p: Promise<void>
     camera.layers.set(SPLAT_LAYER) // Spark picks up the SplatMeshes the camera's layers see
     try { p = s.update({ scene, camera }) } finally { camera.layers.set(0) }

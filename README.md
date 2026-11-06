@@ -153,7 +153,7 @@ CUDA, then MPS, then CPU).
 
 ```sh
 nix develop -c npm run build                # wasm kernels into build/wasm/, the planner into planner/dist/
-nix develop -c npm run check                # every gate, one line each (about 45 min with Rust, fuzzing and proofs)
+nix develop -c npm run check                # every gate, one line each (about 35 min: Rust, fuzzing, proofs)
 nix develop -c npm run check:types          # or one of them: types lint dead gen tests tscert planner py rust fuzz proofs
 ```
 

@@ -1,5 +1,5 @@
-// The v2 library lock (contract §2.8 "One writer", v2): Node has no flock, so every library write and every
-// costs.csv append takes a lock directory instead. The server and midstudy-add implement this same protocol:
+// The library lock (contract §2.8 "One writer"): Node has no flock (v1 flocked <library>/.lock), so every library
+// write and every costs.csv append takes a lock directory. The server and midstudy-add implement this same protocol:
 //
 //   take     mkdir <lock>.d (its parent made first); the maker then writes owner.json {pid, host, cmd, started}
 //            into it (atomically: a temp file and a rename). mkdir either makes the folder or fails: one taker wins.
@@ -13,9 +13,9 @@
 //            a list of the locks it holds, so an interrupt (midstudy-add's Ctrl-C or SIGTERM) gives them all back at
 //            once (releaseAllSync).
 //
-// v1's lock files (`<library>/.lock`, `<costs file>.lock`, flocked by v1 tools) are created when missing and never
-// removed, so a v1 tool finds what it expects; v2 never flocks them, so a v1 tool and a v2 tool don't exclude each
-// other: the server and the CLI switch together.
+// v1's lock files (`<library>/.lock`, `<costs file>.lock`) are still created when missing and never removed (E7
+// checks that cost rows have their own lock file beside costs.csv). Nothing flocks them since the v2 cutover: never run
+// a v1 checkout's tools on a v2 library.
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
