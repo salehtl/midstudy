@@ -4,8 +4,10 @@ The key of a set of photos is the lowercase hex SHA-256 of the UTF-8 text made o
 (lowercase hex), sorted ascending as strings, joined with "\\n", no trailing newline. With <dir>/rooms/<key>/align.json
 present, its answer is written for these folders: each member is matched to the folder whose photo.jpg has its
 photo_sha256 and takes that folder's name; members go in argument order; every pose and scale is re-expressed relative
-to the first argument (geometry.relative_to); `created` is now; everything else is copied. No match: `solver: "none"`,
-the first argument the frame, every other member unplaced.
+to the first argument (geometry.relative_to); `created` is now; everything else is copied, except that the first
+argument, the frame, gets confidence 1 and residual_cm null as align.json's members[0] always does (the recorded answer
+may give it a residual when it wasn't the recording's first member). No match: `solver: "none"`, the first argument
+the frame, every other member unplaced.
 """
 from __future__ import annotations
 
@@ -65,9 +67,12 @@ def recorded(path: Path, photos: Sequence[RoomPhoto], created: str) -> Align:
         if pl is None:
             members.append(AlignMember(scene=p.name, photo_sha256=p.sha256, pose=None, scale=None, confidence=0.0, residual_cm=None))
             continue
+        if i == 0:  # members[0] is the frame (§4.9 align.json): confidence 1 and no residual, whatever was recorded for it
+            members.append(AlignMember(scene=p.name, photo_sha256=p.sha256, pose=Pose(x_m=0.0, z_m=0.0, yaw_deg=0.0), scale=1.0,
+                                       confidence=1.0, residual_cm=None))
+            continue
         rel = relative_to(pl, first)
-        members.append(AlignMember(scene=p.name, photo_sha256=p.sha256, pose=pose_json(rel),
-                                   scale=1.0 if i == 0 else round(clamp_scale(rel.scale), 6),
+        members.append(AlignMember(scene=p.name, photo_sha256=p.sha256, pose=pose_json(rel), scale=round(clamp_scale(rel.scale), 6),
                                    confidence=m["confidence"], residual_cm=m["residual_cm"]))
     out = dict(cast(dict[str, object], data))  # other top-level keys (diagnostics) are copied too
     out.update({"created": created, "members": members, "unplaced": [m["scene"] for m in members if m["pose"] is None]})

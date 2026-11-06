@@ -18,7 +18,8 @@ this personal tool). Phase A measured ~1 min for 7 photos and ~2.3 min for 11 on
 
 How it runs (Phase A's spike, calib/spike/run.py): the photos reach MASt3R as symlinks named m00.jpg, m01.jpg, … in a
 temp folder (its forward cache keys on file names), at 512 px; every pair for up to COMPLETE_MAX photos (a sliding
-window with loop closure above that, so 32 photos stay inside the server's 600 s); sparse global alignment as its
+window in room order with loop closure above that, so 32 photos stay inside the server's 600 s: the planner uploads a
+room's photos in the order taken, docs/ROOMS.md §7, so neighbours overlap); sparse global alignment as its
 demo runs it; the dense depth maps and per-view camera-to-world poses come back for from_views.
 """
 from __future__ import annotations
@@ -47,8 +48,10 @@ COMMIT: Final = "f5209afc300cec36239a7ac992263f36847bbba0"  # Phase A's (dust3r 
 WEIGHTS: Final = "naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
 REVISION: Final = "06e7259f34c3060f322df5cb0c7b9094f57e41fc"
 SIZE: Final = 512
-COMPLETE_MAX: Final = 12  # photos up to which every pair is matched (Phase A measured 7 and 11)
-WINDOW: Final = 5  # above that: each photo with the next WINDOW in room order, cyclic
+COMPLETE_MAX: Final = 12  # photos up to which every pair is matched (Phase A measured 7 and 11: 21 and 55 pairs)
+# Above that, each photo with the next w in room order, cyclic, w = PAIR_BUDGET // n within 2..5: ~2.5 s a pair on MPS
+# (22 photos, 110 pairs: 282 s), so 32 photos (w 4, 128 pairs) stay well inside the server's 600 s.
+PAIR_BUDGET: Final = 130
 # The extra's modules MASt3R imports beyond calib's own dependencies (pyproject.toml [project.optional-dependencies] rooms)
 MODULES: Final = ("roma", "einops", "safetensors", "tqdm")
 
@@ -144,7 +147,8 @@ def _np(t: Any) -> F64:
 
 
 def scene_graph(n: int) -> str:
-    return "complete" if n <= COMPLETE_MAX else f"swin-{WINDOW}"
+    """MASt3R's pairs (dust3r make_pairs): every pair up to COMPLETE_MAX photos, else a cyclic sliding window."""
+    return "complete" if n <= COMPLETE_MAX else f"swin-{max(2, min(5, PAIR_BUDGET // n))}"
 
 
 class Mast3r:

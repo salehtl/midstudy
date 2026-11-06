@@ -141,6 +141,7 @@ def test_mock_renames_reorders_and_re_expresses(tmp_path: Path) -> None:
         assert jnum(m, "pose", "yaw_deg") == pytest.approx(wrap_deg(math.degrees(want.yaw)), abs=1e-3)
         assert jnum(m, "scale") == 1
     assert jget(members[0], "pose") == {"x_m": 0, "z_m": 0, "yaw_deg": 0}
+    assert jget(members[0], "confidence") == 1 and jget(members[0], "residual_cm") is None  # recorded for room-3: 0
 
 
 def test_mock_without_a_match_places_only_the_first(tmp_path: Path) -> None:
@@ -229,6 +230,10 @@ def test_the_worker_answers_align_room(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------------------------------- solvers
+
+
+def test_mast3r_matches_every_pair_up_to_12_photos_then_a_window() -> None:
+    assert [mast3r.scene_graph(n) for n in (2, 7, 12, 13, 22, 26, 32)] == ["complete"] * 3 + ["swin-5", "swin-5", "swin-5", "swin-4"]
 
 
 def test_auto_picks_mast3r_only_when_installed(monkeypatch: pytest.MonkeyPatch) -> None:
