@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-list.schema.json",
+  "title": "RoomList",
+  "description": "GET /api/rooms (contract §4.9): the rooms newest first (by created, ties by the name's collision suffix as a number, as scenes), and the deleted rooms newest first.",
+  "type": "object",
+  "required": ["rooms", "trash"],
+  "additionalProperties": false,
+  "properties": {
+    "rooms": { "type": "array", "items": { "$ref": "room-object.schema.json" } },
+    "trash": {
+      "type": "array",
+      "items": {
+        "title": "TrashedRoom",
+        "type": "object",
+        "required": ["name", "title", "created", "deleted"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/slug" },
+          "title": { "type": ["string", "null"] },
+          "created": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+          "deleted": { "$ref": "common.schema.json#/$defs/dateTime" }
+        }
+      }
+    }
+  }
+}

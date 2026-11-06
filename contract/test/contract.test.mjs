@@ -139,6 +139,62 @@ test('the validators refuse what the contract refuses', () => {
   assert.equal(gen.isLayoutList({ layouts: ['Bad Name'], details: [] }), false)
 })
 
+test('rooms (§4.9): the validators refuse what the contract refuses', () => {
+  const at = (m, p) => matchRoute(routes, m, p)?.route.path
+  assert.equal(at('GET', '/api/rooms/jobs'), '/api/rooms/jobs')
+  assert.equal(at('GET', '/api/rooms/jobs/a-1'), '/api/rooms/jobs/{id}')
+  assert.equal(at('GET', '/api/rooms/room-20261106-101530'), '/api/rooms/{room}')
+  assert.equal(at('POST', '/api/rooms/room-1/align'), '/api/rooms/{room}/align')
+  assert.equal(at('PUT', '/api/layouts/front?room=room-1'), '/api/layouts/{layout}')
+  const detail = first('get-api-rooms-room.json', (e) => e.status === 200)
+  const [origin, moved, unplaced] = detail.members
+  assert.ok(gen.isRoomDetail(detail) && gen.isRoomMember({ scene: origin.scene, pose: origin.pose, scale: 1, pose_source: 'origin' }))
+  assert.equal(gen.isRoomMember({ scene: 'a', pose: null, scale: 1, pose_source: 'solver' }), false, 'no pose only when unplaced')
+  assert.equal(gen.isRoomMember({ scene: 'a', pose: { x_m: 0, z_m: 0, yaw_deg: 0 }, scale: 1, pose_source: 'unplaced' }), false, 'unplaced has no pose')
+  assert.equal(gen.isPose({ x_m: 0, z_m: 0, yaw_deg: -180 }), false, 'yaw in (−180, 180]')
+  assert.ok(gen.isPose({ x_m: 0, z_m: 0, yaw_deg: 180 }))
+  assert.equal(gen.isPose({ x_m: 51, z_m: 0, yaw_deg: 0 }), false, 'positions clamped to ±50 m')
+  assert.equal(gen.isRoomMember({ scene: 'a', pose: null, scale: 5, pose_source: 'unplaced' }), false, 'scale 0.25–4')
+  assert.equal(gen.isRoomDetail({ ...detail, members: [{ ...moved, effective_camera: undefined }] }), false, 'a member names its effective camera')
+  assert.equal(gen.isRoomDetail({ ...detail, align_status: 'aligned' }), false)
+  const align = detail.align
+  assert.ok(gen.isAlign(align) && gen.isAlign({ ...align, diagnostics: { pairs: 3 } }), 'align.json is open at the top, for diagnostics')
+  assert.equal(gen.isAlignMember({ ...align.members[1], scale: null }), false, 'pose and scale are null together')
+  assert.equal(gen.isAlignMember({ ...align.members[2], scale: 1 }), false)
+  assert.equal(gen.isAlignMember({ ...align.members[1], photo_sha256: 'ABC' }), false)
+  assert.equal(gen.isAlignMember({ ...align.members[1], confidence: 1.2 }), false)
+  assert.ok(gen.isCalibCliAlignRoom({ ...align, ok: true }) && gen.isCalibCliAlignRoom({ ...align, ok: true, id: 'a-1' }))
+  assert.equal(gen.isCalibCliAlignRoom(align), false, 'the stdout line says ok')
+  assert.ok(gen.isCalibCliRequest({ id: 'a-1', cmd: 'align-room', args: ['/s/a', '/s/b', '--out', '/r/x'] }))
+  assert.ok(gen.isRoomCreate({ scenes: ['a'] }))
+  assert.equal(gen.isRoomCreate({ scenes: [] }), false, 'at least one scene')
+  assert.equal(gen.isRoomCreate({ scenes: ['a', 'a'] }), false, 'no scene twice')
+  assert.equal(gen.isRoomPut({}), false, 'a PUT changes something')
+  assert.equal(gen.isRoomPut({ reset: ['a', 'a'] }), false)
+  assert.equal(gen.isRoomPut({ rescale: 0 }), false)
+  assert.ok(gen.isRoomPut({ members: [{ scene: 'a', pose: { x_m: 99, z_m: 0, yaw_deg: 720 } }] }), 'pose numbers are clamped, not refused')
+  assert.ok(gen.isRoomPut({ members: [{ scene: 'a', pose: null }] }))
+  assert.equal(gen.isAlignJob({ ...first('get-api-rooms-jobs-id.json', (e) => e.status === 200), id: 'c-1' }), false, 'align job ids start a-')
+  // layouts: exactly one of scene_name and room_name
+  const layout = first('get-api-layouts-layout.json', (e) => e.status === 200)
+  const { scene_name: sceneName, ...bare } = layout
+  assert.ok(gen.isLayout(layout) && gen.isLayout({ ...bare, room_name: 'room-1' }))
+  assert.equal(gen.isLayout(bare), false, 'a layout belongs to a scene or a room')
+  assert.equal(gen.isLayout({ ...layout, room_name: 'room-1' }), false, 'not both')
+  assert.ok(gen.isLayoutDeleted({ ok: true, name: 'front', room: 'room-1', trash: 'layouts/@room-1/.trash/front-20261106-101500.json' }))
+  assert.equal(gen.isLayoutDeleted({ ok: true, name: 'front', scene: sceneName, room: 'room-1', trash: 'layouts/@room-1/.trash/front-20261106-101500.json' }), false)
+  // the scene object and render meta gain optional room keys; trash records a member
+  const scene = first('get-api-scenes.json', (e) => e.body.scenes.length).scenes[0]
+  assert.ok(gen.isSceneObject(scene) && gen.isSceneObject({ ...scene, room: null }) && gen.isSceneObject({ ...scene, room: 'room-1' }))
+  const meta = first('post-api-render.json', (e) => e.status === 200)
+  assert.ok(gen.isRenderMeta(meta) && gen.isRenderMeta({ ...meta, room: 'room-1' }))
+  assert.equal(gen.isRenderMeta({ ...meta, room: null }), false, 'room is absent without one, never null')
+  assert.ok(gen.isSceneTrash({ name: 'scene-1', title: null, deleted: '2026-11-06T10:00:00Z', room: { name: 'room-1', index: 1, member: { scene: 'scene-1', pose: moved.pose, scale: 1, pose_source: 'manual' } } }))
+  assert.ok(gen.isRoomTrash({ name: 'room-1', title: null, created: null, deleted: '2026-11-06T10:00:00Z' }))
+  assert.ok(gen.isRoom({ version: 1, name: 'room-1', title: null, created: '2026-11-06T10:00:00Z', saved: null, members: [], aligned: null }), 'a room may lose every member')
+  void unplaced
+})
+
 test('violation() names the schema and the path, for strict mode', () => {
   assert.equal(gen.violation('midstudy/api/spend.schema.json', first('get-api-spend.json')), null)
   const v = gen.violation('midstudy/api/spend.schema.json', { day: '2026-11-05', spent_usd: 0, reserved_usd: 0, cap_usd: -2 })
@@ -148,10 +204,22 @@ test('violation() names the schema and the path, for strict mode', () => {
 })
 
 test('the file schemas still accept the golden fixtures and the probe library', () => {
-  for (const id of ['living-wide', 'steep-roll', 'portrait', 'living-cool', 'living-warm']) {
+  for (const id of ['living-wide', 'steep-roll', 'portrait', 'living-cool', 'living-warm', 'room-1', 'room-2', 'room-3', 'room-4', 'room-5', 'room-6']) {
     const dir = path.join(CONTRACT, '../fixtures/scenes', id)
     assert.ok(gen.isCalib(JSON.parse(fs.readFileSync(path.join(dir, 'calib.json'), 'utf8'))), `${id} calib.json`)
     assert.ok(gen.isLighting(JSON.parse(fs.readFileSync(path.join(dir, 'lighting.json'), 'utf8'))), `${id} lighting.json`)
   }
   assert.ok(gen.isLibrary(JSON.parse(fs.readFileSync(path.join(CONTRACT, '../fixtures/library/library.json'), 'utf8'))))
+  // the calib mock's align-room answers for the golden room (§4.9 Mock), and their pose_in_room
+  const rooms = path.join(CONTRACT, '../fixtures/calib/rooms')
+  const answers = fs.readdirSync(rooms).filter((k) => /^[0-9a-f]{64}$/.test(k))
+  assert.equal(answers.length, 2, 'the golden room and the golden pair')
+  for (const key of answers) {
+    const a = JSON.parse(fs.readFileSync(path.join(rooms, key, 'align.json'), 'utf8'))
+    assert.ok(gen.isAlign(a), key)
+    for (const m of a.members.slice(1)) {
+      const t = JSON.parse(fs.readFileSync(path.join(CONTRACT, '../fixtures/scenes', m.scene, 'truth.json'), 'utf8'))
+      assert.ok(gen.isPose(t.pose_in_room) && JSON.stringify(t.pose_in_room) === JSON.stringify(m.pose), `${m.scene} pose_in_room`)
+    }
+  }
 })

@@ -2,9 +2,9 @@
 
 The shared spec between the **planner** (`planner/`, with its server in `server/`), the **calibration** CLI (`calib/`, `midstudy-calib`) and the **furniture pipeline** (`pipeline/`, `midstudy-add`). They share only the files and HTTP routes described here. Conventions (units, axes, item frame, slugs) are in [CLAUDE.md](../CLAUDE.md) and apply everywhere. [PLAN.md](../PLAN.md) is the plan; where this file and PLAN.md disagree, PLAN.md wins and this file gets fixed.
 
-Sections 1–3 are nook's contract with the scan, rooms, iOS and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down. Section 5 covers fixtures and evals. **v1.1 (2026-11-05, PLAN.md §12):** the `idol` engine (the default), the stand-in box for splat-only items, `splat.spz`, per-axis splat fitting, and the planner drawing splats with Spark (§1, §3.2, §3.4, §4.5 Splats).
+Sections 1–3 are nook's contract with the scan, rooms, iOS and hosting parts removed and the names changed (`nook` → `midstudy`). Section 4 is PLAN.md §4 with the details pinned down; **§4.9 Rooms** (2026-11-06, [docs/ROOMS.md](../docs/ROOMS.md)) groups several photos of one room into one shared frame (nook's rooms were 3D scans; these are not). Section 5 covers fixtures and evals. **v1.1 (2026-11-05, PLAN.md §12):** the `idol` engine (the default), the stand-in box for splat-only items, `splat.spz`, per-axis splat fitting, and the planner drawing splats with Spark (§1, §3.2, §3.4, §4.5 Splats).
 
-Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json), [lighting.schema.json](lighting.schema.json), [trash.schema.json](trash.schema.json), [add-summary.schema.json](add-summary.schema.json); the HTTP API's in [api/](api/README.md) (§0).
+Schemas: [library.schema.json](library.schema.json), [layout.schema.json](layout.schema.json), [scene.schema.json](scene.schema.json), [calib.schema.json](calib.schema.json), [lighting.schema.json](lighting.schema.json), [trash.schema.json](trash.schema.json), [add-summary.schema.json](add-summary.schema.json), [room.schema.json](room.schema.json), [align.schema.json](align.schema.json), [calib-cli.schema.json](calib-cli.schema.json); the HTTP API's in [api/](api/README.md) (§0).
 
 ---
 
@@ -36,10 +36,15 @@ scenes/<name>/...             one scene per uploaded photo (§4.2)
 scenes/.trash/<name>-<stamp>/ deleted scenes, with their layouts and trash.json {name, title, deleted}
 layouts/<scene>/<layout>.json a scene's layouts (layout.schema.json)
 layouts/<scene>/.trash/<layout>-<stamp>.json  deleted layouts
+rooms/<room>/room.json        a room: its member scenes, their poses and scales (§4.9, room.schema.json)
+rooms/<room>/align.json       the pose solver's last answer for the room (§4.9, align.schema.json), written by midstudy-calib
+rooms/.trash/<room>-<stamp>/  deleted rooms, with their layouts and trash.json {name, title, created, deleted}
+layouts/@<room>/<layout>.json a room's layouts (layout.schema.json with room_name; the @ keeps them apart from scenes')
+layouts/@<room>/.trash/<layout>-<stamp>.json  deleted room layouts
 renders/<name>.jpg ...        renders (§2.6, §4.7)
 ```
 
-`scenes/`, `layouts/`, `renders/` and `library/<id>/` are user data and git-ignored.
+`scenes/`, `layouts/`, `renders/`, `rooms/` and `library/<id>/` are user data and git-ignored.
 
 ### Normalized assets
 
@@ -61,7 +66,7 @@ A web app in `planner/` (strict TypeScript; three.js `0.180.0` from npm, its Web
 
 ```
 node server/src/main.ts [--port 8765] [--host 127.0.0.1] [--library-dir library] [--costs-file library/costs.csv]
-                        [--layouts-dir layouts] [--renders-dir renders] [--scenes-dir scenes]
+                        [--layouts-dir layouts] [--renders-dir renders] [--scenes-dir scenes] [--rooms-dir rooms]
                         [--calib "uv run --project calib midstudy-calib"] [--midstudy-add "node pipeline/src/cli.ts"]
                         [--daily-spend-usd 2] [--allowed-host NAME ...]
 ```
@@ -69,13 +74,14 @@ node server/src/main.ts [--port 8765] [--host 127.0.0.1] [--library-dir library]
 - TypeScript run by Node 22's type stripping (no build step for the server itself), from the repository root (`npm run serve` builds first). It serves the planner bundle in `planner/dist/` (`node scripts/build.mjs`). With `MIDSTUDY_STRICT=1` it validates what it sends and writes (§0). v1's `planner/serve.py` took the same flags (its default `--midstudy-add` was the Python CLI) and gave the same answers.
 - Serves the planner at `/planner/`; `GET /` redirects there. Static files get correct MIME types (`.spz` is `application/octet-stream`, sent as stored: no `Content-Encoding`), `X-Content-Type-Options: nosniff` and no caching. **Static is an allowlist:** `/planner/…` (the app's own files), `/library/…` (§2.8), `/scenes/…` (§4.4) and `/renders/…`; every other path is `404`, whatever its spelling or case. (The repo also holds the user's photos, camera originals dropped at the root with or without an extension, scratch scenes and the tracked `costs.csv`, and APFS is case-insensitive.)
 - All `/api` responses are JSON (errors are `{"error": "<one sentence>"}`).
-- Removed from nook: `/api/room`, `/api/rooms*`, `--room-file`, `--room-dir`, `--scan-api` and `/api/scan/*`, flat (scene-less) layouts.
+- Removed from nook: `/api/room`, nook's `/api/rooms*` (scans), `--room-file`, `--room-dir`, `--scan-api` and `/api/scan/*`, flat (scene-less) layouts. `/api/rooms*` came back in §4.9 with another meaning: a group of scenes (photos), never a scan; `--rooms-dir` (default `rooms/`) is where they live.
 - Evals and agents always start it with `MIDSTUDY_NO_DOTENV=1`, `MIDSTUDY_FAL_MOCK=fixtures/fal` and `--daily-spend-usd 0` (§5.3).
 
 ### 2.2 URL parameters
 
 - `?library=<url>`: library to load (default `/library/library.json`). Asset paths resolve relative to it. A missing library is an empty library, not an error.
 - `?scene=<name>`: the scene to open (§4.5).
+- `?room=<room>[&photo=<scene>]`: the room to open, on that member photo (§4.9 Planner); `room` wins over `scene`.
 
 ### 2.3 Features carried from nook
 
@@ -145,7 +151,7 @@ interface Midstudy {
 | `qwen` | `fal-ai/qwen-image-edit` | `image_url`, `prompt`, `output_format: "jpeg"` | $0.03 × megapixels of the input |
 | `gpt-image` (added 2026-11-05) | `openai/gpt-image-2/edit` | `image_urls`, `prompt`, `output_format: "jpeg"`, `quality: "medium"`, `image_size: "auto"` | $0.07, an estimate: fal bills it by tokens (its table: $0.043–0.068 at medium for 1–3.7 MP with one input image) |
 
-### 2.7 Layouts (per scene)
+### 2.7 Layouts (per scene, or per room: §4.9)
 
 | Method and path | Response |
 |---|---|
@@ -156,7 +162,7 @@ interface Midstudy {
 
 The planner's Undo of a delete PUTs the layout back as it read it first. A layout may carry `title`, the name as the user typed it ("Phone A", at most 120 characters; `400` otherwise), shown instead of the slug; `details` list it.
 
-`<layout>` must be a slug (`400` otherwise; a slug never ends in a newline: every slug check matches the whole string). `scene` is required (`400` without it) and must name an existing scene (`404`). A layout saved in one scene is never listed in another. Layout items carry `dims_cm`, so a layout placing a deleted library item still loads with a "missing item" placeholder box at those dims (or 50 cm cubed).
+`<layout>` must be a slug (`400` otherwise; a slug never ends in a newline: every slug check matches the whole string). Exactly one of `scene` and `room` is required (`400` with neither or both); it must name an existing scene (`404`), or an existing room (`404`), whose layouts are `layouts/@<room>/` (§4.9 Layouts: the same four routes, `room_name` instead of `scene_name`, the answer of a delete naming `room` instead of `scene`). A layout saved in one scene or room is never listed in another, and a scene's own layouts stay its own when it joins a room. Layout items carry `dims_cm`, so a layout placing a deleted library item still loads with a "missing item" placeholder box at those dims (or 50 cm cubed).
 
 ### 2.8 Library API (carried from nook v4)
 
@@ -407,6 +413,8 @@ midstudy-calib fit <scene-dir> [--model ...] [--device ...] [--no-depth]   # cal
 midstudy-calib light <scene-dir> [--model ...] [--device ...]   # lighting.json only, for a scene calibrated before it (§4.8);
                                                                 # camera: calib.json's when its floor was found, else this run's floor fit
 midstudy-calib align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>   # keep-room composite (§4.7)
+midstudy-calib align-room <scene-dir> <scene-dir> ... --out <room-dir> [--solver auto|<name>|manhattan] [--device auto|cuda|mps|cpu]
+                                                        # align.json only: where each photo was taken (§4.9 Align)
 ```
 
 **Output contract (all commands):** progress goes to stderr. The **last stdout line** is one JSON object:
@@ -417,6 +425,7 @@ midstudy-calib align <photo.jpg> <raw.jpg> <mask.png> --out <final.jpg>   # keep
 | `ingest` | `{"ok": true, "photo": "photo.jpg", "source": "source.<ext>", "image": {"w", "h"}}` |
 | `light` | `{"ok": true, "lighting": true, "cct_k", "confidence", "elapsed_s"}`, or `{"ok": true, "lighting": false, "reason"}` when the photo shows too little (nothing written) |
 | `align` | `{"ok": true, "applied": bool, "inliers": int, "residual_px": number \| null, "reason"?: string}` |
+| `align-room` | the `align.json` contents (align.schema.json, §4.9 Align) plus `"ok": true` |
 
 A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the last stdout line and `midstudy-calib: <the same sentence>` as the last stderr line. The server shows that sentence. A fallback calibration is a success (exit 0).
 
@@ -439,6 +448,8 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **Mock:** with `MIDSTUDY_CALIB_MOCK=<dir>` (e.g. `fixtures/calib`), `fit` never loads MoGe: it looks up `<dir>/<sha256 of photo.jpg>/`, then `<dir>/<sha256 of source.<ext>>/`, and copies that `calib.json`, `depth.png` and `lighting.json` (each when present); with no match it writes the `default` fallback and no `lighting.json`. `ingest` and `align` still run for real.
 
+**Mock of `align-room`** (§4.9 Mock): with `MIDSTUDY_CALIB_MOCK=<dir>` it looks up `<dir>/rooms/<key>/align.json` instead of solving; the key and what it writes are in §4.9.
+
 **Stub:** `fixtures/stub_calib.py` (stdlib only) has the same CLI and output contract for development and fast evals: JPEG only, strips metadata without re-encoding (can't rotate, resize or convert colour), mock (including `lighting.json`) or `default` fit, and `align` answers `applied: false`. Run the server with `--calib "python3 fixtures/stub_calib.py"`.
 
 **Lighting** (§4.8): after the floor fit, `fit` infers the room's light from the photo's pixels and MoGe's normals and writes `lighting.json`. It runs on MoGe's output at depth size, needs no other model, costs nothing and adds about a second.
@@ -448,7 +459,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 `midstudy-calib serve [--model vitl|vitb|vits] [--device auto|cuda|mps|cpu]` answers the commands above as one long-lived process that keeps MoGe-2 loaded (one model at a time, on the device it last ran on), so only its first calibration pays for starting Python and torch, loading the network and the device's first inference. Measured on the M3 Max (MPS, vitl; `calib/scripts/bench.py`, `docs/notes/calib.md`): a one-shot calibration takes 5.6 s (v1: 10.0 s); through the worker the first takes 5.3 s and every later one 0.9 s. `--model` and `--device` are the defaults of the requests that name none (so a device the server's `--calib` command fixes applies to every request).
 
 **Protocol** (stdin and stdout, UTF-8, one JSON object per line; `contract/calib-cli.schema.json`, of which calib carries a generated byte copy, `calib/src/midstudy_calib/schemas/calib-cli.schema.json`):
-- Request: `{"id": "<1–200 characters>", "cmd": "run" | "fit" | "light" | "align" | "ingest", "args": [...]}`, where `args` are the one-shot command's arguments after its name, e.g. `{"id": "c-20261105-221500-ab12", "cmd": "fit", "args": ["/abs/scenes/x", "--no-depth"]}`.
+- Request: `{"id": "<1–200 characters>", "cmd": "run" | "fit" | "light" | "align" | "ingest" | "align-room", "args": [...]}`, where `args` are the one-shot command's arguments after its name, e.g. `{"id": "c-20261105-221500-ab12", "cmd": "fit", "args": ["/abs/scenes/x", "--no-depth"]}`.
 - Response: `{"id": <the request's id>, …}`, the rest being exactly the one-shot command's last stdout line (the same object, checked against the same schema). Requests are answered one at a time, in order, and nothing else is written to stdout. The files are written exactly as by the one-shot command.
 - Progress goes to stderr as the one-shot commands write it; a failed request also writes `midstudy-calib: <sentence>` there.
 - A request that fails (not JSON, not a valid request, arguments the CLI refuses, a command that fails) is answered `{"id", "ok": false, "error": "<one sentence>"}` (`id` null when the request had no usable one), and the worker carries on.
@@ -457,7 +468,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **The server's side** (§4.4):
 - Start the worker (`<calib> serve`, with the one-shot commands' working directory and environment) on the first calibration job, not at startup, and keep it for the next ones.
-- Send the calibration queue's `run`, `fit` and `light` jobs to it, one at a time (the job id makes a good request id). Read its stderr continuously (the job's progress) and its response line within the job's timeout (600 s); handle the response exactly as the one-shot result.
+- Send the calibration queue's `run`, `fit`, `light` and `align-room` jobs (§4.9 Align) to it, one at a time (the job id makes a good request id). Read its stderr continuously (the job's progress) and its response line within the job's timeout (600 s); handle the response exactly as the one-shot result.
 - With `MIDSTUDY_STRICT=1` (§0) every result, the worker's answers and the one-shot commands' last stdout lines alike (`align`'s too), is checked against `contract/calib-cli.schema.json` (the command's result, or the error result for `ok: false`). One that breaks it fails its job with `contract violation: <schema> <path> (<why>)` (a render's `align`: not applied, with that reason); the worker isn't blamed for it.
 - `align` (the render path) stays one-shot, so a render never waits behind a calibration.
 - Crash: when the worker can't be started, exits, or answers anything but a JSON object with the request's id, kill it (SIGTERM, then SIGKILL after 5 s) and run that job with the one-shot command; the next job starts a new worker. After 3 such failures in a row, use the one-shot command for the rest of the server's life. This covers `--calib "python3 fixtures/stub_calib.py"` too: the stub has no `serve` and exits 2 at once. An `ok: false` answer is the job's failure, not the worker's.
@@ -479,8 +490,8 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 | `PUT /api/scenes/<name>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB | `200 {"ok": true, "thumb_url"}` |
 | `POST /api/scenes/<name>/calibrate` | | `202 {job}`: runs `fit` (or `run` on `source.<ext>` when `photo.jpg` is missing); `409` while one is queued or running for that scene |
 | `POST /api/scenes/<name>/light` | | `202 {job}` (kind `light`): runs `light` on the calibration queue for a scene without `lighting.json` (§4.8 backfill); the same job again while one is queued or running; `200 {"lighting_status": "done"}` without a job when it has one; `409` while the scene calibrates or without `photo.jpg`. It never changes `scene.json`, the camera, `calib.json` or `calib_status`. Light job ids start `l-` (calibration jobs `c-`); a light job carries `lighting: true\|false\|null` and appears in the jobs list. A calibration newer than the newest light job decides `lighting_status`; an unreadable `lighting.json` counts as missing |
-| `DELETE /api/scenes/<name>` | | `200 {"ok": true, "trash": "scenes/.trash/<name>-<stamp>"}`: the folder and `layouts/<name>/` move there; a queued job for it is dropped, a running one's result is ignored |
-| `POST /api/scenes/<name>/restore` | | `200` the scene object: the newest trashed copy and its layouts move back (its renders show again); `404` none in the trash, `409` a scene (or layouts) by that name exists |
+| `DELETE /api/scenes/<name>` | | `200 {"ok": true, "trash": "scenes/.trash/<name>-<stamp>"}`: the folder and `layouts/<name>/` move there; a queued job for it is dropped, a running one's result is ignored. A member of a room leaves it (§4.9 Membership): its member record goes into the trash's `trash.json` (`room`) |
+| `POST /api/scenes/<name>/restore` | | `200` the scene object: the newest trashed copy and its layouts move back (its renders show again), and it rejoins its room when it can (§4.9 Membership); `404` none in the trash, `409` a scene (or layouts) by that name exists |
 | layouts | | §2.7 (`?scene=`) |
 
 **Upload** (`POST /api/scenes`): `411` without `Content-Length`, `413` over 25 MB, `400` with one sentence when the body isn't a JPEG, PNG, HEIC or WebP (sniffed from its bytes). The body goes to a private temp file, never under a served path. The server then creates `scenes/<name>/scene.json` (`title` from the meta or null, `created` now, `saved` null, the default camera, `camera_source: "default"`, `upload: {filename, ext, bytes}`), queues `<calib> run <temp file> --out scenes/<name>` and answers `202`. The scene exists (and is listed, `calib_status: "pending"`) from that moment.
@@ -495,10 +506,11 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 { "name": "scene-20261104-201500", "title": "Upper lounge" | null, "created": "<ISO UTC>", "saved": "<ISO UTC>" | null,
   "photo_url": "/scenes/scene-20261104-201500/photo.jpg" | null, "thumb_url": "…/thumb.jpg" | null, "depth_url": "…/depth.png" | null,
   "w": 2048 | null, "h": 1152 | null, "camera_source": "auto", "floor_found": true | null, "layouts": 2,
-  "calib_status": "pending" | "running" | "done" | "failed", "calib_error": "<sentence>" | null }
+  "calib_status": "pending" | "running" | "done" | "failed", "calib_error": "<sentence>" | null,
+  "room": "room-20261106-101530" | null }
 ```
 
-`photo_url` is null until `photo.jpg` exists; `w`/`h` are `photo.jpg`'s size. `floor_found` is `calib.json`'s `floor.found` (null without one). `calib_status`: `pending` while a job is queued, `running` while it runs, else `done` when `calib.json` exists and the last job (if any) succeeded, else `failed` (including a calibration lost to a restart). Asset URLs may carry a `?v=<mtime>` cache buster.
+`room` (added with §4.9) is the room the scene is a member of, or null; a server with rooms always sends it (the schema leaves it optional, so a server without rooms still conforms), here and in `GET /api/scenes/<name>`. `photo_url` is null until `photo.jpg` exists; `w`/`h` are `photo.jpg`'s size. `floor_found` is `calib.json`'s `floor.found` (null without one). `calib_status`: `pending` while a job is queued, `running` while it runs, else `done` when `calib.json` exists and the last job (if any) succeeded, else `failed` (including a calibration lost to a restart). Asset URLs may carry a `?v=<mtime>` cache buster.
 
 **Static:** `/scenes/<name>/photo.jpg`, `depth.png` and `thumb.jpg` are served (`nosniff`). Everything else under `/scenes/` gets `404`: `source.*`, `calib.json` and `lighting.json` (use the API), `scene.json`, `.trash/`, folder listings, and the same paths spelled with `.`/`..`/percent-encoding (§2.9 Paths).
 
@@ -520,7 +532,8 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
   - **Render** (§4.7): the capture includes splat items, sorted for the capture camera; the keep-room mask covers them (their box is enough, as the mask is dilated anyway).
   - **Shows as** (the library Edit sheet, `PATCH default_render`, §2.8): Splat or Mesh, offered only for items with a splat **and** a real mesh (`sam3d`); not for `idol` (its GLB is a stand-in box), nor for items without a splat. Placed copies switch at once.
   - The contact shadow of a splat item never darkens the splat above its bottom 30 % (nook's depth-only proxy does this).
-- **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat rooms, LoD, True colour.
+- **Rooms** (several photos of one room, one layout): §4.9 Planner.
+- **Removed from nook:** orbit, seated / standing / walk, viewpoints, room alignment and picks, shell, hang on wall, retrain, splat rooms, LoD, True colour. (§4.9's photo alignment is not nook's room alignment: there is no scan.)
 
 ### 4.6 Hook additions (`window.midstudy`)
 
@@ -556,7 +569,7 @@ getState(): {
 }
 ```
 
-Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. v1.1: `lib-engine` (the Add form's Model choice: buttons with `data-value` = the engine and `aria-pressed`, in the order `idol`, `sam3d`, `trellis2`, `rug`, labels names only: Idol, SAM 3D, TRELLIS 2, Flat rug), `lib-cost` (its price box, e.g. "$0.10"), `lib-shows-as` (the Edit sheet's Shows as: buttons `data-value` `splat` / `glb`, labels Splat / Mesh, `aria-pressed`). `scene-card` elements also carry `data-scene="<name>"`.
+Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-file`, `scene-card`, `scene-delete`, `scene-undo`, `scene-restore`, `layout-undo`, `ruler-true`, `ruler-set`, `compare-swap`, `adjust-floor`, `cam-height`, `cam-fov`, `cam-roll`, `horizon`, `floor-ok`, `floor-reset`, `occlusion`, `zoom-fit`, `render`, `render-go`, `keep-room`, `compare`, and from nook `elev-up`, `elev-down`, `elev-value`, `drop`, `lib-add`, `lib-remove`, `lib-undo`, `missing-item`. v1.1: `lib-engine` (the Add form's Model choice: buttons with `data-value` = the engine and `aria-pressed`, in the order `idol`, `sam3d`, `trellis2`, `rug`, labels names only: Idol, SAM 3D, TRELLIS 2, Flat rug), `lib-cost` (its price box, e.g. "$0.10"), `lib-shows-as` (the Edit sheet's Shows as: buttons `data-value` `splat` / `glb`, labels Splat / Mesh, `aria-pressed`). `scene-card` elements also carry `data-scene="<name>"`. §4.9 Hook adds the room methods and handles.
 
 ### 4.7 Render
 
@@ -567,6 +580,7 @@ Test handles (`data-midstudy`): the Look controls of §4.8, `scene-new`, `scene-
 - **Keep room exact** (render dialog toggle `keep-room`, **default on** since the live check on 2026-11-05, PLAN.md §8; the hook's `renderView()` still defaults `keepRoom` to false): the request also carries `keep_room: true` and `mask`, a PNG data URI at the photo's size (items white on black, dilated by 3 % of the photo width, more below each item for its shadow). After fal returns, the server writes the output as `<name>-raw.jpg` and runs `<calib> align <scene photo.jpg> <name>-raw.jpg <mask> --out <name>.jpg`; when `applied` is false, `<name>.jpg` is a copy of the raw output and the meta says why. Without keep-room there is no `-raw.jpg`.
 - **Meta** gains `scene`, `layout`, `reference: bool` (the scene photo was sent), `keep_room: bool`, `aligned: {applied, inliers, residual_px, reason?} | null` (null without keep-room), `raw_url` (null without keep-room), `out_w`, `out_h` (the result's size). `GET /api/renders?scene=<name>` lists one scene's renders.
 - **Mock:** the result is a copy of the input, $0, so align sees the identity and must apply.
+- **Room** (§4.9): `POST /api/render` may carry `room`; then `scene` is required and must be a member of that room (`400` otherwise; `404` for an unknown room) and `layout` names a room layout. The capture, the reference photo, the prompt and keep-room are that photo's, exactly as without a room. The meta gains `room` (present exactly when the request named one). `GET /api/renders?room=<room>` lists the renders made in that room (every photo); `?scene=` keeps one photo's, with or without a room.
 
 ### 4.8 Lighting inferred from the photo (added 2026-11-05)
 
@@ -640,6 +654,129 @@ resetLighting(): void
 
 `getRenderSettings()` keeps its v1 fields; `setRenderSettings({contactShadows})` is the same as `setLighting({contact_shadows})`.
 
+### 4.9 Rooms: several photos, one layout (added 2026-11-06, [docs/ROOMS.md](../docs/ROOMS.md))
+
+A **room** groups several scenes (photos of the same room, taken from different spots) into one shared frame, the **room frame**. Each photo stays a scene exactly as §4.1–§4.8 describe it (its own `photo.jpg`, camera block, `depth.png`, `lighting.json`, occlusion, Look, renders, keep-room, its own layouts); a room adds where each photo was taken (a **pose** and a **scale** per member) and **room layouts**, placed once in the room frame and shown in every photo. There is no free roaming: the user switches between the photos. Opened on its own, a member scene behaves exactly as before. Schemas: [room.schema.json](room.schema.json) (`room.json`), [align.schema.json](align.schema.json) (`align.json` and `align-room`'s answer), [layout.schema.json](layout.schema.json) (`room_name`), `api/room-*.schema.json` and `api/align-*.schema.json`.
+
+#### Frames, poses and the effective camera
+
+Every scene keeps its own frame (§4.1: camera at x = z = 0, yaw 0, floor y = 0). All the photos share the floor (y = 0), and each photo's pitch and roll come from its own floor fit, so between two photos only a position on the floor, a turn about Y and a scale are unknown. A member's **pose** `{x_m, z_m, yaw_deg}` maps its scene frame into the room frame:
+
+```
+p_room  = Ry(yaw) · p_scene + (x_m, 0, z_m)
+p_scene = Ry(−yaw) · (p_room − (x_m, 0, z_m))
+Ry(a)   = [[cos a, 0, sin a], [0, 1, 0], [−sin a, 0, cos a]]     positive yaw is counterclockwise seen from above
+                                                                (+X turns toward −Z): the sign of rotation_y_deg
+an item's rotation_y_deg:  scene = room − yaw (then into (−180, 180]);  its elevation (position[1]) is the same in both
+```
+
+So the photo's camera stands at `(x_m, height_m, z_m)` in the room frame and looks along `Ry(yaw) · (0, 0, −1) = (−sin yaw, 0, −cos yaw)`; in three.js it is §4.1's camera with `position (x_m, height_m, z_m)` and `rotation.set(pitch, yaw, roll, 'YXZ')`. A room point is drawn in a photo by taking it into that photo's scene frame (above) and projecting it with §4.1, using the **effective camera**.
+
+- **Scale.** Each member has `scale` (default 1). Its **effective camera** is its scene's camera in use (`scene.json`) with `height_m × scale`, clamped to 0.2–3.0 as every camera; the other three numbers are the scene's. "The member's scene frame" above is the frame of that effective camera: the scene frame scaled by `scale` about the floor point under the camera. `depth.png` follows with no new rule: §4.5 Occlusion already scales it by `height_m / calib height_m`, with the effective `height_m`. Joining a room **never rewrites `scene.json`**; neither does anything in this section but a photo's own Adjust floor (§4.5), which changes that scene's camera as it always did (its effective camera follows).
+- **The room frame** is the first member's frame when the room is created (that member gets pose `{0, 0, 0}`, `pose_source: "origin"`). Reordering, removing or moving members never moves the frame: poses are only changed by an align result (below), the user (Align photos, `pose_source: "manual"`) and Set scale.
+- **Set scale** (the ruler of §4.5 used in any member photo, `room-scale`): the true length over the measured one is a factor k; `PUT /api/rooms/<room> {"rescale": k}` multiplies every member's `scale` and every pose's `x_m` and `z_m` by k (then clamps), leaves `pose_source` as it is, and rewrites no layout (as a scene's Set scale moves nothing placed). One tape measurement scales the whole room.
+- **Ranges** (every writer clamps): `x_m` and `z_m` −50…50, `yaw_deg` brought into (−180, 180] (`y = ((yaw + 180) mod 360) − 180`, then −180 becomes 180), `scale` 0.25–4. `pose` is null exactly when `pose_source` is `unplaced` (the photo has no position yet: just added, or the solver couldn't place it); an unplaced photo can be looked at on its own, but room layouts aren't drawn in it and it isn't on the floor plan until it is placed.
+
+#### Files
+
+```
+rooms/<room>/room.json        room.schema.json: version, name, title, created, saved, members [{scene, pose, scale, pose_source}], aligned
+rooms/<room>/align.json       align.schema.json: the solver's last answer, written by midstudy-calib align-room (never by the server)
+rooms/.trash/<room>-<stamp>/  a deleted room: room.json, align.json, trash.json (trash.schema.json $defs/room), layouts/ (its room layouts)
+layouts/@<room>/<layout>.json room layouts: layout.schema.json with room_name (and no scene_name); positions in the room frame
+layouts/@<room>/.trash/<layout>-<stamp>.json   deleted room layouts
+```
+
+- `<room>` is `room-YYYYMMDD-HHMMSS` (UTC of the `POST`), `-2`, `-3`… on collision, a slug that never changes; `title` is free text (trimmed, at most 200 characters, blank means null).
+- `pose_source`: `origin` (set on the first member when the room is created), `solver` (from an align result), `manual` (the user moved or turned it; an align never overwrites it unless asked, `overwrite_manual`), `unplaced` (no pose).
+- `aligned`: `{solver, finished}` of the last align result the server applied, or null. `saved`: the last change to anything but the title, or null.
+- **Membership:** a scene is in **at most one room**; a room has at most **32** members, in order (the photo strip's order, numbered from 1), and may lose them all (it stays until it is deleted). Deleting a scene (`DELETE /api/scenes/<name>`) removes it from its room and writes its member record into the scene trash's `trash.json` as `room: {name, index, member}` (trash.schema.json `SceneTrashRoom`; `index` 0-based). Restoring the scene puts it back at `min(index, number of members)` with that record when the room exists (not in the trash) and the scene isn't in another room; otherwise the scene comes back on its own. Deleting a room never deletes its scenes: they stay, in no room.
+- **Layouts:** `?room=<room>` instead of `?scene=` on the four §2.7 routes (exactly one of the two, `400` otherwise; `404` for an unknown room). The server sets `room_name` and drops a `scene_name` the body carries; a delete answers `{ok, name, room, trash}` with `trash` = `<layouts dir name>/@<room>/.trash/<layout>-<stamp>.json`. The `@` can't start a slug, so a room's layouts never collide with a scene's. A room's layouts move with the room into and out of the trash.
+- `rooms/` is user data: git-ignored, never served (there is no static `/rooms/`; use the API).
+
+#### Server (§4.4's rules: every mutating route follows §2.9; strict mode validates every answer, `room.json`, the room layouts and `trash.json`)
+
+| Method and path | Request | Response |
+|---|---|---|
+| `GET /api/rooms` | | `200 {"rooms": [room object, ...], "trash": [{name, title, created, deleted}, ...]}`, newest first (by `created`, ties by the collision suffix as a number, as scenes) |
+| `POST /api/rooms` | `{title?, scenes: [name, ...]}` (1–32, no repeats) | `201` the room (as GET). First scene: pose `{0, 0, 0}`, `origin`; the others `unplaced`; scales 1. Starts no alignment. `400` bad body or a repeated scene, `404` a scene that doesn't exist, `409` a scene already in a room |
+| `GET /api/rooms/jobs` | | `200 {"jobs": [align job, ...]}`, newest first (align jobs only: they are not listed in `/api/scenes/jobs`) |
+| `GET /api/rooms/jobs/<id>` | | `200` the align job, `404` unknown |
+| `GET /api/rooms/<room>` | | `200` the room detail: `room.json`'s fields, each member with `scene_object` (§4.4), `camera` (its `scene.json` camera) and `effective_camera`, `layouts` (how many), `align` (`align.json` as it is, or null), `align_status`, `align_error`; `404` unknown |
+| `PUT /api/rooms/<room>` | any of `title`, `members`, `reset`, `rescale` (below) | `200` as GET; `400` unknown keys or bad values, `404` an unknown scene, `409` a scene in another room, or `reset` before any `align.json` |
+| `DELETE /api/rooms/<room>` | | `200 {"ok": true, "trash": "rooms/.trash/<room>-<stamp>"}` (the rooms folder as it is called): the folder and `layouts/@<room>/` move there; a queued align job for it is dropped, a running one's result is ignored |
+| `POST /api/rooms/<room>/restore` | | `200` the room object: the newest trashed copy and its layouts move back; members whose scene no longer exists or is now in another room are dropped; `404` none in the trash, `409` a room by that name exists |
+| `POST /api/rooms/<room>/align` | no body, or `{solver?, overwrite_manual?}` | `202 {job}`: an align job on the calibration queue (below); `409` while one is queued or running for the room, or when fewer than two members have a `photo.jpg` |
+| layouts | | §2.7 with `?room=` (above) |
+| `POST /api/render` | gains `room` | §4.7 |
+
+**Room object** (`GET /api/rooms` entries, restore): `{name, title, created, saved, aligned, members: [{scene, pose, scale, pose_source, scene_object}], layouts, align_status, align_error}`. **Room detail** adds `version`, `align` and, per member, `camera` and `effective_camera`. `align_status`: `pending` while an align job is queued (also while it waits for members to calibrate), `running` while it runs; else `done` when `align.json` exists and the last align job since the server started (if any) succeeded, `failed` when it failed (`align_error` its sentence), `none` when the room has never been aligned (no `align.json`, no job).
+
+**Changes** (`PUT`), applied in this order, each clamped:
+- `title`: as scenes' (trimmed, at most 200 characters, `400` above; blank or null removes it). A title alone doesn't stamp `saved`.
+- `members`: the **whole new list**, in order, entries `{scene, pose?, scale?}`. A scene not listed leaves the room (its pose is forgotten; leaving is not deleting); a new one joins (`unplaced`, scale 1, unless it carries a pose, then `manual`); the order is the new order. Per entry, a `pose` that differs from the stored one (after clamping) is stored with `pose_source: "manual"`, `pose: null` makes it `unplaced`, an absent `pose` keeps the stored one; a `scale` is stored (clamped) and doesn't change `pose_source`. The planner's Align photos sends the whole list with the moved photo's new pose.
+- `reset: [scene, ...]` (Align photos' **Reset**): those members take `align.json`'s answer again, applied as an align result is (below) with `pose_source: "solver"` (or `unplaced` when `align.json` doesn't place them, or doesn't list them, or lists them with another `photo_sha256`); an `origin` member is left as it is. A scene that isn't a member is `400`.
+- `rescale: k` (k > 0): Set scale (above).
+
+#### Align
+
+`POST /api/rooms/<room>/align` queues an **align job** on the calibration queue (§4.4: one job at a time, 600 s timeout, the worker when it answers): `{id: "a-…", kind: "align", room, status, created, started, finished, message, waiting_for, align}` (api/room-job.schema.json; in memory, a restart forgets it). While any member's calibration is queued or running the job stays `queued`, lists those scenes in `waiting_for` and lets other calibration jobs pass it. Then it runs
+
+```
+<calib> align-room <scenes>/<anchor> <scenes>/<m2> ... --out <rooms>/<room> [--solver <solver>]
+```
+
+(as the worker command `{"cmd": "align-room", "args": [...]}`, else one-shot), on the members that have a `photo.jpg`, in room order except that the **anchor** goes first: the first member (in room order) that has a pose and whose pose the result can't change (`origin` or `manual`, or any placed member with `overwrite_manual`), else the first placed member, else the first member. On success (`ok: true`, and the answer valid in strict mode) the server applies `align.json` to the room as it is then:
+
+- An answer's pose `P_k = {x_k, z_k, yaw_k}` and scale `s_k` are relative to the anchor; in the room frame they become, with the anchor's room pose `A = {x_a, z_a, yaw_a}` (`{0, 0, 0}` if it had none) and scale `s_a`:
+  `yaw = yaw_a + yaw_k`, `(x, z) = (x_a, z_a) + s_a · Ry(yaw_a) · (x_k, z_k)` (Ry on `(x, 0, z)`), `scale = s_a · s_k`, then clamped.
+- That pose goes to every member the answer places, still in the room and with the same `photo_sha256` as its `photo.jpg` now, unless its `pose_source` is `manual` (and not `overwrite_manual`) or `origin`: `pose_source: "solver"`. A member the answer lists as unplaced becomes `unplaced` unless it is `manual` or `origin`. Members the answer doesn't mention keep theirs.
+- `aligned` becomes `{solver, finished}` and `saved` is stamped. A failed job (`ok: false`, a timeout, a contract violation) changes nothing in `room.json`; its message is `align_error`.
+
+**`midstudy-calib align-room`** (§4.3 table; calib track): reads each scene folder's `photo.jpg`, `calib.json` and `depth.png` (one without `calib.json` or `depth.png` can still be placed from its photo, or comes back unplaced), and writes only `<room-dir>/align.json`, atomically, creating `<room-dir>` when missing; it never touches the scenes. Its last stdout line is `align.json`'s contents plus `"ok": true` (calib-cli.schema.json `align_room`); `ok` is never written into the file. Fewer than two scene folders, or one without `photo.jpg`, is a failure (exit 1, one sentence). Being unable to place a photo is not a failure: it is listed unplaced (exit 0).
+
+- **align.json:** `version` 1, `solver` (which one answered: `manhattan`, the chosen learned solver's name, `truth` for the golden fixtures, `none` when nothing could be placed), `created`, `elapsed_s`, `device`, `loop_residual_cm` (how far the poses disagree around closed loops of overlapping photos, cm; null without a loop), `members` (every scene folder given, in the order given: `{scene, photo_sha256, pose, scale, confidence, residual_cm}`), `unplaced` (the scenes whose pose is null, in member order). `scene` is the folder's name; `photo_sha256` is that `photo.jpg`'s SHA-256 as read (lowercase hex). **`members[0]` is the frame:** pose `{0, 0, 0}`, scale 1, confidence 1, residual null; every other pose and scale is relative to it in this section's convention (scale: that photo's `height_m` multiplier relative to `members[0]`'s). Unplaced: `pose` and `scale` null, `confidence` 0, `residual_cm` null. `confidence` is 0–1 (the planner flags a placed photo below 0.5); `residual_cm` is the median distance between that photo's depth points and the other placed photos' where they overlap, after alignment. Other top-level keys are allowed (diagnostics); readers ignore them.
+- **Solvers:** `--solver auto` (the default) uses the chosen learned solver when its optional dependencies are installed, else `manhattan` (no ML: walls snapped to two square directions from MoGe's normals); `--solver <name>` asks for one (a solver that isn't installed is a failure). Heavy dependencies go in an optional uv extra; without them `midstudy-calib` still runs and answers `manhattan` or unplaced. Weights are cached outside the repo, like MoGe's. Which learned solver is chosen at Gate A (docs/ROOMS.md §5) and named in `docs/notes/`.
+- **Mock** (`MIDSTUDY_CALIB_MOCK=<dir>`): no solver runs. The **key** of a set of photos is the lowercase hex SHA-256 of the UTF-8 text made of the lowercase hex SHA-256s of the members' `photo.jpg` bytes, **sorted** (ascending, as strings), **joined with `"\n"`**, with no trailing newline. With `<dir>/rooms/<key>/align.json` present, the tool writes that answer for these folders: each member is matched to the scene folder whose `photo.jpg` has its `photo_sha256` and takes that folder's name as `scene`; the members are put in argument order; and every pose and scale is re-expressed relative to the first argument `a` (`yaw'_k = yaw_k − yaw_a`, `(x'_k, z'_k) = Ry(−yaw_a) · ((x_k, z_k) − (x_a, z_a)) / s_a`, `s'_k = s_k / s_a`, yaw into (−180, 180]; an unplaced first argument is a failure of the fixture), so the first argument comes out `{0, 0, 0}`, scale 1. `created` is now; everything else (`solver`, `confidence`, `residual_cm`, `loop_residual_cm`, `unplaced` renamed) is copied. With no match it writes `solver: "none"`, the first argument placed as the frame and every other member unplaced (`confidence` 0, `loop_residual_cm` null), exit 0. `fixtures/calib/rooms/` holds the golden room's answers (§5.1). The stub (`fixtures/stub_calib.py`) implements the same mock.
+
+#### Planner (§4.5 additions; app track)
+
+- **Scenes page:** a room shows as **one card** (`room-card`, `data-room="<room>"`) with its photos' thumbnails inside, title, and the number of photos; scenes in a room aren't shown again as their own cards. **New room** (`room-new`) takes several photos at once (`room-files`: `<input type=file multiple accept="image/*">`) and an optional title, uploads each photo (`POST /api/scenes`, one at a time), creates the room in the order chosen (`POST /api/rooms`) and asks for an alignment (`POST /api/rooms/<room>/align`); the card shows the photos calibrating, then "Aligning…", then the room. The help text is docs/ROOMS.md §7 in a few lines. A room card's menu renames it, deletes it (`room-delete`, with Undo and Recently deleted → Restore, `room-restore`, as scenes), adds a scene to it (`room-add`) and removes a photo from it (`room-remove`, `data-scene`). `?room=<room>[&photo=<scene>]` opens a room; the Scenes page remembers the last room or scene opened on this device.
+- **Room view:** the current photo fills the view exactly as a scene does (§4.5 The view): its photo, its effective camera, its occlusion, Look, lighting, Adjust floor, render, keep-room, Compare, elevation, missing items, Export, all meaning what they mean for that scene. A **photo strip** (numbered thumbnails in member order, `room-photo` with `data-scene` and `aria-pressed` on the current one) switches photos; keys `1`–`9` switch to photos 1–9. Switching is a cut, not an animation. It opens on `photo=`, else the photo this device last had open in that room, else the first placed member. An unplaced photo shows a one-line note ("Place this photo on the floor plan") and no room furniture.
+- **Floor plan** (`floor-plan`, a `<canvas>`; `floor-plan-toggle` shows and hides it: beside the view on desktop, a bottom sheet on the phone): top-down, the room frame with +X to the right and −Z up (as the first photo looks), a 50 cm grid; each placed member's position (a dot with its number), its **view wedge** (the effective camera's horizontal field of view, 1.5 m long), and on the current one a turn handle at 0.75 m along its view direction; the furniture's footprints (selectable, draggable, turnable as in the photo view); and the room's shape: each placed member's `depth.png` lifted into the room frame (every pixel with depth, through its effective camera and pose), the points between 0.1 m and 2.0 m above the floor, drawn as a faint density map (walls show as dark lines where photos agree). Drawn in 2D. Zoom and pan of the plan are its own; **Fit** frames every placed member and footprint.
+- **Align photos** (`align-photos`, a toggle on the floor plan): dragging a wedge moves that photo (its `x_m`, `z_m`); dragging its turn handle turns it (`yaw_deg`); the density map follows live, so two photos' walls visibly snap together when right; releasing saves (`PUT` `members` with the new pose: `pose_source` `manual`). An unplaced photo is placed by tapping the plan where it was taken, then turning it. **Reset** (`align-reset`) puts the selected photo back to the solver's answer (`PUT {"reset": [scene]}`); **Align again** asks for a new alignment (keeps manual poses). A placed photo with `confidence` below 0.5 or listed in `unplaced` shows a one-line note.
+- **Layouts:** a room view loads and saves room layouts (§2.7 with `?room=`), with the same unsaved-change warnings and the same per-device choice of layout as scenes (§4.5 Layouts, per room). An item is placed, moved and turned in the room frame; each placed photo shows it through its pose and effective camera (above). Placing an item from a photo (the view-center ray, §4.5 Items) finds the floor point in that photo's scene frame and stores it in the room frame. A scene's own layouts aren't shown in its room view, and room layouts aren't shown when the scene is opened on its own.
+- **Set scale** (`room-scale`): the ruler of Adjust floor in the current photo, applied to the whole room (`PUT {"rescale": k}`, above), not to that scene's camera.
+- **Render** in a room view captures the current photo (`scene` = that photo, `room`, `layout` = the room layout).
+
+#### Hook (§4.6 additions)
+
+```ts
+type Pose = { x_m: number, z_m: number, yaw_deg: number }
+type RoomObject = /* api/room-object.schema.json */          type RoomDetail = /* api/room-detail.schema.json */
+listRooms(): Promise<RoomObject[]>                            // GET /api/rooms (rooms only)
+createRoom(files: File[], meta?: { title?: string }): Promise<{ room: string, scenes: string[], job: AlignJob }>
+                                // New room: uploads each file (POST /api/scenes), POST /api/rooms with the scenes in this order,
+                                // POST /api/rooms/<room>/align; resolves when all three are accepted (202, 201, 202)
+waitForRoom(name: string): Promise<RoomDetail>              // resolves when every member's calib_status is done or failed and
+                                                            // align_status is done, failed or none
+openRoom(name: string, photo?: string): Promise<void>       // the room view on that member photo (default as the planner opens);
+                                                            // resolves when the photo (and depth) are shown and the layout loaded
+setRoomPhoto(scene: string): Promise<void>                  // as a tap on the photo strip; resolves when shown
+getRoom(): { name, title, photo: string, members: Array<{ scene, index: number, pose: Pose | null, scale, pose_source,
+             camera: Camera, effective_camera: Camera, confidence: number | null }> } | null   // null outside a room view
+setPose(scene: string, partial: Partial<Pose> & { scale?: number }): Promise<void>   // as Align photos: PUT, pose_source manual
+roomToScene(p: [x, y, z], scene?: string): [x, y, z]        // §4.9 frames, the current photo's pose unless scene is given
+sceneToRoom(p: [x, y, z], scene?: string): [x, y, z]
+floorPlanPoint([x, z]: [number, number]): { x: number, y: number } | null   // CSS px in the page of a room-frame floor point
+                                                            // on the floor plan; null while the plan is hidden
+getState(): { ...§4.6, room: { name, title, photo: string, alignPhotos: boolean, floorPlan: boolean } | null }
+```
+
+In a room view, **every position the hook takes or gives is in the room frame**: `addItem`, `moveItem`, `getState().items` (`position`, `rotation_y_deg`, `worldBounds`), `saveLayout`/`loadLayout`/`listLayouts` (room layouts), `floorToPhoto` and `photoToFloor` (the current photo's projection composed with its pose: room-frame points in and out), while `getScreenRect` stays in the current photo's pixels. `getState().scene` is the current photo's scene and `getCamera()`/`setCamera()` its `scene.json` camera (Adjust floor); `getRoom()` gives the effective cameras. Outside a room view nothing changes and `getState().room` is null.
+
+Test handles (`data-midstudy`): `room-new`, `room-files`, `room-card` (with `data-room`), `room-delete`, `room-restore`, `room-add`, `room-remove` (with `data-scene`), `room-photo` (with `data-scene`, `aria-pressed`), `floor-plan`, `floor-plan-toggle`, `align-photos` (`aria-pressed`), `align-reset`, `room-scale`.
+
 ---
 
 ## 5. Fixtures and evals
@@ -668,7 +805,20 @@ Files in `fixtures/scenes/<id>/`:
 
 `fixtures/calib/<sha256 of photo.jpg>/{calib.json, depth.png, lighting.json}` are copies that the calib mock (`MIDSTUDY_CALIB_MOCK=fixtures/calib`) serves for those photos.
 
-**Self-check:** `evals/py fixtures/check_scenes.py` reimplements §4.1 in numpy and checks every scene against the renders: each object's projected silhouette matches its id mask (IoU ≥ 0.985, bounding box within 1 px), every sofa corner lands on the sofa (≤ 1.5 px), the true camera beats the same camera with roll negated or pitch off by 0.5° or negated (this pins the signs), `depth.png` equals the ray-plane view-axis depth on the sofa's front face and the back wall (median error well under 1 mm; it is *not* the Euclidean distance), open floor is 0, calib.json validates, and the mock copies are identical. It writes marker images to `evals/out/check-scenes/`. Re-running `make_scene.mjs` regenerates everything (its JPEG bytes may differ run to run; it removes the old `fixtures/calib/<sha>/`), and the self-check must pass after it. `--only <id>` renders one scene; `--lights-only` rewrites `truth.json`'s `lights` and `lighting.json` without rendering.
+**Self-check:** `evals/py fixtures/check_scenes.py` reimplements §4.1 in numpy and checks every scene against the renders: each object's projected silhouette matches its id mask (IoU ≥ 0.985, bounding box within 1 px), every sofa corner lands on the sofa (≤ 1.5 px), the true camera beats the same camera with roll negated or pitch off by 0.5° or negated (this pins the signs), `depth.png` equals the ray-plane view-axis depth on the sofa's front face and the back wall (median error well under 1 mm; it is *not* the Euclidean distance), open floor is 0, calib.json validates, and the mock copies are identical. It writes marker images to `evals/out/check-scenes/`. Re-running `make_scene.mjs` regenerates everything (its JPEG bytes may differ run to run; it removes the old `fixtures/calib/<sha>/`), and the self-check must pass after it. `--only <id>[,<id>…]` renders those scenes; `--rooms` renders the golden room's six photos and its mock answers, leaving the five as they are; `--out <dir>` writes under `<dir>` instead of `fixtures/`; `--lights-only` rewrites `truth.json`'s `lights` and `lighting.json` without rendering.
+
+**The golden room** (§4.9, added 2026-11-06): six more photos of the same room, `room-1` … `room-6`, taken from around it, each a scene in its own frame like the five, under `DAYLIGHT`. The room frame is `living-wide`'s. The room has furnishings that the five never see (a bookshelf, a console with a poster and a second door on the front wall, an armchair, a striped rug, a sideboard with a print and a plant on the left wall, a pendant lamp; they cast no shadow, so re-rendering the five gives the same pixels as before they existed). Their `truth.json` is in the scene's own frame (objects, floor points, lights) and adds `pose_in_room` `{x_m, z_m, yaw_deg}` (the scene's pose in the room frame), `room` `{frame: "living-wide", hard_case, overlap}` (`overlap`: the share of this photo's points, floor included, that each other photo sees) and `wall_check` (a bare stretch of wall it sees, for the self-check).
+
+| id | size | camera (fov, height, pitch, roll) | pose_in_room (x_m, z_m, yaw_deg) | |
+|---|---|---|---|---|
+| `room-1` | 1600 × 1200 | 58, 1.52, −12, 1.2 | −1.15, 0.45, −22 | front left, toward the sofa |
+| `room-2` | 1600 × 1200 | 60, 1.36, −14, −1.4 | 1.9, 0.3, 35 | front right, toward the door |
+| `room-3` | 1600 × 1200 | 52, 1.58, −9, 0.6 | −1.95, −0.35, −55 | left, toward the window corner |
+| `room-4` | 1600 × 1200 | 65, 1.45, −16, −0.8 | 1.35, −4.55, 152 | behind the sofa, facing the front wall: **little overlap** (18 % of its points are in living-wide's view and 22 % in room-1's; 12 % of room-1's are in its view) |
+| `room-5` | 1200 × 1600 | 66, 1.22, −6, −0.5 | 1.9, −1.3, 62 | right, toward the left wall (portrait) |
+| `room-6` | 1600 × 1200 | 55, 1.45, −19, 1.5 | 0.55, −0.7, −90 | facing the **bare right wall**: no sofa, no table, plaster and floor only |
+
+`fixtures/calib/<sha256 of photo.jpg>/` holds their mock copies like the five's, and `fixtures/calib/rooms/<key>/align.json` the calib mock's `align-room` answers (§4.9 Mock) with the **true** poses: `golden-room` (living-wide, room-1 … room-6) and `golden-pair` (living-wide, room-1). Their members name the fixture ids (the mock renames them) and carry each photo's SHA-256; `solver` is `truth`. The self-check adds, per room photo: the room's sofa and table carried through `pose_in_room` are the scene's own (corners within 1e-5 m, `rotation_y_deg` = room − yaw); the room's sofa corners land on its id mask (≤ 1.5 px, at least four in the photo; none, and an empty mask, for room-6); the true pose beats the pose with yaw negated, yaw off by 1°, x and z swapped, or x off by 3 cm; and the answers validate, sit under their key and hold the true poses. `core/crates/geom/tests/golden.rs` must read the five only: it skips a `truth.json` with `pose_in_room` (kernels' file; the change is pending, docs/notes/rooms-foundation.md).
 
 ### 5.2 Carried evals
 

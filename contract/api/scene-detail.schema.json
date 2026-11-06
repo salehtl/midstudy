@@ -25,6 +25,7 @@
     "layouts": { "$ref": "scene-object.schema.json#/properties/layouts" },
     "calib_status": { "$ref": "scene-object.schema.json#/properties/calib_status" },
     "calib_error": { "$ref": "scene-object.schema.json#/properties/calib_error" },
+    "room": { "$ref": "scene-object.schema.json#/properties/room" },
     "calib": { "description": "calib.json without exif.make and exif.model, or null.", "anyOf": [{ "$ref": "common.schema.json#/$defs/publicCalib" }, { "type": "null" }] },
     "lighting": { "description": "lighting.json as it is, or null without one.", "anyOf": [{ "$ref": "../lighting.schema.json" }, { "type": "null" }] },
     "lighting_status": {

@@ -6,12 +6,12 @@
     { "method": "GET", "path": "/api/settings", "contract": "§2.9", "responses": { "200": "midstudy/api/settings.schema.json" } },
     { "method": "PUT", "path": "/api/settings", "contract": "§2.9", "request": { "body": "midstudy/api/settings-put.schema.json" }, "responses": { "200": "midstudy/api/settings.schema.json" } },
     { "method": "POST", "path": "/api/render", "contract": "§2.6, §4.7", "request": { "body": "midstudy/api/render-request.schema.json" }, "responses": { "200": "midstudy/api/render-meta.schema.json", "402": "midstudy/api/spend-refused.schema.json" } },
-    { "method": "GET", "path": "/api/renders", "contract": "§2.6, §4.7", "query": ["scene"], "responses": { "200": "midstudy/api/render-list.schema.json" } },
+    { "method": "GET", "path": "/api/renders", "contract": "§2.6, §4.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/api/render-list.schema.json" } },
 
-    { "method": "GET", "path": "/api/layouts", "contract": "§2.7", "query": ["scene"], "responses": { "200": "midstudy/api/layout-list.schema.json" } },
-    { "method": "GET", "path": "/api/layouts/{layout}", "contract": "§2.7", "query": ["scene"], "responses": { "200": "midstudy/layout.schema.json" } },
-    { "method": "PUT", "path": "/api/layouts/{layout}", "contract": "§2.7", "query": ["scene"], "request": { "body": "midstudy/api/layout-put.schema.json" }, "responses": { "200": "midstudy/layout.schema.json" } },
-    { "method": "DELETE", "path": "/api/layouts/{layout}", "contract": "§2.7", "query": ["scene"], "responses": { "200": "midstudy/api/layout-deleted.schema.json" } },
+    { "method": "GET", "path": "/api/layouts", "contract": "§2.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/api/layout-list.schema.json" } },
+    { "method": "GET", "path": "/api/layouts/{layout}", "contract": "§2.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/layout.schema.json" } },
+    { "method": "PUT", "path": "/api/layouts/{layout}", "contract": "§2.7, §4.9", "query": ["scene", "room"], "request": { "body": "midstudy/api/layout-put.schema.json" }, "responses": { "200": "midstudy/layout.schema.json" } },
+    { "method": "DELETE", "path": "/api/layouts/{layout}", "contract": "§2.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/api/layout-deleted.schema.json" } },
 
     { "method": "GET", "path": "/api/library", "contract": "§2.8", "responses": { "200": "midstudy/api/library-get.schema.json" } },
     { "method": "POST", "path": "/api/library/items", "contract": "§2.8", "request": { "body": "raw", "headers": { "X-Midstudy-Meta": "midstudy/api/library-meta.schema.json" } }, "responses": { "202": "midstudy/api/library-add-accepted.schema.json", "402": "midstudy/api/spend-refused.schema.json" } },
@@ -34,6 +34,16 @@
     { "method": "PUT", "path": "/api/scenes/{name}/thumb", "contract": "§4.4", "request": { "body": "midstudy/api/thumb-put.schema.json" }, "responses": { "200": "midstudy/api/scene-thumb-saved.schema.json" } },
     { "method": "POST", "path": "/api/scenes/{name}/calibrate", "contract": "§4.4", "responses": { "202": "midstudy/api/calibrate-accepted.schema.json" } },
     { "method": "POST", "path": "/api/scenes/{name}/light", "contract": "§4.4, §4.8", "responses": { "202": "midstudy/api/light-accepted.schema.json", "200": "midstudy/api/light-done.schema.json" } },
-    { "method": "POST", "path": "/api/scenes/{name}/restore", "contract": "§4.4", "responses": { "200": "midstudy/api/scene-object.schema.json" } }
+    { "method": "POST", "path": "/api/scenes/{name}/restore", "contract": "§4.4", "responses": { "200": "midstudy/api/scene-object.schema.json" } },
+
+    { "method": "GET", "path": "/api/rooms", "contract": "§4.9", "responses": { "200": "midstudy/api/room-list.schema.json" } },
+    { "method": "POST", "path": "/api/rooms", "contract": "§4.9", "request": { "body": "midstudy/api/room-create.schema.json" }, "responses": { "201": "midstudy/api/room-detail.schema.json" } },
+    { "method": "GET", "path": "/api/rooms/jobs", "contract": "§4.9", "responses": { "200": "midstudy/api/room-jobs.schema.json" } },
+    { "method": "GET", "path": "/api/rooms/jobs/{id}", "contract": "§4.9", "responses": { "200": "midstudy/api/room-job.schema.json" } },
+    { "method": "GET", "path": "/api/rooms/{room}", "contract": "§4.9", "responses": { "200": "midstudy/api/room-detail.schema.json" } },
+    { "method": "PUT", "path": "/api/rooms/{room}", "contract": "§4.9", "request": { "body": "midstudy/api/room-put.schema.json" }, "responses": { "200": "midstudy/api/room-detail.schema.json" } },
+    { "method": "DELETE", "path": "/api/rooms/{room}", "contract": "§4.9", "responses": { "200": "midstudy/api/room-deleted.schema.json" } },
+    { "method": "POST", "path": "/api/rooms/{room}/align", "contract": "§4.9", "request": { "body": "midstudy/api/align-request.schema.json" }, "responses": { "202": "midstudy/api/align-accepted.schema.json" } },
+    { "method": "POST", "path": "/api/rooms/{room}/restore", "contract": "§4.9", "responses": { "200": "midstudy/api/room-object.schema.json" } }
   ]
 }

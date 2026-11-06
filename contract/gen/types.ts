@@ -33,6 +33,71 @@ export type AddSummary = {
   readonly fit: AddFit
 }
 
+/** rooms/<room>/align.json (contract §4.3 align-room, §4.9): the pose solver's last answer for a room's photos, written atomically by `midstudy-calib align-room` (never by the server). Poses and scales are relative to the first scene folder the command was given (pose {0, 0, 0}, scale 1), in the §4.9 convention. `align-room` prints the same object plus "ok": true as its last stdout line. Keys not listed here are allowed at the top level for diagnostics; readers ignore them. */
+export type Align = {
+  readonly version: 1
+  /** Which solver answered: manhattan (the no-ML fallback), the chosen learned solver's name (e.g. vggt, mast3r, solv3r; Gate A, docs/ROOMS.md §5), truth (the golden room fixtures' mock answers), none (nothing could be placed: the mock without a match, or every solver failed). */
+  readonly solver: string
+  /** When the answer was written, ISO-8601 UTC. */
+  readonly created: string
+  readonly elapsed_s: number
+  readonly device: "mps" | "cuda" | "cpu" | null
+  /** How far the poses disagree around closed loops of overlapping photos (cm), or null when there is no loop (fewer than three placed photos, or a chain). */
+  readonly loop_residual_cm: number | null
+  /** Every scene folder given, in the order given. members[0] is the frame: pose {0, 0, 0}, scale 1, confidence 1, residual_cm null. */
+  readonly members: readonly AlignMember[]
+  /** The scenes of the members whose pose is null, in member order (never members[0]). */
+  readonly unplaced: readonly string[]
+  readonly [key: string]: unknown
+}
+
+/** 202 of POST /api/rooms/<room>/align (contract §4.9 Align): the queued job. */
+export type AlignAccepted = {
+  readonly job: AlignJob
+}
+
+/** An align job (contract §4.9 Align): runs `align-room` on the calibration queue. GET /api/rooms/jobs/<id>, inside the jobs list and the 202 of POST /api/rooms/<room>/align. In memory: a restart forgets them. */
+export type AlignJob = {
+  /** a-…, e.g. a-20261106-101500-ab12. */
+  readonly id: string
+  readonly kind: "align"
+  readonly room: Slug
+  readonly status: JobStatus
+  readonly created: DateTime
+  readonly started: DateTime | null
+  readonly finished: DateTime | null
+  /** A human-readable status line; a failed job's is the tool's error sentence. */
+  readonly message: string
+  /** While queued: the member scenes it waits for (calibration pending or running); empty otherwise. */
+  readonly waiting_for: readonly Slug[]
+  /** The answer (align.json) once done, else null. */
+  readonly align: Align | null
+}
+
+/** One photo's answer. pose and scale are both null (unplaced) or both set. */
+export type AlignMember = {
+  /** The scene folder's name (the last path segment of its argument). */
+  readonly scene: string
+  /** SHA-256 of the scene's photo.jpg as it was read (lowercase hex): an answer for a photo since replaced is stale. */
+  readonly photo_sha256: string
+  /** Relative to members[0], or null when the solver couldn't place this photo. */
+  readonly pose: Pose | null
+  /** This photo's scale relative to members[0] (multiplies its camera's height_m), or null when unplaced. */
+  readonly scale: MemberScale | null
+  /** 0–1: how sure the solver is of this pose (0 when unplaced). The planner flags a placed photo below 0.5. */
+  readonly confidence: number
+  /** The median distance between this photo's depth points and the other placed photos' where they overlap, after alignment (cm); null for members[0], when unplaced, or when it overlaps no other placed photo. */
+  readonly residual_cm: number | null
+}
+
+/** POST /api/rooms/<room>/align (contract §4.9 Align): no body, or this object. 409 while an align job for the room is queued or running, or when fewer than two members have a photo. */
+export type AlignRequest = {
+  /** align-room's --solver (default auto). */
+  readonly solver?: string
+  /** Also replace the poses of manual members with the answer (default false: they keep theirs). */
+  readonly overwrite_manual?: boolean
+}
+
 export type AlignResult = {
   readonly applied: boolean
   readonly inliers: number | null
@@ -40,6 +105,9 @@ export type AlignResult = {
   /** Why it didn't apply. */
   readonly reason?: string
 }
+
+/** pending while an align job is queued (also while it waits for members to calibrate), running while it runs; else done when align.json exists and the last align job (if any since the server started) succeeded; failed when the last one failed; none when the room was never aligned (no align.json, no job). */
+export type AlignStatus = "none" | "pending" | "running" | "done" | "failed"
 
 /** Every /api error answer (contract §2.1): one sentence. Routes with richer errors name their own schema in routes.json (402: spend-refused, product: product-error). */
 export type ApiError = {
@@ -117,6 +185,13 @@ export type CalibCliAlign = {
   readonly reason?: string
 }
 
+/** `align-room` (contract §4.3, §4.9): align.json's contents (align.schema.json) plus "ok": true; the same object the command wrote to <room-dir>/align.json. */
+export type CalibCliAlignRoom = Align & {
+  readonly ok: true
+  readonly id?: CalibCliId
+  readonly [key: string]: unknown
+}
+
 /** Any command that failed: exit 1 (one-shot), the same sentence as the last stderr line after `midstudy-calib: `. */
 export type CalibCliError = {
   readonly id?: CalibCliId
@@ -160,7 +235,7 @@ export type CalibCliLightNone = {
 export type CalibCliRequest = {
   /** Echoed in the response. */
   readonly id: string
-  readonly cmd: "run" | "fit" | "light" | "align" | "ingest"
+  readonly cmd: "run" | "fit" | "light" | "align" | "ingest" | "align-room"
   /** The one-shot command's arguments after its name, as an argument list. */
   readonly args: readonly string[]
 }
@@ -246,14 +321,16 @@ export type JobStatus = "queued" | "running" | "done" | "failed"
 /** A JPEG as a base64 data URI (contract §2.6). The server stores and sends it without its metadata. */
 export type JpegDataUri = string
 
-/** A scene's furniture placement. Every layout belongs to one scene; there are no scene-less layouts. The camera is the scene's (scene.json), not the layout's. */
+/** A scene's or a room's furniture placement. Every layout belongs to exactly one scene (scene_name) or exactly one room (room_name, contract §4.9), never both, never neither. The camera is the scene's (scene.json), not the layout's; a room layout's positions and rotations are in the room frame. */
 export type Layout = {
   readonly version: 1
   readonly name: string
   /** The name as the user typed it ("Phone A"), shown instead of the slug; optional. */
   readonly title?: string | null
-  /** The scene this layout belongs to (its folder name, e.g. scene-20261104-201500). The server sets it from ?scene=. */
-  readonly scene_name: string
+  /** The scene this layout belongs to (its folder name, e.g. scene-20261104-201500). The server sets it from ?scene=. Exactly one of scene_name and room_name. */
+  readonly scene_name?: string
+  /** The room this layout belongs to (contract §4.9; its folder name, e.g. room-20261106-101500). The server sets it from ?room=. Exactly one of scene_name and room_name. */
+  readonly room_name?: string
   /** Library URL the layout was made with. */
   readonly library?: string | null
   /** Set by the server on PUT, ISO-8601 UTC. */
@@ -262,12 +339,13 @@ export type Layout = {
   readonly notes?: string | null
 }
 
-/** DELETE /api/layouts/<layout>?scene=<name> (contract §2.7): the file moved to layouts/<scene>/.trash/<layout>-<UTC stamp>.json. v1 also names the layout and scene. */
+/** DELETE /api/layouts/<layout>?scene=<name> or ?room=<room> (contract §2.7, §4.9): the file moved to layouts/<scene>/.trash/<layout>-<UTC stamp>.json (a room's: layouts/@<room>/.trash/…). v1 also names the layout and scene; a room layout's answer names the room instead of the scene. */
 export type LayoutDeleted = {
   readonly ok: true
   readonly name: Slug
-  readonly scene: Slug
-  /** <layouts dir name>/<scene>/.trash/<layout>-<YYYYMMDD-HHMMSS>[-n].json */
+  readonly scene?: Slug
+  readonly room?: Slug
+  /** <layouts dir name>/<scene>/.trash/<layout>-<YYYYMMDD-HHMMSS>[-n].json, or <layouts dir name>/@<room>/.trash/… for a room layout */
   readonly trash: string
 }
 
@@ -311,13 +389,14 @@ export type LayoutList = {
   readonly details: readonly LayoutSummary[]
 }
 
-/** PUT /api/layouts/<layout>?scene=<name> (contract §2.7): a layout (layout.schema.json); the server sets name, scene_name and updated, and answers the stored layout. v1 also fills a missing uid (<id>-<n>), render (glb) and rotation_y_deg (0), so only id and position are required of an item. */
+/** PUT /api/layouts/<layout>?scene=<name> or ?room=<room> (contract §2.7, §4.9): a layout (layout.schema.json); the server sets name, scene_name or room_name (from the query; the other is dropped) and updated, and answers the stored layout. v1 also fills a missing uid (<id>-<n>), render (glb) and rotation_y_deg (0), so only id and position are required of an item. */
 export type LayoutPut = {
   readonly version?: 1
   readonly name?: Slug
   /** The name as the user typed it; whitespace is collapsed, at most 120 characters after that (400 otherwise). */
   readonly title?: string | null
   readonly scene_name?: Slug
+  readonly room_name?: Slug
   readonly library?: string | null
   readonly updated?: string | null
   readonly notes?: string | null
@@ -590,10 +669,31 @@ export type LookPatch = {
   readonly cast_shadows?: boolean | null
 }
 
+/** Multiplies the member scene's camera height_m to give its effective camera (contract §4.9); clamped to 0.25–4 by every writer. */
+export type MemberScale = number
+
 export type Percent = number
 
 /** A PNG as a base64 data URI. */
 export type PngDataUri = string
+
+/** Where a member photo was taken, in the room frame (contract §4.9 Frames): its scene frame maps to the room frame by p_room = Ry(yaw) · p_scene + (x_m, 0, z_m). Every writer clamps x_m and z_m to −50…50 and brings yaw_deg into (−180, 180]. */
+export type Pose = {
+  readonly x_m: number
+  readonly z_m: number
+  /** Positive is counterclockwise seen from above (+X turns toward −Z), the sign of rotation_y_deg. */
+  readonly yaw_deg: number
+}
+
+/** A pose as the client sends it: any numbers (the server clamps x_m and z_m to −50…50 and brings yaw_deg into (−180, 180]). */
+export type PosePut = {
+  readonly x_m: number
+  readonly z_m: number
+  readonly yaw_deg: number
+}
+
+/** origin: set when the room was created, on its first member (pose {0, 0, 0}); solver: from an align result; manual: the user moved or turned it (an align never overwrites it unless asked); unplaced: no pose (pose is null): just added, or the solver couldn't place it. */
+export type PoseSource = "origin" | "solver" | "manual" | "unplaced"
 
 /** A 4xx of POST /api/library/product (contract §2.11): one sentence; blocked: true when the shop refuses automatic reading (422). */
 export type ProductError = {
@@ -651,7 +751,7 @@ export type PublicCalib = Calib
 
 export type RelPath = string
 
-/** GET /api/renders[?scene=<name>] (contract §2.6, §4.7): newest first. */
+/** GET /api/renders[?scene=<name>][&room=<room>] (contract §2.6, §4.7, §4.9): newest first; ?scene= keeps one photo's renders (with or without a room), ?room= keeps the renders made in that room. */
 export type RenderList = {
   readonly renders: readonly RenderMeta[]
   /** v1: whether the server runs with the fal mock (the contract is silent; the planner shows it). */
@@ -679,6 +779,8 @@ export type RenderMeta = {
   readonly scene: Slug | null
   /** The layout shown, or null. */
   readonly layout: Slug | null
+  /** The room the render was made in (contract §4.9): present exactly when the request named one; layout is then a room layout. */
+  readonly room?: Slug
   /** The scene photo was sent as image 2 (nano-banana with a scene). */
   readonly reference: boolean
   readonly keep_room: boolean
@@ -702,8 +804,10 @@ export type RenderRequest = {
   readonly prompt?: string
   /** The scene rendered; required for the reference photo and keep-room (§4.7). */
   readonly scene?: Slug
-  /** The layout shown; a value that isn't a slug is recorded as null. */
+  /** The layout shown; a value that isn't a slug is recorded as null. With room, a room layout. */
   readonly layout?: string
+  /** The room the render was made in (contract §4.9): needs scene, the member photo shown (400 when scene is missing or isn't a member; 404 for an unknown room). The capture, the reference photo and keep-room are that photo's, exactly as without a room. */
+  readonly room?: Slug
   /** Keep room exact (§4.7): needs scene and mask. */
   readonly keep_room?: boolean
   /** Items white on black at the photo's size (keep_room only). */
@@ -711,6 +815,151 @@ export type RenderRequest = {
 }
 
 export type Rgb = readonly [number, number, number]
+
+/** rooms/<room>/room.json (contract §4.9): several scenes (photos of one room) in one shared frame, the room frame. Written by the server only: created by POST /api/rooms, changed by PUT /api/rooms/<room>, by an align job that finishes (§4.9 Align), by Set scale and by deleting or restoring a member scene. The folder name is the room's name; it never changes. Joining a room never rewrites a scene's scene.json. */
+export type Room = {
+  readonly version: 1
+  /** room-YYYYMMDD-HHMMSS (UTC of the POST), -2, -3… on collision; the folder name. */
+  readonly name: string
+  /** Free text (trimmed, at most 200 characters), or null (shows the date). */
+  readonly title: string | null
+  /** When the room was created, ISO-8601 UTC. */
+  readonly created: string
+  /** The last change to anything but the title (members, poses, scales, an align result applied), ISO-8601 UTC; null until then. */
+  readonly saved: string | null
+  /** The member scenes in order (the photo strip's order, numbered from 1). A scene is in at most one room. At most 32. May be empty (every member deleted); the room stays until it is deleted. */
+  readonly members: readonly RoomMember[]
+  /** The last align result the server applied (§4.9 Align): which solver and when, or null when none was. */
+  readonly aligned: null | RoomAlignApplied
+}
+
+export type RoomAlignApplied = {
+  /** Which solver answered: manhattan (the no-ML fallback), the chosen learned solver's name (e.g. vggt, mast3r, solv3r; Gate A, docs/ROOMS.md §5), truth (the golden room fixtures' mock answers), none (nothing could be placed: the mock without a match, or every solver failed). */
+  readonly solver: string
+  /** When the align job finished, ISO-8601 UTC. */
+  readonly finished: string
+}
+
+/** POST /api/rooms (contract §4.9): a new room of existing scenes, in this order. The first becomes the origin (pose {0, 0, 0}, pose_source origin), the others unplaced; every scale 1. Nothing is aligned until POST /api/rooms/<room>/align. 400 for a duplicate scene or a bad title, 404 for a scene that doesn't exist, 409 for a scene already in a room. */
+export type RoomCreate = {
+  /** Trimmed; at most 200 characters after that (400 otherwise); blank or null means none. */
+  readonly title?: string | null
+  readonly scenes: readonly string[]
+}
+
+/** 200 of DELETE /api/rooms/<room> (contract §4.9): the room's folder and layouts/@<room>/ moved to rooms/.trash/<room>-<UTC stamp>; its scenes stay where they are, in no room. */
+export type RoomDeleted = {
+  readonly ok: true
+  /** <rooms dir name>/.trash/<room>-<YYYYMMDD-HHMMSS>[-n] */
+  readonly trash: string
+}
+
+/** GET /api/rooms/<room>, and the answer of POST /api/rooms (201) and PUT /api/rooms/<room> (200) (contract §4.9): room.json, each member with its scene object, its scene's camera and its effective camera, align.json (or null), and the alignment's status. */
+export type RoomDetail = {
+  readonly version: 1
+  /** room-YYYYMMDD-HHMMSS (UTC of the POST), -2, -3… on collision. */
+  readonly name: Slug
+  /** Free text (trimmed, at most 200 characters), or null (shows the date). */
+  readonly title: string | null
+  readonly created: DateTime
+  readonly saved: DateTime | null
+  /** The last align result the server applied (§4.9 Align): which solver and when, or null when none was. */
+  readonly aligned: null | RoomAlignApplied
+  readonly members: readonly RoomMemberDetail[]
+  /** How many room layouts it has (layouts/@<room>/). */
+  readonly layouts: number
+  /** rooms/<room>/align.json as it is (the solver's last answer), or null without one (or when it can't be read). */
+  readonly align: Align | null
+  readonly align_status: AlignStatus
+  /** The failed align job's sentence, else null. */
+  readonly align_error: string | null
+}
+
+/** GET /api/rooms/jobs (contract §4.9): align jobs, newest first. They run on the calibration queue but are listed here, not in GET /api/scenes/jobs. */
+export type RoomJobs = {
+  readonly jobs: readonly AlignJob[]
+}
+
+/** GET /api/rooms (contract §4.9): the rooms newest first (by created, ties by the name's collision suffix as a number, as scenes), and the deleted rooms newest first. */
+export type RoomList = {
+  readonly rooms: readonly RoomObject[]
+  readonly trash: readonly TrashedRoom[]
+}
+
+/** One member photo. pose is null exactly when pose_source is unplaced. */
+export type RoomMember = {
+  /** The member scene's name (scenes/<scene>/). */
+  readonly scene: string
+  readonly pose: Pose | null
+  readonly scale: MemberScale
+  readonly pose_source: PoseSource
+}
+
+/** A member (room.json), its scene object, the camera its scene.json uses and its effective camera: that camera with height_m × scale, clamped to 0.2–3.0 (contract §4.9). */
+export type RoomMemberDetail = {
+  readonly scene: Slug
+  readonly pose: Pose | null
+  readonly scale: MemberScale
+  readonly pose_source: PoseSource
+  readonly scene_object: SceneObject
+  readonly camera: Camera
+  readonly effective_camera: Camera
+}
+
+/** A member (room.json) and its scene object (§4.4). */
+export type RoomMemberObject = {
+  readonly scene: Slug
+  readonly pose: Pose | null
+  readonly scale: MemberScale
+  readonly pose_source: PoseSource
+  readonly scene_object: SceneObject
+}
+
+export type RoomMemberPut = {
+  readonly scene: Slug
+  /** Numbers are clamped and yaw brought into (−180, 180]. */
+  readonly pose?: PosePut | null
+  /** Clamped to 0.25–4. */
+  readonly scale?: number
+}
+
+/** The room object (contract §4.9): each entry of GET /api/rooms, and the answer of POST /api/rooms/<room>/restore. room.json's fields, each member with its scene object, the number of room layouts and the alignment's status. GET /api/rooms/<room> carries more (room-detail). */
+export type RoomObject = {
+  /** room-YYYYMMDD-HHMMSS (UTC of the POST), -2, -3… on collision. */
+  readonly name: Slug
+  /** Free text (trimmed, at most 200 characters), or null (shows the date). */
+  readonly title: string | null
+  readonly created: DateTime
+  readonly saved: DateTime | null
+  /** The last align result the server applied (§4.9 Align): which solver and when, or null when none was. */
+  readonly aligned: null | RoomAlignApplied
+  readonly members: readonly RoomMemberObject[]
+  /** How many room layouts it has (layouts/@<room>/). */
+  readonly layouts: number
+  readonly align_status: AlignStatus
+  /** The failed align job's sentence, else null. */
+  readonly align_error: string | null
+}
+
+/** PUT /api/rooms/<room> (contract §4.9 Changes): any of title, members, reset and rescale, applied in that order. Numbers are clamped (pose and scale ranges of room.schema.json); unknown keys or bad values are 400, an unknown scene 404, a scene in another room 409, reset without align.json 409. Answers the room (room-detail). */
+export type RoomPut = {
+  /** Trimmed; at most 200 characters after that (400 otherwise); blank or null removes it. */
+  readonly title?: string | null
+  /** The whole new member list, in order: a scene not listed leaves the room (its pose is forgotten), a new one joins (unplaced, scale 1, unless it carries a pose), the order is the new order. Per entry, a pose that differs from the stored one is stored with pose_source manual (null makes it unplaced); a scale is stored as given (clamped), its pose_source unchanged. */
+  readonly members?: readonly RoomMemberPut[]
+  /** Align photos' Reset: these members go back to align.json's answer, re-expressed in the room frame as an align result is applied (§4.9 Align), with pose_source solver (unplaced when align.json doesn't place them); an origin member is left as it is. Members not in the room are 400. */
+  readonly reset?: readonly string[]
+  /** The room's Set scale: multiplies every member's scale and every pose's x_m and z_m by this factor (then clamps); pose_source is unchanged; layouts are not rewritten (as a scene's Set scale). */
+  readonly rescale?: number
+}
+
+/** rooms/.trash/<room>-<UTC stamp>/trash.json (contract §4.9): room.json and align.json sit beside it, the room's layouts in layouts/ inside it. */
+export type RoomTrash = {
+  readonly name: string
+  readonly title: string | null
+  readonly created: string | null
+  readonly deleted: string
+}
 
 /** Written by the server: created when the upload is accepted, updated by PUT /api/scenes/<name> and by a calibration that finishes while camera_source is auto or default. The folder name is the scene's name; it never changes. */
 export type Scene = {
@@ -771,6 +1020,8 @@ export type SceneDetail = {
   readonly calib_status: "pending" | "running" | "done" | "failed"
   /** The failed calibration's sentence, else null. */
   readonly calib_error: string | null
+  /** The room the scene is a member of, or null (contract §4.9). Optional in the schema so that a server without rooms conforms; a server with rooms always sends it. */
+  readonly room?: Slug | null
   /** calib.json without exif.make and exif.model, or null. */
   readonly calib: PublicCalib | null
   /** lighting.json as it is, or null without one. */
@@ -800,7 +1051,7 @@ export type SceneMeta = {
   readonly title?: string | null
 }
 
-/** The scene object (contract §4.4): each entry of GET /api/scenes, and the answer of POST /api/scenes/<name>/restore. GET /api/scenes/<name> carries the same fields (scene-detail). */
+/** The scene object (contract §4.4, §4.9): each entry of GET /api/scenes, and the answer of POST /api/scenes/<name>/restore. GET /api/scenes/<name> carries the same fields (scene-detail). */
 export type SceneObject = {
   /** scene-YYYYMMDD-HHMMSS (UTC of the upload), -2, -3… on collision. */
   readonly name: Slug
@@ -824,6 +1075,8 @@ export type SceneObject = {
   readonly calib_status: "pending" | "running" | "done" | "failed"
   /** The failed calibration's sentence, else null. */
   readonly calib_error: string | null
+  /** The room the scene is a member of, or null (contract §4.9). Optional in the schema so that a server without rooms conforms; a server with rooms always sends it. */
+  readonly room?: Slug | null
 }
 
 /** PUT /api/scenes/<name> (contract §4.4, §4.8): any of title, camera, camera_source, look. Camera values and look numbers are clamped (so any number is accepted); a look replaces only the keys it carries and a key set to null is removed. Unknown keys or wrong types are 400. saved is stamped unless only title changed. */
@@ -846,6 +1099,14 @@ export type SceneTrash = {
   readonly name: string
   readonly title: string | null
   readonly deleted: string
+  readonly room?: SceneTrashRoom
+}
+
+/** Present when the scene was a member of a room when it was deleted (contract §4.9): the room, the member's 0-based index in members and its member record. Restoring the scene puts it back into that room at min(index, number of members) with this record, when the room exists (not in the trash) and the scene isn't in another room; otherwise the scene comes back on its own. */
+export type SceneTrashRoom = {
+  readonly name: string
+  readonly index: number
+  readonly member: RoomMember
 }
 
 /** GET and PUT /api/settings (contract §2.9 Settings): the daily fal budget, its default and maximum, and whether the server's --daily-spend-usd fixes it. */
@@ -889,6 +1150,13 @@ export type ThumbPut = {
 export type TrashedItem = {
   readonly id: Slug
   readonly name: string
+  readonly deleted: DateTime
+}
+
+export type TrashedRoom = {
+  readonly name: Slug
+  readonly title: string | null
+  readonly created: DateTime | null
   readonly deleted: DateTime
 }
 

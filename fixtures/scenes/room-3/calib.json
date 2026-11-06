@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "source": "truth",
+  "model": null,
+  "image": {
+    "w": 1600,
+    "h": 1200
+  },
+  "camera": {
+    "fov_y_deg": 52,
+    "height_m": 1.58,
+    "pitch_deg": -9,
+    "roll_deg": 0.6
+  },
+  "principal": [
+    0.5,
+    0.5
+  ],
+  "floor": {
+    "found": true,
+    "inlier_ratio": 0.2246,
+    "rmse_m": 0
+  },
+  "depth": {
+    "file": "depth.png",
+    "w": 1024,
+    "h": 768,
+    "floor_masked": true
+  },
+  "exif": null,
+  "device": null,
+  "elapsed_s": 0
+}

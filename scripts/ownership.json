@@ -1,5 +1,5 @@
 {
-  "doc": "Which paths each track may change (docs/REFACTOR.md §6; CLAUDE.md has the table for after the refactor). Globs: ** any depth, * one segment, {a,b}; a leading ! excludes. shared_append files may gain entries from any track. docs/notes/<track>.md is always allowed. The v2 build tracks (f-* to finish) are kept for their branches; app, server, kernels, evals, foundation, toolchain and integration (with calib, pipeline, proofs and packaging) are the tracks after the refactor.",
+  "doc": "Which paths each track may change (docs/REFACTOR.md §6; CLAUDE.md has the table for after the refactor). Globs: ** any depth, * one segment, {a,b}; a leading ! excludes. shared_append files may gain entries from any track. docs/notes/<track>.md is always allowed. The v2 build tracks (f-* to finish) are kept for their branches; app, server, kernels, evals, foundation, toolchain and integration (with calib, pipeline, proofs and packaging) are the tracks after the refactor. Rooms (docs/ROOMS.md §4, 2026-11-06): foundation also owns docs/ROOMS.md, fixtures/make_scene.mjs, fixtures/check_scenes.py (the golden scenes' generator and self-check; the room fixtures are fixtures/scenes/room-*/** and fixtures/calib/rooms/**) and .gitignore's rooms/ line (toolchain's consent, ROOMS §5); calib's solver spike lives under calib/spike/ (calib/**). A track's notes may also be docs/notes/rooms-<track>.md.",
   "shared_append": [
     "package.json",
     "package-lock.json",
@@ -184,7 +184,9 @@
       "fixtures/**",
       "!fixtures/scenes/**",
       "!fixtures/calib/**",
-      "!evals/lib/harness.mjs"
+      "!evals/lib/harness.mjs",
+      "!fixtures/make_scene.mjs",
+      "!fixtures/check_scenes.py"
     ],
     "foundation": [
       "contract/**",
@@ -199,7 +201,11 @@
       "evals/lib/harness.mjs",
       "scripts/ownership.json",
       "scripts/check-ownership.mjs",
-      "scripts/eval-lock.mjs"
+      "scripts/eval-lock.mjs",
+      "docs/ROOMS.md",
+      "fixtures/make_scene.mjs",
+      "fixtures/check_scenes.py",
+      ".gitignore"
     ],
     "toolchain": [
       "scripts/**",

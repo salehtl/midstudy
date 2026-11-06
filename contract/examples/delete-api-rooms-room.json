@@ -1,0 +1,18 @@
+{
+  "route": "DELETE /api/rooms/{room}",
+  "contract": "§4.9",
+  "examples": [
+    {
+      "kind": "response",
+      "status": 200,
+      "schema": "midstudy/api/room-deleted.schema.json",
+      "type": "RoomDeleted",
+      "note": "to the trash; the scenes stay",
+      "body": {
+        "ok": true,
+        "trash": "rooms/.trash/room-20261106-101530-20261106-103000"
+      }
+    }
+  ],
+  "recorded": "hand-written from contract §4.9 (docs/ROOMS.md Phase A, A1) before any server implemented it; re-record with contract/tools/record-examples.mjs once one does"
+}

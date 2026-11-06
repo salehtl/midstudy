@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-create.schema.json",
+  "title": "RoomCreate",
+  "description": "POST /api/rooms (contract §4.9): a new room of existing scenes, in this order. The first becomes the origin (pose {0, 0, 0}, pose_source origin), the others unplaced; every scale 1. Nothing is aligned until POST /api/rooms/<room>/align. 400 for a duplicate scene or a bad title, 404 for a scene that doesn't exist, 409 for a scene already in a room.",
+  "type": "object",
+  "required": ["scenes"],
+  "additionalProperties": false,
+  "properties": {
+    "title": { "description": "Trimmed; at most 200 characters after that (400 otherwise); blank or null means none.", "type": ["string", "null"] },
+    "scenes": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" } }
+  }
+}

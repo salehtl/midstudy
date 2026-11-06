@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/room.schema.json",
+  "title": "Room",
+  "description": "rooms/<room>/room.json (contract §4.9): several scenes (photos of one room) in one shared frame, the room frame. Written by the server only: created by POST /api/rooms, changed by PUT /api/rooms/<room>, by an align job that finishes (§4.9 Align), by Set scale and by deleting or restoring a member scene. The folder name is the room's name; it never changes. Joining a room never rewrites a scene's scene.json.",
+  "type": "object",
+  "required": ["version", "name", "title", "created", "saved", "members", "aligned"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "description": "room-YYYYMMDD-HHMMSS (UTC of the POST), -2, -3… on collision; the folder name.", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "title": { "description": "Free text (trimmed, at most 200 characters), or null (shows the date).", "type": ["string", "null"], "maxLength": 200 },
+    "created": { "description": "When the room was created, ISO-8601 UTC.", "type": "string", "format": "date-time" },
+    "saved": { "description": "The last change to anything but the title (members, poses, scales, an align result applied), ISO-8601 UTC; null until then.", "type": ["string", "null"], "format": "date-time" },
+    "members": {
+      "description": "The member scenes in order (the photo strip's order, numbered from 1). A scene is in at most one room. At most 32. May be empty (every member deleted); the room stays until it is deleted.",
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/member" }
+    },
+    "aligned": {
+      "description": "The last align result the server applied (§4.9 Align): which solver and when, or null when none was.",
+      "anyOf": [
+        { "type": "null" },
+        {
+          "title": "RoomAlignApplied",
+          "type": "object",
+          "required": ["solver", "finished"],
+          "additionalProperties": false,
+          "properties": {
+            "solver": { "$ref": "align.schema.json#/properties/solver" },
+            "finished": { "description": "When the align job finished, ISO-8601 UTC.", "type": "string", "format": "date-time" }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "pose": {
+      "title": "Pose",
+      "description": "Where a member photo was taken, in the room frame (contract §4.9 Frames): its scene frame maps to the room frame by p_room = Ry(yaw) · p_scene + (x_m, 0, z_m). Every writer clamps x_m and z_m to −50…50 and brings yaw_deg into (−180, 180].",
+      "type": "object",
+      "required": ["x_m", "z_m", "yaw_deg"],
+      "additionalProperties": false,
+      "properties": {
+        "x_m": { "type": "number", "minimum": -50, "maximum": 50 },
+        "z_m": { "type": "number", "minimum": -50, "maximum": 50 },
+        "yaw_deg": { "description": "Positive is counterclockwise seen from above (+X turns toward −Z), the sign of rotation_y_deg.", "type": "number", "exclusiveMinimum": -180, "maximum": 180 }
+      }
+    },
+    "scale": {
+      "title": "MemberScale",
+      "description": "Multiplies the member scene's camera height_m to give its effective camera (contract §4.9); clamped to 0.25–4 by every writer.",
+      "type": "number",
+      "minimum": 0.25,
+      "maximum": 4
+    },
+    "poseSource": {
+      "title": "PoseSource",
+      "description": "origin: set when the room was created, on its first member (pose {0, 0, 0}); solver: from an align result; manual: the user moved or turned it (an align never overwrites it unless asked); unplaced: no pose (pose is null): just added, or the solver couldn't place it.",
+      "enum": ["origin", "solver", "manual", "unplaced"]
+    },
+    "member": {
+      "title": "RoomMember",
+      "description": "One member photo. pose is null exactly when pose_source is unplaced.",
+      "type": "object",
+      "required": ["scene", "pose", "scale", "pose_source"],
+      "additionalProperties": false,
+      "properties": {
+        "scene": { "description": "The member scene's name (scenes/<scene>/).", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "pose": { "anyOf": [{ "$ref": "#/$defs/pose" }, { "type": "null" }] },
+        "scale": { "$ref": "#/$defs/scale" },
+        "pose_source": { "$ref": "#/$defs/poseSource" }
+      },
+      "not": {
+        "type": "object",
+        "anyOf": [
+          { "type": "object", "required": ["pose", "pose_source"], "properties": { "pose": { "type": "null" }, "pose_source": { "enum": ["origin", "solver", "manual"] } } },
+          { "type": "object", "required": ["pose", "pose_source"], "properties": { "pose": { "type": "object" }, "pose_source": { "const": "unplaced" } } }
+        ]
+      }
+    }
+  }
+}

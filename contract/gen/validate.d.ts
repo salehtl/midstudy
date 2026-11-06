@@ -13,6 +13,18 @@ export type Validator<V> = ((data: unknown) => data is V) & { errors?: readonly 
 
 /** midstudy/add-summary.schema.json */
 export declare const isAddSummary: Validator<T.AddSummary>
+/** midstudy/align.schema.json */
+export declare const isAlign: Validator<T.Align>
+/** midstudy/api/align-accepted.schema.json */
+export declare const isAlignAccepted: Validator<T.AlignAccepted>
+/** midstudy/api/room-job.schema.json */
+export declare const isAlignJob: Validator<T.AlignJob>
+/** midstudy/align.schema.json#/$defs/member */
+export declare const isAlignMember: Validator<T.AlignMember>
+/** midstudy/api/align-request.schema.json */
+export declare const isAlignRequest: Validator<T.AlignRequest>
+/** midstudy/api/room-object.schema.json#/$defs/alignStatus */
+export declare const isAlignStatus: Validator<T.AlignStatus>
 /** midstudy/api/error.schema.json */
 export declare const isApiError: Validator<T.ApiError>
 /** midstudy/library.schema.json#/$defs/axisErr */
@@ -21,6 +33,8 @@ export declare const isAxisError: Validator<T.AxisError>
 export declare const isCalib: Validator<T.Calib>
 /** midstudy/calib-cli.schema.json#/$defs/align */
 export declare const isCalibCliAlign: Validator<T.CalibCliAlign>
+/** midstudy/calib-cli.schema.json#/$defs/align_room */
+export declare const isCalibCliAlignRoom: Validator<T.CalibCliAlignRoom>
 /** midstudy/calib-cli.schema.json#/$defs/error */
 export declare const isCalibCliError: Validator<T.CalibCliError>
 /** midstudy/calib-cli.schema.json#/$defs/id */
@@ -99,10 +113,18 @@ export declare const isLighting: Validator<T.Lighting>
 export declare const isLightJob: Validator<T.LightJob>
 /** midstudy/scene.schema.json#/$defs/look */
 export declare const isLook: Validator<T.Look>
+/** midstudy/room.schema.json#/$defs/scale */
+export declare const isMemberScale: Validator<T.MemberScale>
 /** midstudy/library.schema.json#/$defs/pct */
 export declare const isPercent: Validator<T.Percent>
 /** midstudy/api/common.schema.json#/$defs/pngDataUri */
 export declare const isPngDataUri: Validator<T.PngDataUri>
+/** midstudy/room.schema.json#/$defs/pose */
+export declare const isPose: Validator<T.Pose>
+/** midstudy/api/room-put.schema.json#/$defs/posePut */
+export declare const isPosePut: Validator<T.PosePut>
+/** midstudy/room.schema.json#/$defs/poseSource */
+export declare const isPoseSource: Validator<T.PoseSource>
 /** midstudy/api/product-error.schema.json */
 export declare const isProductError: Validator<T.ProductError>
 /** midstudy/api/product-request.schema.json */
@@ -121,6 +143,26 @@ export declare const isRenderMeta: Validator<T.RenderMeta>
 export declare const isRenderRequest: Validator<T.RenderRequest>
 /** midstudy/lighting.schema.json#/$defs/rgb */
 export declare const isRgb: Validator<T.Rgb>
+/** midstudy/room.schema.json */
+export declare const isRoom: Validator<T.Room>
+/** midstudy/api/room-create.schema.json */
+export declare const isRoomCreate: Validator<T.RoomCreate>
+/** midstudy/api/room-deleted.schema.json */
+export declare const isRoomDeleted: Validator<T.RoomDeleted>
+/** midstudy/api/room-detail.schema.json */
+export declare const isRoomDetail: Validator<T.RoomDetail>
+/** midstudy/api/room-jobs.schema.json */
+export declare const isRoomJobs: Validator<T.RoomJobs>
+/** midstudy/api/room-list.schema.json */
+export declare const isRoomList: Validator<T.RoomList>
+/** midstudy/room.schema.json#/$defs/member */
+export declare const isRoomMember: Validator<T.RoomMember>
+/** midstudy/api/room-object.schema.json */
+export declare const isRoomObject: Validator<T.RoomObject>
+/** midstudy/api/room-put.schema.json */
+export declare const isRoomPut: Validator<T.RoomPut>
+/** midstudy/trash.schema.json#/$defs/room */
+export declare const isRoomTrash: Validator<T.RoomTrash>
 /** midstudy/scene.schema.json */
 export declare const isScene: Validator<T.Scene>
 /** midstudy/api/scene-created.schema.json */
@@ -164,13 +206,20 @@ export declare const isUpload: Validator<T.Upload>
 /** midstudy/api/common.schema.json#/$defs/usd */
 export declare const isUsd: Validator<T.Usd>
 
-export type SchemaUri = "midstudy/add-summary.schema.json" | "midstudy/api/error.schema.json" | "midstudy/library.schema.json#/$defs/axisErr" | "midstudy/calib.schema.json" | "midstudy/calib-cli.schema.json#/$defs/align" | "midstudy/calib-cli.schema.json#/$defs/error" | "midstudy/calib-cli.schema.json#/$defs/id" | "midstudy/calib-cli.schema.json#/$defs/ingest" | "midstudy/calib-cli.schema.json#/$defs/light" | "midstudy/calib-cli.schema.json#/$defs/light_done" | "midstudy/calib-cli.schema.json#/$defs/light_none" | "midstudy/calib-cli.schema.json#/$defs/request" | "midstudy/calib-cli.schema.json#/$defs/run" | "midstudy/api/calibrate-accepted.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/calibrate" | "midstudy/calib.schema.json#/$defs/camera" | "midstudy/scene.schema.json#/$defs/camera" | "midstudy/api/common.schema.json#/$defs/dateTime" | "midstudy/library.schema.json#/$defs/dims" | "midstudy/api/product-result.schema.json#/$defs/candidate" | "midstudy/calib.schema.json#/$defs/size" | "midstudy/api/common.schema.json#/$defs/jobStatus" | "midstudy/api/common.schema.json#/$defs/jpegDataUri" | "midstudy/layout.schema.json" | "midstudy/api/layout-deleted.schema.json" | "midstudy/layout.schema.json#/$defs/item" | "midstudy/api/layout-list.schema.json" | "midstudy/api/layout-put.schema.json" | "midstudy/library.schema.json" | "midstudy/api/library-add-accepted.schema.json" | "midstudy/api/library-deleted.schema.json" | "midstudy/api/library-from-url.schema.json" | "midstudy/library.schema.json#/$defs/item" | "midstudy/api/library-job.schema.json" | "midstudy/api/library-jobs.schema.json" | "midstudy/api/library-get.schema.json" | "midstudy/api/library-meta.schema.json" | "midstudy/api/library-patch.schema.json" | "midstudy/api/library-rescale-accepted.schema.json" | "midstudy/trash.schema.json#/$defs/item" | "midstudy/api/light-accepted.schema.json" | "midstudy/api/light-done.schema.json" | "midstudy/lighting.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/light" | "midstudy/scene.schema.json#/$defs/look" | "midstudy/library.schema.json#/$defs/pct" | "midstudy/api/common.schema.json#/$defs/pngDataUri" | "midstudy/api/product-error.schema.json" | "midstudy/api/product-request.schema.json" | "midstudy/api/product-result.schema.json" | "midstudy/api/common.schema.json#/$defs/publicCalib" | "midstudy/library.schema.json#/$defs/relpath" | "midstudy/api/render-list.schema.json" | "midstudy/api/render-meta.schema.json" | "midstudy/api/render-request.schema.json" | "midstudy/lighting.schema.json#/$defs/rgb" | "midstudy/scene.schema.json" | "midstudy/api/scene-created.schema.json" | "midstudy/api/scene-deleted.schema.json" | "midstudy/api/scene-detail.schema.json" | "midstudy/api/scene-job.schema.json" | "midstudy/api/scene-jobs.schema.json" | "midstudy/api/scene-list.schema.json" | "midstudy/api/scene-meta.schema.json" | "midstudy/api/scene-object.schema.json" | "midstudy/api/scene-put.schema.json" | "midstudy/api/scene-thumb-saved.schema.json" | "midstudy/trash.schema.json#/$defs/scene" | "midstudy/api/settings.schema.json" | "midstudy/api/settings-put.schema.json" | "midstudy/api/common.schema.json#/$defs/slug" | "midstudy/library.schema.json#/$defs/slug" | "midstudy/api/spend.schema.json" | "midstudy/api/spend-refused.schema.json" | "midstudy/api/thumb-put.schema.json" | "midstudy/lighting.schema.json#/$defs/unit" | "midstudy/scene.schema.json#/$defs/upload" | "midstudy/api/common.schema.json#/$defs/usd"
+export type SchemaUri = "midstudy/add-summary.schema.json" | "midstudy/align.schema.json" | "midstudy/api/align-accepted.schema.json" | "midstudy/api/room-job.schema.json" | "midstudy/align.schema.json#/$defs/member" | "midstudy/api/align-request.schema.json" | "midstudy/api/room-object.schema.json#/$defs/alignStatus" | "midstudy/api/error.schema.json" | "midstudy/library.schema.json#/$defs/axisErr" | "midstudy/calib.schema.json" | "midstudy/calib-cli.schema.json#/$defs/align" | "midstudy/calib-cli.schema.json#/$defs/align_room" | "midstudy/calib-cli.schema.json#/$defs/error" | "midstudy/calib-cli.schema.json#/$defs/id" | "midstudy/calib-cli.schema.json#/$defs/ingest" | "midstudy/calib-cli.schema.json#/$defs/light" | "midstudy/calib-cli.schema.json#/$defs/light_done" | "midstudy/calib-cli.schema.json#/$defs/light_none" | "midstudy/calib-cli.schema.json#/$defs/request" | "midstudy/calib-cli.schema.json#/$defs/run" | "midstudy/api/calibrate-accepted.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/calibrate" | "midstudy/calib.schema.json#/$defs/camera" | "midstudy/scene.schema.json#/$defs/camera" | "midstudy/api/common.schema.json#/$defs/dateTime" | "midstudy/library.schema.json#/$defs/dims" | "midstudy/api/product-result.schema.json#/$defs/candidate" | "midstudy/calib.schema.json#/$defs/size" | "midstudy/api/common.schema.json#/$defs/jobStatus" | "midstudy/api/common.schema.json#/$defs/jpegDataUri" | "midstudy/layout.schema.json" | "midstudy/api/layout-deleted.schema.json" | "midstudy/layout.schema.json#/$defs/item" | "midstudy/api/layout-list.schema.json" | "midstudy/api/layout-put.schema.json" | "midstudy/library.schema.json" | "midstudy/api/library-add-accepted.schema.json" | "midstudy/api/library-deleted.schema.json" | "midstudy/api/library-from-url.schema.json" | "midstudy/library.schema.json#/$defs/item" | "midstudy/api/library-job.schema.json" | "midstudy/api/library-jobs.schema.json" | "midstudy/api/library-get.schema.json" | "midstudy/api/library-meta.schema.json" | "midstudy/api/library-patch.schema.json" | "midstudy/api/library-rescale-accepted.schema.json" | "midstudy/trash.schema.json#/$defs/item" | "midstudy/api/light-accepted.schema.json" | "midstudy/api/light-done.schema.json" | "midstudy/lighting.schema.json" | "midstudy/api/scene-job.schema.json#/$defs/light" | "midstudy/scene.schema.json#/$defs/look" | "midstudy/room.schema.json#/$defs/scale" | "midstudy/library.schema.json#/$defs/pct" | "midstudy/api/common.schema.json#/$defs/pngDataUri" | "midstudy/room.schema.json#/$defs/pose" | "midstudy/api/room-put.schema.json#/$defs/posePut" | "midstudy/room.schema.json#/$defs/poseSource" | "midstudy/api/product-error.schema.json" | "midstudy/api/product-request.schema.json" | "midstudy/api/product-result.schema.json" | "midstudy/api/common.schema.json#/$defs/publicCalib" | "midstudy/library.schema.json#/$defs/relpath" | "midstudy/api/render-list.schema.json" | "midstudy/api/render-meta.schema.json" | "midstudy/api/render-request.schema.json" | "midstudy/lighting.schema.json#/$defs/rgb" | "midstudy/room.schema.json" | "midstudy/api/room-create.schema.json" | "midstudy/api/room-deleted.schema.json" | "midstudy/api/room-detail.schema.json" | "midstudy/api/room-jobs.schema.json" | "midstudy/api/room-list.schema.json" | "midstudy/room.schema.json#/$defs/member" | "midstudy/api/room-object.schema.json" | "midstudy/api/room-put.schema.json" | "midstudy/trash.schema.json#/$defs/room" | "midstudy/scene.schema.json" | "midstudy/api/scene-created.schema.json" | "midstudy/api/scene-deleted.schema.json" | "midstudy/api/scene-detail.schema.json" | "midstudy/api/scene-job.schema.json" | "midstudy/api/scene-jobs.schema.json" | "midstudy/api/scene-list.schema.json" | "midstudy/api/scene-meta.schema.json" | "midstudy/api/scene-object.schema.json" | "midstudy/api/scene-put.schema.json" | "midstudy/api/scene-thumb-saved.schema.json" | "midstudy/trash.schema.json#/$defs/scene" | "midstudy/api/settings.schema.json" | "midstudy/api/settings-put.schema.json" | "midstudy/api/common.schema.json#/$defs/slug" | "midstudy/library.schema.json#/$defs/slug" | "midstudy/api/spend.schema.json" | "midstudy/api/spend-refused.schema.json" | "midstudy/api/thumb-put.schema.json" | "midstudy/lighting.schema.json#/$defs/unit" | "midstudy/scene.schema.json#/$defs/upload" | "midstudy/api/common.schema.json#/$defs/usd"
 export interface Validators {
   readonly "midstudy/add-summary.schema.json": Validator<T.AddSummary>
+  readonly "midstudy/align.schema.json": Validator<T.Align>
+  readonly "midstudy/api/align-accepted.schema.json": Validator<T.AlignAccepted>
+  readonly "midstudy/api/room-job.schema.json": Validator<T.AlignJob>
+  readonly "midstudy/align.schema.json#/$defs/member": Validator<T.AlignMember>
+  readonly "midstudy/api/align-request.schema.json": Validator<T.AlignRequest>
+  readonly "midstudy/api/room-object.schema.json#/$defs/alignStatus": Validator<T.AlignStatus>
   readonly "midstudy/api/error.schema.json": Validator<T.ApiError>
   readonly "midstudy/library.schema.json#/$defs/axisErr": Validator<T.AxisError>
   readonly "midstudy/calib.schema.json": Validator<T.Calib>
   readonly "midstudy/calib-cli.schema.json#/$defs/align": Validator<T.CalibCliAlign>
+  readonly "midstudy/calib-cli.schema.json#/$defs/align_room": Validator<T.CalibCliAlignRoom>
   readonly "midstudy/calib-cli.schema.json#/$defs/error": Validator<T.CalibCliError>
   readonly "midstudy/calib-cli.schema.json#/$defs/id": Validator<T.CalibCliId>
   readonly "midstudy/calib-cli.schema.json#/$defs/ingest": Validator<T.CalibCliIngest>
@@ -211,8 +260,12 @@ export interface Validators {
   readonly "midstudy/lighting.schema.json": Validator<T.Lighting>
   readonly "midstudy/api/scene-job.schema.json#/$defs/light": Validator<T.LightJob>
   readonly "midstudy/scene.schema.json#/$defs/look": Validator<T.Look>
+  readonly "midstudy/room.schema.json#/$defs/scale": Validator<T.MemberScale>
   readonly "midstudy/library.schema.json#/$defs/pct": Validator<T.Percent>
   readonly "midstudy/api/common.schema.json#/$defs/pngDataUri": Validator<T.PngDataUri>
+  readonly "midstudy/room.schema.json#/$defs/pose": Validator<T.Pose>
+  readonly "midstudy/api/room-put.schema.json#/$defs/posePut": Validator<T.PosePut>
+  readonly "midstudy/room.schema.json#/$defs/poseSource": Validator<T.PoseSource>
   readonly "midstudy/api/product-error.schema.json": Validator<T.ProductError>
   readonly "midstudy/api/product-request.schema.json": Validator<T.ProductRequest>
   readonly "midstudy/api/product-result.schema.json": Validator<T.ProductResult>
@@ -222,6 +275,16 @@ export interface Validators {
   readonly "midstudy/api/render-meta.schema.json": Validator<T.RenderMeta>
   readonly "midstudy/api/render-request.schema.json": Validator<T.RenderRequest>
   readonly "midstudy/lighting.schema.json#/$defs/rgb": Validator<T.Rgb>
+  readonly "midstudy/room.schema.json": Validator<T.Room>
+  readonly "midstudy/api/room-create.schema.json": Validator<T.RoomCreate>
+  readonly "midstudy/api/room-deleted.schema.json": Validator<T.RoomDeleted>
+  readonly "midstudy/api/room-detail.schema.json": Validator<T.RoomDetail>
+  readonly "midstudy/api/room-jobs.schema.json": Validator<T.RoomJobs>
+  readonly "midstudy/api/room-list.schema.json": Validator<T.RoomList>
+  readonly "midstudy/room.schema.json#/$defs/member": Validator<T.RoomMember>
+  readonly "midstudy/api/room-object.schema.json": Validator<T.RoomObject>
+  readonly "midstudy/api/room-put.schema.json": Validator<T.RoomPut>
+  readonly "midstudy/trash.schema.json#/$defs/room": Validator<T.RoomTrash>
   readonly "midstudy/scene.schema.json": Validator<T.Scene>
   readonly "midstudy/api/scene-created.schema.json": Validator<T.SceneCreated>
   readonly "midstudy/api/scene-deleted.schema.json": Validator<T.SceneDeleted>

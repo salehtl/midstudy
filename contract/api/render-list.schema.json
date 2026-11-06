@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "midstudy/api/render-list.schema.json",
   "title": "RenderList",
-  "description": "GET /api/renders[?scene=<name>] (contract §2.6, §4.7): newest first.",
+  "description": "GET /api/renders[?scene=<name>][&room=<room>] (contract §2.6, §4.7, §4.9): newest first; ?scene= keeps one photo's renders (with or without a room), ?room= keeps the renders made in that room.",
   "type": "object",
   "required": ["renders", "mock"],
   "additionalProperties": false,

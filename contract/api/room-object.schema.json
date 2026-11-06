@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-object.schema.json",
+  "title": "RoomObject",
+  "description": "The room object (contract §4.9): each entry of GET /api/rooms, and the answer of POST /api/rooms/<room>/restore. room.json's fields, each member with its scene object, the number of room layouts and the alignment's status. GET /api/rooms/<room> carries more (room-detail).",
+  "type": "object",
+  "required": ["name", "title", "created", "saved", "aligned", "members", "layouts", "align_status", "align_error"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "$ref": "common.schema.json#/$defs/slug", "description": "room-YYYYMMDD-HHMMSS (UTC of the POST), -2, -3… on collision." },
+    "title": { "$ref": "../room.schema.json#/properties/title" },
+    "created": { "$ref": "common.schema.json#/$defs/dateTime" },
+    "saved": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+    "aligned": { "$ref": "../room.schema.json#/properties/aligned" },
+    "members": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "title": "RoomMemberObject",
+        "description": "A member (room.json) and its scene object (§4.4).",
+        "type": "object",
+        "required": ["scene", "pose", "scale", "pose_source", "scene_object"],
+        "additionalProperties": false,
+        "properties": {
+          "scene": { "$ref": "common.schema.json#/$defs/slug" },
+          "pose": { "anyOf": [{ "$ref": "../room.schema.json#/$defs/pose" }, { "type": "null" }] },
+          "scale": { "$ref": "../room.schema.json#/$defs/scale" },
+          "pose_source": { "$ref": "../room.schema.json#/$defs/poseSource" },
+          "scene_object": { "$ref": "scene-object.schema.json" }
+        }
+      }
+    },
+    "layouts": { "description": "How many room layouts it has (layouts/@<room>/).", "type": "integer", "minimum": 0 },
+    "align_status": { "$ref": "#/$defs/alignStatus" },
+    "align_error": { "description": "The failed align job's sentence, else null.", "type": ["string", "null"] }
+  },
+  "$defs": {
+    "alignStatus": {
+      "title": "AlignStatus",
+      "description": "pending while an align job is queued (also while it waits for members to calibrate), running while it runs; else done when align.json exists and the last align job (if any since the server started) succeeded; failed when the last one failed; none when the room was never aligned (no align.json, no job).",
+      "enum": ["none", "pending", "running", "done", "failed"]
+    }
+  }
+}

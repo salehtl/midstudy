@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/room-job.schema.json",
+  "title": "AlignJob",
+  "description": "An align job (contract §4.9 Align): runs `align-room` on the calibration queue. GET /api/rooms/jobs/<id>, inside the jobs list and the 202 of POST /api/rooms/<room>/align. In memory: a restart forgets them.",
+  "type": "object",
+  "required": ["id", "kind", "room", "status", "created", "started", "finished", "message", "waiting_for", "align"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "description": "a-…, e.g. a-20261106-101500-ab12.", "type": "string", "pattern": "^a-[0-9a-z-]+$" },
+    "kind": { "const": "align" },
+    "room": { "$ref": "common.schema.json#/$defs/slug" },
+    "status": { "$ref": "common.schema.json#/$defs/jobStatus" },
+    "created": { "$ref": "common.schema.json#/$defs/dateTime" },
+    "started": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+    "finished": { "anyOf": [{ "$ref": "common.schema.json#/$defs/dateTime" }, { "type": "null" }] },
+    "message": { "description": "A human-readable status line; a failed job's is the tool's error sentence.", "type": "string" },
+    "waiting_for": { "description": "While queued: the member scenes it waits for (calibration pending or running); empty otherwise.", "type": "array", "items": { "$ref": "common.schema.json#/$defs/slug" } },
+    "align": { "description": "The answer (align.json) once done, else null.", "anyOf": [{ "$ref": "../align.schema.json" }, { "type": "null" }] }
+  }
+}
