@@ -44,6 +44,28 @@ Run on the final tree (each `nix develop -c npm run check -- <name>`):
 
 ## The spike's check (planner/gpu/demo/check.mjs)
 
+`nix develop -c node scripts/eval-lock.mjs -- node planner/gpu/demo/check.mjs` on `f21bee0` (the planner as committed
+for the gate rounds; the demo unchanged since): **WG 72/72** in 359 s (`evals/out/webgpu-swap/wg-try1.log`; the
+spike's own final run was 69/69 with 2 skipped). Its reference column ("v1") is now the planner itself on the harness's
+default browser (WebGPU): the same renderer as the demo, so its `order` case no longer loses Spark's sort race and
+nothing is skipped.
+
+| What | WebGPU (GPU sort) | WebGL2 (worker sort) |
+|---|---|---|
+| the demo opens on the backend asked for; letterbox bars exactly (1, 1, 1), the photo at Fit within mean 1.9 | yes | yes |
+| splat probe within 3 % of its projected box; magenta inside its silhouette, stand-in never drawn | ≤ 7 px; 100 % | ≤ 7 px; 100 % |
+| Idol chair (262,144 splats) where its splat.spz points project | ≤ 3 px | ≤ 3 px |
+| near splat in front of a far one right after placing | 100 % | 100 % |
+| the sofa hides a splat behind it / occlusion off shows it | 100 % / 100 % | 100 % / 100 % |
+| lit box faces vs lighting.json (±12 %) / floor shadow away from the light | +2.3…+2.6 % / yes | +2.3…+2.6 % / yes |
+| region diffs against the planner's own composite (JPEG q92), every case | items mean 1.30–1.97, floor 0.71–1.79, photo 0.03 | the same ±0.04 |
+| splat.spz and splat.ply of one probe | mean 0.99 | mean 0.99 |
+| GPU radix sort = a stable CPU sort of its keys (302,350 splats) | 16, 24 and 32-bit: 0 mismatches | — |
+| worker sort and GPU sort draw the same picture | mean 0 | — |
+| no WebGPU flags at all: falls back to WebGL2 by itself, same picture | — | mean 0 |
+| the two backends, every case, whole frame | mean ≤ 0.018, p99 0 | |
+| page or console errors | none | none |
+
 ## Numbers
 
 ## Decisions
@@ -81,6 +103,24 @@ Run on the final tree (each `nix develop -c npm run check -- <name>`):
    an instanced order attribute (one TSL material for both backends).
 
 ## Open issues
+
+- **three.js 0.180 bugs worked around, so the pin matters** (re-run WG and E16 on both backends on any upgrade): the
+  spike's two WebGL2 clear bugs (`clearTarget`), and the shadow-node lifecycle bug above (the key light now always
+  casts; its shadow's intensity is the switch). The cost of the latter: three allocates the key's 2048² shadow map as
+  soon as a lit piece is drawn, also in a scene whose floor shadow is off (it is never rendered while off). Also
+  reaching into internals, as the spike did: `backend.isWebGPUBackend`, `backend.state` (`setColorMask`,
+  `bindFramebuffer`), `builder.context.iblIrradiance`, `library.materialNodes`, `isShadowPassMaterial`, and
+  `PMREMGenerator.fromEquirectangular` (present in 0.180's three/webgpu, missing from @types/three 0.180).
+- **One WGSL string remains**: the GPU radix sort's popcount (`wgslFn`, `countOneBits`): TSL 0.180 has no bit-count
+  node. It is WebGPU-only compute (the WebGL2 fallback sorts in the worker); no GLSL remains anywhere.
+- **Start-up JavaScript +29 %** (1,201 kB against 934 kB): three's WebGPU build carries the node system and both
+  backends. Spark's 2.8 MB lazy chunk is gone. E17's load metrics below say what it costs on SwiftShader.
+- **window.midstudy before the planner has loaded** holds `ready` and `errors` only (planner/ready.ts); v1's held every
+  method at once. Every eval waits for `ready` before calling methods (the harness and E11 do; E12 reads only `ready`).
+- **No real GPU here**: every number is SwiftShader (WebGPU on Dawn's, WebGL on ANGLE's). The spike's risks stand
+  (mobile limits, first-frame pipeline compiles: `compileAsync` at scene open could hide them; splat memory 48 B/splat).
+- **Not done (unchanged from the spike):** packing the splat textures, GPU culling and indirect draws, a Rust/WASM CPU
+  sort, real-device numbers.
 
 ## Interfaces
 
