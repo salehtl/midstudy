@@ -22,7 +22,7 @@ How a solver's answer becomes a §3.1 pose (the same for every ML solver):
 
 Residual (every solver): each member's depth.png lifted into the room through its pose and projected into every other
 member's camera; the median |depth difference| (cm) over points seen by both (difference under 50 cm). Confidence comes
-from that residual, the overlap and the tilt. A member under MIN_CONFIDENCE is `unplaced` (no pose).
+from that residual, the overlap, the tilt and the constraint (a bare wall scores 0). A member under MIN_CONFIDENCE is `unplaced` (no pose).
 
 --truth compares with truth.json's pose_in_room (re-expressed relative to the first member; missing = the origin, as
 the original golden scenes all share living-wide's camera position) and prints the error row.
@@ -57,6 +57,10 @@ MIN_CONFIDENCE = 0.15
 # the residual includes MoGe's own disagreement between photos (13–15 cm on the real lounge photos with a right pose)
 CONF_OVERLAP, CONF_RESIDUAL_CM, CONF_TILT_DEG = 0.3, 20.0, 5.0
 OVERLAP_CUT_M = 0.5
+# stage 2: a member whose own depth faces one direction only (a bare wall) has its shift along that wall unconstrained
+# by geometry; its confidence is multiplied by min(1, constraint / CONF_CONSTRAINT), constraint = λmin/λmax of its
+# horizontal normals (golden room: 0.36–0.92 for ordinary photos, 0.000 for room-6, the blank wall)
+CONF_CONSTRAINT = 0.1
 FLIP = np.diag([1.0, -1.0, -1.0])  # OpenCV camera axes (x right, y down, z forward) ↔ three.js (y up, looking −z)
 # Phase A targets (ROOMS.md §5): a placement off by more than twice one of them is "wrong".
 TARGET_POS_CM, TARGET_YAW_DEG, TARGET_SCALE_PCT = 5.0, 1.5, 2.0
@@ -312,6 +316,25 @@ def pair_residual(a: Scene, pa: Pose, b: Scene, pb: Pose, pts_a: F64) -> tuple[f
     return float(np.median(diff[seen])), share
 
 
+def constraint(s: Scene, step: int = 3) -> float:
+    """λmin/λmax of the 2×2 second moment of the horizontal parts of depth.png's surface normals (scene frame):
+    near 0 when everything the photo sees faces one way (a bare wall), so a shift along it changes nothing."""
+    dh, dw = s.depth.shape
+    d = s.depth[step // 2 :: step, step // 2 :: step]
+    f = (dh / 2) / math.tan(s.fov_y / 2)
+    jj, ii = np.mgrid[step // 2 : dh : step, step // 2 : dw : step]
+    p = np.stack([(ii + 0.5 - dw / 2) / f * d, -(jj + 0.5 - dh / 2) / f * d, -d], axis=-1) @ s.r_gl.T
+    n = np.cross(p[1:-1, 2:] - p[1:-1, :-2], p[2:, 1:-1] - p[:-2, 1:-1])
+    nn = np.linalg.norm(n, axis=-1, keepdims=True)
+    ok = (d[1:-1, 1:-1] > 0) & (d[1:-1, 2:] > 0) & (d[1:-1, :-2] > 0) & (d[2:, 1:-1] > 0) & (d[:-2, 1:-1] > 0)
+    ok &= nn[..., 0] > 1e-9
+    h = (n[ok] / nn[ok])[:, [0, 2]]
+    if len(h) < 50:
+        return 0.0
+    ev = np.linalg.eigvalsh(h.T @ h / len(h))
+    return float(ev[0] / ev[1]) if ev[1] > 1e-12 else 0.0
+
+
 def score(scenes: list[Scene], members: list[Member]) -> float | None:
     """Fill each member's residual_cm and confidence; return the room's loop residual (median over pairs, cm)."""
     pts = [s.lift(step=6) for s in scenes]
@@ -334,8 +357,11 @@ def score(scenes: list[Scene], members: list[Member]) -> float | None:
         m.extra["overlap"] = round(overlap, 3)
         tilt = float(m.extra.get("tilt_deg", 0.0))
         base = float(m.extra.get("solver_confidence", 1.0))
+        cons = constraint(s)
+        m.extra["constraint"] = round(cons, 3)
         conf = 0.0 if m.residual_cm is None else (
-            min(1.0, overlap / CONF_OVERLAP) * math.exp(-m.residual_cm / CONF_RESIDUAL_CM) * math.exp(-tilt / CONF_TILT_DEG) * base)
+            min(1.0, overlap / CONF_OVERLAP) * math.exp(-m.residual_cm / CONF_RESIDUAL_CM) * math.exp(-tilt / CONF_TILT_DEG) * base
+            * min(1.0, cons / CONF_CONSTRAINT))
         m.confidence = 1.0 if i == 0 else round(conf, 3)
     return round(100 * float(np.median(pairs)), 2) if pairs else None
 
@@ -662,6 +688,65 @@ SOLVERS: dict[str, Callable[[], Solver]] = {"solv3r": Solv3RSolver, "vggt": VGGT
                                             "manhattan": ManhattanSolver}
 
 
+# ---------------------------------------------------------------------------------------------------- refine
+
+
+def refine(scenes: list[Scene], members: list[Member], passes: int = 3, iters: int = 25) -> None:
+    """--refine icp (stage 2): every placed member but the first re-fitted against the others' depth.png points by
+    trimmed 3D point-to-point ICP restricted to the §3.1 unknowns (a turn about Y and a shift on the floor; scale
+    kept). Correspondences are 3D (walls and furniture; depth.png masks the floor), the update is the 2D Procrustes
+    of their (x, z). A member with too few matches keeps the solver's pose. Moves are recorded in extra."""
+    from scipy.spatial import cKDTree
+
+    rng = np.random.default_rng(0)
+    clouds = []
+    for s in scenes:
+        c = s.lift(step=3)
+        if len(c) > 30000:
+            c = c[rng.choice(len(c), 30000, replace=False)]
+        clouds.append(c)
+    start = {i: (m.pose.x, m.pose.z, m.pose.yaw) for i, m in enumerate(members) if m.pose is not None}
+    for _ in range(passes):
+        for i, m in enumerate(members):
+            if i == 0 or m.pose is None:
+                continue
+            others = [n.pose.scene_to_room(clouds[j]) for j, n in enumerate(members) if j != i and n.pose is not None]
+            if not others:
+                continue
+            ref = np.concatenate(others)
+            tree = cKDTree(ref)
+            src = m.pose.scale * clouds[i]  # scene frame at member scale; pose turn + shift applied below
+            yaw, t = m.pose.yaw, np.array([m.pose.x, m.pose.z])
+            radius = 0.4
+            n_ok = 0
+            for _k in range(iters):
+                cur = src @ ry(yaw).T + np.array([t[0], 0.0, t[1]])
+                dist, idx = tree.query(cur, distance_upper_bound=radius)
+                ok = np.isfinite(dist)
+                n_ok = int(ok.sum())
+                if n_ok < 200:
+                    break
+                a2, b2 = src[ok][:, [0, 2]], ref[idx[ok]][:, [0, 2]]
+                # (x, z) of Ry(yaw)·p is [[c, s], [-s, c]]·(x, z): fit that rotation by Procrustes
+                ma, mb = a2.mean(0), b2.mean(0)
+                h = (a2 - ma).T @ (b2 - mb)
+                u_, _, vt = np.linalg.svd(h)
+                r2 = vt.T @ u_.T
+                if np.linalg.det(r2) < 0:
+                    vt[-1] *= -1
+                    r2 = vt.T @ u_.T
+                yaw = math.atan2(r2[0, 1], r2[0, 0])
+                t = mb - ma @ r2.T
+                radius = max(0.05, radius * 0.85)
+            if n_ok >= 200:
+                m.pose = Pose(float(t[0]), float(t[1]), yaw, m.pose.scale)
+    for i, m in enumerate(members):
+        if i in start and m.pose is not None:
+            x0, z0, y0 = start[i]
+            m.extra["refine_moved_cm"] = round(100 * math.hypot(m.pose.x - x0, m.pose.z - z0), 2)
+            m.extra["refine_turned_deg"] = round(abs(wrap_deg(math.degrees(m.pose.yaw - y0))), 3)
+
+
 # ---------------------------------------------------------------------------------------------------- truth
 
 
@@ -771,6 +856,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--device", default="auto", choices=["auto", "mps", "cpu", "cuda"])
     ap.add_argument("--truth", action="store_true", help="compare with truth.json pose_in_room")
     ap.add_argument("--repeat", type=int, default=2, help="solves in this process (first = cold incl. model load)")
+    ap.add_argument("--refine", default="none", choices=["none", "icp"],
+                    help="icp: re-fit each member against the others' depth points (turn + shift) after the solver")
     ap.add_argument("--out", type=Path, help="also write the answer here (keep it under evals/out/)")
     a = ap.parse_args(argv)
     if len(a.scenes) < 2:
@@ -798,6 +885,8 @@ def main(argv: list[str] | None = None) -> int:
         for k in range(max(1, a.repeat)):
             t1 = time.perf_counter()
             members = solver.solve(scenes)
+            if a.refine == "icp":
+                refine(scenes, members)
             loop = score(scenes, members)
             solves.append(time.perf_counter() - t1)
             log(f"{a.solver}: solve {k + 1} took {solves[-1]:.2f} s")
@@ -806,7 +895,7 @@ def main(argv: list[str] | None = None) -> int:
             m.extra["rejected_pose"] = member_json(m)["pose"]
             m.pose = None
     result: dict[str, Any] = {
-        "solver": a.solver, "device": device, "members": [member_json(m) for m in members],
+        "solver": a.solver, "refine": a.refine, "device": device, "members": [member_json(m) for m in members],
         "unplaced": [m.scene for m in members if m.pose is None], "loop_residual_cm": loop,
         "timing": {"import_s": round(t_import, 2), "load_s": round(t_load, 2), "solve_s": [round(x, 2) for x in solves],
                    "cold_s": round(t_import + t_load + solves[0], 2), "warm_s": round(solves[1], 2) if len(solves) > 1 else None},

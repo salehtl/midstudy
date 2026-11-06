@@ -1,8 +1,8 @@
-# rooms-calib: the Phase A solver spike (A2, stage 1)
+# rooms-calib: the Phase A solver spike (A2)
 
 Track calib, branch `rooms-calib`, new files only under `calib/spike/`; nothing is wired into `midstudy-calib`.
-Plan: [docs/ROOMS.md](../ROOMS.md) §2, §3.1, §5 (A2). Stage 2 measures on A1's golden room fixtures with the commands
-below.
+Plan: [docs/ROOMS.md](../ROOMS.md) §2, §3.1, §5 (A2). Stage 1 built the script and checked conventions; **stage 2
+(the Phase A measurement on A1's golden room fixtures) is the section "Stage 2" below, with the table for Gate A.**
 
 ## What exists
 
@@ -120,7 +120,117 @@ Scales from the floor: 1.056 (Solv3R), 1.058 (VGGT), 1.056 (MASt3R), consistent 
 much (and `scale_by_depth` disagrees with the floor scale by 14–27 %: reflective marble, glass), so on real photos the
 residual measures MoGe as much as the solver.
 
+## Stage 2: the golden room (the Phase A measurement)
+
+A1's fixtures (`rooms-foundation` at `0540806`, `fixtures/scenes/{living-wide,room-1..room-6}`, `truth.json`
+`pose_in_room` in living-wide's frame), copied into `evals/out/rooms-spike/fx/` (synthetic renders; nothing from a
+user photo). True scale is 1 for every member (each fixture's calib carries its true height). Hard cases: room-6 faces
+a bare wall (0 % overlap with living-wide, 58 % with room-3); room-4 stands 4.7 m away facing back (12–22 % overlap
+with room-1, 18 % with living-wide).
+
+### New in stage 2 (all under `calib/spike/`)
+
+- `bench.sh FIXTURES OUT TAG [SOLVERS…]`: every solver over five member sets: **all** (living-wide + room-1..6, 7
+  photos), **low-overlap** (room-1, room-4), **low-overlap-lw** (living-wide, room-4), **blank-wall** (room-3, room-6),
+  **blank-wall-lw** (living-wide, room-6). First folder = origin. `REFINE=icp` adds `--refine icp`.
+- `table.py OUT [--members] [--min-conf X]`: the worse of the runs per (set, solver), per metric. `off_target` = placed
+  members outside any target (5 cm, 1.5°, 2 %) at any confidence; `confident_wrong` = run.py's (off by more than 2× a
+  target with confidence ≥ 0.5). `--min-conf X` re-reads the answers as if MIN_CONFIDENCE were X.
+- `run.py`: **a constraint factor in every member's confidence** (decision below) and `--refine icp` (a negative
+  result, below; off by default).
+
+### Exact commands (worktree root; the eval lock was held exclusively for every timed run)
+
+```sh
+F=../rooms-foundation/fixtures/scenes; X=evals/out/rooms-spike/fx; mkdir -p $X
+cp -R $F/living-wide $F/room-* $F/steep-roll $F/portrait $F/living-cool $F/living-warm $X/
+for r in r1 r2; do
+  nix develop -c node scripts/eval-lock.mjs --exclusive --wait-min 120 -- calib/spike/bench.sh $X evals/out/rooms-spike/s2c $r
+done
+# 11 photos (the 7 + the four other goldens at living-wide's spot), for run time at a realistic count:
+bash -c 'X=evals/out/rooms-spike/fx; O=evals/out/rooms-spike/s2c-n11; mkdir -p $O
+  D="$X/living-wide $X/room-1 $X/room-2 $X/room-3 $X/room-4 $X/room-5 $X/room-6 $X/steep-roll $X/portrait $X/living-cool $X/living-warm"
+  for r in r1 r2; do for s in solv3r vggt mast3r manhattan; do
+    nix develop -c node scripts/eval-lock.mjs --exclusive --wait-min 60 -- uv run --quiet --project calib/spike \
+      python calib/spike/run.py $D --solver $s --truth --out $O/n11-$s-$r.json > /dev/null 2> $O/n11-$s-$r.log
+  done; done'
+calib/spike/.venv/bin/python calib/spike/table.py evals/out/rooms-spike/s2c [--members] [--min-conf 0.5]
+calib/spike/.venv/bin/python calib/spike/table.py evals/out/rooms-spike/s2c-n11
+```
+
+Each `run.py` call solves twice in one process (`--repeat 2`: cold = import + load + first solve, warm = second), and
+each set was run in two processes (r1, r2): four solves per cell, the table shows the worse process per metric.
+Earlier passes kept for the record: `s2/` (before the constraint factor), `s2-icp/` (with `--refine icp`), `s2-n11/`.
+
+### Result: the full room (7 photos), worse of 2 runs, default MIN_CONFIDENCE 0.15
+
+Target: yaw ≤ 1.5°, position ≤ 5 cm, scale ≤ 2 %, ≤ 1 unplaced, no confident wrong placement.
+
+| solver | pos median / max (cm) | yaw median / max (°) | scale max (%) | unplaced | off target | confident wrong | cold / warm (s) | peak mem (GB) | meets target |
+|---|---|---|---|---|---|---|---|---|---|
+| **MASt3R** | 1.29 / **2.28** | 0.09 / 0.21 | 0.37 | 1 (room-6) | 0 | 0 | 66.9 / 55.8 | 11.4 | **yes** |
+| Solv3R | 3.44 / 19.36 (room-4) | 0.42 / 1.04 | 2.61 (room-3) | 1 (room-6) | 2 | 1 (room-4, conf 0.57) | 5.4 / 2.4 | 6.1 | no |
+| VGGT | 4.64 / 12.42 (room-4) | 0.07 / 0.50 | 1.94 | 1 (room-6) | 2 | 1 (room-4, conf 0.65) | 14.8 / 5.5 | 22.3 | no |
+| Manhattan | 1.46 / 13.55 (room-1) | 0.17 / 0.35 | 2.0 (grid step) | 1 (room-6) | 2 | 1 (room-1, conf 0.92) | 8.8 / 8.4 (CPU) | 0.2 | no |
+
+**11 photos** (the same 7 + four at living-wide's spot), worse of 2 runs: MASt3R 3.16 cm / 0.49° / 0.32 %, 1 unplaced
+(room-6), 0 off target, **152 s cold / 135 s warm**, 11.6 GB; Solv3R 15.7 cm (room-4, conf 0.69: confident wrong),
+12.7 / 10.1 s, 8.8 GB; VGGT 10.5 cm (room-4, conf 0.81: confident wrong), 31.0 / 18.5 s, 27.1 GB; Manhattan 13.7 cm
+(room-1, conf 0.92: confident wrong), 25.8 / 25.4 s, 0.3 GB. MASt3R's time grows with the pairs (it matches every
+pair): ~56 s for 7 photos, ~135 s for 11.
+
+### The hard subsets (pairs; the second photo is the hard one)
+
+| set | MASt3R | Solv3R | VGGT | Manhattan |
+|---|---|---|---|---|
+| low-overlap (room-1 → room-4, 12–22 %) | placed **14.5 cm** off, conf 0.31–0.32 | unplaced | placed **16.3 cm**, 1.04°, 2.25 %, conf 0.30 | placed **321 cm / 89°** off (wrong 90° turn), conf 0.16 |
+| low-overlap-lw (living-wide → room-4, 18 %) | placed **19.6 cm**, 1.13°, conf 0.17–0.21 | unplaced | placed **11.5 cm**, conf 0.40 | placed **321 cm / 89°**, conf 0.33 |
+| blank-wall (room-3 → room-6, 58 %) | unplaced | unplaced | unplaced | unplaced |
+| blank-wall-lw (living-wide → room-6, 0 %) | unplaced | unplaced | unplaced | unplaced |
+
+No solver places room-4 within target from a single low-overlap partner; every one that places it does so with
+confidence under 0.5 (never "confident wrong"), but at the default MIN_CONFIDENCE 0.15 they are still **placed**
+(off target). With **MIN_CONFIDENCE 0.5** (`table.py --min-conf 0.5`) every such pair placement becomes unplaced and
+MASt3R's full-room row is unchanged (all its placed members have confidence ≥ 0.76); Solv3R's and VGGT's room-4 still
+pass 0.5 and stay confidently wrong. In the full room, MASt3R places room-4 within 1.5 cm via the other photos.
+
+### What the numbers say
+
+- **Yaw is easy for every ML solver** (≤ 1.1° everywhere they place). **Position is the discriminator**: Solv3R and VGGT
+  are 10–20 cm off on the far, wide-baseline photo (room-4, 4.7 m away; 3–4 % along the line of sight) while their
+  residual (2.5–5 cm) and confidence (0.57–0.81) look fine. MASt3R's per-pair matching with metric depth places it at
+  1.2–1.5 cm.
+- **Manhattan** fails on its own scale grid (0.02 steps: room-1 picks 0.98 → 13.5 cm off at confidence 0.92) and on
+  low overlap (the wrong 90° turn). Fine as the no-dependency fallback only when the user checks the result.
+- **Run to run**: Solv3R, VGGT and Manhattan are deterministic (identical numbers in r1 and r2); MASt3R's sparse global
+  alignment is not (positions differ by ~0.1–0.5 cm between runs; before the constraint factor, its blank-wall
+  placement's confidence went 0.32 → 0.44 → 0.60 across runs).
+
+## Stage 2 decisions
+
+- **Confidence gets a geometric constraint factor** (`constraint()` in run.py, `CONF_CONSTRAINT = 0.1`). Before it,
+  every solver placed or nearly placed room-6 (the bare wall) along the wall: MASt3R put it **2.0 m off with confidence
+  0.32–0.60** (0.60 = confident wrong, in the 11-photo run), because a plane slid along itself leaves the depth
+  residual small. The factor is λmin/λmax of the horizontal parts of the member's own depth.png surface normals: 0.000
+  for room-6, 0.36–0.92 for every other fixture photo. It is solver-independent, needs no tuning on the answers (the
+  gap is wide), and it is a property of the photo, so Phase B can also tell the user *why* ("this photo shows only one
+  wall: include a corner or furniture"). It was added after seeing the stage-2 numbers: say so at Gate A.
+- **MIN_CONFIDENCE: recommend 0.5 for Phase B** (the spike default stays 0.15 so the tables are comparable). Also
+  chosen after seeing the numbers; it turns every low-overlap pair placement (11–20 cm off, confidence 0.17–0.40; Manhattan's 3 m flips 0.16–0.33) into
+  unplaced and costs MASt3R nothing on the full room. It does not rescue Solv3R or VGGT (their room-4 errors carry
+  0.57–0.81). The confidence formula is still uncalibrated beyond these fixtures.
+- **`--refine icp` is a negative result; do not build it.** Re-fitting each member (turn + floor shift) against the
+  others' depth points by trimmed ICP (`s2-icp/`) made Solv3R and VGGT worse on the full room (to 62 and 282 cm max: a
+  wrong member drags the others), and it **made wrong placements look right**: after ICP, MASt3R's 2 m blank-wall
+  placement had residual 0.18 cm and confidence 0.78–0.81, and Solv3R/VGGT's blank-wall pair placements became
+  confident wrong. It helped only MASt3R's low-overlap pairs (worst 20.3 → 5.7 cm). The residual is only a confidence signal
+  if the solver did not minimise it.
+
 ## Install, licence
+
+Measured on disk: the spike's venv 0.96 GB (torch 0.58 GB, opencv 0.12 GB, scipy 0.07 GB); repos MASt3R 11 MB,
+Solv3R 68 MB, VGGT 144 MB; weights below. Total per solver (venv + repo + weights): **MASt3R ≈ 3.6 GB, Solv3R ≈
+1.5 GB, VGGT ≈ 5.8 GB, Manhattan ≈ 0.1 GB** (numpy, scipy, pillow; already in calib).
 
 | solver | install (beyond calib's torch) | weights | licence |
 |---|---|---|---|
@@ -149,20 +259,40 @@ Solv3R's bfloat16 autocast is CUDA-only, so on MPS/CPU it runs in fp32 (as its `
 - The spike is ruff-clean under calib's config (calib's `ruff check calib` covers `calib/spike/`); calib's pyright
   `include` doesn't cover it, and it isn't pyright-strict (torch and the solver repos are untyped).
 
-## Open issues (for stage 2 and Gate A)
+## Recommendation for Gate A
 
-- **No measurement yet on wide baselines.** Everything above has at most 0.7 m and 30° between photos and one source
-  render; A1's golden room fixtures (6 cameras, a low-overlap pair, a blank wall) are the real test. Expect the ML
-  solvers to differ much more there; Manhattan's greedy matching is untested on partial overlap.
-- **Confidence is uncalibrated.** Weights (`CONF_OVERLAP`, `CONF_RESIDUAL_CM`, `CONF_TILT_DEG`, `MIN_CONFIDENCE` at the
-  top of `run.py`) were set by eye on these sets; stage 2 should tune them on the room fixtures against
-  `confident_wrong`. Manhattan placed a real photo 16.6 cm off with confidence 0.71: the residual can't tell a shift
-  that MoGe's own depth error allows.
-- The first member is always the origin with confidence 1; if it is the stranger (a photo of another room), every other
-  member looks wrong. Phase B should pick the origin by the solver's agreement, or let the user reorder.
-- Peak memory: `peak_mem_gb` = peak RSS + peak MPS driver memory (sampled at 0.1 s); on unified memory these may
-  overlap, so it is an upper bound. VGGT's 10 GB RSS is the fp32 checkpoint loaded on the CPU before moving to MPS.
-- Timing note: Manhattan's first-ever run took 15 s cold (scipy import / bytecode); later colds were ~2–5 s.
-- Every model load asks the Hugging Face Hub whether its revision moved (a network round trip, unauthenticated;
-  nothing about the photos is sent). Phase B should pin revisions and load offline, as calib does for MoGe.
-- `scripts/ownership.json` already gives `calib/**` to calib, so `calib/spike/` needs no new entry.
+**MASt3R** is the only candidate that meets every Phase A target on the golden room: 2.3 cm / 0.21° / 0.37 % worst over
+7 photos (3.2 cm / 0.49° / 0.32 % over 11), one unplaced photo (the bare wall, correctly), no wrong placement at any
+confidence in the full room, in both runs. Its costs, plainly:
+
+- **Licence: CC BY-NC-SA 4.0** (non-commercial, share-alike), and the checkpoint is also bound by its training sets'
+  terms, several non-commercial. Fine for this personal tool; it rules out any commercial use of the feature as built.
+- **Run time: ~1 minute for 7 photos, ~2.3 minutes for 11** on MPS (M3 Max), growing with the number of pairs; cold
+  start adds ~10 s. A room alignment is a background job (ROOMS.md §3.3), so this is a wait, not a freeze, but 12
+  photos will be over 2 minutes.
+- **Memory ~11.5 GB peak** (RSS + MPS, an upper bound on unified memory); 2.6 GB of weights, ~3.6 GB installed.
+
+Alternatives, if the licence or the wait is unacceptable: **Solv3R** (2–10 s, 6–9 GB, NVIDIA non-commercial weights) or
+**VGGT** (5–18 s, 22–27 GB, non-commercial weights; a commercial checkpoint exists behind an application form) both
+miss the position target on the far photo by 3–4× and do so with high confidence, so either would need the user to
+check every alignment (Phase B's Align photos mode). **Manhattan** (no ML, ours) misses too (scale grid, 90° flips on
+low overlap) and stays the no-dependency fallback per ROOMS.md §5 Phase B. In Phase B, keep the constraint factor and
+use MIN_CONFIDENCE 0.5 whichever solver is chosen.
+
+## Open issues
+
+- **Synthetic fixtures only.** All stage-2 numbers come from A1's renders (exact depth, exact calib, flat-shaded
+  surfaces). Real photos bring MoGe's depth error (13–19 cm residual on the real lounge pair, stage 1) and real texture
+  (which may help the ML solvers more than these renders do). The ranking may change in Phase D; the real E20 / `eval:real-room` decides.
+- **Confidence is tuned after the fact** on these fixtures (CONF_CONSTRAINT, and the 0.5 threshold recommendation);
+  nothing holds out. Solv3R's and VGGT's far-photo errors are invisible to the residual, so no threshold fixes them.
+- **Low-overlap pairs are unsolved by everything**: a room-4-like photo can only be placed through a third photo that
+  overlaps both (as in the full room). ROOMS.md §7's photo advice ("each photo overlaps the previous") matters.
+- MASt3R is non-deterministic at the ~0.5 cm level; Phase B's pytest against truth needs a tolerance, not equality.
+- The first member is always the origin with confidence 1 (stage 1 issue, unchanged): if it is the bare wall or a
+  stranger, everything else looks wrong. Phase B should pick the best-constrained, best-connected member as origin.
+- `check-ownership calib --base main` with this branch's script fails on `docs/notes/rooms-calib.md` only; A1's script
+  on `rooms-foundation` (which accepts `docs/notes/rooms-<track>.md`) passes. It resolves when A1's branch merges.
+- Peak memory = peak RSS + peak MPS driver memory, an upper bound on unified memory. Each model load contacts the
+  Hugging Face Hub for its revision (no photo data); Phase B should pin revisions and load offline.
+- calib/spike is ruff-clean (`check:py` ok) but not pyright-strict and not `ruff format`-ed (not gated).
