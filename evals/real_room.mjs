@@ -113,7 +113,7 @@ ev.check('both walls are on the floor plan (each from two floor points in placed
 const report = res.spots
 for (const s of report) {
   ev.check(`${s.name}: in every photo that shows it (${s.rows.length}), its distances to ${Object.keys(s.from).join(' and ')} match the tape within ${TOL_M * 100} cm`,
-    s.rows.length > 0 && s.rows.every((x) => x.err_cm <= TOL_M * 100), `${s.rows.map((x) => `${x.photo}: ${Number.isFinite(x.err_cm) ? `${x.err_cm.toFixed(1)} cm` : 'unplaced'}`).join(', ')}; spread ${s.spread_cm} cm`)
+    s.rows.length > 0 && s.rows.every((x) => x.err_cm <= TOL_M * 100), `${s.rows.map((x) => `${x.photo}: ${Number.isFinite(x.err_cm) ? `${x.err_cm.toFixed(1)} cm` : x.room ? 'a wall is not on the plan' : 'unplaced'}`).join(', ')}; spread ${s.spread_cm} cm`)
 }
 fs.writeFileSync(path.join(ev.out, 'real-room.json'), JSON.stringify({ room: ROOM, photos: files, aligned_s: alignedS, scale_k: k, align: d?.align && { solver: d.align.solver, device: d.align.device, elapsed_s: d.align.elapsed_s, loop_residual_cm: d.align.loop_residual_cm }, poses: d?.members?.map((m) => ({ photo: Object.keys(names).find((f) => names[f] === m.scene), pose: m.pose, scale: m.scale, pose_source: m.pose_source })), spots: report }, null, 2))
 ev.note(`poses: ${d?.members?.map((m) => `${Object.keys(names).find((f) => names[f] === m.scene)} ${fmtPose(m.pose)} ×${m.scale?.toFixed(3)}`).join('; ')}`)
