@@ -1,6 +1,8 @@
 # midstudy rooms: one layout, several photos
 
-Status: **plan, not started** (written 2026-11-06 on `main` at `7536e25`). The work runs as dynamic workflows, one per
+Status: **Phase A** (written 2026-11-06 on `main` at `7536e25`). A1 (contract + fixtures) is on `rooms-foundation`:
+[CONTRACT.md §4.9](../contract/CONTRACT.md) is the interface from now on, and where it differs from §3 below it wins
+(the differences are listed in [docs/notes/rooms-foundation.md](notes/rooms-foundation.md)). The work runs as dynamic workflows, one per
 phase, shaped like [REFACTOR.md](REFACTOR.md) §5–§9 and Anthropic's "Building agents: when to fold subagents into your
 main agent loop" (§10 here). Read this file, then CONTRACT.md §4, before starting anything.
 
