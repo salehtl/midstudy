@@ -21,10 +21,17 @@ dependencies. Node calls it through `midstudy-wasm-node` and `core/js/node.ts`.
 ### Kani bounds
 
 Every harness proves "no panic, no overflow, no out-of-bounds access" plus the properties in its doc comment, for
-every input up to the bound. Whole functions run on short inputs; their building blocks on longer ones (the JPEG walk
-is a loop of `step`s, each proved to stay in bounds and to move forward; the GLB container and the layout arithmetic
-are proved apart from the JSON reader). Under Kani the JPEG walk uses the plain `position` scan; the block scan the
-production build uses is proved equal to it. See docs/notes/kernels-hardening.md for the timings.
+every input up to the bound: `sniff` (16 bytes), `jpeg::step` and `jpeg::scan_end` (10 bytes, every offset: in bounds
+and moving forward, so the JPEG walk over any input ends), `jpeg::frame_info` (16), the block scan = `position` (8, and
+every 65-byte input), the PNG chunk walk (32), `png::size` (26), the GLB container (40), the compact layout's arithmetic
+and `pad4` (every `usize`), the vectorised comparison = `==` (6, and 65), `is_slug` = its regex (8), the Content-Length
+digit fold (16) and `content_length` (4), the WHATWG base64 decoder (8). Under Kani the JPEG walk uses the plain
+`position` scan; the block scan the production build uses is proved equal to it. The string-heavy parsers (paths,
+hosts, `X-Midstudy-Meta`, CPython's base64, data URIs, zip names, the glTF JSON reader) and `jpeg::strip` as a whole
+didn't finish in CBMC at 3–4 bytes (its models of `String` and `Vec` growth): `tests/exhaustive.rs` runs them on
+every input up to a bound instead (every byte string up to 2 bytes; every string up to 4–5 characters over the
+characters each treats specially; every JPEG of up to 5 and PNG of up to 4 structural tokens; 3.1 M inputs in 2.4 s).
+Timings in docs/notes/kernels-hardening.md.
 
 ## Commands (from `core/`)
 

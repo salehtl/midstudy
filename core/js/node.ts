@@ -65,7 +65,7 @@ function raw(): Raw {
   const require = createRequire(import.meta.url)
   const mod: unknown = require(WASM_MODULE)
   if (!isRaw(mod)) {
-    throw new Error(`core/js/node.ts: ${WASM_MODULE} doesn't export the media API: rebuild it (core/crates/wasm-node/build-node.sh)`)
+    throw new Error(`core/js/node.ts: ${WASM_MODULE} doesn't export the media API: rebuild it (nix develop -c npm run build)`)
   }
   loaded = mod
   return mod

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bundles page.ts and worker.ts with esbuild (from the flake's pinned nixpkgs) into evals/out/k-geom/browser/, then runs
-# them in headless Chrome. Needs build/wasm/web/ (../../build-web.sh). Usage, from the repo root:
+# them in headless Chrome. Needs build/wasm/web/ (`nix develop -c npm run build`). Usage, from the repo root:
 #   core/crates/wasm-web/tests/browser/run.sh
 set -euo pipefail
 cd "$(dirname "$0")/../../../../.."

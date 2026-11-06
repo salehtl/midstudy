@@ -451,6 +451,54 @@ mod tests {
         }
     }
 
+    /// The pixel stage (`unfilter_rows`) on every small image over a set of filter bytes (the five types and two
+    /// unknown) and of samples (both ends of a byte, the middle): 8-bit images up to 2 × 2 and 16-bit up to 2 × 1.
+    /// One sample per pixel, or the first row with an unknown filter; never a panic.
+    #[test]
+    fn every_small_image() {
+        let filters = [0_u8, 1, 2, 3, 4, 5, 255];
+        let samples = [0_u8, 1, 127, 128, 255];
+        let sizes: &[(usize, usize, usize)] = if cfg!(miri) {
+            &[(1, 1, 1), (2, 1, 1)] // Miri interprets every case: the one-pixel images only
+        } else {
+            &[
+                (1, 1, 1),
+                (1, 2, 1),
+                (1, 1, 2),
+                (1, 2, 2),
+                (2, 1, 1),
+                (2, 2, 1),
+            ]
+        };
+        for &(bpp, width, height) in sizes {
+            let row_len = width * bpp + 1;
+            let len = row_len * height;
+            // Every row: a filter byte and `width · bpp` sample bytes, from the sets above.
+            let row_choices =
+                filters.len() * samples.len().pow(u32::try_from(width * bpp).unwrap());
+            let total = row_choices.pow(u32::try_from(height).unwrap());
+            for n in 0..total {
+                let mut raw = vec![0_u8; len];
+                let mut k = n;
+                for (i, b) in raw.iter_mut().enumerate() {
+                    let set: &[u8] = if i % row_len == 0 { &filters } else { &samples };
+                    *b = set[k % set.len()];
+                    k /= set.len();
+                }
+                let first_bad = raw.chunks(row_len).position(|r| r[0] > 4);
+                let result = unfilter_rows(&mut raw, width * bpp, bpp, width * height);
+                if let Err(PngError::BadFilter { row, .. }) = result {
+                    assert_eq!(Some(row as usize), first_bad);
+                } else {
+                    let s = result.unwrap();
+                    assert!(first_bad.is_none());
+                    assert_eq!(s.len(), width * height);
+                    assert!(bpp == 2 || s.iter().all(|&v| v < 256));
+                }
+            }
+        }
+    }
+
     #[test]
     fn crc_of_iend() {
         assert_eq!(crc32(&[b"IEND"]), 0xAE42_6082);

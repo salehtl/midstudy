@@ -1,4 +1,4 @@
-// Tests core/js/node.ts against the wasm build in build/wasm/node/ (build it with core/crates/wasm-node/build-node.sh):
+// Tests core/js/node.ts against the wasm build in build/wasm/node/ (build it with `nix develop -c npm run build`):
 // every function on known inputs, the wasm outputs against the native build (examples/difftool) on the GPS-canary
 // corpus diff_v1.py leaves in evals/out/media-diff/corpus/, and random inputs into every export (a panic in wasm would
 // throw "RuntimeError: unreachable").

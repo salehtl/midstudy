@@ -1,8 +1,11 @@
 //! Kani harnesses for the depth.png decoder (`cargo kani`, in the nightly shell; check:rust runs every one): no panic,
 //! no arithmetic overflow and no out-of-bounds access for every input up to the bound in each name, plus the
 //! properties stated with each. The inflater is `miniz_oxide`'s (fuzzed upstream and by `fuzz/decode_png`); the
-//! stages around it are proved here: the chunk reader, the header, and the pixel stage (unfiltering) with its filters
-//! proved to invert the PNG spec's.
+//! stages around it are proved here: the chunk reader with its CRC, the header, and the pixel stage (unfiltering) with
+//! its filters proved to invert the PNG spec's. The decoder as a whole timed out in CBMC at 33 bytes (the CRC over a
+//! symbolic IHDR, then the chunk loop's `Vec`), and so did the pixel stage's row loop on 2 × 2 images (its sample
+//! `Vec`): `png::tests::every_small_image` runs that loop on every small image instead, and the decoder is fuzzed
+//! (`fuzz/decode_png`) and property-tested.
 
 use crate::png::{self, PngError};
 
@@ -35,24 +38,19 @@ fn paeth_is_the_spec() {
     assert_eq!(png::paeth(a, b, c), paeth_spec(a, b, c));
 }
 
-/// The PNG spec's filter of one row (`raw` the row's bytes, `prior` the previous row's, `bpp` bytes a pixel).
-fn filter_spec(kind: u8, raw: &[u8], prior: &[u8], bpp: usize) -> Vec<u8> {
-    raw.iter()
-        .enumerate()
-        .map(|(i, &x)| {
-            let a = if i >= bpp { raw[i - bpp] } else { 0 };
-            let b = prior[i];
-            let c = if i >= bpp { prior[i - bpp] } else { 0 };
-            let pred = match kind {
-                0 => 0,
-                1 => a,
-                2 => b,
-                3 => ((u16::from(a) + u16::from(b)) / 2) as u8,
-                _ => paeth_spec(a, b, c),
-            };
-            x.wrapping_sub(pred)
-        })
-        .collect()
+/// The PNG spec's filter of byte `i` of a row (`raw` the row's bytes, `prior` the previous row's, `bpp` bytes a pixel).
+fn filter_byte(kind: u8, raw: &[u8], prior: &[u8], i: usize, bpp: usize) -> u8 {
+    let a = if i >= bpp { raw[i - bpp] } else { 0 };
+    let b = prior[i];
+    let c = if i >= bpp { prior[i - bpp] } else { 0 };
+    let pred = match kind {
+        0 => 0,
+        1 => a,
+        2 => b,
+        3 => ((u16::from(a) + u16::from(b)) / 2) as u8,
+        _ => paeth_spec(a, b, c),
+    };
+    raw[i].wrapping_sub(pred)
 }
 
 /// Unfiltering inverts every filter of the spec, for every row of 0 to 4 bytes (1 byte a sample) and every previous
@@ -60,59 +58,42 @@ fn filter_spec(kind: u8, raw: &[u8], prior: &[u8], bpp: usize) -> Vec<u8> {
 #[kani::proof]
 #[kani::unwind(6)]
 fn unfilter_inverts_filter_8bit() {
-    let (raw, len) = any_bytes::<4>();
+    let raw: [u8; 4] = kani::any();
     let prior: [u8; 4] = kani::any();
-    let (raw, prior) = (&raw[..len], &prior[..len]);
+    let len: usize = kani::any_where(|&n: &usize| n <= 4);
     let kind: u8 = kani::any();
-    let mut row = filter_spec(kind.min(4), raw, prior, 1);
-    let filtered = row.clone();
-    let ok = png::unfilter::<1>(kind, &mut row, prior);
+    let mut row = [0u8; 4];
+    for (i, r) in row.iter_mut().enumerate() {
+        *r = filter_byte(kind.min(4), &raw, &prior, i, 1);
+    }
+    let filtered = row;
+    let ok = png::unfilter::<1>(kind, &mut row[..len], &prior[..len]);
     assert_eq!(ok, kind <= 4);
     if ok {
-        assert_eq!(row.as_slice(), raw);
+        assert_eq!(&row[..len], &raw[..len]);
     } else {
         assert_eq!(row, filtered);
     }
 }
 
-/// The same for 16-bit samples (2 bytes a pixel), rows of 0 to 3 pixels.
+/// The same for 16-bit samples (2 bytes a pixel), rows of 0 to 2 pixels.
 #[kani::proof]
-#[kani::unwind(8)]
+#[kani::unwind(6)]
 fn unfilter_inverts_filter_16bit() {
-    let raw: [u8; 6] = kani::any();
-    let prior: [u8; 6] = kani::any();
-    let px: usize = kani::any_where(|&n: &usize| n <= 3);
-    let (raw, prior) = (&raw[..2 * px], &prior[..2 * px]);
+    let raw: [u8; 4] = kani::any();
+    let prior: [u8; 4] = kani::any();
+    let px: usize = kani::any_where(|&n: &usize| n <= 2);
     let kind: u8 = kani::any_where(|&k: &u8| k <= 4);
-    let mut row = filter_spec(kind, raw, prior, 2);
-    assert!(png::unfilter::<2>(kind, &mut row, prior));
-    assert_eq!(row.as_slice(), raw);
-}
-
-/// The pixel stage on whole images up to 3 × 2 samples of either depth: no panic for any inflated data of the right
-/// length; it returns one sample per pixel, or the first bad filter byte.
-#[kani::proof]
-#[kani::unwind(16)]
-fn unfilter_rows_short() {
-    let sixteen: bool = kani::any();
-    let bpp = if sixteen { 2 } else { 1 };
-    let width: usize = kani::any_where(|&w: &usize| (1..=3).contains(&w));
-    let height: usize = kani::any_where(|&h: &usize| (1..=2).contains(&h));
-    let mut raw: [u8; 14] = kani::any();
-    let len = (width * bpp + 1) * height;
-    let result = png::unfilter_rows(&mut raw[..len], width * bpp, bpp, width * height);
-    match result {
-        Ok(samples) => {
-            assert_eq!(samples.len(), width * height);
-            if !sixteen {
-                assert!(samples.iter().all(|&s| s < 256));
-            }
-        }
-        Err(PngError::BadFilter { row, filter }) => {
-            assert!(filter > 4 && (row as usize) < height);
-        }
-        Err(_) => panic!("only a bad filter byte can fail the pixel stage"),
+    let mut row = [0u8; 4];
+    for (i, r) in row.iter_mut().enumerate() {
+        *r = filter_byte(kind, &raw, &prior, i, 2);
     }
+    assert!(png::unfilter::<2>(
+        kind,
+        &mut row[..2 * px],
+        &prior[..2 * px]
+    ));
+    assert_eq!(&row[..2 * px], &raw[..2 * px]);
 }
 
 /// The IHDR fields, for all 2¹⁰⁴ headers: no panic; an accepted header is grayscale 8 or 16 bits, non-interlaced,
@@ -148,13 +129,4 @@ fn next_chunk_short() {
         ]);
         assert_eq!(crc, png::crc32(&[&ty, data]));
     }
-}
-
-/// The whole decoder, for every input of 0 to 40 bytes (the signature, an IHDR chunk and the start of the next):
-/// no panic.
-#[kani::proof]
-#[kani::unwind(42)]
-fn decode_gray_short() {
-    let (buf, len) = any_bytes::<40>();
-    let _ = png::decode_gray(&buf[..len]);
 }

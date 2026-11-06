@@ -108,17 +108,32 @@ fn frame_info_short() {
 
 // --- PNG --------------------------------------------------------------------------------------------------------
 
-/// `png::strip` whole, for every input of 0 to 32 bytes (the signature and up to two chunk headers): no panic; the
-/// output keeps the signature, is no longer than the input, and changes exactly when something was removed.
+/// The PNG walk behind `strip` and `strip_plan`, for every input of 0 to 32 bytes (the signature and up to two chunk
+/// headers): no panic; it keeps the signature first, then whole chunks of the input in order, and keeps all of the
+/// input exactly when nothing was removed. (`strip_plan` only collects these ranges and `strip` applies them; with the
+/// plan's `Vec` CBMC ran out of memory even at 24 bytes, so the walk is proved without it.)
 #[kani::proof]
 #[kani::unwind(10)]
-fn png_strip_short() {
+fn png_walk_short() {
     let (buf, len) = any_bytes::<32>();
     let data = buf.get(..len).unwrap_or_default();
-    if let Ok(s) = png::strip(data) {
-        assert!(s.bytes.starts_with(&png::SIGNATURE));
-        assert!(s.bytes.len() <= data.len());
-        assert_eq!(s.removed.any(), s.bytes.len() != data.len());
+    let mut last = 0usize;
+    let mut kept = 0usize;
+    let mut first = true;
+    let walked = png::walk(data, |start, end| {
+        assert!(start < end && end <= len);
+        assert!(if first {
+            start == 0 && end == png::SIGNATURE.len()
+        } else {
+            last <= start
+        });
+        first = false;
+        last = end;
+        kept += end - start;
+    });
+    if let Ok(removed) = walked {
+        assert!(kept <= len);
+        assert_eq!(kept == len, !removed.any());
     }
 }
 

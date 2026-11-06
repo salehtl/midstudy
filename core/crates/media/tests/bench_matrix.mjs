@@ -5,7 +5,7 @@
 //
 //   nix develop -c evals/py core/crates/media/tests/bench_inputs.py
 //   nix develop -c node scripts/eval-lock.mjs --exclusive -- node core/crates/media/tests/bench_matrix.mjs \
-//       [--rounds 3] [--runs 15] [--no-default] [--impl name=cmd ...] [--only op:file] [--out evals/out/kh/media-bench.json]
+//       [--rounds 3] [--runs 15] [--no-default] [--impl name=cmd ...] [--pieces] [--only op:file] [--out evals/out/kh/media-bench.json]
 //
 // Default implementations: v1 (evals/py tests/bench_v1.py), native (core/target/release/examples/bench-media) and wasm
 // (node core/crates/wasm-node/js-test/bench.ts); --no-default keeps only v1. `--impl name=cmd` adds one (a command taking `<op> <file> <runs>` and
@@ -46,6 +46,11 @@ const cases = [
   ['glb-in-place', 'glb-photo.glb', 'the same, in place'],
   ['glb', 'SheenChair.glb', 'SheenChair.glb (7 PNG textures, nothing to strip)'],
   ['glb', 'gps.glb', "metadata.py's gps-glb (2.7 KB)"],
+  ...(argv.includes('--pieces') ? [
+    ['jpeg-pieces', 'photo12mp-gps.jpg', 'photo JPEG, zero-copy pieces (not joined)'],
+    ['jpeg-pieces', 'big12mp.jpg', 'smooth JPEG (clean), zero-copy pieces'],
+    ['png-pieces', 'png3mp-exif.png', 'noisy PNG, zero-copy pieces (not joined)'],
+  ] : []),
 ].filter(([op, file]) => !ONLY || `${op}:${file}`.includes(ONLY))
 
 for (const [, file] of cases) {
@@ -58,6 +63,7 @@ const samples = new Map()
 for (let r = 0; r < ROUNDS; r++) {
   for (const [op, file] of cases) {
     for (const [name, cmd] of impls) {
+      if (op.endsWith('-pieces') && (name === 'v1' || name.includes('before') || name.startsWith('native'))) continue // the pieces exist only in the new face
       const v1op = name === 'v1' && op === 'glb-in-place' ? 'glb' : op // v1 only had the in-place layout
       const p = spawnSync(cmd[0], [...cmd.slice(1), v1op, path.join(IN, file), String(RUNS)], { cwd: REPO, encoding: 'utf8' })
       const line = (p.stdout || '').trim().split('\n').at(-1) ?? ''

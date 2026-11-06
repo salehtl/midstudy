@@ -89,11 +89,18 @@ pub fn strip(data: &[u8]) -> Result<Stripped, PngError> {
 /// # Errors
 /// As [`strip`].
 pub fn strip_plan(data: &[u8]) -> Result<(Plan, Removed), PngError> {
+    let mut plan = Plan::default();
+    let removed = walk(data, |start, end| plan.copy(start, end))?;
+    Ok((plan, removed))
+}
+
+/// The chunk walk behind [`strip_plan`]: calls `keep(start, end)` for the signature and every kept chunk, in order,
+/// and returns what was removed. Allocates nothing (the Kani harness `png_walk_short` proves it on its own).
+pub(crate) fn walk(data: &[u8], mut keep: impl FnMut(usize, usize)) -> Result<Removed, PngError> {
     if !data.starts_with(&SIGNATURE) {
         return Err(PngError::NotPng);
     }
-    let mut plan = Plan::default();
-    plan.copy(0, SIGNATURE.len());
+    keep(0, SIGNATURE.len());
     let mut removed = Removed::default();
     let mut i = SIGNATURE.len();
     while i.checked_add(12).is_some_and(|e| e <= data.len()) {
@@ -113,12 +120,12 @@ pub fn strip_plan(data: &[u8]) -> Result<(Plan, Removed), PngError> {
             b"eXIf" => removed.exif = removed.exif.saturating_add(1),
             b"tEXt" | b"iTXt" | b"zTXt" => removed.text = removed.text.saturating_add(1),
             b"tIME" => removed.time = removed.time.saturating_add(1),
-            _ => plan.copy(i, end),
+            _ => keep(i, end),
         }
         i = end;
         if kind == b"IEND" {
             removed.trailing_bytes = data.len().saturating_sub(end);
-            return Ok((plan, removed));
+            return Ok(removed);
         }
     }
     Err(PngError::NoEnd)

@@ -763,10 +763,10 @@ fn bin_buffer<'a>(
     }
 }
 
-/// Buffer 0 with each shrinking image written at its offset and followed by its zero padding (compact: the rest of
-/// the freed bytes removed). `edits` are sorted by offset and don't overlap.
-fn rebuild_bin(bin: &[u8], edits: &[ViewEdit], layout: Layout) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bin.len());
+/// Appends buffer 0 to `out` with each shrinking image written at its offset and followed by its zero padding
+/// (compact: the rest of the freed bytes removed). `edits` are sorted by offset and don't overlap. Written straight
+/// into the output file: the binary chunk, nearly all of a textured GLB, is copied once.
+fn write_bin(out: &mut Vec<u8>, bin: &[u8], edits: &[ViewEdit], layout: Layout) {
     let mut pos = 0usize;
     for e in edits {
         out.extend_from_slice(bin.get(pos..e.offset).unwrap_or_default());
@@ -776,7 +776,14 @@ fn rebuild_bin(bin: &[u8], edits: &[ViewEdit], layout: Layout) -> Vec<u8> {
         pos = e.offset.saturating_add(e.length);
     }
     out.extend_from_slice(bin.get(pos..).unwrap_or_default());
-    out
+}
+
+/// The length [`write_bin`] writes: buffer 0 less the bytes the layout removes.
+fn rebuilt_len(bin: &[u8], edits: &[ViewEdit], layout: Layout) -> usize {
+    let removed = edits.iter().fold(0usize, |sum, e| {
+        sum.saturating_add(split_freed(e.length.saturating_sub(e.clean.len()), layout).1)
+    });
+    bin.len().saturating_sub(removed)
 }
 
 /// The JSON edits a layout needs: the shrunk views' new lengths and, when bytes were removed, the new offsets of the
@@ -861,16 +868,18 @@ fn splice_json(text: &[u8], mut edits: Vec<TextEdit>) -> Vec<u8> {
     j
 }
 
-/// The GLB container around a JSON chunk and an optional binary chunk (padded with zeros to 4 bytes here).
-fn assemble(json_chunk: &[u8], bin: Option<Vec<u8>>) -> Result<Vec<u8>, GlbError> {
-    let bin = bin.map(|mut b| {
-        b.resize(b.len().saturating_add(pad4(b.len())), 0);
-        b
-    });
+/// The GLB container around a JSON chunk and an optional binary chunk (buffer 0 rewritten by [`write_bin`], padded
+/// with zeros to 4 bytes), written in one pass.
+fn assemble(
+    json_chunk: &[u8],
+    bin: Option<(&[u8], &[ViewEdit], Layout)>,
+) -> Result<Vec<u8>, GlbError> {
+    let bin_len = bin.map(|(b, edits, layout)| rebuilt_len(b, edits, layout));
+    let bin_padded = bin_len.map(|n| n.saturating_add(pad4(n)));
     let total = HEADER_LEN
         .checked_add(8)
         .and_then(|t| t.checked_add(json_chunk.len()))
-        .and_then(|t| t.checked_add(bin.as_ref().map_or(0, |b| b.len().saturating_add(8))))
+        .and_then(|t| t.checked_add(bin_padded.map_or(0, |n| n.saturating_add(8))))
         .and_then(|t| u32::try_from(t).ok())
         .ok_or(GlbError::TooLarge)?;
     let json_len = u32::try_from(json_chunk.len()).map_err(|_| GlbError::TooLarge)?;
@@ -881,11 +890,13 @@ fn assemble(json_chunk: &[u8], bin: Option<Vec<u8>>) -> Result<Vec<u8>, GlbError
     out.extend_from_slice(&json_len.to_le_bytes());
     out.extend_from_slice(&CHUNK_JSON.to_le_bytes());
     out.extend_from_slice(json_chunk);
-    if let Some(b) = &bin {
-        let bin_len = u32::try_from(b.len()).map_err(|_| GlbError::TooLarge)?;
-        out.extend_from_slice(&bin_len.to_le_bytes());
+    if let (Some((b, edits, layout)), Some(padded)) = (bin, bin_padded) {
+        let bin_len32 = u32::try_from(padded).map_err(|_| GlbError::TooLarge)?;
+        out.extend_from_slice(&bin_len32.to_le_bytes());
         out.extend_from_slice(&CHUNK_BIN.to_le_bytes());
-        out.extend_from_slice(b);
+        let start = out.len();
+        write_bin(&mut out, b, edits, layout);
+        out.resize(start.saturating_add(padded), 0);
     }
     Ok(out)
 }
@@ -934,11 +945,7 @@ pub fn strip(data: &[u8], layout: Layout) -> Result<Stripped, GlbError> {
 
     // A binary chunk is written when buffer 0 lives in it and the input had one (an empty buffer 0 may have none).
     let bin_out = match bin {
-        Some(b) if container.bin.is_some() => Some(if view_edits.is_empty() {
-            b.to_vec()
-        } else {
-            rebuild_bin(b, &view_edits, layout)
-        }),
+        Some(b) if container.bin.is_some() => Some((b, view_edits.as_slice(), layout)),
         _ => None,
     };
     let bytes = assemble(&splice_json(text, text_edits), bin_out)?;
