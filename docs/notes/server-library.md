@@ -4,7 +4,7 @@ v1's library API (planner/serve.py `LibraryService` and the handlers `get_librar
 `post_library_from_url`, `queue_add`, `patch_library_item`, `put_library_thumb`, `delete_library_item`,
 `restore_library_item`, and the library job routes of `handle_api_get`; contract §2.8, §2.9) in strict TypeScript on
 server-core's seams. Branch `v2-server-library`, from `v2-server-core` at `22eb9b1`. Everything below was run on rabbit
-on 2026-11-06 (00:00–02:00 UTC), fal mocked (`MIDSTUDY_FAL_MOCK=fixtures/fal`, `MIDSTUDY_NO_DOTENV=1`,
+between 2026-11-05 23:30 and 2026-11-06 01:00 UTC, fal mocked (`MIDSTUDY_FAL_MOCK=fixtures/fal`, `MIDSTUDY_NO_DOTENV=1`,
 `NOOK_NO_DOTENV=1`, `--daily-spend-usd 0` except the cap tests), never `.env`, never `fixtures/photos/`, headless Chrome
 only through the eval harness. Nothing was pushed. `POST /api/library/product` is the product track's.
 
@@ -90,12 +90,12 @@ that `common/logic/` is copied into the sandbox (the modules import it).
 | Eval | Before (server-core) | This branch, legacy CLI | Throwaway merge + v2-server-scenes, legacy CLI | + v2-pipeline, `MIDSTUDY_ADD=next` |
 |---|---|---|---|---|
 | E7 library-api | build check, then "did not answer GET /api/library" | **78/79** | **79/79** | 78/79 |
-| E13 splat | — (its first add would 501) | 24/51: every library check passes | **51/51** | **51/51** |
+| E13 splat | not run (its first add would get a 501) | 24/51: every library check passes | **51/51** | **51/51** |
 
 - E7 on this branch: the one failure is "W2 /api/render counts against the same cap (402)": `POST /api/render` is
   server-scenes' route (a 501 stub here). Run twice: 78/79 both times (at `279ca42`, 21 s wall; at the final code, 15 s).
-  For reference, v1's server on the same branch: 79/79 in 44 s (with v1, curl waits 1 s for a `100 Continue` that never
-  comes on each upload over 1 MB; v2 sends it).
+  For reference, v1's server on the same branch: 79/79, 44 s wall (single runs at different loads: not a performance
+  comparison).
 - E13 on this branch: passes E13.01–E13.11 (the Idol default at $0.10, SAM 3D, the rug, the entries, validate_library,
   splat.spz/splat.ply served), E13.14 (the planner's library), E13.38–E13.42 and E13.46–E13.48 (the Add form and Edit
   sheet over the library API), E13.50–E13.51; the 27 failures are all scenes: `POST /api/scenes` is a 501 stub
@@ -141,12 +141,14 @@ First run: 4 refused, rewritten as tscert/README.md suggests: `concat` (not in t
 returned through a union (`isImageEngine(v.value)`, "evidence search failed") → a `switch` returning literals, the engine
 choice split in two smaller functions.
 
-**TScert's "tool errors" are hangs, not slow units.** Four of eight runs here ended with "verifier … did not finish
-within N s" (N = 180, 600, 900), on server-core's units as often as on these (`apiPathOf`, `urlHostname`, `targetParts`,
-`slugifyDecomposed`, `parseIpv4`, `stalledMessage`, `mockSlug`, `pyFixed`). While they "ran", `ps` showed the stuck
-`stage-runner` with a forked child asleep at 0 % CPU next to a zombie sibling: the verifier never started, so a longer
-step limit only makes the run longer (one official run took 921 s to fail). The same checks passed in 8–18 s once the
-load fell (12–35 → 2–3) with `MIDSTUDY_TSCERT_STEP_LIMIT=120`. A short step limit and a retry is the practical answer.
+**TScert's "tool errors" look like hangs, not slow units.** Four of the eight runs here ended with "verifier … did not
+finish within N s" (N = 180, 600, 900) and no verdict, on server-core's units more often than on these: `targetParts`,
+`slugifyDecomposed`, `checkMeta` (run 1), `engineOf` (run 3), `apiPathOf`, `urlHostname` (run 5), `parseIpv4`,
+`stalledMessage`, `mockSlug`, `pyFixed` (the first official run, 921 s). During run 3 and the first official run `ps` showed the waiting
+`stage-runner`s at 0 % CPU, each with a forked child that still showed as `stage-runner` (it had not exec'd the
+verifier), asleep, next to a zombie sibling; so a longer step limit only makes the run longer. The same checks then
+passed in 8–18 s once the machine's load fell (12–35 → 2–3), with `MIDSTUDY_TSCERT_STEP_LIMIT=120`. A short step limit
+and a retry is the practical answer; worth a look by f-toolchain (stage-runner's fork and exec).
 
 ## Decisions and deviations from v1
 
