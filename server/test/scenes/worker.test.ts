@@ -183,6 +183,22 @@ void test('a request still running at the timeout fails the job with the timeout
   assert.deepEqual(calls(r).starts, [['serve'], ['serve']], 'a new worker for the next job, no one-shot')
 })
 
+void test('shutdown while a request runs: the worker is closed, then killed; the job ends without a one-shot run', async () => {
+  const r = rig(1, 'hang')
+  const res = r.scenes.calibrate(sceneName(1))
+  assert.ok('job' in res)
+  for (let i = 0; i < 50 && calls(r).requests.length === 0; i++) await sleep(50)
+  assert.equal(calls(r).requests.length, 1)
+  const t0 = Date.now()
+  await r.scenes.shutdown()
+  await r.scenes.drained()
+  assert.ok(Date.now() - t0 < 3000, 'closed, then killed after the grace period')
+  const job = r.scenes.getJob(res.job.id)
+  assert.equal(job?.status, 'failed')
+  assert.equal(job.message, 'the server stopped')
+  assert.deepEqual(calls(r).starts, [['serve']], 'no one-shot run that would outlive the server')
+})
+
 void test('an idle worker gets its stdin closed; the next calibration starts another', async () => {
   const r = rig(2, 'ok', { idleMs: 300 })
   await calibrateAll(r, 1)
