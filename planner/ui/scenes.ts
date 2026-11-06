@@ -31,7 +31,8 @@ export function mount(ctx: UiContext): void {
     onchange: () => { const f = file.files?.[0]; file.value = ''; if (f) quiet(upload(f)) } })
   document.body.append(file)
   const newBtn = h('button.btn.btn-primary.sc-new', { type: 'button', dataset: { midstudy: 'scene-new' }, onclick: () => { pick() } }, icon('plus', { size: 18 }), h('span', 'New scene'))
-  page.actions.append(newBtn)
+  const settingsBtn = h('button.btn.btn-secondary.sc-settings', { type: 'button', 'aria-label': 'Settings', dataset: { midstudy: 'settings', tip: 'Settings (daily fal budget)' }, onclick: () => { ctx.settings?.open() } }, icon('settings', { size: 18 }), h('span', 'Settings'))
+  page.actions.append(settingsBtn, newBtn)
 
   function pick(): void { file.click() }
 

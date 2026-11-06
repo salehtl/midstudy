@@ -6,22 +6,47 @@ import fs from 'node:fs'
 import { pyRound } from '../../common/logic/pyfmt.ts'
 import { spentOn } from '../../common/logic/csv.ts'
 import { utcDay } from '../../common/logic/time.ts'
-import { heldExpired, heldKey, refusal, type SpendRefusal } from './logic/spend.ts'
-import type { Spend } from '../../contract/gen/types.ts'
+import { DEFAULT_CAP_USD, MAX_CAP_USD, heldExpired, heldKey, refusal, type SpendRefusal } from './logic/spend.ts'
+import type { Settings, Spend } from '../../contract/gen/types.ts'
+import { atomicWriteSync, readJsonFile } from '../../common/files.ts'
 
 export type { SpendRefusal } from './logic/spend.ts'
 
-/** The cap, the reservations and the costs file it reads. */
+/** The cap, the reservations and the costs file it reads. The cap is --daily-spend-usd's (locked), or the app's
+ *  Settings, saved in the settings file (<library>/settings.json; contract §2.9 Settings). */
 export class SpendCap {
   readonly costsFile: string
-  readonly capUsd: number
+  #cap: number
+  readonly locked: boolean
+  readonly #settingsFile: string | null
   readonly #now: () => number
   readonly #reserved = new Map<string, number>()
 
-  constructor(costsFile: string, capUsd: number, now: () => number = Date.now) {
+  constructor(costsFile: string, capUsd: number, now: () => number = Date.now, settings: { readonly file: string; readonly locked: boolean } | null = null) {
     this.costsFile = costsFile
-    this.capUsd = capUsd
+    this.#cap = capUsd
+    this.locked = settings?.locked ?? true
+    this.#settingsFile = settings?.file ?? null
     this.#now = now
+  }
+
+  get capUsd(): number {
+    return this.#cap
+  }
+
+  /** GET /api/settings: the budget, its default and maximum, and whether the flag fixes it. */
+  settings(): Settings {
+    return { daily_spend_usd: this.#cap, default_usd: DEFAULT_CAP_USD, max_usd: MAX_CAP_USD, locked: this.locked }
+  }
+
+  /** Saves the app's budget to settings.json (other keys kept) and uses it from now on. Only when not locked. */
+  setCap(usd: number): void {
+    if (this.locked || this.#settingsFile === null) throw new Error('the daily budget is fixed by --daily-spend-usd')
+    const stored = readJsonFile(this.#settingsFile)
+    const data: Record<string, unknown> = typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? { ...stored } : {}
+    data['daily_spend_usd'] = usd
+    atomicWriteSync(this.#settingsFile, JSON.stringify(data, null, 2) + '\n')
+    this.#cap = usd
   }
 
   /** Today's (UTC) day, `YYYY-MM-DD`. */

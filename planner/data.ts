@@ -17,8 +17,8 @@ import { RequestError, quiet, withMidstudy } from './engine.js'
 import type { Engine, Req } from './engine.js'
 import { Bus } from './bus.js'
 import type { Events } from './bus.js'
-import { libraryEntry, libraryJob, libraryJobs, sceneCreated, spendOf, trashedItems } from './wire.js'
-import type { LibraryEntry, LibraryJob, SceneCreated, SceneSummary, Spend, TrashedItem } from './wire.js'
+import { libraryEntry, libraryJob, libraryJobs, sceneCreated, settingsOf, spendOf, trashedItems } from './wire.js'
+import type { BudgetSettings, LibraryEntry, LibraryJob, SceneCreated, SceneSummary, Spend, TrashedItem } from './wire.js'
 import * as libLogic from './logic/library.js'
 import * as msg from './logic/messages.js'
 import * as money from './logic/money.js'
@@ -187,6 +187,7 @@ export type Scenes = ReturnType<typeof createScenes>
 //   edit(id, patch)           PATCH → the item, or a rescale job (dims_cm, yaw)
 //   remove(id) / restore(id)  DELETE → move to the library's trash / POST …/restore → the item
 //   spend() → Promise<spend>  GET /api/spend
+//   settings() / setBudget(usd) → Promise<settings>   GET / PUT /api/settings (§2.9 Settings: the daily fal budget)
 // The answers are read with planner/wire.ts (LibraryJob, LibraryEntry, TrashedItem, Spend); estimateCost(meta, kind)
 // is the price an add will reserve ($0 for a model).
 // Events (lib.events, LibEvents): 'jobs' { jobs }   'job-done' { job }   'job-failed' { job }   'spend' { spend }   'trash' { trash }
@@ -275,6 +276,24 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     state.spend = spendOf(body)
     events.emit('spend', { spend: state.spend })
     return state.spend
+  }
+  // §2.9 Settings: the daily fal budget. locked when the server was started with --daily-spend-usd.
+  async function settings(): Promise<BudgetSettings> {
+    let body: unknown
+    try { body = await fetchJson('/api/settings') } catch (e) { throw report('Could not read the settings', e) }
+    const s = settingsOf(body)
+    if (!s) throw report('Could not read the settings', new Error('the server answered something else'))
+    return s
+  }
+  async function setBudget(usd: number): Promise<BudgetSettings> {
+    let body: unknown
+    try {
+      body = await fetchJson('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ daily_spend_usd: usd }) })
+    } catch (e) { throw report('Could not save the daily budget', e) }
+    quiet(spend())
+    const s = settingsOf(body)
+    if (!s) throw report('Could not save the daily budget', new Error('the server answered something else'))
+    return s
   }
   async function refreshTrash(): Promise<void> {
     try {
@@ -378,7 +397,7 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
 
   const listen: Events<LibEvents> = events
   return {
-    events: listen, start, jobs, spend, addFromFile, addFromUrl, readProduct, edit, remove, restore,
+    events: listen, start, jobs, spend, settings, setBudget, addFromFile, addFromUrl, readProduct, edit, remove, restore,
     getState: (): Readonly<LibState> => ({ ...state, jobs: state.jobs.slice(), trash: state.trash.slice() }),
   }
 }

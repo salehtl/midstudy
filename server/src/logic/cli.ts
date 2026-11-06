@@ -3,6 +3,7 @@
 // Pure (TScert); server/src/main.ts prints and exits.
 import { pyRepr } from '../../../common/logic/pyfmt.ts'
 import { pyFloat } from '../../../common/logic/csv.ts'
+import { MAX_CAP_USD } from './spend.ts'
 
 /** The default --calib: calib/'s midstudy-calib (its warm worker, `midstudy-calib serve`, is tried first; contract §4.3). */
 const DEFAULT_CALIB = 'uv run --project calib midstudy-calib'
@@ -21,7 +22,8 @@ interface CliOptions {
   readonly calib: string
   readonly midstudyAdd: string
   readonly allowedHosts: readonly string[]
-  readonly dailySpendUsd: number
+  /** null: not given (the app's Settings set the budget, §2.9) */
+  readonly dailySpendUsd: number | null
 }
 
 /** What the command line asks for: run with these options, print the help, or stop with argparse's message. */
@@ -57,7 +59,7 @@ export function help(prog: string): string {
     + '  --calib CALIB         the calibration command, run as an argument list (default: ' + DEFAULT_CALIB + ')\n'
     + '  --midstudy-add MIDSTUDY_ADD\n                        the command that adds furniture, run with --library <library-dir>\n                        (default: ' + DEFAULT_MIDSTUDY_ADD + ')\n'
     + '  --allowed-host NAME   also answer requests with this Host name, e.g. midstudy.example.com (repeatable;\n                        loopback names always work)\n'
-    + '  --daily-spend-usd DAILY_SPEND_USD\n                        cap on paid fal calls (library adds and renders) per UTC day, in USD\n                        (default 2)\n'
+    + '  --daily-spend-usd DAILY_SPEND_USD\n                        cap on paid fal calls (library adds and renders) per UTC day, in USD.\n                        Given, it is fixed and the app\'s Settings can\'t change it; left\n                        out, the app sets it (default 2)\n'
 }
 
 /** Python's `int(s)` for ASCII text: surrounding whitespace, a sign, `_` between digits; null where it raises. */
@@ -201,16 +203,18 @@ export function parseCli(argv: readonly string[]): CliParse {
     calib: lastValue(pairs, '--calib') ?? DEFAULT_CALIB,
     midstudyAdd: lastValue(pairs, '--midstudy-add') ?? DEFAULT_MIDSTUDY_ADD,
     allowedHosts: pairs.filter((p) => p.flag === '--allowed-host').map((p) => p.value),
-    dailySpendUsd: spendText === null ? 2 : (pyFloat(spendText) ?? 2),
+    dailySpendUsd: spendText === null ? null : pyFloat(spendText),
   }
   return { kind: 'run', options }
 }
 
 /** v1's checks after parsing that need no file system: a negative cap (and, v2, one that isn't a finite number:
  *  `nan` would switch the cap off). The message argparse's `error` prints, or null. */
-export function spendProblem(dailySpendUsd: number): string | null {
+export function spendProblem(dailySpendUsd: number | null): string | null {
+  if (dailySpendUsd === null) return null
   if (Number.isNaN(dailySpendUsd) || dailySpendUsd === Infinity) return '--daily-spend-usd must be a finite number of USD'
   if (dailySpendUsd < 0) return "--daily-spend-usd can't be negative"
+  if (dailySpendUsd > MAX_CAP_USD) return '--daily-spend-usd must be from 0 to ' + String(MAX_CAP_USD)
   return null
 }
 

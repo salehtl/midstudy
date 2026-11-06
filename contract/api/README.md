@@ -8,6 +8,8 @@ an error status without its own entry answers [error.schema.json](error.schema.j
 | Route (contract) | Request | Answers |
 |---|---|---|
 | `GET /api/spend` (§2.9) | | 200 `spend` |
+| `GET /api/settings` (§2.9 Settings) | | 200 `settings` |
+| `PUT /api/settings` | `settings-put` | 200 `settings` (400 out of range, 409 with `--daily-spend-usd`) |
 | `POST /api/render` (§2.6, §4.7) | `render-request` | 200 `render-meta`, 402 `spend-refused` |
 | `GET /api/renders[?scene=]` | | 200 `render-list` |
 | `GET /api/layouts?scene=` (§2.7) | | 200 `layout-list` |

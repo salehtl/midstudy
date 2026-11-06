@@ -508,8 +508,39 @@ if (srv2.up) {
   ev.check('W2 GET /api/spend: nothing spent or reserved, cap 0.03', r.json?.spent_usd === 0 && r.json?.reserved_usd === 0 && r.json?.cap_usd === 0.03, st(r))
   r = await api.send(srv2.base, 'POST', '/api/render', { image: dataUri('image/jpeg', livingBytes), scene: S2 })
   ev.check('the 402 for one render that costs more than the whole cap says so (not "used up: $0.00 spent")', r.status === 402 && /costs \$0\.0398, more than the daily fal budget/.test(r.json?.error || ''), st(r))
+  r = await api.get(srv2.base, '/api/settings')
+  ev.check('with --daily-spend-usd 0.03: GET /api/settings is locked at 0.03', r.status === 200 && r.json?.locked === true && r.json?.daily_spend_usd === 0.03, st(r))
+  r = await api.send(srv2.base, 'PUT', '/api/settings', { daily_spend_usd: 50 })
+  ev.check('…and PUT /api/settings is 409 (the flag wins), the cap still 0.03', r.status === 409 && (await api.get(srv2.base, '/api/spend')).json?.cap_usd === 0.03, st(r))
   await srv2.stop()
 }
+
+// --- Settings: the daily budget (§2.9 Settings) ---------------------------------------------------------------------------------
+ev.section('Settings: the daily budget')
+const srvB = await startServer(ev, { appBudget: true, mockCost: true })
+ev.check('a server without --daily-spend-usd (fal mocked, a temp library)', srvB.up, srvB.up ? srvB.base : srvB.why)
+if (srvB.up) {
+  r = await api.get(srvB.base, '/api/settings')
+  ev.check('GET /api/settings: $2 by default, not locked', r.status === 200 && r.json?.daily_spend_usd === 2 && r.json?.default_usd === 2 && r.json?.locked === false, st(r))
+  for (const bad of [-1, 'ten', null, 10001, true]) {
+    r = await api.send(srvB.base, 'PUT', '/api/settings', { daily_spend_usd: bad })
+    ev.check(`PUT daily_spend_usd ${JSON.stringify(bad)} → 400`, r.status === 400, st(r))
+  }
+  r = await api.send(srvB.base, 'PUT', '/api/settings', { daily_spend_usd: 25 }, { forged: true })
+  ev.check('W1 a forged PUT /api/settings → 403', r.status === 403, st(r))
+  r = await api.send(srvB.base, 'PUT', '/api/settings', { daily_spend_usd: 0.01 })
+  const cap = (await api.get(srvB.base, '/api/spend')).json?.cap_usd
+  ev.check('PUT 0.01 → 200, /api/spend uses it at once', r.status === 200 && r.json?.daily_spend_usd === 0.01 && cap === 0.01, `${st(r)} cap ${cap}`)
+  r = await api.send(srvB.base, 'POST', '/api/render', { image: dataUri('image/jpeg', livingBytes) })
+  ev.check('…a $0.0398 render is then 402', r.status === 402, st(r))
+  r = await api.send(srvB.base, 'PUT', '/api/settings', { daily_spend_usd: 3.14159 })
+  const saved = JSON.parse(fs.readFileSync(path.join(srvB.dirs.library, 'settings.json'), 'utf8'))
+  ev.check('PUT 3.14159 → 3.14, saved in <library>/settings.json', r.status === 200 && r.json?.daily_spend_usd === 3.14 && saved.daily_spend_usd === 3.14, `${st(r)} ${fmt(saved)}`)
+  r = await api.send(srvB.base, 'POST', '/api/render', { image: dataUri('image/jpeg', livingBytes) })
+  ev.check('…and the render goes through under the new budget', r.status === 200, st(r))
+  await srvB.stop()
+}
+
 
 // --- verify round 1: privacy and HTTP hardening (docs/notes/verify-fix-1.md) ---------------------------------------------------
 const META = path.join(ev.out, 'meta')

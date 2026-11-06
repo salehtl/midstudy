@@ -30,7 +30,7 @@ export function modelShort(model: string | null | undefined, label: string | nul
 
 /** What each model is like, under its name in the confirm. */
 export function modelNote(model: string): string {
-  return model === 'nano-banana' ? 'Uses the photo as a reference' : model === 'kontext' ? 'Freer light, may move things' : model === 'qwen' ? 'Restyles more, slower' : model === 'gpt-image' ? 'OpenAI, uses the photo as a reference' : ''
+  return model === 'nano-banana' ? 'Uses the photo as a reference' : model === 'kontext' ? 'Freer light, may move things' : model === 'qwen' ? 'Restyles more, slower' : model === 'gpt-image' ? 'OpenAI, the scene as you see it' : ''
 }
 
 /** A prompt that is one of the server's defaults reads as no prompt (planner/serve.py's two). */

@@ -2261,7 +2261,7 @@ function pngDataUrl(png: Uint8Array): Promise<string> {
 }
 
 // --- render (contract §2.6, §4.7) ---------------------------------------------------------------------------------------
-/** The render models, the default first (Nano Banana and GPT Image take the scene photo as a reference, image 2). */
+/** The render models, the default first (Nano Banana takes the scene photo as a reference, image 2; GPT Image gets the scene alone). */
 export const RENDER_MODELS: Readonly<Record<RenderModel, { readonly label: string; readonly price: (megapixels: number) => number }>> = {
   'nano-banana': { label: money.renderLabel('nano-banana'), price: (mp) => money.renderModelPrice('nano-banana', mp) },
   kontext: { label: money.renderLabel('kontext'), price: (mp) => money.renderModelPrice('kontext', mp) },

@@ -37,3 +37,34 @@ export function heldExpired(key: string, day: string): boolean {
   if (!key.startsWith('held:')) return false
   return key.split(':')[1] !== day
 }
+
+// --- Settings: the daily budget (contract §2.9 Settings, main fc82c5c) --------------------------------------------------
+/** The budget without --daily-spend-usd and without a saved setting. */
+export const DEFAULT_CAP_USD = 2
+/** The highest budget the flag or Settings may set. */
+export const MAX_CAP_USD = 10000
+
+/** A budget Settings or <library>/settings.json may hold: a finite number from 0 to MAX_CAP_USD (not a boolean). */
+function validCap(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= MAX_CAP_USD
+}
+
+/** The budget at startup: the flag's (fixed), else settings.json's daily_spend_usd when valid, else the default. */
+export function startCap(flag: number | null, stored: unknown): { readonly cap: number; readonly locked: boolean } {
+  if (flag !== null) return { cap: flag, locked: true }
+  const saved: unknown = typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? Reflect.get(stored, 'daily_spend_usd') : undefined
+  return { cap: validCap(saved) ? saved : DEFAULT_CAP_USD, locked: false }
+}
+
+/** PUT /api/settings's body: the budget to save (rounded to cents), or the 400 sentence. */
+export function budgetPut(body: unknown): { readonly ok: true; readonly usd: number } | { readonly ok: false; readonly error: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body) || !('daily_spend_usd' in body)) return { ok: false, error: 'send {"daily_spend_usd": <dollars>}' }
+  const usd: unknown = Reflect.get(body, 'daily_spend_usd')
+  if (!validCap(usd)) return { ok: false, error: 'daily_spend_usd must be a number from 0 to ' + String(MAX_CAP_USD) }
+  return { ok: true, usd: Math.round(usd * 100) / 100 }
+}
+
+/** PUT /api/settings's 409 while --daily-spend-usd fixes the budget. */
+export function budgetLocked(cap: number): string {
+  return "the daily budget is set by the server's --daily-spend-usd ($" + cap.toFixed(2) + '): restart it without that flag to set it here'
+}

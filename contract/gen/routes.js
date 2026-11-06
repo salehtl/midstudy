@@ -13,6 +13,25 @@ export const routes = Object.freeze({
       }
     },
     {
+      "method": "GET",
+      "path": "/api/settings",
+      "contract": "§2.9",
+      "responses": {
+        "200": "midstudy/api/settings.schema.json"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings",
+      "contract": "§2.9",
+      "request": {
+        "body": "midstudy/api/settings-put.schema.json"
+      },
+      "responses": {
+        "200": "midstudy/api/settings.schema.json"
+      }
+    },
+    {
       "method": "POST",
       "path": "/api/render",
       "contract": "§2.6, §4.7",

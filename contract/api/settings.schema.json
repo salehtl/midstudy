@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/settings.schema.json",
+  "title": "Settings",
+  "description": "GET and PUT /api/settings (contract §2.9 Settings): the daily fal budget, its default and maximum, and whether the server's --daily-spend-usd fixes it.",
+  "type": "object",
+  "required": ["daily_spend_usd", "default_usd", "max_usd", "locked"],
+  "additionalProperties": false,
+  "properties": {
+    "daily_spend_usd": { "$ref": "common.schema.json#/$defs/usd" },
+    "default_usd": { "$ref": "common.schema.json#/$defs/usd" },
+    "max_usd": { "$ref": "common.schema.json#/$defs/usd" },
+    "locked": { "description": "true: --daily-spend-usd fixes the budget and PUT is 409.", "type": "boolean" }
+  }
+}

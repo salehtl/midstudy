@@ -21,6 +21,7 @@ import * as renders from './ui/panels/renders.js'
 import * as scenesPage from './ui/scenes.js'
 import * as shortcuts from './ui/shortcuts.js'
 import * as exporter from './ui/export.js'
+import * as settings from './ui/settings.js'
 import type { UiContext } from './ui/seam.js'
 import { renderSettingsArgs } from './logic/messages.js'
 
@@ -45,7 +46,7 @@ window.midstudyCtx = ctx
 // Panels register in rail/dock order: Library, In scene, Layouts, Scene, Renders.
 // Shortcuts and Export first: the panels show their keys (keys.lookup) when they mount.
 const areas: [string, { mount: (c: UiContext) => void }][] = [
-  ['shortcuts', shortcuts], ['exporter', exporter], ['workspace', workspace], ['library', library], ['inscene', inscene], ['layouts', layouts], ['scene', scenePanel], ['renders', renders], ['scenes', scenesPage],
+  ['shortcuts', shortcuts], ['exporter', exporter], ['settings', settings], ['workspace', workspace], ['library', library], ['inscene', inscene], ['layouts', layouts], ['scene', scenePanel], ['renders', renders], ['scenes', scenesPage],
 ]
 for (const [name, mod] of areas) {
   try { mod.mount(ctx) } catch (e) { engine.reportError(`Could not set up the ${name} UI`, e) }

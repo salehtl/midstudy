@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/settings-put.schema.json",
+  "title": "SettingsPut",
+  "description": "PUT /api/settings (contract §2.9 Settings): the daily fal budget in USD, 0 to 10000, saved rounded to cents in <library>/settings.json; 400 out of range, 409 while --daily-spend-usd fixes it.",
+  "type": "object",
+  "required": ["daily_spend_usd"],
+  "properties": {
+    "daily_spend_usd": { "type": "number", "minimum": 0, "maximum": 10000 }
+  }
+}

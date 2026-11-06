@@ -51,8 +51,9 @@ Node 22 runs directly, and it serves the bundled planner from `planner/dist/`.
 - **fal key.** Paid calls (furniture from a photo or link, renders) read `FAL_KEY` from the environment or from a
   `.env` file at the repo root (`FAL_KEY=...`, git-ignored). Without it, everything else still works, including GLB
   and OBJ furniture.
-- **Spend cap.** The server refuses paid calls past **$2 per UTC day** by default (`--daily-spend-usd`, `0` blocks
-  them all). Every paid call is logged in `library/costs.csv`.
+- **Spend cap.** The server refuses paid calls past a daily budget, **$2 per UTC day** until you change it in
+  **Settings** (Scenes page, or ⌘,). Starting the server with `--daily-spend-usd N` fixes it at `N` instead (`0` blocks
+  them all), and Settings then only shows it. Every paid call is logged in `library/costs.csv`.
 - **First calibration.** The first photo you upload downloads the MoGe-2 ViT-L weights (1.32 GB, about 20 s on a fast
   line) into `~/.cache/huggingface/hub`, outside the repo. The server runs calibration in a worker
   (`midstudy-calib serve`) that keeps the model loaded: the first photo after a start takes a few seconds, each later

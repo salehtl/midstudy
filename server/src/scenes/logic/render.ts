@@ -8,9 +8,11 @@ import { isNum, isRecord, pyStr, pyTruthy } from './values.ts'
 /** The render models, in v1's order. */
 export type RenderModel = 'kontext' | 'nano-banana' | 'qwen' | 'gpt-image'
 
-/** The models that take the scene photo as image 2 with REFERENCE_RENDER_PROMPT (§4.7). */
+/** The models that take the scene photo as image 2 with REFERENCE_RENDER_PROMPT (§4.7): nano-banana only. gpt-image,
+ *  given the photo as image 2, redrew the photo and dropped the furniture (seen 2026-11-05 on an empty-room scene,
+ *  main fc82c5c): it gets the composite alone, with COMPOSITE_RENDER_PROMPT when there is a scene. */
 export function takesReference(model: RenderModel): boolean {
-  return model === 'nano-banana' || model === 'gpt-image'
+  return model === 'nano-banana'
 }
 
 /** One model's fal endpoint and the argument its image goes in. */
@@ -50,12 +52,18 @@ export const DEFAULT_RENDER_PROMPT = 'Turn this 3D planning render into a photor
   + 'room geometry, and every piece of furniture with its position, size, shape and color. Realistic materials, '
   + 'soft natural daylight, subtle contact shadows. Do not add, remove or move anything.'
 
-/** v1 REFERENCE_RENDER_PROMPT (§4.7: nano-banana and gpt-image with the scene photo as image 2). */
+/** v1 REFERENCE_RENDER_PROMPT (§4.7: nano-banana with the scene photo as image 2). */
 export const REFERENCE_RENDER_PROMPT = 'Image 1 is a photo of a room with 3D models of furniture placed in it. Image 2 is the same room as photographed. '
   + "Make the furniture in image 1 look like it was photographed in this room: realistic materials, lighting, "
   + "reflections and contact shadows that match the room's light. Keep the camera, the room and everything already in "
   + "it exactly as in image 2. Keep each piece of furniture's position, size, shape and color. Do not add, remove or "
   + 'move anything.'
+
+/** gpt-image with a scene (§4.7): a real photo with 3D furniture drawn into it, sent alone. */
+const COMPOSITE_RENDER_PROMPT = 'This is a photo of a room with 3D models of furniture placed in it. Make every piece of furniture look like it '
+  + "was really photographed in this room: realistic materials and textures, lighting, reflections and soft contact "
+  + "shadows that match the room's light. Keep every piece of furniture: its position, size, shape and color. Keep the "
+  + 'camera, the room and everything else in the photo exactly as it is. Do not add, remove or move anything.'
 
 /** v1's 400 for an image that isn't a usable JPEG data URI. */
 export const NOT_JPEG_URI = 'image must be a JPEG data URI (data:image/jpeg;base64,...)'
@@ -96,8 +104,8 @@ export function renderLayout(v: unknown): string | null {
 
 /** The prompt sent: the request's unless it is missing or blank, else v1's default for the request (the reference
  *  prompt when the scene photo goes along). */
-export function renderPrompt(prompt: string | null, reference: boolean): string {
-  if (prompt === null || pyStrip(prompt) === '') return reference ? REFERENCE_RENDER_PROMPT : DEFAULT_RENDER_PROMPT
+export function renderPrompt(prompt: string | null, reference: boolean, composite = false): string {
+  if (prompt === null || pyStrip(prompt) === '') return reference ? REFERENCE_RENDER_PROMPT : composite ? COMPOSITE_RENDER_PROMPT : DEFAULT_RENDER_PROMPT
   return prompt
 }
 

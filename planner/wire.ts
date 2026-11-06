@@ -129,6 +129,19 @@ function isSpend(v: unknown): v is Spend {
 }
 export const spendOf = (v: unknown): Spend | null => read(v, SPEND, isSpend)
 
+/** The daily fal budget (GET/PUT /api/settings, §2.9 Settings); locked: --daily-spend-usd fixes it. */
+export interface BudgetSettings {
+  readonly daily_spend_usd: number
+  readonly default_usd: number
+  readonly max_usd: number
+  readonly locked: boolean
+}
+const SETTINGS: Fields = { daily_spend_usd: num, default_usd: num, max_usd: num, locked: bool }
+function isBudgetSettings(v: unknown): v is BudgetSettings {
+  return isObject(v) && conforms(v, SETTINGS)
+}
+export const settingsOf = (v: unknown): BudgetSettings | null => read(v, SETTINGS, isBudgetSettings)
+
 // --- scenes (contract §4.4) -----------------------------------------------------------------------------------------
 
 /** A scene object (GET /api/scenes; GET /api/scenes/<name> has the same fields and more). */

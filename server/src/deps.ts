@@ -22,7 +22,8 @@ export interface ServerConfig {
   readonly calib: readonly string[]
   /** --midstudy-add, split (never empty). */
   readonly midstudyAdd: readonly string[]
-  readonly dailySpendUsd: number
+  /** null: the app's Settings set the budget (<library>/settings.json, §2.9) */
+  readonly dailySpendUsd: number | null
   /** The --allowed-host values as given (already checked to be `name[:port]`). */
   readonly allowedHosts: readonly string[]
   /** MIDSTUDY_SOCKET_TIMEOUT (default 30), in seconds: how long one read may wait. */

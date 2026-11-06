@@ -848,6 +848,21 @@ export type SceneTrash = {
   readonly deleted: string
 }
 
+/** GET and PUT /api/settings (contract §2.9 Settings): the daily fal budget, its default and maximum, and whether the server's --daily-spend-usd fixes it. */
+export type Settings = {
+  readonly daily_spend_usd: Usd
+  readonly default_usd: Usd
+  readonly max_usd: Usd
+  /** true: --daily-spend-usd fixes the budget and PUT is 409. */
+  readonly locked: boolean
+}
+
+/** PUT /api/settings (contract §2.9 Settings): the daily fal budget in USD, 0 to 10000, saved rounded to cents in <library>/settings.json; 400 out of range, 409 while --daily-spend-usd fixes it. */
+export type SettingsPut = {
+  readonly daily_spend_usd: number
+  readonly [key: string]: unknown
+}
+
 export type Slug = string
 
 /** GET /api/spend (contract §2.9): today's (UTC) spend from costs.csv, what running calls have reserved, and the cap. */

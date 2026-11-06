@@ -252,7 +252,7 @@ export function ensureBuilt(ev) {
 // Starts the server (node server/src/main.ts, strict mode) with scratch dirs. Returns {base,
 // port, dirs, log(), stop(), exited}. Never throws: when the server doesn't come up, `up` is false and `why` says what
 // happened (e.g. an unknown flag before the feature exists).
-export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
+export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', appBudget = false, mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
   ensureBuilt(ev)
   const n = ++serverCount
   const data = path.join(ev.out, `server-${n}`)
@@ -271,10 +271,11 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   else delete childEnv.MIDSTUDY_FAL_MOCK_COST
   childEnv.MIDSTUDY_STRICT = '1'
   // Hard limits (CLAUDE.md): never without the fal mock, never without a spend cap flag.
-  if (!childEnv.MIDSTUDY_FAL_MOCK || spendUsd == null) throw new Error(`refusing to start ${SERVER_NAME} without the fal mock and a spend cap`)
+  // appBudget: no --daily-spend-usd, so the budget is the app's Settings (§2.9); allowed only with the mock, in a temp library.
+  if (!childEnv.MIDSTUDY_FAL_MOCK || (spendUsd == null && !appBudget)) throw new Error(`refusing to start ${SERVER_NAME} without the fal mock and a spend cap`)
   const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
     '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, '--midstudy-add', ADD_CMD,
-    '--daily-spend-usd', String(spendUsd), ...args])
+    ...(appBudget ? [] : ['--daily-spend-usd', String(spendUsd)]), ...args])
   const logPath = path.join(data, 'server.log')
   let log = `$ ${cmd} ${argv.join(' ')}\n`
   const proc = spawn(cmd, argv, { cwd: REPO, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })

@@ -4,7 +4,7 @@
 //   node server/src/main.ts [--port 8765] [--host 127.0.0.1] [--scenes-dir scenes] [--layouts-dir layouts]
 //                           [--renders-dir renders] [--library-dir library] [--costs-file <library-dir>/costs.csv]
 //                           [--calib "uv run --project calib midstudy-calib"]
-//                           [--midstudy-add "node pipeline/src/cli.ts"] [--daily-spend-usd 2]
+//                           [--midstudy-add "node pipeline/src/cli.ts"] [--daily-spend-usd N]
 //                           [--allowed-host NAME ...]
 //
 // Relative paths are resolved against the repository. FAL_KEY comes from the environment, else from <repo>/.env
@@ -22,6 +22,8 @@ import type { ApiRoute } from './http/router.ts'
 import { createServer } from './http/server.ts'
 import { allowedHostProblem, costsFileProblem, help, parseCli, spendProblem, usage } from './logic/cli.ts'
 import { SpendCap } from './spend.ts'
+import { startCap } from './logic/spend.ts'
+import { readJsonFile } from '../../common/files.ts'
 import { enableStrict, strictRequested } from './strict.ts'
 import { splitCommand } from '../../common/tools.ts'
 import { routes as libraryRoutes } from './routes/library.ts'
@@ -45,6 +47,12 @@ function allRoutes(deps: ServerDeps): readonly ApiRoute[] {
     ...productRoutes(deps),
     ...spendRoutes(deps),
   ]
+}
+
+/** The daily cap: --daily-spend-usd's (fixed), else the app's Settings in <library>/settings.json, else $2 (§2.9). */
+function spendCap(costsFile: string, flag: number | null, settingsFile: string): SpendCap {
+  const { cap, locked } = startCap(flag, flag === null ? readJsonFile(settingsFile) : null)
+  return new SpendCap(costsFile, cap, Date.now, { file: settingsFile, locked })
 }
 
 function fail(message: string, code = 2): never {
@@ -117,7 +125,7 @@ async function main(argv: readonly string[]): Promise<void> {
   }
   const deps: ServerDeps = {
     config,
-    spend: new SpendCap(costsFile, o.dailySpendUsd),
+    spend: spendCap(costsFile, o.dailySpendUsd, path.join(libraryDir, 'settings.json')),
     onShutdown: (fn) => {
       hooks.push(fn)
     },

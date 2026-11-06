@@ -65,6 +65,7 @@ evals/out/
 /library/.lock.d/
 /library/.trash/
 /library/costs.csv.lock
+library/settings.json
 /library/costs.csv.lock.d/
 /scenes/
 /layouts/

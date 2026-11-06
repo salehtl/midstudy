@@ -8,9 +8,9 @@ export function isRenderModel(m: string): m is RenderModel {
   return m === 'nano-banana' || m === 'kontext' || m === 'qwen' || m === 'gpt-image'
 }
 
-/** Nano Banana and GPT Image take the scene photo as a reference (image 2, contract §4.7). */
+/** Nano Banana takes the scene photo as a reference (image 2, contract §4.7); GPT Image gets the scene alone. */
 export function takesReference(m: string): boolean {
-  return m === 'nano-banana' || m === 'gpt-image'
+  return m === 'nano-banana'
 }
 
 export function renderLabel(m: RenderModel): string {

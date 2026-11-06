@@ -96,7 +96,7 @@ async function postRender(ctx: RequestContext, scenes: SceneService, renders: Re
   }
   const { width, height } = size.value
   const outcome = await renders.render({
-    image, width, height, model: choice.model, prompt: renderPrompt(typeof prompt === 'string' ? prompt : null, reference), scene, layout,
+    image, width, height, model: choice.model, prompt: renderPrompt(typeof prompt === 'string' ? prompt : null, reference, choice.model === 'gpt-image' && scene !== null), scene, layout,
     reference: reference ? photo : null, keepRoom, mask, price: renderPrice(choice.model, width, height),
   })
   switch (outcome.kind) {

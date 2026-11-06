@@ -119,7 +119,7 @@ if (r.json?.name) mine.push(r.json.name)
 ev.check('kontext with a scene: the composite only (reference false)', r.status === 200 && r.json?.reference === false && r.json?.model === 'kontext', `${r.status} reference ${r.json?.reference}`)
 r = await api.send(srv.base, 'POST', '/api/render', { image: dataUri('image/jpeg', photo), scene: S.name, model: 'gpt-image' })
 if (r.json?.name) mine.push(r.json.name)
-ev.check('gpt-image with a scene: the scene photo as reference, the reference prompt, openai/gpt-image-2/edit', r.status === 200 && r.json?.reference === true && r.json?.model === 'gpt-image' && r.json?.endpoint === 'openai/gpt-image-2/edit' && /^Image 1 is a photo/.test(r.json?.prompt || ''), `${r.status} reference ${r.json?.reference} ${r.json?.endpoint}`)
+ev.check('gpt-image with a scene: the composite alone (reference false) with its own prompt, openai/gpt-image-2/edit', r.status === 200 && r.json?.reference === false && r.json?.model === 'gpt-image' && r.json?.endpoint === 'openai/gpt-image-2/edit' && /^This is a photo of a room with 3D models/.test(r.json?.prompt || ''), `${r.status} reference ${r.json?.reference} ${r.json?.endpoint} ${r.json?.prompt}`)
 r = await api.send(srv.base, 'POST', '/api/render', { image: dataUri('image/jpeg', photo) })
 const sceneless = r.json?.name
 ev.check('nano-banana without a scene: no reference', r.status === 200 && r.json?.reference === false && r.json?.scene == null, `${r.status} reference ${r.json?.reference} scene ${r.json?.scene}`)
