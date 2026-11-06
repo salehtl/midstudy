@@ -97,10 +97,11 @@ await page.keyboard.press('Delete')
 const removed = await hasToast('Probe box 2 removed')
 const kbdText = await page.evaluate(() => document.querySelector('#toasts .toast-action .kbd')?.textContent)
 ev.check('Del removes the piece: "Probe box 2 removed", Undo with its key', removed && (kbdText === 'Ctrl Z' || kbdText === '⌘Z'), `${(await toasts()).join(' | ')} / ${kbdText}`)
-await page.keyboard.press('Control+z')
+// the undo key the toast names: ⌘Z on a Mac (the planner's 'mod' is ⌘ there; Ctrl+Z is another key), Ctrl+Z elsewhere
+await page.keyboard.press(kbdText === '⌘Z' ? 'Meta+z' : 'Control+z')
 await sleep(500)
 const st3 = await hook(page, 'getState')
-ev.check('Ctrl+Z puts it back', st3.value?.items?.length === 1, st3.value?.items?.length)
+ev.check('Ctrl+Z (⌘Z on a Mac) puts it back', st3.value?.items?.length === 1, st3.value?.items?.length)
 
 // --- Scene panel ------------------------------------------------------------------------------------------------------------------
 await openPanel('scene')
