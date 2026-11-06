@@ -119,10 +119,12 @@ no key in the environment): both images as data URIs for nano-banana with a scen
 qwen, the cost row written once fal answered (also when there is no image or the download fails), v1's 502 and 503
 sentences, the cap refusing before any call, the reservation released.
 
-**Gates on this branch**: check:types ok, check:lint ok (58 files), check:dead ok, check-ownership ok (29 paths).
-`npm run test:server` (server-core's): 93/94 — the failing one asserts that every stage-B route answers 501, which mine
-no longer do (Requests). check:tscert: my modules aren't in its areas yet (Requests); the gate itself hit a tool error
-(a 600 s step timeout on server-core's `mime.ts#extension` at load 14–25), not a verdict: run it again when quieter.
+**Gates on this branch**: check:types ok, check:lint ok (58 files), check:dead ok, check-ownership ok (30 paths),
+check:tscert ok (115/115, server-core's baseline, 12 s at load 4; my modules aren't in its areas yet: Requests). The two
+check:tscert runs before that, at load 14–25, ended in tool errors (step timeouts of 600 s and 900 s on server-core's
+`mime.ts#extension` and `http.ts#explainStatus`, units that certify alone in seconds), not verdicts. `npm run
+test:server` (server-core's): 93/94 — the failing one asserts that every stage-B route answers 501, which mine no
+longer do (Requests).
 
 ## TScert
 
