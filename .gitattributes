@@ -12,3 +12,4 @@ fixtures/** linguist-vendored
 **/fuzz/** linguist-vendored
 *.test.mjs linguist-vendored
 eslint.config.js linguist-vendored
+contract/tools/** linguist-vendored
