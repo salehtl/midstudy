@@ -85,7 +85,7 @@ import type { SparkRenderer, SplatMesh } from '@sparkjsdev/spark'
 import {
   DEFAULT_CAMERA, KernelWorker, SceneCamera, azElOf, boxCorners as kBoxCorners, clampCamera as kClampCamera, clampElevation,
   clampLook, decodeDepth, depthScale as kDepthScale, dirOf, dragHeight as kDragHeight, dragLift, dragMove, dragRotate,
-  footprint as kFootprint, gripAngle, keepRoomMask, liftPlane, loadKernels, rotateBy, roundTo, rulerRescale, splatMultiplier,
+  footprint as kFootprint, gripAngle, kernelsLoaded, keepRoomMask, liftPlane, loadKernels, rotateBy, roundTo, rulerRescale, splatMultiplier,
   worldBounds as kWorldBounds, wrapAz, wrapDeg,
 } from '../core/js/web.js'
 import type { DepthMap, ItemBox, KeepRoomMask, Plane, Rect } from '../core/js/web.js'
@@ -414,7 +414,9 @@ function depthScale(): number {
   const measured = !!floor?.['found'] && (source === 'moge-2' || source === 'truth')
   return kDepthScale(cam.height_m, Number(rec(c?.['camera'])?.['height_m']), measured)
 }
-function emitView(): void { emit('view', getView()) }
+// The view's report rounds with the kernels. A resize while the page starts (before they have loaded) has no listener
+// to tell yet: the UI mounts after the kernels and reads the view then.
+function emitView(): void { if (kernelsLoaded()) emit('view', getView()) }
 function getView(): ViewReport { return viewLogic.viewReport(view, K) }
 function setStageInsets(ins: unknown = {}): void {
   const o = rec(ins) ?? {}

@@ -1,8 +1,9 @@
 // A smoke test of the UI's flows the evals do not drive (written with the TypeScript port, ui track): Library remove /
 // Undo / Recently removed / Edit (the size fields as properties), Layouts save / Save as new / the name check / Load with
 // changes, Del + Ctrl+Z, the Scene panel's camera card, Look and toggles, Renders' Compare with fewer than two, Scenes
-// rename, card flags and meta. Each expected text is v1's. Through the evals' harness (legacy server, fal mocked, $0).
-// Usage (repo root): nix develop -c node scripts/eval-lock.mjs -- node planner/ui/test/smoke.mjs   (output: evals/out/ui-smoke/)
+// rename, card flags and meta; and resize events while the page starts, before the kernels have loaded. Each expected text
+// is v1's. Through the evals' harness (legacy server, fal mocked, $0).
+// Usage (repo root): nix develop -c node scripts/eval-lock.mjs -- npm run eval:ui-smoke   (output: evals/out/ui-smoke/)
 import { createEval, startServer, launchBrowser, openPlanner, hook, seedScene, ensureScene, sleep, waitFor } from '../../../evals/lib/harness.mjs'
 
 const ev = createEval('UI', 'ui-smoke', { timeoutS: 600 })
@@ -140,4 +141,26 @@ await page.keyboard.press('Escape')
 
 ev.check('no page errors', P.errors.page.length === 0, P.errors.page.join(' | ') || 'none')
 ev.check('no console errors', P.errors.console.length === 0, P.errors.console.join(' | ') || 'none')
+
+// --- Start-up: resize events before the kernels have loaded (int-planner) --------------------------------------------------------
+// The engine's 'view' report rounds with the kernels; a resize while the page starts must not throw (it did once, on a phone
+// eval). Resize events every millisecond from the first script on, desktop and phone, 3 loads each.
+for (const device of ['desktop', 'phone']) {
+  const errs = []
+  let ready = 0
+  for (let i = 0; i < 3; i++) {
+    const ctx = await browser.newContext(device === 'phone' ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 } : { viewport: { width: 1440, height: 900 } })
+    await ctx.addInitScript(() => {
+      const t0 = performance.now()
+      const tick = () => { window.dispatchEvent(new Event('resize')); if (performance.now() - t0 < 6000) setTimeout(tick, 1) }
+      tick()
+    })
+    const pg = await ctx.newPage()
+    pg.on('pageerror', (e) => errs.push(String(e.stack || e).split('\n').slice(0, 3).join(' / ')))
+    await pg.goto(`${srv.base}/planner/?scene=${S.name}`, { waitUntil: 'load', timeout: 60000 }).catch((e) => errs.push(`goto: ${e}`))
+    if (await pg.waitForFunction(() => window.midstudy?.ready, null, { timeout: 60000 }).then(() => pg.evaluate(() => window.midstudy.ready.then(() => true)), () => false)) ready++
+    await ctx.close()
+  }
+  ev.check(`start-up (${device}): resize events before the kernels load, 3 loads reach midstudy.ready with no page error`, ready === 3 && errs.length === 0, errs.slice(0, 2).join(' | ') || `${ready}/3 ready`)
+}
 await ev.finish()
