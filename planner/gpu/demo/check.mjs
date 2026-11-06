@@ -1,13 +1,17 @@
-// WG: the WebGPU spike's check (docs/notes/webgpu-spike.md). $0: fal mocked, calib stub + mock (the harness's server).
-// Builds the demo (planner/gpu/demo/demo.ts), then on golden living-wide:
-//   v1     the planner as it is (WebGLRenderer, Spark 2.4) renders reference composites for each case (renderView);
+// WG: the WebGPU check (docs/notes/webgpu-spike.md, docs/notes/webgpu-swap.md). $0: fal mocked, calib stub + mock (the
+// harness's server). Builds the demo (planner/gpu/demo/demo.ts: the planner's own render modules without its state and
+// UI), then on golden living-wide:
+//   v1     the planner itself renders reference composites for each case (renderView): since the swap it is the same
+//          renderer, on the backend the harness's browser gives it (WebGPU; WebGL2 with MIDSTUDY_WEBGPU=0); before the
+//          swap it was v1's (WebGLRenderer + Spark 2.4), what the spike compared against;
 //   webgpu the demo on three.js WebGPURenderer (WebGPU on Dawn's SwiftShader), SplatLayer with the GPU radix sort;
 //   webgl  the same demo on the WebGL2 fallback (forceWebGL), SplatLayer with the CPU sort in a worker.
 // Checks, per backend, as E13/E4/E16 judge v1: the photo drawn as is; the splat probe within 3 % of its projected box;
 // the Idol chair where its own splat.spz points project (5 %); a near splat in front of a far one right after placing;
 // the sofa hides a splat behind it (occlusion off shows it); the stand-in never drawn; the lit box's faces against
-// lighting.json; and every case region by region against v1. --perf adds the numbers (262,144 splats): frame and sort
-// time, time to the first splat frame, memory, WebGPU vs Spark (run it under the eval lock with --exclusive).
+// lighting.json; and every case region by region against the planner's. --perf adds the demo's numbers (262,144
+// splats): frame and sort time, time to the first splat frame, memory, per backend and sort (run it under the eval lock
+// with --exclusive; the planner's own splat numbers, against v2 on WebGL, are E17's).
 // Usage: node planner/gpu/demo/check.mjs [--perf] [--only=v1,webgpu,webgl,sort,perf]   Output: evals/out/webgpu-spike/
 import fs from 'node:fs'
 import path from 'node:path'
@@ -209,7 +213,7 @@ function compare(tag, shots, ref) {
 const ref = {}
 let P1 = null
 if (want('v1') || want('webgpu') || want('webgl') || want('perf')) {
-  ev.section('v1: the planner as it is (WebGLRenderer, Spark 2.4): reference composites')
+  ev.section('v1: the planner itself (renderView): reference composites')
   P1 = await openPlanner(browser, srv.base, { scene: D.name })
   ev.check('the v1 planner opens the scene', P1.hookOk, P1.why || P1.url)
   await ensureScene(P1.page, D.name)
@@ -354,7 +358,7 @@ if (PERF) {
     const Dm = await openDemo(backend, extra)
     const r = await Dm.page.evaluate(async () => {
       const d = window.gpuDemo
-      await d.draw() // the scene's own pipelines compile first, as v1's page has drawn frames before Spark's chair
+      await d.draw() // the scene's own pipelines compile first, as the planner has drawn frames before a chair is added
       await d.draw()
       const h0 = d.stats().heap
       const add = await d.addItem({ uid: 'chair', glb: '/lib/idol-chair/model.glb', splat: '/lib/idol-chair/splat.spz', position: [1.25, 0, -3.1] })
@@ -372,58 +376,11 @@ if (PERF) {
   results.perf.webgpu = await v2perf('webgpu', '')
   results.perf.webgpuCpuSort = await v2perf('webgpu', '&sort=cpu')
   results.perf.webgl2 = await v2perf('webgl', '')
-  // Spark on v1: the same chair; its sort (GPU depth readback + a worker sort) and its draw
-  if (P1) {
-    const page = P1.page
-    await hook(page, 'clearItems')
-    await hook(page, 'setOcclusion', [true])
-    await hook(page, 'setRenderSettings', [{ contactShadows: true }])
-    await hook(page, 'setLighting', [{ cast_shadows: true }])
-    const sp = await page.evaluate(async (id) => {
-      const e = window.midstudyCtx.engine
-      const { renderer, scene, camera } = e.three
-      const gl = renderer.getContext()
-      const sync = () => { const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px) }
-      const drawSplats = () => { camera.layers.set(1); try { renderer.render(scene, camera); sync() } finally { camera.layers.set(0) } }
-      const heap0 = performance.memory?.usedJSHeapSize ?? null
-      // time to the first splat frame: add (fetch, Spark's decode), Spark's first sort, one draw of the sorted splats
-      const t0 = performance.now()
-      const uid = await e.addItemInternal(id, { position: [1.25, 0, -3.1], rotation_y_deg: 0 })
-      const tAdded = performance.now()
-      await e.settleSplats()
-      const tSettled = performance.now()
-      drawSplats()
-      const tFirst = performance.now()
-      const draws = [], sorts = []
-      for (let i = 0; i < 5; i++) {
-        // a sort: move the chair 1 mm and wait for Spark's depth readback, worker sort and upload
-        const p = e.getItem(uid).position
-        await e.moveItemInternal(uid, { position: [p[0] + (i % 2 ? -0.001 : 0.001), p[1], p[2]] })
-        const s0 = performance.now()
-        await e.settleSplats()
-        sorts.push(performance.now() - s0)
-        // a draw: the splat layer alone (camera layer 1), synced
-        const d0 = performance.now()
-        drawSplats()
-        draws.push(performance.now() - d0)
-      }
-      const med = (v) => [...v].sort((x, y) => x - y)[Math.floor(v.length / 2)]
-      const heap1 = performance.memory?.usedJSHeapSize ?? null
-      // Spark's own splat buffers: its packed splats (4 words each) and the ordering (1 word each)
-      let packed = 0
-      scene.traverse((o) => { const a = o.packedSplats?.packedArray; if (a?.byteLength) packed += a.byteLength })
-      const ordering = e.three.spark?.orderingTexture?.image?.data?.byteLength ?? 0
-      return { addMs: tAdded - t0, firstSortMs: tSettled - tAdded, firstFrameMs: tFirst - t0, sorts, draws, sortMedian: med(sorts), drawMedian: med(draws),
-        numSplats: e.three.spark?.display?.numSplats ?? null, heapDelta: heap0 != null && heap1 != null ? heap1 - heap0 : null, packedBytes: packed, orderingBytes: ordering }
-    }, IDOL.id).catch((e) => ({ error: String(e.message || e).split('\n')[0] }))
-    results.perf.spark = sp
-  }
   const p = results.perf
-  ev.check('numbers measured on every renderer', ['webgpu', 'webgpuCpuSort', 'webgl2', 'spark'].every((k) => p[k] && !p[k].error), fmt(Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.error || 'ok']))))
+  ev.check('numbers measured on every renderer', ['webgpu', 'webgpuCpuSort', 'webgl2'].every((k) => p[k] && !p[k].error), fmt(Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.error || 'ok']))))
   ev.note(`WebGPU (GPU sort): frame with a sort ${p.webgpu?.median?.toFixed(0)} ms, without ${p.webgpu?.stillMedian?.toFixed(0)} ms, first splat frame ${p.webgpu?.first?.firstFrameMs?.toFixed(0)} ms`)
   ev.note(`WebGPU (CPU sort): frame ${p.webgpuCpuSort?.median?.toFixed(0)} ms, worker sort ${p.webgpuCpuSort?.stats?.lastWorkerMs?.toFixed(1)} ms`)
   ev.note(`WebGL2 (CPU sort): frame ${p.webgl2?.median?.toFixed(0)} ms, worker sort ${p.webgl2?.stats?.lastWorkerMs?.toFixed(1)} ms, first splat frame ${p.webgl2?.first?.firstFrameMs?.toFixed(0)} ms`)
-  ev.note(`Spark (v1 WebGL): sort ${p.spark?.sortMedian?.toFixed(0)} ms, splat draw ${p.spark?.drawMedian?.toFixed(0)} ms, first splat frame ${p.spark?.firstFrameMs?.toFixed(0)} ms`)
 }
 
 fs.writeFileSync(path.join(ev.out, 'summary.json'), JSON.stringify(results, null, 2))
