@@ -32,7 +32,7 @@ function isRaw(m: unknown): m is Raw {
 }
 
 /** Where the build puts the module (repo root /build/wasm/pipeline/), relative to this file (core/js/). */
-export const WASM_MODULE = fileURLToPath(new URL('../../build/wasm/pipeline/midstudy_wasm_pipeline.js', import.meta.url))
+const WASM_MODULE = fileURLToPath(new URL('../../build/wasm/pipeline/midstudy_wasm_pipeline.js', import.meta.url))
 
 let loaded: Raw | null = null
 
@@ -168,7 +168,7 @@ export function spzCheck(payload: Uint8Array, ply: Uint8Array): Result<SpzCheck,
 
 // --- pictures ----------------------------------------------------------------------------------------------------
 
-export const IMAGE_FORMATS = ['JPEG', 'PNG', 'WEBP'] as const
+const IMAGE_FORMATS = ['JPEG', 'PNG', 'WEBP'] as const
 export type ImageFormat = (typeof IMAGE_FORMATS)[number]
 
 /** What Pillow's `Image.open` learns. Errors: `unidentified`, `broken` (offset: the format), `too-large`. */
@@ -238,7 +238,7 @@ export function imageRug(bytes: Uint8Array, wCm: number, dCm: number): Result<Ru
   })
 }
 
-export const MASK_KINDS = ['no-margin', 'no-piece', 'piece'] as const
+const MASK_KINDS = ['no-margin', 'no-piece', 'piece'] as const
 export type MaskKind = (typeof MASK_KINDS)[number]
 
 /** SAM 3D's foreground mask (PNG) and what it covers. */
