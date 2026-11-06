@@ -14,15 +14,16 @@ tables** (they supersede the two tables in proofs.md, which this track does not 
   (`Midstudy/Base64.lean`), #8 sniff (`Midstudy/Sniff.lean`), #10 wasm-node's wire reader (`Midstudy/Wire.lean`).
   Each is an executable Lean model of the Rust, proved, and added to `proofs/diff` as a mode. Every AENEAS.md target
   (#1–#10) now has a Lean model with proofs.
-- **LEAN.md 17, the convex hull** (`Midstudy/Hull.lean`): over ℝ, every vertex of the hull is an input point and every
-  input point is on or left of every edge (`pointInHull` whenever the hull has ≥ 3 vertices); both monotone chains
-  turn strictly left. Not proved: the strict turn at the two points where the chains meet.
+- **LEAN.md 17, the convex hull** (`Midstudy/Hull.lean`), all three parts, over ℝ: every vertex of the hull is an
+  input point; every input point is on or left of every edge (`pointInHull` whenever the hull has ≥ 3 vertices); and
+  every turn of the hull is strictly left unless the points are all on one line (inside both chains and at the two
+  points where they meet).
 - **Method unchanged**: Aeneas and Charon stay a no-go (no binary from f-toolchain's build; Aeneas's library pins
   Lean 4.35), so the Rust is covered by executable Lean models, proved, then compared with the Rust on generated
   inputs (`proofs/diff`).
 
-`check:proofs` (`nix develop -c npm run check:proofs`, i.e. `proofs/check.sh`): **ok, 24 files, 491 theorems**
-(was 20 and 354), 1,549 declarations under `Midstudy` using only `propext`, `Classical.choice`, `Quot.sound`; no
+`check:proofs` (`nix develop -c npm run check:proofs`, i.e. `proofs/check.sh`): **ok, 24 files, 504 theorems**
+(was 20 and 354), 1,568 declarations under `Midstudy` using only `propext`, `Classical.choice`, `Quot.sound`; no
 `sorry`, `admit`, `native_decide` or `axiom` in the sources; no build warnings.
 
 ## proofs/diff, 2026-11-06 (`nix develop -c proofs/diff/run.sh 20000`)
@@ -60,7 +61,8 @@ cd proofs && ./run.sh lake build mediastrip  # the models as a program: .lake/bu
 
 ## The theorem table (all of `proofs/`, current)
 
-The rows up to `unfilter_filter` are proofs.md's, unchanged; the last ten are this round's.
+The rows up to `unfilter_filter` are proofs.md's (pipes inside code escaped so the table renders); the last ten are
+this round's.
 
 | Theorem | File | What it guarantees for the app | Mirrored by (floats are tested, not proved) |
 |---|---|---|---|
@@ -134,8 +136,8 @@ The rows up to `unfilter_filter` are proofs.md's, unchanged; the last ten are th
 | `sniff_take`, `sniff_jpeg_iff`, `sniff_png_iff`, `sniff_heif`, `sniff_glb`, `sniff_zip` | Sniff | only the first 64 bytes count; JPEG is exactly `FF D8 FF` first, PNG exactly the signature; HEIC/HEIF only from an `ftyp` box at 4 with an HEVC or generic HEIF major brand; GLB and zip by their magic | k-media sniff tests |
 | `u32_eq_some`, `bytes_eq_some`, `readEntry_pos` | Wire | wasm-node's `wire::Reader` never reads past its buffer: `u32` succeeds exactly when 4 bytes are left, `bytes` exactly when the length-prefixed slice is inside, returning exactly that slice; positions only move forward, never past the end (AENEAS.md #10) | proofs/diff wire: 20,001 inputs identical |
 | `readAll_pack`, `readAll_eq_some_iff`, `Raw.size_eq`, `Raw.size_split` | Wire | `zip_plan`'s input loop reads back every packing of the TypeScript face (`node.ts` `zipPlan`, fields below 2³²) exactly, and nothing else: any other buffer is `bad-input`; `low \| high << 32` is the size the face split in two words | proofs/diff wire (`api::zip_plan`'s `bad-input` too) |
-| `hull_vertices`, `hull_contains` | Hull | v1's `convexHull` (hull.rs computes it in a buffer) over ℝ: every vertex is an input point, and every input point is on or left of every edge, the closing one included, so `pointInHull` holds for it whenever the hull has ≥ 3 vertices (LEAN.md 17) | geom props `hull_contains_its_points`, geom's differential test against v1 |
-| `hull_chains_convex`, `chain_convex`, `push_inv`, `cr_trans`, `upper_eq` | Hull | the lower and the upper chain each turn strictly left at every vertex; each pop keeps every processed point on or left of every stack edge (turns are monotone over vectors in the right half plane); the upper chain is the lower chain of the points turned by 180° | geom props |
+| `hull_vertices`, `hull_contains`, `push_inv`, `cr_trans`, `upper_eq` | Hull | v1's `convexHull` (hull.rs computes it in a buffer) over ℝ: every vertex is an input point, and every input point is on or left of every edge, the closing one included, so `pointInHull` holds for it whenever the hull has ≥ 3 vertices (LEAN.md 17). The proof: each pop keeps every processed point on or left of every stack edge (turns are monotone over vectors in the right half plane); the upper chain is the lower chain of the points turned by 180° | geom props `hull_contains_its_points`, geom's differential test against v1 |
+| `hull_turns_left`, `chain_convex`, `junction_right`, `junction_left` | Hull | unless the points are all on one line, every turn of the hull is strictly left: inside the lower and the upper chain, and at the rightmost and leftmost points where they meet (a straight turn there would put every point on that line: `reversal_line`) (LEAN.md 17) | geom props `hull_contains_its_points` (turns) |
 
 ## k-geom's LEAN.md, property by property (current)
 
@@ -159,7 +161,7 @@ Row 17 is this round's; the others are as in proofs.md.
 | 14 | Ry(90°)·x = −z; Ry(90°)⁴ = I | `Ry_quarter_x`, `Ry_quarter_pow_four` |
 | 15 | bounds extents `\|cos\|w + \|sin\|d`, quarter turn swaps | `worldBounds_x(_least)`, `worldBounds_z(_least)`, `worldBounds_quarter` |
 | 16 | every point within the corners' bounds; footprint centre | `corners_bound_x/y/z`, `footprint_centre` |
-| 17 | hull vertices are inputs, turn left, contain the points | `hull_vertices` (inputs), `hull_contains` (every input point on or left of every edge; `pointInHull` with ≥ 3 vertices), `hull_chains_convex` (each chain turns strictly left at every vertex). **Not proved**: the strict turns at the two junctions (the leftmost and the rightmost point, where the lower chain meets the upper one); geom's proptest covers them |
+| 17 | hull vertices are inputs, turn left, contain the points | `hull_vertices` (inputs), `hull_contains` (every input point on or left of every edge; `pointInHull` with ≥ 3 vertices), `hull_turns_left` (every turn strictly left unless all points are on one line: `chain_convex` inside the chains, `junction_right`, `junction_left` where they meet). Over ℝ; f64 is geom's proptest |
 | 18 | floor-plane hit = photoToFloor | `photoToPlane_zero` |
 | 19 | a move drag keeps the grabbed point under the pointer | `drag_keeps_point_under_pointer`, `photoToPlane_floorToPhoto`, `floorToPhoto_photoToPlane` |
 | 20 | landing: the base or a free point | `landing_spec`, `landing_free`, `ringPoint_dist` (free up to the 6-decimal rounding: within 5·10⁻⁷) |
@@ -212,10 +214,8 @@ Row 17 is this round's; the others are as in proofs.md.
 
 ## Not proved, and open
 
-- **LEAN.md 17, the turns where the chains meet**: inside each chain every turn is strictly left
-  (`hull_chains_convex`); at the leftmost and the rightmost point the turn is left or straight (it follows from
-  `hull_contains`), and strictly left whenever the points are not all on one line, which is not proved here (the
-  argument: a straight turn there means every point lies on that line). geom's proptest covers it.
+- LEAN.md 17 is proved over ℝ for v1's list algorithm; that hull.rs's one-buffer version returns the same list is
+  argued in its comment and pinned by geom's differential test against v1, not proved here.
 - LEAN.md 23's rank-9 claim (numeric) and 28 (half floats): as in proofs.md, not proved.
 - Aeneas and Charon: still blocked (proofs.md).
 - **kernels-hardening is not on `v2`**: its crates were measured at `a7953e9` (the branch tip when this ran; that
@@ -231,4 +231,4 @@ Row 17 is this round's; the others are as in proofs.md.
   `meta::{decode, MAX_HEADER_LEN, MetaError}`, `sniff::{sniff, Kind::name, Kind::photo_ext}` besides the earlier
   names, and compiles wasm-node's `wire.rs` and `api.rs` by path: keep those two files depending only on
   `midstudy_media` and `crate::wire` (true at `979677c` and `a7953e9`), or tell proofs.
-- **k-geom**: LEAN.md 17 can now say which parts are proved (above).
+- **k-geom**: LEAN.md 17 is proved (over ℝ, for v1's algorithm): its "[props …]" note can name `Midstudy/Hull.lean`.

@@ -7,17 +7,20 @@ import Mathlib.Tactic
 v1's `convexHull` (planner/engine.js), which `core/crates/geom/src/hull.rs` reimplements in a buffer: Andrew's
 monotone chain over the points sorted by x then y, popping while `cross(o, a, b) ≤ 0`, the output the lower chain and
 the upper chain (the same rule over the points in reverse) each without its last point; fewer than 3 points come back
-sorted. `pointInHull(h, q)`: at least 3 points and `q` on or left of every edge. The hit test of a placed piece rests
-on it (§4.5: a click inside the hull of the piece's projected corners selects it). Over ℝ, exactly:
+sorted. `pointInHull(h, q)`: at least 3 points and `q` on or left of every edge. A press on a piece selects it (§4.5)
+when it falls in the hull of the piece's projected corners or within a few pixels of it (v1's `hitItemAt`, hull.rs
+`hull_hit`). Over ℝ, exactly:
 
 * `hull_vertices`: **every vertex of the hull is an input point**;
 * `hull_contains`: **every input point is in the hull**: on or left of every edge (`pointInHull` whenever the hull has
   at least 3 vertices);
-* `chain_convex`: the lower and the upper chains turn strictly left at every vertex.
+* `hull_turns_left`: **every turn of the hull is strictly left** unless the points are all on one line: inside each
+  chain (`chain_convex`) and where the chains meet, at the rightmost and the leftmost point (`junction_right`,
+  `junction_left`).
 
 The proof works on one chain at a time (the stack, top first): every processed point stays on or left of every edge
 of the stack (`Inv.left`), by a monotonicity of turns over vectors in the right half plane (`cr_trans`). The upper
-chain is the lower chain of the points turned by 180° (`chain_neg`). In f64 the Rust is checked by geom's property
+chain is the lower chain of the points turned by 180° (`upper_eq`). In f64 the Rust is checked by geom's property
 test `hull_contains_its_points` (up to rounding) and the differential test against v1.
 -/
 
@@ -672,5 +675,249 @@ theorem hull_contains (pts : List P2) (q : P2) (hq : q ∈ pts) (h3 : 3 ≤ (con
 theorem hull_chains_convex (pts : List P2) :
     Convex (chain (pts.mergeSort lexB)) ∧ Convex (chain (pts.mergeSort lexB).reverse) :=
   chain_convex _ (sorted_mergeSort pts)
+
+/-! ## The turns where the chains meet -/
+
+/-- The points are not all on one line. -/
+def NotCollinear (pts : List P2) : Prop := ∃ a ∈ pts, ∃ b ∈ pts, ∃ c ∈ pts, cross a b c ≠ 0
+
+/-- On the line through `o` along `e ≠ 0`, every turn is straight. -/
+theorem line_cross_zero {o e : P2} (he : e ≠ 0) {a b c : P2}
+    (ha : e.1 * (a.2 - o.2) - e.2 * (a.1 - o.1) = 0) (hb : e.1 * (b.2 - o.2) - e.2 * (b.1 - o.1) = 0)
+    (hc : e.1 * (c.2 - o.2) - e.2 * (c.1 - o.1) = 0) : cross a b c = 0 := by
+  have h1 : e.1 * cross a b c = 0 := by
+    unfold cross
+    linear_combination (b.1 - a.1) * hc - (b.1 - a.1) * ha - (c.1 - a.1) * hb + (c.1 - a.1) * ha
+  have h2 : e.2 * cross a b c = 0 := by
+    unfold cross
+    linear_combination (-(c.2 - a.2)) * hb + (c.2 - a.2) * ha + (b.2 - a.2) * hc - (b.2 - a.2) * ha
+  by_contra h
+  apply he
+  exact Prod.ext ((mul_eq_zero.1 h1).resolve_right h) ((mul_eq_zero.1 h2).resolve_right h)
+
+/-- **A straight turn where the direction reverses puts everything on the line**: at `x`, lexicographically after
+both `l` and `u`, if `l → x → u` is straight and every point is on or left of `l → x` and of `x → u`, every point is on
+the line `l x`. -/
+theorem reversal_line {l x u q : P2} (h1 : LexLe l x) (hlx : l ≠ x) (h2 : LexLe u x) (hux : u ≠ x)
+    (h0 : cross l x u = 0) (hq1 : 0 ≤ cross l x q) (hq2 : 0 ≤ cross x u q) : cross l x q = 0 := by
+  have he := sub_pos_of_lexLe h1 hlx
+  have hf := sub_pos_of_lexLe h2 hux
+  unfold cross at *
+  rcases he with he | ⟨he1, he2⟩
+  · rcases hf with hf | ⟨hf1, hf2⟩
+    · -- f₁ < 0 with e₁ > 0: (x₁ - l₁)·cross(x, u, q) = (u₁ - x₁)·cross(l, x, q)
+      have key : (x.1 - l.1) * ((u.1 - x.1) * (q.2 - x.2) - (u.2 - x.2) * (q.1 - x.1)) =
+          (u.1 - x.1) * ((x.1 - l.1) * (q.2 - l.2) - (x.2 - l.2) * (q.1 - l.1)) := by
+        linear_combination (-(q.1 - x.1)) * h0
+      nlinarith
+    · -- f₁ = 0 forces f₂ = 0: u = x
+      have : x.2 - u.2 = 0 := by
+        have : (x.1 - l.1) * (u.2 - l.2) - (x.2 - l.2) * (u.1 - l.1) = (x.1 - l.1) * (u.2 - x.2) := by
+          rw [show u.1 = x.1 by linarith]
+          ring
+        nlinarith
+      linarith
+  · rcases hf with hf | ⟨hf1, hf2⟩
+    · have hx1 : x.1 = l.1 := by linarith
+      have : (x.1 - l.1) * (u.2 - l.2) - (x.2 - l.2) * (u.1 - l.1) = - (x.2 - l.2) * (u.1 - l.1) := by
+        rw [hx1]
+        ring
+      nlinarith
+    · have hx1 : x.1 = l.1 := by linarith
+      have hu1 : u.1 = x.1 := by linarith
+      rw [hx1] at hq1 hq2 ⊢
+      rw [hu1, hx1] at hq2
+      nlinarith
+
+/-- The last point of a sorted list is the greatest, the first the least. -/
+theorem le_last {init : List P2} {c : P2} (hs : (init ++ [c]).Pairwise LexLe) : ∀ q ∈ init ++ [c], LexLe q c := by
+  intro q hq
+  rcases List.mem_append.1 hq with hq | hq
+  · exact (List.pairwise_append.1 hs).2.2 q hq c (by simp)
+  · simp only [List.mem_singleton] at hq
+    subst hq
+    exact lexLe_refl _
+
+theorem first_le {a : P2} {rest : List P2} (hs : (a :: rest).Pairwise LexLe) : ∀ q ∈ a :: rest, LexLe a q := by
+  intro q hq
+  rcases List.mem_cons.1 hq with rfl | hq
+  · exact lexLe_refl _
+  · exact List.rel_of_pairwise_cons hs hq
+
+/-- Points that are all equal are collinear. -/
+theorem not_all_equal {s : List P2} {x : P2} (hnc : NotCollinear s) (h : ∀ q ∈ s, q = x) : False := by
+  obtain ⟨a, ha, b, hb, c, hc, habc⟩ := hnc
+  rw [h a ha, h b hb, h c hc, cross_self'] at habc
+  exact habc rfl
+
+theorem convex_tail {h : P2} {S : List P2} (hc : Convex (h :: S)) : Convex S := by
+  match S, hc with
+  | [], _ => trivial
+  | [_], _ => trivial
+  | [_, _], _ => trivial
+  | y :: x :: w :: rest, hc => exact hc.2
+
+/-- The bottom triple of a convex stack turns strictly left. -/
+theorem convex_bottom : ∀ (l : List P2) (z y w : P2), Convex (l ++ [z, y, w]) → 0 < cross w y z
+  | [], _, _, _, hc => hc.1
+  | _ :: t, z, y, w, hc => convex_bottom t z y w (convex_tail hc)
+
+theorem cross_self'' (o b : P2) : cross o o b = 0 := by simp [cross]
+
+/-- **The turn at the rightmost point is strictly left** (`l → x` the lower chain's last edge, `x → u` the upper
+chain's first), unless the points are all on one line. -/
+theorem junction_right (s : List P2) (hs : s.Pairwise LexLe) (hnc : NotCollinear s) {x l : P2} {L₂ : List P2}
+    (hL : chain s = x :: l :: L₂) {u : P2} {U₂ : List P2} (hU : (chain s.reverse).reverse = x :: u :: U₂) :
+    0 < cross l x u := by
+  -- s's last point is x, the greatest
+  obtain ⟨init, c, rfl⟩ : ∃ init c, s = init ++ [c] := by
+    rcases List.eq_nil_or_concat s with h | ⟨init, c, h⟩
+    · subst h
+      obtain ⟨a, ha, -⟩ := hnc
+      simp at ha
+    · exact ⟨init, c, by simpa using h⟩
+  have hxc : x = c := by
+    have := chain_head init c
+    rw [hL] at this
+    simpa using this
+  subst hxc
+  have hmax := le_last hs
+  -- every point is on or left of `l → x` and of `x → u`
+  have hLx : ∀ q ∈ init ++ [x], 0 ≤ cross l x q := by
+    intro q hq
+    have := chain_left _ hs q hq
+    rw [hL] at this
+    unfold LeftAll at this
+    exact (List.isChain_cons_cons.1 this).1
+  have hUx : ∀ q ∈ init ++ [x], 0 ≤ cross x u q := by
+    intro q hq
+    have := upper_left _ hs q hq
+    unfold LeftAll at this
+    rw [← List.isChain_reverse, hU] at this
+    exact (List.isChain_cons_cons.1 this).1
+  have hl_s : l ∈ init ++ [x] := chain_sub _ l (by rw [hL]; simp)
+  have hu_s : u ∈ init ++ [x] := by
+    have : u ∈ chain (init ++ [x]).reverse := by
+      rw [← List.mem_reverse, hU]
+      simp
+    exact List.mem_reverse.1 (chain_sub _ u this)
+  -- the first point is the least
+  obtain ⟨a, rest, hs_eq⟩ : ∃ a rest, init ++ [x] = a :: rest := by
+    match h : init ++ [x] with
+    | [] => simp at h
+    | a :: rest => exact ⟨a, rest, rfl⟩
+  have hmin : ∀ q ∈ init ++ [x], LexLe a q := by
+    rw [hs_eq] at hs ⊢
+    exact first_le hs
+  have all_eq : (a = x) → False := by
+    intro hax
+    apply not_all_equal hnc (x := x)
+    intro q hq
+    exact lexLe_antisymm (hmax q hq) (hax ▸ hmin q hq)
+  by_contra hle
+  have h0 : cross l x u = 0 := le_antisymm (not_lt.1 hle) (hLx u hu_s)
+  -- the two degenerate stacks: a repeated top or bottom only happens when every point is the same
+  have hlx : l ≠ x := by
+    rintro rfl
+    have hconv := (chain_convex _ hs).1
+    rw [hL] at hconv
+    cases L₂ with
+    | nil =>
+      have := chain_getLast a rest
+      rw [← hs_eq, hL] at this
+      simp at this
+      exact all_eq this.symm
+    | cons w L₃ =>
+      have := hconv.1
+      rw [cross_self'] at this
+      exact lt_irrefl _ this
+  have hux : u ≠ x := by
+    rintro rfl
+    have hU' : chain (init ++ [u]).reverse = U₂.reverse ++ [u, u] := by
+      have := congrArg List.reverse hU
+      simpa using this
+    cases U₂ with
+    | nil =>
+      have htop : (chain (init ++ [u]).reverse).head? = some a := by
+        rw [hs_eq, List.reverse_cons]
+        exact chain_head _ a
+      rw [hU'] at htop
+      simp at htop
+      exact all_eq htop.symm
+    | cons w W =>
+      have hconv := (chain_convex _ hs).2
+      rw [hU', show (w :: W).reverse ++ [u, u] = W.reverse ++ [w, u, u] by simp] at hconv
+      have := convex_bottom W.reverse w u u hconv
+      rw [cross_self''] at this
+      exact lt_irrefl _ this
+  -- otherwise every point is on the line `l x`, so all turns are straight
+  have hline : ∀ q ∈ init ++ [x], cross l x q = 0 := fun q hq =>
+    reversal_line (hmax l hl_s) hlx (hmax u hu_s) hux h0 (hLx q hq) (hUx q hq)
+  obtain ⟨p1, hp1, p2, hp2, p3, hp3, hne⟩ := hnc
+  apply hne
+  have he : x - l ≠ 0 := sub_ne_zero.2 (Ne.symm hlx)
+  have hl' : ∀ q ∈ init ++ [x], (x - l).1 * (q.2 - l.2) - (x - l).2 * (q.1 - l.1) = 0 := by
+    intro q hq
+    have := hline q hq
+    unfold cross at this
+    simpa using this
+  exact line_cross_zero he (hl' p1 hp1) (hl' p2 hp2) (hl' p3 hp3)
+
+theorem notCollinear_neg {s : List P2} (h : NotCollinear s) : NotCollinear (s.reverse.map neg) := by
+  obtain ⟨a, ha, b, hb, c, hc, habc⟩ := h
+  refine ⟨neg a, List.mem_map.2 ⟨a, List.mem_reverse.2 ha, rfl⟩, neg b, List.mem_map.2 ⟨b, List.mem_reverse.2 hb, rfl⟩,
+    neg c, List.mem_map.2 ⟨c, List.mem_reverse.2 hc, rfl⟩, ?_⟩
+  rwa [cross_neg]
+
+/-- **The turn at the leftmost point is strictly left** (`u → y` the upper chain's last edge, `y → l` the lower
+chain's first), unless the points are all on one line: the rightmost turn of the points turned by 180°. -/
+theorem junction_left (s : List P2) (hs : s.Pairwise LexLe) (hnc : NotCollinear s) {y l : P2} {L₂ : List P2}
+    (hL : (chain s).reverse = y :: l :: L₂) {u : P2} {U₂ : List P2} (hU : chain s.reverse = y :: u :: U₂) :
+    0 < cross u y l := by
+  have hs' := sorted_reverse_neg s hs
+  have hL' : chain (s.reverse.map neg) = neg y :: neg u :: U₂.map neg := by
+    have := congrArg (List.map neg) (upper_eq s)
+    rw [List.map_map] at this
+    simp only [Function.comp_def, neg_neg', List.map_id'] at this
+    rw [← this, hU]
+    rfl
+  have hU' : (chain (s.reverse.map neg).reverse).reverse = neg y :: neg l :: L₂.map neg := by
+    rw [← List.map_reverse, List.reverse_reverse, chain_map_neg, ← List.map_reverse, hL]
+    rfl
+  have := junction_right _ hs' (notCollinear_neg hnc) hL' hU'
+  rwa [cross_neg] at this
+
+/-- Points not all on one line are at least two (three, in fact). -/
+theorem two_le_of_notCollinear {s : List P2} (h : NotCollinear s) : 2 ≤ s.length := by
+  obtain ⟨a, ha, b, hb, c, hc, habc⟩ := h
+  match s, ha, hb, hc with
+  | [x], ha, hb, hc =>
+    simp only [List.mem_singleton] at ha hb hc
+    subst ha hb hc
+    exact absurd (cross_self' _ _) habc
+  | _ :: _ :: _, _, _, _ => simp
+
+/-- **Every turn of the hull is strictly left** when the points are not all on one line: inside the lower and the
+upper chain (`chain_convex`), and where they meet at the rightmost (`x`) and the leftmost (`y`) point; both chains
+have at least two points, so those meeting turns exist. With the hull being `lower.dropLast ++ upper.dropLast`, these
+are all its consecutive triples, cyclically. -/
+theorem hull_turns_left (pts : List P2) (hnc : NotCollinear pts) :
+    let s := pts.mergeSort lexB
+    2 ≤ (chain s).length ∧ 2 ≤ (chain s.reverse).length ∧ Convex (chain s) ∧ Convex (chain s.reverse) ∧
+      (∀ x l L₂ u U₂, chain s = x :: l :: L₂ → (chain s.reverse).reverse = x :: u :: U₂ → 0 < cross l x u) ∧
+      (∀ y l L₂ u U₂, (chain s).reverse = y :: l :: L₂ → chain s.reverse = y :: u :: U₂ → 0 < cross u y l) := by
+  intro s
+  have hs := sorted_mergeSort pts
+  have hnc' : NotCollinear s := by
+    obtain ⟨a, ha, b, hb, c, hc, h⟩ := hnc
+    exact ⟨a, List.mem_mergeSort.2 ha, b, List.mem_mergeSort.2 hb, c, List.mem_mergeSort.2 hc, h⟩
+  have h2 := two_le_of_notCollinear hnc'
+  have hlen : ∀ l : List P2, 2 ≤ l.length → 2 ≤ (chain l).length := by
+    intro l hl
+    match l, hl with
+    | a :: b :: rest, _ => exact chain_length a b rest
+  exact ⟨hlen s h2, hlen s.reverse (by simpa using h2), (chain_convex s hs).1, (chain_convex s hs).2,
+    fun _ _ _ _ _ hL hU => junction_right s hs hnc' hL hU,
+    fun _ _ _ _ _ hL hU => junction_left s hs hnc' hL hU⟩
 
 end Midstudy.Hull
