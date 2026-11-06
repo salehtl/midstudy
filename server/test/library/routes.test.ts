@@ -361,7 +361,9 @@ async function spendScript(s: Server): Promise<Record_> {
   const hits = webHits.length
   put('url-over-cap', await call(s, 'POST', '/api/library/items/from-url', '{"image_url": "http://127.0.0.1:' + String(webPort) + '/chair.jpg", "name": "X", "engine": "idol", "dims_cm": {"w": 1, "d": 1, "h": 1}}'))
   rec.set('url-over-cap fetched nothing', webHits.length === hits)
-  put('free', await add('free-rug', 'rug'))
+  const free = await add('free-rug', 'rug')
+  put('free', free)
+  put('free:job', await waitJob(s, jobIdOf(free)))
   put('spend1', await call(s, 'GET', '/api/spend'))
   return rec
 }

@@ -74,5 +74,6 @@ void test('library writes wait 60 s for a held lock, then answer 503 and change 
     assert.ok(after.includes('"w": 80.0') && after.includes('"thumb": "chair/thumb.jpg"'), after)
   } finally {
     await s.stop()
+    fs.rmSync(s.dir, { recursive: true, force: true })
   }
 })

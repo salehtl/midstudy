@@ -76,7 +76,7 @@ that `common/logic/` is copied into the sandbox (the modules import it).
   with line breaks), deletes, restores (404, 409, twice), and crafted trash folders (order by `deleted` then folder,
   unreadable ones skipped). Three answers differ only in the JSON parser's words after v1's "body is not valid JSON: "
   (server-core's `readJson`, a documented deviation); the test normalizes those.
-- **The spend cap, side by side** ($0.05 cap, `MIDSTUDY_FAL_MOCK_COST=1`): 12 answers equal, including the 402 while
+- **The spend cap, side by side** ($0.05 cap, `MIDSTUDY_FAL_MOCK_COST=1`): 13 answers equal (and the web server untouched), including the 402 while
   a slow paid job holds its reservation ("… $0.02 spent and $0.02 reserved by calls still running, …"), the used-up
   402, "this call costs $0.35, more than the daily fal budget ($0.05) allows", a from-URL add refused before any
   download (the web server saw no request), and `GET /api/spend` with and without a reservation.
@@ -93,7 +93,9 @@ that `common/logic/` is copied into the sandbox (the modules import it).
 | E13 splat | — (its first add would 501) | 24/51: every library check passes | **51/51** | **51/51** |
 
 - E7 on this branch: the one failure is "W2 /api/render counts against the same cap (402)": `POST /api/render` is
-  server-scenes' route (a 501 stub here). Run twice (78/79 both times, ~20 s each).
+  server-scenes' route (a 501 stub here). Run twice: 78/79 both times (at `279ca42`, 21 s wall; at the final code, 15 s).
+  For reference, v1's server on the same branch: 79/79 in 44 s (with v1, curl waits 1 s for a `100 Continue` that never
+  comes on each upload over 1 MB; v2 sends it).
 - E13 on this branch: passes E13.01–E13.11 (the Idol default at $0.10, SAM 3D, the rug, the entries, validate_library,
   splat.spz/splat.ply served), E13.14 (the planner's library), E13.38–E13.42 and E13.46–E13.48 (the Add form and Edit
   sheet over the library API), E13.50–E13.51; the 27 failures are all scenes: `POST /api/scenes` is a 501 stub
@@ -114,20 +116,37 @@ that "every stage-B route answers 501" (`GET /api/library` now answers 200); see
 
 ## TScert
 
-All 5 modules certify: **TSCERT_RESULT**. They live in `server/src/library/logic/` (this track owns `server/src/library/**`,
-not `server/src/logic/`), which no area of `tscert/config.json` covers yet, so `npm run check:tscert` doesn't see them
-and their functions are **not in `tscert/baseline.json`**: adding them now would make the official ratchet fail
-("gone") until the area exists. Request below; once it is added, `--update` puts them in the baseline.
+**All 59 units of the 5 modules certify** (every top-level function and each module's initialization):
+
+| Module | Units |
+|---|---|
+| `pyvalue.ts` (12) | codePointOrder, dictGet, inNumbers, noneOrEmpty, numberOf, pyCompare, pyInt, pySorted, pyTruthy, pyValueRepr, reprEntries, reprItems |
+| `meta.ts` (16) | (init), addArgv, checkDims, checkMeta, choice, dimText, engineOf, enginePrice, fail, imageEngineOf, modelEngineOf, mountOf, optionalText, positive, rescaleArgv, sameNumber |
+| `upload.ts` (9) | (init), extProblem, imageExt, sizeLimit, suffixOf, tooLarge, unreadableZip, uploadFilename, uploadKind |
+| `patch.ts` (8) | (init), checkPatch, defaultRenderProblem, fieldProblem, needsRefit, patchShape, setsOf, storedValue |
+| `messages.ts` (14) | (init), existsAgain, noFolder, noItem, noJob, noTrashed, notInTrash, notInstalled, queuedMessage, runningMessage, serverFailed, timedOut, trashName, trashOrder |
+
+Measured at the final code with a scratch config (`build/tscert-library/config.json`: tscert/config.json's five areas plus
+`server/src/library/logic/**/*.ts`) at load 3: `tscert: 174/174 certified, all 115 baselined still certify, 59 new (add
+them: --update) (20 files, 18 s)`. And **`npm run check:tscert`** (the official areas): `ok — 115/115 certified, all 115
+baselined still certify (15 files, 8 s)`.
+
+The modules live in `server/src/library/logic/` (this track owns `server/src/library/**`, not `server/src/logic/`), which
+no area of `tscert/config.json` covers yet, so `npm run check:tscert` doesn't see them and **their functions are not in
+`tscert/baseline.json`**: adding them now would make the official ratchet fail ("gone": not in any area) until the area
+exists. Request below; once it is added, `--update` puts these 59 in the baseline.
 
 First run: 4 refused, rewritten as tscert/README.md suggests: `concat` (not in the array contract) → a spread literal and
 `push`; a spread of a Map's key iterator → `for (const [key] of m.entries())`; a type-predicate narrowing of a field
-returned through a union (`isImageEngine(v.value)`, "evidence search failed") → a `switch` returning literals, and the
-engine choice split in two smaller functions (the combined one hung TScert's verifier past 600 s).
+returned through a union (`isImageEngine(v.value)`, "evidence search failed") → a `switch` returning literals, the engine
+choice split in two smaller functions.
 
-`npm run check:tscert` itself (the official areas; this track changed none of their files, but package.json is one of
-its inputs): OFFICIAL_RESULT. Under this machine's load (12–35) TScert's verifier steps time out on server-core's units
-too (`apiPathOf`, `urlHostname`, `targetParts`, `slugifyDecomposed`: "did not finish within 600 s", no verdict), as
-server-core reported; the runs over this track's 5 modules alone took 15–17 s.
+**TScert's "tool errors" are hangs, not slow units.** Four of eight runs here ended with "verifier … did not finish
+within N s" (N = 180, 600, 900), on server-core's units as often as on these (`apiPathOf`, `urlHostname`, `targetParts`,
+`slugifyDecomposed`, `parseIpv4`, `stalledMessage`, `mockSlug`, `pyFixed`). While they "ran", `ps` showed the stuck
+`stage-runner` with a forked child asleep at 0 % CPU next to a zombie sibling: the verifier never started, so a longer
+step limit only makes the run longer (one official run took 921 s to fail). The same checks passed in 8–18 s once the
+load fell (12–35 → 2–3) with `MIDSTUDY_TSCERT_STEP_LIMIT=120`. A short step limit and a retry is the practical answer.
 
 ## Decisions and deviations from v1
 
@@ -184,8 +203,11 @@ library-meta.schema.json at run time (v1 didn't either; strict mode checks answe
 
 ## Left
 
-- The TScert area and baseline entries (Requests); the official check:tscert result under load (above).
-- Not run here: check:rust, check:fuzz, check:proofs, check:py (no Rust, Lean or Python under this track changed; the
-  Python files here are test oracles run by the tests).
-- E7 79/79 and E13 51/51 were reached only on the throwaway merge; on this branch alone they need server-scenes'
-  routes.
+- The TScert area for `server/src/library/logic/` and its 59 baseline entries (Requests: f-toolchain or the main
+  session).
+- E7 79/79 and E13 51/51 were reached only on a throwaway merge with v2-server-scenes (and v2-pipeline for the next
+  CLI); on this branch alone, E7's render check and E13's scene checks wait for server-scenes' routes.
+- `server/test/server.test.ts`'s 501 assertion (server-core's file) fails on the implemented library routes until
+  integration trims it (Requests).
+- Not run here: check:rust, check:fuzz, check:proofs, check:py (no Rust, Lean or calib Python changed; the Python files
+  in `server/test/library/` are the tests' v1 oracle and stand-in CLI).
