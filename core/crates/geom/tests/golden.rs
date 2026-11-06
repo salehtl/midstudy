@@ -77,6 +77,10 @@ fn p2(v: &Value) -> [f64; 2] {
 const ROUND3: f64 = 5e-4 + 1e-9;
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn every_corner_projects_onto_corner_px() {
     let mut worst = 0.0_f64;
     let mut n = 0;
@@ -107,6 +111,10 @@ fn every_corner_projects_onto_corner_px() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn photo_to_floor_inverts_the_floor_points() {
     let mut worst_trip = 0.0_f64;
     let mut worst_file = 0.0_f64;
@@ -149,6 +157,10 @@ fn photo_to_floor_inverts_the_floor_points() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn horizon_and_signs_are_pinned() {
     for s in scenes() {
         let b = s.cam.block();
@@ -229,6 +241,10 @@ fn horizon_and_signs_are_pinned() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn the_item_frame_builds_truths_corners() {
     for s in scenes() {
         for (name, o) in s.truth["objects"].as_object().unwrap() {
@@ -253,6 +269,10 @@ fn the_item_frame_builds_truths_corners() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn the_light_frame_is_the_cameras() {
     // lighting.json's key is in the camera frame; R turns it into the world frame (§4.8), which the golden
     // lighting.json records (rounded to 6 decimals) for the evals.

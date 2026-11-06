@@ -1,0 +1,24 @@
+# The product page reader's size rules (contract §2.11; v1 planner/product_page.py): numbers, units, fractions,
+# feet and inches, labels in six languages, order keys, ranges, rug sizes, the box/packaging/seat exclusions,
+# plausibility and the merge of readings within 0.5 cm. Every pattern runs in linear time: the hand-written matchers
+# take bounded steps per position (v1's regexes, lookarounds and all, emulated exactly), and the plain ones go
+# through the regex crate (finite automata). Called from Node through crates/wasm-product; core/js/product.ts is
+# its typed face.
+[package]
+name = "midstudy-product"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex = { version = "1.13", default-features = false, features = ["std", "unicode", "perf"] }
+regex-syntax = { version = "0.8", default-features = false, features = ["unicode"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+proptest = { version = "1.7", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

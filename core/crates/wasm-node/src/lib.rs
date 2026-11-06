@@ -13,6 +13,7 @@
 //! only encodes its results (the release profile aborts on a panic, which would surface in Node as a
 //! `RuntimeError: unreachable`). [`api`] is plain Rust, tested natively; `exports` is the `#[wasm_bindgen]` layer.
 //! The workspace's `#![forbid(unsafe_code)]` holds here too: wasm-bindgen's generated glue doesn't trip it.
+#![deny(missing_docs)]
 #![deny(
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,

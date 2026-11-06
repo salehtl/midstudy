@@ -1,0 +1,33 @@
+# cargo-fuzz targets for the splat kernels (docs/REFACTOR.md: cargo-fuzz on every byte parser): the PLY reader and the
+# per-axis fit, and the SPZ writer and its read-back. Its own workspace, so the core workspace never builds libFuzzer.
+#
+#   cd core/crates/splat/fuzz && nix develop ../../../..#nightly -c cargo fuzz run <target> -- -max_total_time=300
+[package]
+name = "midstudy-splat-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+midstudy-splat = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ply_fit"
+path = "fuzz_targets/ply_fit.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spz_roundtrip"
+path = "fuzz_targets/spz_roundtrip.rs"
+test = false
+doc = false
+bench = false

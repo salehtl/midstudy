@@ -2,7 +2,7 @@
 
 - contract/calib.schema.json
 - contract/lighting.schema.json
-- calib/src/midstudy_calib/schemas/calib-cli.schema.json
+- contract/calib-cli.schema.json
 
 Do not edit: change the schemas and run the script (tests/test_contract_types.py checks that this file is current).
 """

@@ -1,0 +1,34 @@
+# cargo-fuzz targets for the imaging kernels (docs/REFACTOR.md: cargo-fuzz on every byte parser): the JPEG, PNG and
+# WebP decoders with the EXIF orientation, and what midstudy-add makes of a picture. Its own workspace, so the core
+# workspace never builds libFuzzer.
+#
+#   cd core/crates/imaging/fuzz && nix develop ../../../..#nightly -c cargo fuzz run <target> -- -max_total_time=300
+[package]
+name = "midstudy-imaging-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+midstudy-imaging = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "picture_ops"
+path = "fuzz_targets/picture_ops.rs"
+test = false
+doc = false
+bench = false

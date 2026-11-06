@@ -63,6 +63,10 @@ fn scene(id: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn decodes_like_pillow() {
     for (id, w, h, sum, sha) in PIL {
         let bytes = std::fs::read(scene(id).join("depth.png")).unwrap();
@@ -86,6 +90,10 @@ fn decodes_like_pillow() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "reads the golden fixtures from disk, and Miri runs isolated"
+)]
 fn open_floor_is_zero() {
     for (id, ..) in PIL {
         let dir = scene(id);

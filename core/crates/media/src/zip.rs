@@ -83,7 +83,7 @@ pub enum Refusal {
 }
 
 /// `total / 1e6` rounded half to even, as Python's `f"{total / 1e6:.0f}"` prints it.
-fn megabytes(total: u64) -> u64 {
+pub(crate) fn megabytes(total: u64) -> u64 {
     let q = total / 1_000_000;
     let r = total % 1_000_000;
     if r > 500_000 || (r == 500_000 && q % 2 == 1) {

@@ -340,7 +340,7 @@ mod tests {
     fn dilation_equals_v1s() {
         let (w, h) = (37, 23);
         let mut seed = 0x1234_5678_u32;
-        for trial in 0..200_usize {
+        for trial in 0..if cfg!(miri) { 8 } else { 200_usize } {
             let mut src = vec![0; w * h];
             let density = u32::try_from(5 + trial % 40).unwrap();
             for v in &mut src {

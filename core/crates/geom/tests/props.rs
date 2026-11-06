@@ -20,6 +20,16 @@ use midstudy_geom::mat::{mat_mul, rot_x, rot_z};
 use midstudy_geom::{Camera, CameraBlock, DEFAULT_CAMERA};
 use proptest::prelude::*;
 
+/// `cases` cases natively; under Miri (`cargo miri test`, core/miri.txt) 4, since every case is interpreted. No
+/// failure file, as before (and Miri's isolation has no `getcwd`, which proptest needs to find one).
+fn config(cases: u32) -> ProptestConfig {
+    ProptestConfig {
+        cases: if cfg!(miri) { 4 } else { cases },
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    }
+}
+
 fn camera_block() -> impl Strategy<Value = CameraBlock> {
     (
         FOV_RANGE.0..=FOV_RANGE.1,
@@ -33,6 +43,15 @@ fn camera_block() -> impl Strategy<Value = CameraBlock> {
             pitch_deg,
             roll_deg,
         })
+}
+
+/// `k` for an angle `k / 1e7` degrees in [−180, 180): uniform nine times in ten, else within 10⁻⁶ of ±180.
+fn near_half_turn() -> impl Strategy<Value = i64> {
+    prop_oneof![
+        18 => -1_800_000_000_i64..1_800_000_000,
+        1 => -1_800_000_000_i64..-1_799_999_990,
+        1 => 1_799_999_990_i64..1_800_000_000,
+    ]
 }
 
 fn photo_size() -> impl Strategy<Value = (f64, f64)> {
@@ -52,7 +71,7 @@ fn any_f64() -> impl Strategy<Value = f64> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 4000, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(config(4000))]
 
     /// project ∘ photoToFloor is the identity on pixels at least 1 px below the horizon (and inside a generous frame).
     #[test]
@@ -189,16 +208,46 @@ proptest! {
         prop_assert!(((z - a) / 360.0 - ((z - a) / 360.0).round()).abs() < 1e-9);
     }
 
-    /// Four quarter turns are the identity: on the stored angle (exactly, for angles on v1's 1e-6 grid) and on points.
+    /// Four quarter turns are the identity (LEAN.md 13, as corrected by the proofs track): on the stored angle as a
+    /// direction always (`wrap_deg` of both sides equal), and as a number exactly unless the stored angle is −180,
+    /// which comes back as 180 (`rotateBy_four_quarters_stored`, `rotateBy_four_quarters_exception`; v1 does the same);
+    /// and on points. One case in ten is drawn next to ±180, where the exception lives (k in [−1 799 999 999,
+    /// −1 799 999 996] stores −180), so the run reaches it every time.
     #[test]
-    fn four_quarter_turns(k in -1_800_000_000_i64..1_800_000_000, x in -5.0..5.0_f64, y in 0.0..2.0_f64, z in -5.0..5.0_f64) {
+    fn four_quarter_turns(k in near_half_turn(), x in -5.0..5.0_f64, y in 0.0..2.0_f64, z in -5.0..5.0_f64) {
         #[allow(clippy::cast_precision_loss)]
         let r0 = round_to(wrap_deg(k as f64 / 1e7), 6);
         let r4 = (0..4).fold(r0, |r, _| rotate_by(r, 90.0));
-        prop_assert_eq!(r4, r0);
+        prop_assert_eq!(wrap_deg(r4), wrap_deg(r0));
+        if r0 == -180.0 {
+            prop_assert_eq!(r4, 180.0);
+        } else {
+            prop_assert_eq!(r4, r0);
+        }
         let p = [x, y, z];
         let q = (0..4).fold(p, |q, _| Pose { position: [0.0; 3], rotation_y_deg: 90.0 }.transform().apply(q));
         prop_assert!((0..3).all(|i| (q[i] - p[i]).abs() < 1e-14));
+    }
+
+    /// LEAN.md 7, as corrected by the proofs track (`floorToPhoto_raise`): at roll 0, raising a point in front of the
+    /// camera by δ moves its pixel by exactly f·δ·z / (d·d') rows, so up in the world is up in the photo for points
+    /// ahead of the camera's foot (z < 0), and down for points in front but behind it (z > 0, looking steeply down).
+    #[test]
+    fn raising_a_point_moves_its_pixel_by_the_formula(b in camera_block(), (w, h) in photo_size(), u in 0.0..1.0_f64, v in 0.0..1.0_f64, t in 0.3..10.0_f64, delta in 0.01..0.5_f64) {
+        let cam = Camera::new(CameraBlock { roll_deg: 0.0, ..b }, w, h);
+        // A point in front by construction: depth t along the ray of a pixel of the photo (LEAN.md 3).
+        let (e, dir) = (cam.eye(), cam.ray_dir(u * w, v * h));
+        let [x, y, z] = [e[0] + t * dir[0], e[1] + t * dir[1], e[2] + t * dir[2]];
+        let (p0, p1) = (cam.project([x, y, z]), cam.project([x, y + delta, z]));
+        prop_assume!(p1[2] > 1e-2);
+        let want = cam.focal() * delta * z / (p0[2] * p1[2]);
+        let got = p1[1] - p0[1];
+        prop_assert!((got - want).abs() <= 1e-9 * (1.0 + want.abs()), "Δpy {got}, formula {want}");
+        if z < -1e-6 {
+            prop_assert!(got < 0.0);
+        } else if z > 1e-6 {
+            prop_assert!(got > 0.0);
+        }
     }
 
     /// A quarter turn swaps the X and Z extents of an item's world bounds.
@@ -236,5 +285,31 @@ proptest! {
                 prop_assert!(cross > 0.0);
             }
         }
+    }
+}
+
+/// The exception to LEAN.md 13, pinned (the proofs track's `rotateBy_four_quarters_exception`, reproduced in Rust): an
+/// angle within 5·10⁻⁷ of −180 is stored as −180 by v1's `round(wrapDeg(r), 6)`, and four quarter turns bring it back
+/// as 180, the same direction. Kept as v1 behaves; every neighbour on either side is a fixed point.
+#[test]
+fn four_quarter_turns_from_minus_180() {
+    let four = |r0: f64| (0..4).fold(r0, |r, _| rotate_by(r, 90.0));
+    for k in -1_799_999_999_i64..=-1_799_999_996 {
+        #[allow(clippy::cast_precision_loss)]
+        let r0 = round_to(wrap_deg(k as f64 / 1e7), 6);
+        assert_eq!(r0, -180.0, "k = {k}");
+        assert_eq!(four(r0), 180.0, "k = {k}");
+        assert_eq!(wrap_deg(four(r0)), wrap_deg(r0));
+    }
+    for k in [
+        -1_800_000_000_i64,
+        -1_799_999_995,
+        -1_799_999_990,
+        1_799_999_999,
+    ] {
+        #[allow(clippy::cast_precision_loss)]
+        let r0 = round_to(wrap_deg(k as f64 / 1e7), 6);
+        assert_ne!(r0, -180.0, "k = {k}");
+        assert_eq!(four(r0), r0, "k = {k}");
     }
 }

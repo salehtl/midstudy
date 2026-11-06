@@ -16,7 +16,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createEval, startServer, api, raw, sleep, fmt, freePort, REPO, STUB_CALIB } from './lib/harness.mjs'
+import { createEval, startServer, api, raw, sleep, fmt, freePort, REPO, STUB_CALIB, serverCommand } from './lib/harness.mjs'
 import { snapshotPages, startPagesServer } from './lib/pages_server.mjs'
 
 const args = process.argv.slice(2)
@@ -44,10 +44,11 @@ async function startRealFalServer() {
   const base = `http://127.0.0.1:${port}`
   const env = { ...process.env }
   for (const k of ['MIDSTUDY_FAL_MOCK', 'NOOK_FAL_MOCK', 'MIDSTUDY_NO_DOTENV', 'NOOK_NO_DOTENV', 'MIDSTUDY_FAL_MOCK_COST', 'MIDSTUDY_FAL_MOCK_LOG', 'MIDSTUDY_FETCH_ALLOW']) delete env[k]
-  const argv = ['planner/serve.py', '--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
-    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--calib', STUB_CALIB, '--daily-spend-usd', '0.02']
+  // the server MIDSTUDY_SERVER picks (the harness's command)
+  const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
+    '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--calib', STUB_CALIB, '--daily-spend-usd', '0.02'])
   let log = ''
-  const proc = spawn('python3', argv, { cwd: REPO, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const proc = spawn(cmd, argv, { cwd: REPO, env, stdio: ['ignore', 'pipe', 'pipe'] })
   proc.stdout.on('data', (d) => { log += d })
   proc.stderr.on('data', (d) => { log += d })
   const srv = { base, port, dirs, up: false, why: '', exited: null }

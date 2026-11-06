@@ -355,8 +355,16 @@ mod tests {
         let c = cam(55.0, 1.4, 0.0, 0.0);
         let p = c.project([0.0, 1.4, -3.0]);
         assert_eq!(p, [800.0, 600.0, 3.0]);
-        // Up in the world is up in the photo (smaller py) with no roll.
+        // Up in the world is up in the photo (smaller py) with no roll, for points ahead of the camera's foot (z < 0).
         assert!(c.project([0.0, 2.0, -3.0])[1] < 600.0);
+        // Looking steeply down, a point in front but behind the foot (z > 0) moves *down* the photo when raised
+        // (LEAN.md 7 as corrected by the proofs track: Δpy = f·δ·z / (d·d')).
+        let steep = cam(55.0, 1.4, -80.0, 0.0);
+        let (low, high) = (
+            steep.project([0.0, 0.0, 0.2]),
+            steep.project([0.0, 0.5, 0.2]),
+        );
+        assert!(low[2] > 0.0 && high[2] > 0.0 && high[1] > low[1]);
         // +X is to the right.
         assert!(c.project([1.0, 1.4, -3.0])[0] > 800.0);
     }

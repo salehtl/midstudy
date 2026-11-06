@@ -14,9 +14,9 @@
 //!   `calib/src/midstudy_calib/ingest.py`, plus the frame checks v1 made through Pillow.
 
 use crate::bytes::{be16, byte};
+use crate::plan::Plan;
 
 const SOI: [u8; 2] = [0xFF, 0xD8];
-const EOI: [u8; 2] = [0xFF, 0xD9];
 const SOS: u8 = 0xDA;
 const APP0: u8 = 0xE0;
 const COM: u8 = 0xFE;
@@ -121,11 +121,11 @@ const fn is_sof(m: u8) -> bool {
 
 /// One step of the walk over a JPEG's markers.
 #[derive(Clone, Copy, Debug)]
-enum Item {
+pub(crate) enum Item {
     /// EOI; `end` is the offset just past it.
     Eoi { end: usize },
     /// A marker without a length (RST0–7, TEM).
-    Standalone(u8),
+    Standalone(#[cfg_attr(not(kani), allow(dead_code, reason = "the Kani harnesses check it"))] u8),
     /// A marker segment other than SOS: `data[start..end]` is its two length bytes and its payload.
     Segment {
         marker: u8,
@@ -138,16 +138,16 @@ enum Item {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Step {
-    item: Item,
+pub(crate) struct Step {
+    pub(crate) item: Item,
     /// Fill bytes before the marker.
-    fill: usize,
+    pub(crate) fill: usize,
     /// Where the next marker starts.
-    next: usize,
+    pub(crate) next: usize,
 }
 
 /// The marker at `at` (after any fill bytes), as v1's `clean_jpeg` / `jpeg_walk` loop body reads it.
-fn step(data: &[u8], at: usize) -> Result<Step, JpegError> {
+pub(crate) fn step(data: &[u8], at: usize) -> Result<Step, JpegError> {
     let rest = data
         .get(at..)
         .filter(|r| !r.is_empty())
@@ -211,7 +211,7 @@ fn step(data: &[u8], at: usize) -> Result<Step, JpegError> {
 
 /// The end of the entropy-coded data that starts at `from`: the next `FF` that isn't a stuffed byte (`FF 00`) or a
 /// restart marker (`FF D0`–`FF D7`). An `FF` in the last byte, or no `FF` at all, is a cut-off scan.
-fn scan_end(data: &[u8], from: usize) -> Result<usize, JpegError> {
+pub(crate) fn scan_end(data: &[u8], from: usize) -> Result<usize, JpegError> {
     let mut j = from;
     loop {
         let rest = data.get(j..).ok_or(JpegError::Truncated { at: j })?;
@@ -229,11 +229,24 @@ fn scan_end(data: &[u8], from: usize) -> Result<usize, JpegError> {
     }
 }
 
+/// The first `0xFF` in `hay` ([`find_ff_blocks`]).
+#[cfg(not(kani))]
+fn find_ff(hay: &[u8]) -> Option<usize> {
+    find_ff_blocks(hay)
+}
+
+/// Under Kani the walk is verified with the plain scan, which CBMC handles in milliseconds;
+/// `proofs::find_ff_blocks_is_position` proves [`find_ff_blocks`] equal to it.
+#[cfg(kani)]
+fn find_ff(hay: &[u8]) -> Option<usize> {
+    hay.iter().position(|&b| b == 0xFF)
+}
+
 /// The first `0xFF` in `hay`: `hay.iter().position(|&b| b == 0xFF)`, but each 64-byte block is first tested with a
 /// max-reduction without an early exit, which the compiler turns into SIMD (NEON natively, SIMD128 in wasm when
 /// enabled). The entropy-coded data is nearly all of a JPEG, so this scan is the strip's cost: on a 12 MP JPEG it
 /// took the strip from 4x slower than `CPython`'s `bytes.find` (a vectorized memchr) to 3x faster.
-fn find_ff(hay: &[u8]) -> Option<usize> {
+pub(crate) fn find_ff_blocks(hay: &[u8]) -> Option<usize> {
     const BLOCK: usize = 64;
     let mut blocks = hay.chunks_exact(BLOCK);
     let mut base = 0usize;
@@ -278,37 +291,57 @@ fn plain_jfif(seg: &[u8]) -> Option<[u8; 16]> {
 /// [`JpegError`] when the data isn't a JPEG, a segment or scan is cut off or malformed, or there is no EOI: v1 refused
 /// exactly these (`clean_jpeg` returned `None`).
 pub fn strip(data: &[u8]) -> Result<Stripped, JpegError> {
+    let (plan, removed) = strip_plan(data)?;
+    Ok(Stripped {
+        bytes: plan.apply(data),
+        removed,
+    })
+}
+
+/// What [`strip`] writes, as a [`Plan`] over `data`, and what it removed: every kept marker, segment and scan is one
+/// range of the input (the `FF` before its marker included; fill bytes before it are not), and a JFIF header cut back
+/// to 16 bytes is the plan's only bytes of its own. `strip(data)` is exactly `plan.apply(data)`.
+///
+/// # Errors
+/// As [`strip`].
+pub fn strip_plan(data: &[u8]) -> Result<(Plan, Removed), JpegError> {
     if !starts_jpeg(data) {
         return Err(JpegError::NotJpeg);
     }
-    let mut out = Vec::with_capacity(data.len());
-    out.extend_from_slice(&SOI);
+    let mut plan = Plan::default();
+    plan.copy(0, SOI.len());
     let mut removed = Removed::default();
     let mut at = SOI.len();
     loop {
         let s = step(data, at)?;
         removed.fill_bytes = removed.fill_bytes.saturating_add(s.fill);
+        // The marker's own FF is the byte before the marker (at + fill); the item's bytes run from it to `next`.
+        let marker_ff = at.saturating_add(s.fill);
         match s.item {
             Item::Eoi { end } => {
-                out.extend_from_slice(&EOI);
+                plan.copy(marker_ff, end);
                 removed.trailing_bytes = data.len().saturating_sub(end);
-                return Ok(Stripped {
-                    bytes: out,
-                    removed,
-                });
+                return Ok((plan, removed));
             }
-            Item::Standalone(m) => out.extend_from_slice(&[0xFF, m]),
+            Item::Standalone(_) => plan.copy(marker_ff, s.next),
+            Item::Scan { start, scan_end } => {
+                // The marker's FF, SOS, the scan header (from `start`) and the entropy-coded data up to `scan_end`.
+                debug_assert!(marker_ff < start && start <= scan_end);
+                plan.copy(marker_ff, scan_end);
+            }
             Item::Segment { marker, start, end } => {
                 let seg = data
                     .get(start..end)
                     .ok_or(JpegError::Truncated { at: start })?;
                 if marker == APP0 {
                     if let Some(header) = plain_jfif(seg) {
-                        if header.as_slice() != seg {
+                        if header.as_slice() == seg {
+                            plan.copy(marker_ff, end);
+                        } else {
                             removed.jfif_trimmed = removed.jfif_trimmed.saturating_add(1);
+                            let bytes: Vec<u8> = [0xFF, APP0].into_iter().chain(header).collect();
+                            plan.bytes(&bytes);
                         }
-                        out.extend_from_slice(&[0xFF, APP0]);
-                        out.extend_from_slice(&header);
                     } else {
                         removed.app0_segments = removed.app0_segments.saturating_add(1);
                     }
@@ -317,16 +350,8 @@ pub fn strip(data: &[u8]) -> Result<Stripped, JpegError> {
                 } else if is_metadata(marker) {
                     removed.app_segments = removed.app_segments.saturating_add(1);
                 } else {
-                    out.extend_from_slice(&[0xFF, marker]);
-                    out.extend_from_slice(seg);
+                    plan.copy(marker_ff, end);
                 }
-            }
-            Item::Scan { start, scan_end } => {
-                out.extend_from_slice(&[0xFF, SOS]);
-                out.extend_from_slice(
-                    data.get(start..scan_end)
-                        .ok_or(JpegError::Truncated { at: start })?,
-                );
             }
         }
         at = s.next;
@@ -577,6 +602,8 @@ pub fn passthrough(data: &[u8]) -> Result<FrameInfo, Reencode> {
 pub(crate) mod tests {
     use super::*;
 
+    const EOI: [u8; 2] = [0xFF, 0xD9];
+
     fn seg(marker: u8, payload: &[u8]) -> Vec<u8> {
         let mut v = vec![0xFF, marker];
         v.extend_from_slice(&u16::try_from(payload.len() + 2).unwrap().to_be_bytes());
@@ -753,6 +780,24 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    /// Found by the `jpeg_strip` fuzz target: like v1's `jpeg_size`, `frame_info` reads the frame fields after an SOF
+    /// marker even when its segment is too short to hold them (here a length of 2), so they come from the bytes that
+    /// follow, and stripping (which drops fill bytes there) changes what it reads. Kept as v1; pinned here.
+    #[test]
+    fn frame_info_reads_past_a_short_sof_like_v1() {
+        let j = [
+            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x02, 0xFF, 0x04, 0x00, 0x02, 0xFF, 0xFF, 0xFF, 0xD9,
+        ];
+        let f = frame_info(&j).unwrap();
+        assert_eq!(
+            (f.precision, f.height, f.width, f.components),
+            (0xFF, 0x0400, 0x02FF, 0xFF)
+        );
+        let s = strip(&j).unwrap();
+        assert_eq!(s.removed.fill_bytes, 2);
+        assert_eq!(frame_info(&s.bytes).unwrap().components, 0xD9);
     }
 
     #[test]

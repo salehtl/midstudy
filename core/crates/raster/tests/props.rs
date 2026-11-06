@@ -22,6 +22,16 @@ use midstudy_raster::sh::{Sh9, fibonacci_directions, irradiance_at, rotate_sh, r
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use proptest::prelude::*;
 
+/// `cases` cases natively; under Miri (`cargo miri test`, core/miri.txt) 4, since every case is interpreted. No
+/// failure file, as before (and Miri's isolation has no `getcwd`, which proptest needs to find one).
+fn config(cases: u32) -> ProptestConfig {
+    ProptestConfig {
+        cases: if cfg!(miri) { 4 } else { cases },
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    }
+}
+
 /// The forward PNG filter of one row (`a`, `b`, `c`: left, up, up-left, from the unfiltered bytes).
 fn filter_row(ft: u8, cur: &[u8], prev: &[u8], bpp: usize) -> Vec<u8> {
     (0..cur.len())
@@ -131,7 +141,7 @@ fn sh9() -> impl Strategy<Value = Sh9> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 2000, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(config(2000))]
 
     /// Every filter, both bit depths, any size, chunking and compression level: the samples come back.
     #[test]
