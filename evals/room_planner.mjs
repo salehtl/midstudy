@@ -335,6 +335,21 @@ async function desktopPass(browser, backend) {
   ev.check(`${T}: setPose(scene, {x_m}) saves that photo's pose (the other numbers kept), pose_source manual`, !sp.error && m3 && Math.abs(m3.pose.x_m + 1.8) < 1e-6 && Math.abs(m3.pose.z_m - byId['room-3'].pose.z_m) < 1e-6 && yawDiff(m3.pose.yaw_deg, byId['room-3'].pose.yaw_deg) < 1e-6 && m3.pose_source === 'manual',
     sp.error || fmt(m3))
   await C.send('PUT', `/api/rooms/${ROOM}`, { reset: [S['room-3']] })
+
+  ev.section(`${T}: listRooms, createRoom, waitForRoom (New room through the hook)`)
+  const lr = await hook(page, 'listRooms')
+  ev.check(`${T}: listRooms() gives the room objects (the golden room with its seven members)`, lr.value?.some((x) => x.name === ROOM && x.members?.length === 7), lr.error || fmt(lr.value?.map((x) => [x.name, x.members?.length])))
+  const cr = await page.evaluate(async ({ files, title }) => {
+    const m = window.midstudy
+    if (typeof m?.createRoom !== 'function') return { error: 'hook missing: createRoom' }
+    const fs = files.map(([b64, name]) => new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], name, { type: 'image/jpeg' }))
+    try { return { value: JSON.parse(JSON.stringify(await m.createRoom(fs, { title }))) } } catch (e) { return { error: `createRoom() failed: ${e?.message || e}` } }
+  }, { files: ['living-wide', 'room-1'].map((id) => [fs.readFileSync(byId[id].photo).toString('base64'), `${id}.jpg`]), title: 'Pair' }).catch((e) => ({ error: String(e).split('\n')[0] }))
+  ev.check(`${T}: createRoom([living-wide.jpg, room-1.jpg], {title}) resolves {room, scenes (2, in order), job (an align job)}`, typeof cr.value?.room === 'string' && cr.value?.scenes?.length === 2 && /^a-/.test(cr.value?.job?.id || ''), cr.error || fmt(cr.value))
+  const wr = cr.value?.room ? await hook(page, 'waitForRoom', [cr.value.room], 120000) : { error: 'no room' }
+  const pairR1 = wr.value?.members?.[1]
+  ev.check(`${T}: waitForRoom() resolves once calibrated and aligned: the pair's room-1 at its true pose (the calib mock's golden pair), titled`, wr.value?.align_status === 'done' && wr.value?.title === 'Pair' && poseEq(pairR1?.pose, byId['room-1'].pose, 1e-6, 1e-6) && pairR1?.pose_source === 'solver',
+    wr.error || fmt(wr.value && { status: wr.value.align_status, title: wr.value.title, members: wr.value.members?.map((m) => [m.pose_source, fmtPose(m.pose)]) }))
   errorsOk(P, T)
   await P.context.close()
 }
