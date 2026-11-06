@@ -1,0 +1,14 @@
+# GitHub's language stats: count the app (TypeScript, Rust, Python, Lean), not tooling, tests or generated code.
+contract/gen/** linguist-generated
+contract/examples/** linguist-generated
+evals/** linguist-vendored
+scripts/** linguist-vendored
+fixtures/** linguist-vendored
+.claude/** linguist-vendored
+**/test/** linguist-vendored
+**/tests/** linguist-vendored
+**/js-test/** linguist-vendored
+**/demo/** linguist-vendored
+**/fuzz/** linguist-vendored
+*.test.mjs linguist-vendored
+eslint.config.js linguist-vendored
