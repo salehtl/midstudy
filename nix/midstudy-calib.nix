@@ -93,6 +93,7 @@ let
     "midstudy_calib.rooms.score"
     "midstudy_calib.rooms.manhattan"
     "midstudy_calib.rooms.mock"
+    "midstudy_calib.rooms.mast3r"
     "scipy.spatial"
     "moge.model.v2"
     "torch"

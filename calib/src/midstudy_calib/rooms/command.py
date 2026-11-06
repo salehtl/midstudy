@@ -108,7 +108,7 @@ def solve(photos: list[RoomPhoto], choice: solver.SolverChoice, want: Device, cr
             members.append(AlignMember(scene=p.name, photo_sha256=p.sha256, pose=None, scale=None, confidence=0.0, residual_cm=None))
         else:
             members.append(AlignMember(scene=p.name, photo_sha256=p.sha256, pose=mock.pose_json(s.placement),
-                                       scale=round(clamp_scale(s.placement.scale), 5), confidence=s.confidence, residual_cm=s.residual_cm))
+                                       scale=round(clamp_scale(s.placement.scale), 6), confidence=s.confidence, residual_cm=s.residual_cm))
         per.append({"scene": p.name, "usable": p.usable, **(s.diag if s is not None else {})})
     diag["members"] = per
     timing["total_s"] = round(time.monotonic() - t0, 2)

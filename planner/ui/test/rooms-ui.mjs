@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The app track's room-view check (contract §4.9 Planner and Hook) in headless Chrome, against the real server plus
-// planner/ui/test/rooms-fake.mjs (the §4.9 routes, until the server track's land): the golden room (living-wide, room-1 …
+// The app track's room-view check (contract §4.9 Planner and Hook) in headless Chrome, against the real server (its
+// §4.9 routes, with --rooms-dir in the eval's scratch dir; Phase B's fake is gone since Phase C): the golden room (living-wide, room-1 …
 // room-6) aligned by the calib mock's true poses; a probe placed in the room frame lands where each photo's truth says
 // (getScreenRect within 3 px of this file's own §4.1 projection through the true pose); the photo strip and keys 1–9
 // switch photos; the floor plan drags a piece; Align photos moves a photo (saved manual) and Reset puts it back; a room
@@ -11,9 +11,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  REPO, PROBE, createEval, startServer, seedScene, launchBrowser, openPlanner, hook, state, golden, fmt, project, control, sleep, waitFor, raw,
+  PROBE, createEval, startServer, seedScene, launchBrowser, openPlanner, hook, state, golden, fmt, project, control, sleep, waitFor, raw,
 } from '../../../evals/lib/harness.mjs'
-import { startFake } from './rooms-fake.mjs'
 
 const ev = createEval('APP-ROOMS', 'rooms-app-ui', { timeoutS: 900 })
 const IDS = ['living-wide', 'room-1', 'room-2', 'room-3', 'room-4', 'room-5', 'room-6']
@@ -40,9 +39,6 @@ const rectDiff = (a, b) => (a && b ? Math.max(Math.abs(a.x - b.x), Math.abs(a.y 
 const srv = await startServer(ev)
 ev.check('the server starts (calib stub + MIDSTUDY_CALIB_MOCK, scratch dirs, probe library)', srv.up, srv.up ? srv.base : srv.why)
 if (!srv.up) await ev.finish()
-const fake = await startFake({ upstream: srv.base, scenesDir: srv.dirs.scenes, calibMock: path.join(REPO, 'fixtures/calib'), port: 8860 })
-ev.onCleanup(() => fake.close())
-ev.note(`rooms fake on ${fake.base} in front of ${srv.base}`)
 const names = {}
 for (const id of IDS) {
   const s = await seedScene(srv, id)
@@ -51,10 +47,10 @@ for (const id of IDS) {
 }
 const truth = Object.fromEntries(IDS.map((id) => [id, golden(id).truth]))
 const poseTrue = (id) => truth[id].pose_in_room ?? { x_m: 0, z_m: 0, yaw_deg: 0 }
-const api = async (method, p, body) => { const r = await raw(fake.base, method, p, { headers: { 'X-Midstudy': '1', 'content-type': 'application/json' }, body: body === undefined ? null : JSON.stringify(body) }); return { status: r.status, json: r.json } }
+const api = async (method, p, body) => { const r = await raw(srv.base, method, p, { headers: { 'X-Midstudy': '1', 'content-type': 'application/json' }, body: body === undefined ? null : JSON.stringify(body) }); return { status: r.status, json: r.json } }
 const made = await api('POST', '/api/rooms', { title: 'Golden room', scenes: IDS.map((id) => names[id]) })
 const ROOM = made.json?.name
-ev.check('POST /api/rooms (fake) makes the golden room', made.status === 201 && !!ROOM, `${made.status} ${ROOM}`)
+ev.check('POST /api/rooms makes the golden room', made.status === 201 && !!ROOM, `${made.status} ${ROOM}`)
 const al = await api('POST', `/api/rooms/${ROOM}/align`, {})
 ev.check('POST …/align queues an align job', al.status === 202, `${al.status}`)
 await waitFor(async () => (await api('GET', `/api/rooms/${ROOM}`)).json?.align_status === 'done', { timeoutMs: 30000 })
@@ -102,8 +98,8 @@ async function roomChecks(P, label) {
 }
 
 // --- desktop, WebGPU (or the fallback when MIDSTUDY_WEBGPU=0) ------------------------------------------------------------
-let P = await openPlanner(browser, fake.base, { viewport: { width: 1280, height: 800 } })
-await P.page.goto(`${fake.base}/planner/?room=${ROOM}`, { waitUntil: 'load' })
+let P = await openPlanner(browser, srv.base, { viewport: { width: 1280, height: 800 } })
+await P.page.goto(`${srv.base}/planner/?room=${ROOM}`, { waitUntil: 'load' })
 await P.page.waitForFunction(() => window.midstudy?.getState?.().room !== undefined && window.midstudy.getState().room !== null, null, { timeout: 60000 }).catch(() => {})
 const page = P.page
 const uid = await roomChecks(P, 'desktop')
@@ -288,9 +284,9 @@ await P.context.close()
 // --- phone, 375 px -----------------------------------------------------------------------------------------------------
 await api('POST', `/api/rooms/${ROOM}/align`, {})
 await waitFor(async () => (await api('GET', `/api/rooms/${ROOM}`)).json?.align_status === 'done', { timeoutMs: 30000 })
-const Ph = await openPlanner(browser, fake.base, { device: 'phone' })
+const Ph = await openPlanner(browser, srv.base, { device: 'phone' })
 await Ph.page.setViewportSize({ width: 375, height: 812 })
-await Ph.page.goto(`${fake.base}/planner/?room=${ROOM}`, { waitUntil: 'load' })
+await Ph.page.goto(`${srv.base}/planner/?room=${ROOM}`, { waitUntil: 'load' })
 await Ph.page.waitForFunction(() => !!window.midstudy?.getState?.().room, null, { timeout: 60000 }).catch(() => {})
 const pp = Ph.page
 const ph0 = await state(pp)
@@ -315,8 +311,8 @@ ev.check('phone: no page errors or console errors', errsOf(Ph).length === 0, err
 await Ph.context.close()
 
 // --- the WebGL2 fallback (?webgpu=0) ---------------------------------------------------------------------------------------
-const G = await openPlanner(browser, fake.base, { viewport: { width: 1280, height: 800 } })
-await G.page.goto(`${fake.base}/planner/?room=${ROOM}&webgpu=0`, { waitUntil: 'load' })
+const G = await openPlanner(browser, srv.base, { viewport: { width: 1280, height: 800 } })
+await G.page.goto(`${srv.base}/planner/?room=${ROOM}&webgpu=0`, { waitUntil: 'load' })
 await G.page.waitForFunction(() => !!window.midstudy?.getState?.().room, null, { timeout: 60000 }).catch(() => {})
 await roomChecks(G, 'webgl2 (?webgpu=0)')
 await shot(G.page, 'webgl2-room')

@@ -321,7 +321,9 @@ export function mount(ctx: UiContext): void {
     // the photos: wedge, dot and number; the current one's turn handle
     const align = !!engine.getRoomState()?.alignPhotos
     const cur = currentScene()
-    for (const m of ms) {
+    const onTop = align ? (alignSel ?? cur) : cur
+    // the current (selected) photo last, on top of the others: it is also the one a tap on overlapping wedges takes
+    for (const m of [...ms.filter((q) => q.scene !== onTop), ...ms.filter((q) => q.scene === onTop)]) {
       if (!m.pose || !m.eff) continue
       const wd = R.wedgeOf(m.pose, m.eff, m.aspect, Math.sqrt)
       const isCur = m.scene === cur

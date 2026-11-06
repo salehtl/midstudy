@@ -190,13 +190,16 @@ export interface PlanPiece {
 }
 
 /** The plan's hit test at a room-frame floor point, `r` the grab radius in meters (the pointer's slop at the plan's
- *  zoom). In Align photos: the current photo's handle, then any photo's dot, then any photo's wedge. Otherwise: pieces
+ *  zoom). In Align photos: the current photo's handle, then any photo's dot, then the current photo's wedge, then any
+ *  photo's wedge (the topmost). Otherwise: pieces
  *  first (the topmost, i.e. the last drawn), then nothing (photos aren't moved outside Align photos). */
 export function planHit(p: Xz, r: number, photos: readonly PlanPhoto[], pieces: readonly PlanPiece[], align: boolean): PlanHit {
   const r2 = r * r
   if (align) {
     for (const ph of photos) if (ph.current && dist2(p, ph.wedge.handle) <= r2) return { kind: 'handle', scene: ph.scene }
     for (const ph of photos) if (dist2(p, ph.wedge.apex) <= r2) return { kind: 'photo', scene: ph.scene }
+    // the current (selected) photo's wedge is drawn on top of the others, so it wins where wedges overlap
+    for (const ph of photos) if (ph.current && insidePolygon(p, [ph.wedge.apex, ph.wedge.left, ph.wedge.right])) return { kind: 'photo', scene: ph.scene }
     for (let i = photos.length - 1; i >= 0; i -= 1) {
       const ph = photos[i]
       if (ph !== undefined && insidePolygon(p, [ph.wedge.apex, ph.wedge.left, ph.wedge.right])) return { kind: 'photo', scene: ph.scene }

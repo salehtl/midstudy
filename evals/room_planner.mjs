@@ -296,7 +296,9 @@ async function desktopPass(browser, backend) {
   let srvM = await waitFor(async () => { const d = (await C.get(`/api/rooms/${ROOM}`)).json; const mm = memberOf(d, S['room-2']); return mm?.pose_source === 'manual' ? mm : null }, { timeoutMs: photoWait > 3000 ? 8000 : 1500 })
   let e = poseErr(srvM?.pose, moved)
   ev.check(`${T}: dragging room-2's wedge 0.3 m along +X moves the photo (±3 cm, yaw ±0.5°) and saves it: pose_source manual (PUT members)`, srvM && e.pos_m <= 0.03 && e.yaw_deg <= 0.5, `server ${fmt(srvM && { pose: srvM.pose, pose_source: srvM.pose_source })} want ${fmtPose(moved)}`)
-  const grM = (await hook(page, 'getRoom')).value?.members?.find((m) => m.scene === S['room-2'])
+  // the server has the PUT before the page has its answer: give the page a moment to take it
+  const grOf = async () => (await hook(page, 'getRoom')).value?.members?.find((m) => m.scene === S['room-2'])
+  const grM = srvM ? (await waitFor(async () => { const g = await grOf(); return g?.pose_source === 'manual' ? g : null }, { timeoutMs: 3000 }).catch(() => null)) ?? await grOf() : await grOf()
   ev.check(`${T}: getRoom() shows the saved pose`, grM && srvM && poseEq(grM.pose, srvM.pose, 1e-6, 1e-6) && grM.pose_source === 'manual', fmt(grM))
   it = itemOf(await roomState(page), uid)
   ev.check(`${T}: moving a photo doesn't move the furniture in the room frame`, it && Math.hypot(it.position[0] - SOFA.center[0], it.position[2] - SOFA.center[2]) < 0.001, fmt(it?.position))

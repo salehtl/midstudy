@@ -33,8 +33,10 @@ def answer_path(mock: Path, photos: Sequence[RoomPhoto]) -> Path:
 
 
 def pose_json(p: Placement) -> Pose:
-    """A §4.9 pose (yaw from radians), clamped and rounded as every writer does."""
-    return Pose(x_m=round(clamp_pos(p.x), 4) + 0.0, z_m=round(clamp_pos(p.z), 4) + 0.0, yaw_deg=round(wrap_deg(math.degrees(p.yaw)), 3) + 0.0)
+    """A §4.9 pose (yaw from radians), clamped and kept to 6 decimals (micrometres, microdegrees) as the server keeps
+    poses; a yaw that rounds to −180 is written as 180, so it stays in (−180, 180]."""
+    yaw = round(wrap_deg(math.degrees(p.yaw)), 6) + 0.0
+    return Pose(x_m=round(clamp_pos(p.x), 6) + 0.0, z_m=round(clamp_pos(p.z), 6) + 0.0, yaw_deg=180.0 if yaw <= -180.0 else yaw)
 
 
 def _placement(m: AlignMember) -> Placement | None:
