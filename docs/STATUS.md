@@ -24,6 +24,21 @@ As of 2026-11-06, branch `v2`. The plan is [REFACTOR.md](REFACTOR.md); each trac
 E11 29, E12 27, E13 51, E14 409, E15 135, E16 57). `npm run check` all ok. Earlier on the same code: real-MoGe
 `eval:calib` 132/132, `eval:real` 32/32, `eval:ui-smoke` 41/41.
 
+## Ported from `main` (`e1b717f..fc82c5c`, merged 2026-11-06)
+
+- a292ee2 keyboard shortcuts, Shift multi-select, arrow-key moves, Export: `planner/keymap.ts` (+ `logic/keymap.ts`),
+  the selection set (`logic/selection.ts`), `ui/shortcuts.ts`, `ui/export.ts`; `eval:keys` (main's E17, not perf's
+  E17 A/B below) in `eval:all`.
+- c9e09c3 evals on the flake's headless Chrome: v2 already did; the uBlock wait (Helium only) not taken.
+- a2a0762 docs: headless Chrome, never Helium: v2's docs already said so.
+- 7a4f425 GPT Image 2 renders (`gpt-image`, `openai/gpt-image-2/edit`, est. $0.07): server, schemas, planner, E1/E6.
+- 67275fd gpt-image's measured output size and framing: contract §4.7.
+- ae46665 the photo-inferred light colour neutralized (`logic/look.ts` `neutralized`): contract §4.8.
+- fc82c5c daily fal budget in Settings (`GET/PUT /api/settings`, `<library>/settings.json`, `--daily-spend-usd`
+  locks it; `ui/settings.ts`, ⌘,) and gpt-image gets the composite alone: E1, E6.
+- After the merge, on WebGPU: `eval:all` 15/15 (E1 235, E3 56, E4 21, E5 35, E6 38, E7 79, E8 72, E9 49, E11 29,
+  E12 27, E13 51, E14 409, E15 135, E16 57, E17 52); `check gen types lint dead` ok. WebGL2 fallback not re-run.
+
 ## Speed (E17 A/B against v1, interleaved, exclusive; software GPU)
 
 v2 is faster than v1 on every metric; none is worse. Calibration from the second photo −85 % (0.95 s), desktop load
@@ -34,8 +49,6 @@ judge it in Safari or Helium on Metal, with and without `?webgpu=0`.
 
 ## Open
 
-- `main` has 8 commits written against v1 files since the fork (`e1b717f..main`: keyboard shortcuts and Export, GPT
-  Image 2 renders, the daily fal budget in Settings, the light-colour fix, headless-Chrome evals): not yet ported to v2.
 - Phase 4 stopped early (usage limit). Fixed: the product route no longer hangs on a page or feed body that doesn't
   decode as its Content-Encoding says (422 in ~10 ms, as v1; gzip with trailing junk is now 422 where v1 read it), and
   picture links to private or loopback IPv4 written in decimal, hex, octal, short or percent-encoded form are dropped
