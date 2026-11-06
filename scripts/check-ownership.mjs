@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Refuses a track's changes outside the paths it owns (docs/REFACTOR.md §6, scripts/ownership.json).
-// Usage: node scripts/check-ownership.mjs <track> [--base <ref>]   (default base: the merge-base with v2)
+// Usage: node scripts/check-ownership.mjs <track> [--base <ref>]   (default base: the merge-base with main; v2's
+// before the cutover, when there is no main)
 // Checks committed changes since the base plus anything uncommitted or untracked. Exit 0 when clean, 1 otherwise.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -18,7 +19,8 @@ if (!track || !spec.tracks[track]) {
 }
 
 const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' })
-const base = baseArg || git('merge-base', 'HEAD', 'v2').trim()
+const hasRef = (r) => { try { git('rev-parse', '--verify', '--quiet', r); return true } catch { return false } }
+const base = baseArg || git('merge-base', 'HEAD', hasRef('main') ? 'main' : 'v2').trim()
 
 // glob → RegExp: ** any depth, * one segment, ? one char, {a,b} alternatives.
 function globRe(g) {

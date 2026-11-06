@@ -80,8 +80,9 @@ DAYLIGHT's sun put their shadows into living-wide, steep-roll and portrait.
 
 ## Checks run (this worktree)
 
-- `nix develop -c npm run check:gen`, `check:types`, `check:lint`, `check:tests` (157 passed), `check:scenes`
-  (261/261), `MIDSTUDY_TRACK=foundation npm run check:ownership`, `node scripts/check-ownership.mjs foundation --base main`
+- `nix develop -c npm run check:gen`, `check:types`, `check:lint`, `check:dead`, `check:tests` (157 passed),
+  `check:scenes` (261/261), `MIDSTUDY_TRACK=foundation npm run check:ownership`,
+  `node scripts/check-ownership.mjs foundation --base main`
 - `npm run test:contract` (12 tests), `cargo test -p midstudy-contract` (the Rust types round-trip every example,
   the new ones included)
 - through the eval lock: `eval:scenes-api` (E1 235/235), `eval:planner` (E3 56/56)
@@ -149,6 +150,9 @@ DAYLIGHT's sun put their shadows into living-wide, steep-roll and portrait.
     photo's camera frame as for the five. The mock's `align.json` `created` is fixed (`2026-11-06T00:00:00Z`) so a
     re-render changes only what the photos change.
 20. `docs/ROOMS.md` status line now points at CONTRACT §4.9 as the interface.
+21. `scripts/check-ownership.mjs`'s default base is now the merge-base with `main` (`v2` only when there is no `main`):
+    with `v2`'s, `MIDSTUDY_TRACK=foundation npm run check:ownership` blamed this branch for `main`'s own later changes
+    (`.gitattributes`, `docs/HANDOFF.md`). Every rooms track's gate needs this.
 
 ## Open issues
 
@@ -165,5 +169,5 @@ DAYLIGHT's sun put their shadows into living-wide, steep-roll and portrait.
    answer) for fast evals; the contract says the stub implements it.
 4. The room examples are hand-written; re-record them with `contract/tools/record-examples.mjs` once the server
    implements §4.9 (and add room cases to the recorder).
-5. Not run: `check:rust` as a whole, `check:dead`, `check:tscert`, `check:planner`, `check:py`, `check:proofs`, any eval
+5. Not run: `check:rust` as a whole, `check:tscert`, `check:planner`, `check:py`, `check:proofs`, any eval
    but E1 and E3. The five original scenes were not regenerated (see How to run).
