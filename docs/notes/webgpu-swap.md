@@ -42,11 +42,53 @@ Run on the final tree (each `nix develop -c npm run check -- <name>`):
 
 ## The gate: every browser eval twice per backend
 
+**Passed.** The ten browser evals the task names (`eval:planner`, `eval:occlusion`, `eval:floor`, `eval:render`,
+`eval:phone`, `eval:ux`, `eval:ux2`, `eval:splat`, `eval:lighting`, `eval:product-ui`), each run through
+`scripts/eval-lock.mjs` with the legacy server: twice with WebGPU (the harness default: `--enable-unsafe-webgpu
+--use-webgpu-adapter=swiftshader`) and twice with `MIDSTUDY_WEBGPU=0` (no WebGPU flags: no adapter, three falls back to
+WebGL2 by itself, which the console's "running under WebGL2 backend" warning confirmed). Rounds B and C ran on the same
+planner, scripts and evals trees (`git rev-parse <commit>:planner` = `ce760eb`, rounds B on `3929050` and C on
+`c5a445d`, which differ only in docs/notes), every run on its first try, two at a time (never the same eval twice at
+once: an eval's `evals/out/<slug>/` is shared by its runs and wiped at its start; round A's first attempt lost E4 to
+that collision and was restarted). Logs: `evals/out/webgpu-swap/<round>-<backend>-<eval>.log`, summaries
+`<round>.summary`.
+
+| Eval | B WebGPU | B WebGL2 | C WebGPU | C WebGL2 | A (pre-check) WebGPU · WebGL2 |
+|---|---|---|---|---|---|
+| E3 planner | **56/56 (41 s)** | **56/56 (40 s)** | **56/56 (41 s)** | **56/56 (40 s)** | 56/56 · 56/56 |
+| E4 occlusion | **21/21 (14 s)** | **21/21 (13 s)** | **21/21 (14 s)** | **21/21 (13 s)** | 21/21 · 21/21 |
+| E5 floor | **35/35 (22 s)** | **35/35 (21 s)** | **35/35 (22 s)** | **35/35 (21 s)** | 35/35 · 35/35 |
+| E6 render | **37/37 (20 s)** | **37/37 (20 s)** | **37/37 (20 s)** | **37/37 (20 s)** | 37/37 · 37/37 |
+| E9 phone | **49/49 (43 s)** | **49/49 (43 s)** | **49/49 (43 s)** | **49/49 (43 s)** | 49/49 · 49/49 |
+| E11 ux | **29/29 (51 s)** | **29/29 (44 s)** | **29/29 (50 s)** | **29/29 (45 s)** | 29/29 · 29/29 |
+| E12 ux2 | **27/27 (61 s)** | **27/27 (56 s)** | **27/27 (60 s)** | **27/27 (56 s)** | 10/11 · 10/11 |
+| E13 splat | **51/51 (118 s)** | **51/51 (98 s)** | **51/51 (122 s)** | **51/51 (94 s)** | 51/51 · 51/51 |
+| E16 lighting | **57/57 (120 s)** | **57/57 (104 s)** | **57/57 (122 s)** | **57/57 (106 s)** | 57/57 · 55/57 |
+| E15 product-ui | **135/135 (33 s)** | **135/135 (32 s)** | **135/135 (34 s)** | **135/135 (33 s)** | 135/135 · 135/135 |
+| **total** | **497/497** | **497/497** | **497/497** | **497/497** | 480/481 · 478/481 (E12 stopped at its exception) |
+
+Round A was the pre-check, on the tree before the last two fixes (`5d7345a`, later evals of it on newer builds): it
+found both remaining bugs. **E12.10** (both backends): `window.midstudy` was undefined right after a reload's load event
+(fixed by `planner/ready.ts`, see Decisions). **E16.20/.21** (WebGL2): after `light_strength` 0 → 1 the box and its
+shadow vanished from every capture until the page reloaded; reproduced every time by replaying E16's control sequence
+(`evals/out/webgpu-swap/repro-e16.mjs`), the console showing "Rendering failed: Cannot read properties of null (reading
+'depthTexture')" and then invalid multisample formats and incomplete framebuffers: three 0.180's shadow-node
+lifecycle (see Decisions). After both fixes: E12 27/27 on both backends and E16 57/57 on WebGL2 as pre-checks, the
+replay 3 rounds × 7 captures with the box in every one on both backends, then rounds B and C.
+
+Extra, not in the gate: `eval:ui-smoke` (the UI's browser smoke test, with int-planner's start-up race checks: resize
+events from the first script, 3 loads each) **41/41 on WebGPU and 41/41 on WebGL2**; and a scratch check that
+`?webgpu=0` gives a WebGL2 canvas while the browser has WebGPU (and the default a WebGPU one), both rendering
+(`evals/out/webgpu-swap/urlswitch.mjs`).
+
+The timing check that flaked once in int-planner (E13.38, the Library row's "…" click with a splat in view) passed in
+every run; the 1-minute load was 5–14 during the rounds.
+
 ## The spike's check (planner/gpu/demo/check.mjs)
 
-`nix develop -c node scripts/eval-lock.mjs -- node planner/gpu/demo/check.mjs` on `f21bee0` (the planner as committed
-for the gate rounds; the demo unchanged since): **WG 72/72** in 359 s (`evals/out/webgpu-swap/wg-try1.log`; the
-spike's own final run was 69/69 with 2 skipped). Its reference column ("v1") is now the planner itself on the harness's
+`nix develop -c node scripts/eval-lock.mjs -- node planner/gpu/demo/check.mjs`, twice: on `f21bee0` **WG 72/72** in
+359 s, and after round C on `c5a445d` **WG 72/72** in 342 s (the same planner tree; `evals/out/webgpu-swap/wg-try1.log`,
+`wg-try2.log`; the spike's own final run was 69/69 with 2 skipped). Its reference column ("v1") is now the planner itself on the harness's
 default browser (WebGPU): the same renderer as the demo, so its `order` case no longer loses Spark's sort race and
 nothing is skipped.
 
@@ -98,7 +140,19 @@ nothing is skipped.
 8. **`?webgpu=0`** forces the WebGL2 backend from the URL (the spike's suggestion; for checking a real device). The
    harness's `MIDSTUDY_WEBGPU=0` hides WebGPU from the browser instead; three then falls back by itself, with a console
    warning ("WebGPU is not available, running under WebGL2 backend"), not an error.
-9. **Kept from the spike as measured:** three 0.180.0 pinned; the two WebGL2 clear workarounds (`clearTarget`); the
+9. **The key light always casts; the Look's floor-shadow switch is the shadow's intensity.** three 0.180's
+   `AnalyticLightNode.setup` disposes the light's `ShadowNode` (its `shadowMap` set to null) whenever a material builds
+   while `castShadow` is false, while node states built with it true keep that node: switching `castShadow` off and
+   on (E16's strength 0 → 1) threw in every following frame. With `castShadow` fixed, `shadow.intensity` 0 gives
+   `mix(1, s, 0) = 1` exactly (same pixels as no shadow), `shadow.autoUpdate` false skips the map's renders, and the
+   catcher and the engine's shadow box follow `lights.castsShadow()`. v1's behaviour is kept; the cost is the map's
+   memory in scenes that never show a shadow.
+10. **`window.midstudy.ready` before the module graph's awaits** (`planner/ready.ts`, imported first by main.ts, no
+   top-level await of its own, so it runs before engine.ts's): the engine now awaits `renderer.init()` (an adapter
+   request, also on the WebGL2 fallback, which asks first) on top of the kernels, which pushed main.ts's hook past the
+   page's load event; v1 installed the hook during its module's evaluation, and E12 reads `ready` right after a
+   reload's load event. The stub holds the same `ready` Promise and `errors`; main.ts installs the whole hook as before.
+11. **Kept from the spike as measured:** three 0.180.0 pinned; the two WebGL2 clear workarounds (`clearTarget`); the
    letterbox bars written as the Color's linear components (v1's quirk, (1, 1, 1)); 16-bit sort keys; data textures +
    an instanced order attribute (one TSL material for both backends).
 
