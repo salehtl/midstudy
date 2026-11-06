@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "solver": "truth",
+  "created": "2026-11-06T00:00:00Z",
+  "elapsed_s": 0,
+  "device": null,
+  "loop_residual_cm": 0,
+  "members": [
+    {
+      "scene": "living-wide",
+      "photo_sha256": "2538616d70a91609e96930ad92fde0ab80c4c199a1a8ecd4f111a1da2d3d956e",
+      "pose": {
+        "x_m": 0,
+        "z_m": 0,
+        "yaw_deg": 0
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": null
+    },
+    {
+      "scene": "room-1",
+      "photo_sha256": "f58f0390bce7799e1583689cafe15ca1f1e4d1278be438e8001d9ce1d9f40bf7",
+      "pose": {
+        "x_m": -1.15,
+        "z_m": 0.45,
+        "yaw_deg": -22
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": 0
+    },
+    {
+      "scene": "room-2",
+      "photo_sha256": "6d6f8fd47a88b48a2df49e77e3d3262627f42a3e7b7f879a89c03712d5f80649",
+      "pose": {
+        "x_m": 1.9,
+        "z_m": 0.3,
+        "yaw_deg": 35
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": 0
+    },
+    {
+      "scene": "room-3",
+      "photo_sha256": "b8a58ae092cc5b858748958ff8e1bd664e83631f481ceaf95b7174760ed83225",
+      "pose": {
+        "x_m": -1.95,
+        "z_m": -0.35,
+        "yaw_deg": -55
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": 0
+    },
+    {
+      "scene": "room-4",
+      "photo_sha256": "4bce2d38c52ac405bd3ad706301bed0291d53e274630192b7f00afd433546e91",
+      "pose": {
+        "x_m": 1.35,
+        "z_m": -4.55,
+        "yaw_deg": 152
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": 0
+    },
+    {
+      "scene": "room-5",
+      "photo_sha256": "e969e2e8a9ae67067063ca9d37638f405fac01d8d0aa7b00f95d0b357ab9570c",
+      "pose": {
+        "x_m": 1.9,
+        "z_m": -1.3,
+        "yaw_deg": 62
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": 0
+    },
+    {
+      "scene": "room-6",
+      "photo_sha256": "d0995441325e1f3346550c112ee5a84382b6b3e17a908173227835a78593c61c",
+      "pose": {
+        "x_m": 0.55,
+        "z_m": -0.7,
+        "yaw_deg": -90
+      },
+      "scale": 1,
+      "confidence": 1,
+      "residual_cm": 0
+    }
+  ],
+  "unplaced": [],
+  "fixture": {
+    "name": "golden-room",
+    "note": "the true poses of the golden room fixtures (fixtures/scenes/<scene>/truth.json pose_in_room), in living-wide's frame; scene is the fixture id, which the mock replaces with the scene folder whose photo.jpg has photo_sha256"
+  }
+}

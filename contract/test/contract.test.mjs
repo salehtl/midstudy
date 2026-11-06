@@ -204,10 +204,22 @@ test('violation() names the schema and the path, for strict mode', () => {
 })
 
 test('the file schemas still accept the golden fixtures and the probe library', () => {
-  for (const id of ['living-wide', 'steep-roll', 'portrait', 'living-cool', 'living-warm']) {
+  for (const id of ['living-wide', 'steep-roll', 'portrait', 'living-cool', 'living-warm', 'room-1', 'room-2', 'room-3', 'room-4', 'room-5', 'room-6']) {
     const dir = path.join(CONTRACT, '../fixtures/scenes', id)
     assert.ok(gen.isCalib(JSON.parse(fs.readFileSync(path.join(dir, 'calib.json'), 'utf8'))), `${id} calib.json`)
     assert.ok(gen.isLighting(JSON.parse(fs.readFileSync(path.join(dir, 'lighting.json'), 'utf8'))), `${id} lighting.json`)
   }
   assert.ok(gen.isLibrary(JSON.parse(fs.readFileSync(path.join(CONTRACT, '../fixtures/library/library.json'), 'utf8'))))
+  // the calib mock's align-room answers for the golden room (§4.9 Mock), and their pose_in_room
+  const rooms = path.join(CONTRACT, '../fixtures/calib/rooms')
+  const answers = fs.readdirSync(rooms).filter((k) => /^[0-9a-f]{64}$/.test(k))
+  assert.equal(answers.length, 2, 'the golden room and the golden pair')
+  for (const key of answers) {
+    const a = JSON.parse(fs.readFileSync(path.join(rooms, key, 'align.json'), 'utf8'))
+    assert.ok(gen.isAlign(a), key)
+    for (const m of a.members.slice(1)) {
+      const t = JSON.parse(fs.readFileSync(path.join(CONTRACT, '../fixtures/scenes', m.scene, 'truth.json'), 'utf8'))
+      assert.ok(gen.isPose(t.pose_in_room) && JSON.stringify(t.pose_in_room) === JSON.stringify(m.pose), `${m.scene} pose_in_room`)
+    }
+  }
 })
