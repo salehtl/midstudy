@@ -234,3 +234,45 @@ From `docs/notes/state-machines-plan.md`, package planner-engine-base (guard-onl
 - **Deviations.** `waitForRoom`'s default for a member with no `scene_object` (taken as calibrated) is left as is: the
   fix entry defers it to server-domain, while the plan's seam note gives it to this package; not changed here, to be
   settled with the server's room GET shape.
+
+## State machines W1: planner-ui-shell (sm1-planner-ui-shell)
+
+docs/notes/state-machines-plan.md, package planner-ui-shell. What changed:
+
+- **Phone sheet.** `shell.setDetent` acts only while the sheet is open (`logic/chrome.ts detentAllowed`, TScert);
+  openPanel uses the internal `applyDetent`. An awaited Library Place (or a job's Place) that settles after the user
+  closed the sheet no longer reopens it at peek. `closePanel` drops a drag still down, and `onUp` returns when the
+  sheet is closed, so a late pointerup cannot reopen it. A mode change that closes or opens a panel now calls its
+  onClose / onOpen and sends `'panel'` (1440 → 375 with the Scene panel open: `{ id: 'scene', open: false }`).
+- **One layer stack.** `shell.pushLayer(kind, cancel) → { remove() }` (idempotent) and `shell.topLayer()`; kinds
+  confirm, menu, page, sheet, modal. Confirms, menus and the Scenes page use it, and so does `sheet.ts` (it dropped its
+  Esc key filter). One Esc cancels one layer (`logic/layers.ts escTarget`, TScert: in a field it still closes a sheet,
+  modal, confirm or menu, never the page) and is recorded so the engine's key filter swallows it: it never reaches the
+  keymap (deselect, leave Adjust floor or the ruler) or a lower layer. The engine's filter is now
+  `escDone || keyFilters.some(...) || layers.length > 0`: the filters run before the any-layer swallow, so the
+  Shortcuts key still closes its sheet and the renders arrows still step. A mode change cancels open menus and
+  confirms (a confirm answers its cancel value). `addKeyFilter`'s remover checks `i >= 0`. **This changes v1**: v1 let
+  an Esc fall through (close the page, then also deselect; close a confirm, then also the sheet under it). The
+  fall-through was the risk, so it goes on purpose.
+- **Renders modal.** Not touched here (planner-ui-renders owns renders.ts): until it pushes a `'modal'` layer, its own
+  key filter still handles Esc and the arrows when no shell layer is above it; with a confirm or sheet above it, one
+  Esc now closes only that.
+- **Toasts.** `toast(…, { onGone })`, called once on every exit; the handle's `close()` / `update()` are inert after,
+  the action's click does nothing once the toast is closed, and `.toast.is-leaving` takes no pointer (kit.css).
+- **Tooltips.** The tip timer rechecks the mode and every mode change hides the tip.
+- **Shared helpers.** `ui/epoch.ts uiEpoch(engine)` (`now()`: scene loading / opened / closed / failed; `items()`:
+  loading / closed only, so a room photo switch keeps it) and `shell.epoch`, one instance the shell keeps (that is
+  also what keeps knip quiet until the other packages import it). `sheet.ts isSheetOpen()` (marked `@public` for knip
+  until planner-ui-sheets uses it).
+- **Tests.** `npm run test:ui-machines` (`node --test planner/ui/test/machines-*.test.mjs`, in check:tests):
+  machines-shell.test.mjs bundles layers.ts, chrome.ts and epoch.ts with esbuild. `planner/ui/test/smoke.mjs` is now a
+  runner over `planner/ui/test/sections/*.mjs` (`export async function run(ctx)`; ctx: ev, srv, browser, H (the
+  harness), scene, seedScene, open, phone (any size, `setup(context)` for `context.route` holds before load),
+  goldenRoom()); `-- --only shell` runs one. The old cases moved unchanged to sections/base.mjs; this package's are in
+  sections/shell.mjs.
+
+Deviations: `tscert-ratchet --files … --update` exits before writing (the `--files` path never rewrites the baseline),
+and a full `--update` would rewrite every area's entries, so the two new functions were appended to
+tscert/baseline.json by hand in its sorted order. The held GET in the Place check is the probe's `model.glb`, held on
+the context from before the page loads: the Library's thumbnails load the GLB on their own, so a hold set later finds
+it cached. The shell section seeds its own scene (a scene with a saved layout would load the held GLB at start-up).

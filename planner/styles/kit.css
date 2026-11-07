@@ -381,7 +381,7 @@ button:disabled { cursor: default; }
 [data-mode="desktop"] .toast-action { height: 32px; }
 .toast-close { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--color-muted); }
 [data-mode="desktop"] .toast-close { width: 32px; height: 32px; }
-.toast.is-leaving { opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s; }
+.toast.is-leaving { opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s; pointer-events: none; } /* its action does nothing while it fades (shell.ts) */
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* layer: dialogs, action sheets, menus, tooltips */

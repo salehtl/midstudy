@@ -57,6 +57,7 @@
     "test:engine": "node planner/engine.test.mjs",
     "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
     "test:planner": "node --test planner/test/*.test.mjs",
+    "test:ui-machines": "node --test planner/ui/test/machines-*.test.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {
