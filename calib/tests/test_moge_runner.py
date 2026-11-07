@@ -52,15 +52,15 @@ def test_one_model_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
         time.sleep(0.01)
         return Net()
 
-    def checkpoint(model: Model) -> Path:
-        return Path(f"/{model}.pt")
+    def checkpoint(model: Model) -> tuple[Path, str]:
+        return Path(f"/{model}.pt"), "main"
 
     monkeypatch.setattr(mr, "_build", build)
     monkeypatch.setattr(mr, "_checkpoint", checkpoint)
     monkeypatch.setattr(mr, "_LOADED", {})
     a, ta = mr.load("vitl")
     b, tb = mr.load("vitl")
-    assert a is b and ta > 0 and tb == 0.0 and built == [Path("/vitl.pt")]
+    assert a is b and ta > 0 and tb == 0.0 and built == [Path("/vitl.pt")] and a.revision == "main"
     c, tc = mr.load("vits")
     assert c is not a and tc > 0 and list(mr._LOADED) == ["vits"]  # pyright: ignore[reportPrivateUsage]
     mr.load("vitl")
@@ -79,11 +79,56 @@ def test_pinned_revision_then_main(monkeypatch: pytest.MonkeyPatch) -> None:
         return f"/cache/{repo_id}/{filename}"
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake)
-    assert mr._checkpoint("vitl") == Path("/cache/Ruicheng/moge-2-vitl-normal/model.pt")  # pyright: ignore[reportPrivateUsage]
+    got = mr._checkpoint("vitl")  # pyright: ignore[reportPrivateUsage]
+    assert got == (Path("/cache/Ruicheng/moge-2-vitl-normal/model.pt"), "main")  # the fallback is recorded as main
     assert asked == [mr.REVISIONS["vitl"], None]
     asked.clear()
-    mr._checkpoint("vitb")  # pyright: ignore[reportPrivateUsage]
+    assert mr._checkpoint("vitb")[1] == "main"  # pyright: ignore[reportPrivateUsage]
     assert asked == [None]
+
+
+def test_pinned_revision_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    import huggingface_hub
+
+    def fake(repo_id: str, filename: str, *, revision: str | None = None) -> str:
+        return f"/cache/{repo_id}/{revision}/{filename}"
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake)
+    pin = mr.REVISIONS["vitl"]
+    assert mr._checkpoint("vitl") == (Path(f"/cache/Ruicheng/moge-2-vitl-normal/{pin}/model.pt"), pin)  # pyright: ignore[reportPrivateUsage]
+
+
+class _SplitNet:
+    """A network whose move to mps fails midway (as an MPS out-of-memory can, leaving some layers moved)."""
+
+    def __init__(self) -> None:
+        self.moves: list[str] = []
+
+    def infer(self, image: torch.Tensor, *, use_fp16: bool) -> dict[str, torch.Tensor]:
+        h, w = image.shape[1], image.shape[2]
+        return {"points": torch.ones((h, w, 3)), "mask": torch.ones((h, w), dtype=torch.bool),
+                "intrinsics": torch.eye(3)}
+
+    def to(self, device: str) -> object:
+        self.moves.append(device)
+        if device == "mps":
+            raise RuntimeError("MPS backend out of memory")
+        return self
+
+
+def test_failed_move_forces_a_full_move_on_retry() -> None:
+    """A move that raises leaves the device unknown (None), so fit's cpu retry moves the whole network back."""
+    net = _SplitNet()
+    loaded = mr.Loaded(net=net, model="vitl", repo="x", load_s=0.0, revision="abc")
+    rgb = np.zeros((4, 6, 3), np.uint8)
+    with pytest.raises(RuntimeError):
+        mr.infer(loaded, rgb, "mps", 0.0)
+    assert loaded.device is None
+    out = mr.infer(loaded, rgb, "cpu", 0.0)
+    assert net.moves == ["mps", "cpu"] and loaded.device == "cpu"
+    assert out.points.shape == (4, 6, 3) and out.revision == "abc"
+    mr.infer(loaded, rgb, "cpu", 0.0)
+    assert net.moves == ["mps", "cpu"]  # already there: no move
 
 
 def test_the_pin_is_the_nix_one() -> None:
@@ -123,9 +168,9 @@ def test_build_is_moge_from_pretrained() -> None:
     assert list(sf) == list(sr)
     assert all(torch.equal(sf[k], sr[k]) for k in sf)
     rgb = np.random.default_rng(0).integers(0, 255, (96, 128, 3), dtype=np.uint8)
-    loaded = mr.Loaded(net=fast, model="vitl", repo="x", load_s=0.0)
+    loaded = mr.Loaded(net=fast, model="vitl", repo="x", load_s=0.0, revision="x")
     a = mr.infer(loaded, rgb, "cpu", 0.0)
-    b = mr.infer(mr.Loaded(net=cast(mr.MogeNet, ref), model="vitl", repo="x", load_s=0.0), rgb, "cpu", 0.0)
+    b = mr.infer(mr.Loaded(net=cast(mr.MogeNet, ref), model="vitl", repo="x", load_s=0.0, revision="x"), rgb, "cpu", 0.0)
     assert np.array_equal(a.points, b.points, equal_nan=True) and np.array_equal(a.mask, b.mask)
     assert t_fast < t_ref, (t_fast, t_ref)
 
