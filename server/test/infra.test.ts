@@ -10,6 +10,7 @@ import { countsAgainstCap, download, falCall, FalError, falKey, falMock, falMock
 import { atomicWrite, jsonText, makeTempDir, readJsonFile } from '../../common/files.ts'
 import { utcDay } from '../../common/logic/time.ts'
 import { JobStore, newJobId, SerialQueue } from '../src/jobs.ts'
+import { jobStep } from '../src/logic/jobs.ts'
 import { SpendCap } from '../src/spend.ts'
 import { addError, addMessage, lastJsonLine, outputLines, runTool, splitCommand, summaryOf, toolError } from '../../common/tools.ts'
 import { decodeImageDataUri } from '../../core/js/node.ts'
@@ -63,13 +64,14 @@ void describe('the tool runner', () => {
   })
 })
 
+interface Job { readonly id: string; readonly status: 'queued' | 'running' | 'done' | 'failed'; readonly message: string }
+
 void describe('job queues', () => {
   void test('ids as v1 made them', () => {
     assert.match(newJobId('l'), /^l-\d{8}-\d{6}-[0-9a-f]{4}$/)
     assert.match(newJobId('c', Date.UTC(2026, 10, 4, 20, 15, 0)), /^c-20261104-201500-[0-9a-f]{4}$/)
   })
   void test('one job at a time in the order queued, listed newest first; a failing job never stops the queue; copies only', async () => {
-    interface Job { readonly id: string; readonly status: string; readonly message: string }
     const store = new JobStore<Job>()
     const ran: string[] = []
     let running = 0
@@ -103,6 +105,42 @@ void describe('job queues', () => {
     assert.notEqual(copy, store.get('a'))
     assert.equal(store.get('nope'), null)
     assert.equal(store.position('c'), 2)
+  })
+  void test('an ended job keeps its first terminal status: a late status patch is refused, a message-only one applies', () => {
+    const store = new JobStore<Job>()
+    store.add({ id: 'd', status: 'running', message: 'working' })
+    assert.equal(store.update('d', { status: 'done', message: 'added chair' })?.status, 'done')
+    assert.equal(store.update('d', { status: 'failed', message: 'late failure' }), null)
+    assert.equal(store.update('d', { status: 'running' }), null)
+    assert.deepEqual(store.get('d'), { id: 'd', status: 'done', message: 'added chair' })
+    assert.equal(store.update('d', { message: 'added chair (note)' })?.message, 'added chair (note)')
+    assert.equal(store.update('d', { status: 'done', message: 'again' })?.message, 'again')
+  })
+  void test('a job dropped while queued (failed) refuses a late running or done', () => {
+    const store = new JobStore<Job>()
+    store.add({ id: 'q', status: 'queued', message: '' })
+    assert.equal(store.update('q', { status: 'failed', message: 'the scene was deleted' })?.status, 'failed')
+    assert.equal(store.update('q', { status: 'running', message: 'calibrating' }), null)
+    assert.equal(store.update('q', { status: 'done', message: 'calibrated' }), null)
+    assert.deepEqual(store.get('q'), { id: 'q', status: 'failed', message: 'the scene was deleted' })
+  })
+  void test('non-terminal moves still apply: queued -> done (rooms #end), running -> running with a new message', () => {
+    const store = new JobStore<Job>()
+    store.add({ id: 'r', status: 'queued', message: '' })
+    assert.equal(store.update('r', { status: 'done', message: 'aligned' })?.status, 'done')
+    store.add({ id: 's', status: 'running', message: 'aligning' })
+    assert.equal(store.update('s', { status: 'running', message: 'aligning again' })?.message, 'aligning again')
+    store.add({ id: 't', status: 'queued', message: '' })
+    assert.equal(store.update('t', { status: 'failed', message: 'lost' })?.status, 'failed')
+  })
+  void test('jobStep: only an ended job is guarded, and only against a different status', () => {
+    const all = ['queued', 'running', 'done', 'failed'] as const
+    for (const from of all) {
+      for (const to of all) {
+        const ended = from === 'done' || from === 'failed'
+        assert.equal(jobStep(from, to), !ended || from === to, from + ' -> ' + to)
+      }
+    }
   })
 })
 
