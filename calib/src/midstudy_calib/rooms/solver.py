@@ -5,12 +5,15 @@ How a learned solver's answer becomes a §4.9 pose (docs/notes/rooms-calib.md, P
   1. The solver gives each view a camera-to-world pose (OpenCV camera axes) in its own frame and units, intrinsics and
      a depth map on its own pixel grid.
   2. Each photo's calib.json gives the same camera's rotation in its own floor-up frame (pitch, roll; yaw 0). Each
-     view's up in the solver frame is Rs·Rcᵀ·ŷ; their mean is the room's up (tilt_deg: how far a view's is from it).
+     view's up in the solver frame is Rs·Rcᵀ·ŷ; their mean is the room's up (tilt_deg: how far a view's is from it),
+     without the views more than TILT_OUTLIER_DEG from the rest (`robust_up`; they don't give the floor either).
   3. A rotation takes that up to +Y; each view's yaw is the Y-turn left in A·Rs·Rcᵀ; the first member's is 0.
   4. Scale from the floor: the photos' floor pixels (depth.png 0, clearly below the horizon) give the solver's floor
      height (median); metres per solver unit make the first member's camera height its calib height_m; each member's
      scale makes its effective camera height (height_m × scale) the solver's. With no floor seen: depth.png against
-     the solver's depth (`scale_source: depth`).
+     the solver's depth (`scale_source: depth`). Either way each candidate also carries depth.png's own scale against
+     the solver's depth (`Candidate.depth_scale`, diagnostics `scale_by_depth`): scoring carries depth.png with it,
+     since MoGe-2's depth and its height_m can disagree by several per cent (score.py).
   5. Positions: σ·A·(c_i − c_0); x and z are the pose (the floor point under the camera).
 """
 from __future__ import annotations
@@ -74,19 +77,47 @@ class View:
         return pc @ self.c2w[:3, :3].T + self.c2w[:3, 3]
 
 
+TILT_OUTLIER_DEG = 2.0  # a view whose up is further than this from the others' is left out of the room's up and floor
+
+
+def robust_up(ups: list[F64]) -> tuple[F64, list[bool]]:
+    """The room's up: the mean of the views' ups, without the views whose up is more than TILT_OUTLIER_DEG from the
+    mean of the rest, worst first (a photo whose calibrated pitch or roll is off, or that the solver placed wrong: on
+    the golden room with MoGe-2's calibration, room-6's pitch is 5° off and its 3.4° tilt moved the mean up by ~0.5°,
+    enough to put the other photos' scales 1.5–4 % off; docs/notes/rooms-calib-real.md). At least two views stay."""
+    keep = [True] * len(ups)
+
+    def mean(mask: list[bool]) -> F64:
+        m = np.sum([up for up, k in zip(ups, mask, strict=True) if k], axis=0)
+        return m / np.linalg.norm(m)
+
+    while sum(keep) > 2:
+        u = mean(keep)
+        worst, wi = -1.0, -1
+        for i, up in enumerate(ups):
+            if keep[i]:
+                rest = mean([k and j != i for j, k in enumerate(keep)])
+                t = math.degrees(math.acos(float(np.clip(np.dot(up, rest), -1.0, 1.0))))
+                if t > worst:
+                    worst, wi = t, i
+        if worst <= TILT_OUTLIER_DEG:
+            return u, keep
+        keep[wi] = False
+    return mean(keep), keep
+
+
 def from_views(photos: list[RoomPhoto], views: list[View]) -> list[Candidate | None]:
     """Steps 2–5 of the module doc."""
     rs = [v.c2w[:3, :3] for v in views]
     ups = [r @ s.r_cv.T @ np.array([0.0, 1.0, 0.0]) for r, s in zip(rs, photos, strict=True)]
-    u = np.sum(ups, axis=0)
-    u /= np.linalg.norm(u)
+    u, inlier = robust_up(ups)
     tilts = [math.degrees(math.acos(float(np.clip(np.dot(up, u), -1.0, 1.0)))) for up in ups]
     a0 = rotation_to_up(u)
     yaws = [yaw_of(a0 @ r @ s.r_cv.T) for r, s in zip(rs, photos, strict=True)]
     a = ry(-yaws[0]) @ a0
     ratios: list[float] = []
     floor_y: list[F64] = []
-    for s, v in zip(photos, views, strict=True):
+    for i, (s, v) in enumerate(zip(photos, views, strict=True)):
         good = (v.depth > 1e-6) & np.isfinite(v.depth)
         if v.conf.size == v.depth.size and good.any():
             good &= v.conf >= np.quantile(v.conf[good], 0.3)
@@ -94,7 +125,7 @@ def from_views(photos: list[RoomPhoto], views: list[View]) -> list[Candidate | N
         ok = good & (dp > 0)
         ratios.append(float(np.median(dp[ok] / v.depth[ok])) if int(ok.sum()) > 50 else math.nan)
         fl = good & s.floor_at_uv(v.u, v.v)
-        if int(fl.sum()) > 50:
+        if inlier[i] and int(fl.sum()) > 50:
             floor_y.append((v.points()[fl] @ a.T)[:, 1])
     c0 = views[0].c2w[:3, 3]
     cy = [float((a @ v.c2w[:3, 3])[1]) for v in views]
@@ -122,7 +153,7 @@ def from_views(photos: list[RoomPhoto], views: list[View]) -> list[Candidate | N
             continue
         diag: Diag = {"scale_source": mode, "scale_by_depth": round(depth_scale, 5) if depth_scale is not None else None}
         yaw = 0.0 if i == 0 else yaws[i] - yaws[0]
-        out.append(Candidate(Placement(float(p[0]), float(p[2]), yaw, 1.0 if i == 0 else float(sc)), 1.0, tilts[i], diag))
+        out.append(Candidate(Placement(float(p[0]), float(p[2]), yaw, 1.0 if i == 0 else float(sc)), 1.0, tilts[i], diag, depth_scale))
     return out
 
 

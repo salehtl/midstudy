@@ -104,10 +104,14 @@ class RoomPhoto:
         pc = np.stack([(ii + 0.5 - dw / 2) / f * sub, -(jj + 0.5 - dh / 2) / f * sub, -sub], axis=-1)
         return pc @ self.r_gl.T, sub > 0
 
+    def lift_rel(self, step: int = 4) -> F64:
+        """depth.png's points with depth (every step-th pixel) relative to the camera, scene axes, (n, 3)."""
+        p, ok = self.camera_points(step)
+        return p[ok]
+
     def lift(self, step: int = 4) -> F64:
         """depth.png's points with depth (every step-th pixel) in the scene frame, (n, 3)."""
-        p, ok = self.camera_points(step)
-        return p[ok] + np.array([0.0, self.cam().height, 0.0])
+        return self.lift_rel(step) + np.array([0.0, self.cam().height, 0.0])
 
     def project(self, p_scene: F64) -> tuple[F64, F64, F64]:
         """Scene-frame points -> depth.png pixel coordinates (continuous, contract §4.1) and view-axis depth."""
