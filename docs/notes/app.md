@@ -276,3 +276,29 @@ and a full `--update` would rewrite every area's entries, so the two new functio
 tscert/baseline.json by hand in its sorted order. The held GET in the Place check is the probe's `model.glb`, held on
 the context from before the page loads: the Library's thumbnails load the GLB on their own, so a hold set later finds
 it cached. The shell section seeds its own scene (a scene with a saved layout would load the held GLB at start-up).
+
+## State machines W1: planner-gpu-splat-sort (2026-11-07)
+
+The splat layer's CPU sort (the WebGL2 fallback) and its settle(), per docs/notes/state-machines-plan.md:
+
+- `planner/logic/splats.ts` (new, import-free, 4 functions certified and in tscert/baseline.json): the CPU sort's
+  state `CpuSort {worker none|up|down, pending {id,key,version,superseded}, sortedKey, setChanged}`, `cpuSortAction`
+  (none / here / post / wait), `cpuReplyVerdict` (ignore / drop / apply; a reply overtaken by a main-thread sort is
+  dropped), and `sortKey` (now with camera.near; far stays out, neither sort uses it).
+- `planner/gpu/splat-layer.ts`: a set change, a settle() and a down worker sort on the main thread (sort-cpu.ts on a
+  copy of the set the layer keeps), so a new set never draws a blank frame; camera and transform changes still go to
+  the worker. A worker that fails to load, sends an unreadable message or answers with a fatal error is down for good
+  (terminated, one warning, onChange); a non-fatal error (the worker's version check) only drops and re-decides. After
+  every apply or drop the layer decides again for the latest key. settle() resolves or rejects at once: the waiter
+  queue and its 30 s timeout are gone (no caller passed timeoutMs). add() of an existing uid rebuilds once. After
+  dispose() add/remove/render/update throw and settle rejects. `stats().cpuWorker` says none/up/down.
+- `sort-messages.ts`: 'error' carries `fatal`. `sort.worker.ts`: try/catch around 'set' and 'sort'; a failed set is
+  remembered and answers later sorts fatal.
+- Demo: `?sortWorker=throw-load|throw-sort|throw-uncaught` (Blob-URL workers), `addItem({settle:false})`,
+  `capture({settle:false})`, `settleMs`, `nudgeSplats`; window 'error'/'unhandledrejection' reject `ready`.
+  check.mjs: a new section (`--only=worker`, also in `webgl`), WG.06–WG.10: red before (30 s settle rejections, blank
+  first frames), green after. The perf notes now say the first splat frame includes the main-thread sort and the
+  worker's time shows only once a frame moved.
+- Tests: `npm run test:splats` (planner/gpu/test/*.test.mjs, in knip's entries).
+- Deviation: the worker gets a 'set' as a structured-clone copy (the layer keeps its own), as designed; a fatal
+  'error' marks the worker down whatever its id (any fatal answer means it cannot sort), not only for the pending id.

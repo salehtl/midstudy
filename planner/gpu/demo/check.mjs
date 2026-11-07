@@ -12,7 +12,7 @@
 // lighting.json; and every case region by region against the planner's. --perf adds the demo's numbers (262,144
 // splats): frame and sort time, time to the first splat frame, memory, per backend and sort (run it under the eval lock
 // with --exclusive; the planner's own splat numbers, against v2 on WebGL, are E17's).
-// Usage: node planner/gpu/demo/check.mjs [--perf] [--only=v1,webgpu,webgl,sort,perf]   Output: evals/out/webgpu-spike/
+// Usage: node planner/gpu/demo/check.mjs [--perf] [--only=v1,webgpu,webgl,worker,sort,perf]   Output: evals/out/webgpu-spike/
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -311,6 +311,63 @@ for (const backend of ['webgpu', 'webgl']) {
   await Dm.ctx.close()
 }
 
+// The CPU sort's failure paths and its first frames (docs/notes/state-machines.md, SplatLayer CPU sort): a sort worker
+// that throws as it loads, answers with a fatal error, or throws uncaught must not freeze the splats or hold settle()
+// (the layer marks it down and sorts on the main thread); and the first frame after an add or a remove, drawn with no
+// wait at all, shows the splats (a set change sorts on the main thread, never a blank frame).
+if (want('webgl') || want('worker')) {
+  ev.section('WebGL2: a broken sort worker, and the first frame after a set change')
+  const sp = items.sprobe([-1.0, 0, -2.4])
+  const r = rectOf(boxAt(sp.spec.position, sp.dims))
+  const tol = [Math.max(6, 0.03 * (r[2] - r[0])), Math.max(6, 0.03 * (r[3] - r[1]))]
+  const drawnAt = (dataUrl, name) => {
+    if (!dataUrl) return { error: 'no capture' }
+    const f = path.join(ev.out, `worker-${name}.png`)
+    fs.writeFileSync(f, Buffer.from(dataUrl.split(',')[1], 'base64'))
+    const d = pyHelper(['drawn', '--composite', f, '--photo', LW.photo, `--window=${[r[0] - 120, r[1] - 120, r[2] + 120, r[3] + 120].join(',')}`])
+    return { ok: edgeOk(d.bbox, r, tol), bbox: d.bbox?.map(Math.round), error: d.error }
+  }
+  for (const kind of ['throw-load', 'throw-sort', 'throw-uncaught']) {
+    const Dm = await openDemo('webgl', `&sortWorker=${kind}`)
+    const res = await Dm.page.evaluate(async (spec) => {
+      const d = window.gpuDemo
+      d.setOcclusion(false); d.setContactShadows(false); d.setCastShadows(false)
+      const t0 = performance.now()
+      let addError = null
+      await d.addItem({ uid: 'p', ...spec }).catch((e) => { addError = String(e) })
+      const addMs = performance.now() - t0
+      await d.nudgeSplats() // a transform change: the layer posts it to the worker, which fails
+      await new Promise((ok) => setTimeout(ok, 1000))
+      await d.nudgeSplats()
+      const settle = await d.settleMs()
+      const shot = await d.capture({ settle: false })
+      return { addMs, addError, settle, shot: shot.dataUrl, worker: d.stats().splats?.cpuWorker }
+    }, sp.spec).catch((e) => ({ error: String(e.message || e).split('\n')[0] }))
+    const dr = drawnAt(res.shot, kind)
+    ev.check(`WebGL2, sortWorker=${kind}: the worker is marked down, addItem and settle() resolve at once (< 1 s), the probe is drawn within 3 % of its box`,
+      !res.error && res.addError == null && res.addMs < 6000 && res.settle?.error == null && res.settle?.ms < 1000 && res.worker === 'down' && dr.ok,
+      fmt({ error: res.error, addMs: Math.round(res.addMs ?? -1), addError: res.addError, settle: res.settle, worker: res.worker, drawn: dr.bbox, projected: r.map(Math.round), why: dr.error }))
+    await Dm.ctx.close()
+  }
+  {
+    const Dm = await openDemo('webgl')
+    const res = await Dm.page.evaluate(async ({ spec, other }) => {
+      const d = window.gpuDemo
+      d.setOcclusion(false); d.setContactShadows(false); d.setCastShadows(false)
+      await d.addItem({ uid: 'p', ...spec, settle: false })
+      const afterAdd = await d.capture({ settle: false })
+      await d.addItem({ uid: 'q', ...other })
+      d.removeItem('q')
+      const afterRemove = await d.capture({ settle: false })
+      return { afterAdd: afterAdd.dataUrl, afterRemove: afterRemove.dataUrl, worker: d.stats().splats?.cpuWorker }
+    }, { spec: sp.spec, other: items.idol([1.25, 0, -3.1]).spec }).catch((e) => ({ error: String(e.message || e).split('\n')[0] }))
+    const a = drawnAt(res.afterAdd, 'first-after-add'), b = drawnAt(res.afterRemove, 'first-after-remove')
+    ev.check('WebGL2: the first frame right after addItem, with no wait, draws the probe within 3 % of its box', !res.error && a.ok, fmt({ error: res.error, drawn: a.bbox, projected: r.map(Math.round), why: a.error }))
+    ev.check('WebGL2: the first frame right after removing another splat item, with no wait, still draws the probe', !res.error && b.ok && res.worker !== 'down', fmt({ error: res.error, drawn: b.bbox, worker: res.worker, why: b.error }))
+    await Dm.ctx.close()
+  }
+}
+
 // A browser without WebGPU at all (MIDSTUDY_WEBGPU=0's flags): WebGPURenderer must fall back to WebGL2 on its own.
 if (want('webgl')) {
   ev.section('no WebGPU in the browser: the fallback picks itself')
@@ -379,8 +436,11 @@ if (PERF) {
   const p = results.perf
   ev.check('numbers measured on every renderer', ['webgpu', 'webgpuCpuSort', 'webgl2'].every((k) => p[k] && !p[k].error), fmt(Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.error || 'ok']))))
   ev.note(`WebGPU (GPU sort): frame with a sort ${p.webgpu?.median?.toFixed(0)} ms, without ${p.webgpu?.stillMedian?.toFixed(0)} ms, first splat frame ${p.webgpu?.first?.firstFrameMs?.toFixed(0)} ms`)
-  ev.note(`WebGPU (CPU sort): frame ${p.webgpuCpuSort?.median?.toFixed(0)} ms, worker sort ${p.webgpuCpuSort?.stats?.lastWorkerMs?.toFixed(1)} ms`)
-  ev.note(`WebGL2 (CPU sort): frame ${p.webgl2?.median?.toFixed(0)} ms, worker sort ${p.webgl2?.stats?.lastWorkerMs?.toFixed(1)} ms, first splat frame ${p.webgl2?.first?.firstFrameMs?.toFixed(0)} ms`)
+  // CPU sort: a set change and settle() sort on the main thread (the first splat frame includes that sort); the worker
+  // sorts the moved frames, so its time is there only once a frame moved ('none yet' is not a regression)
+  const ms = (v) => (v == null ? 'none yet' : `${v.toFixed(1)} ms`)
+  ev.note(`WebGPU (CPU sort): frame ${p.webgpuCpuSort?.median?.toFixed(0)} ms, worker sort ${ms(p.webgpuCpuSort?.stats?.lastWorkerMs)}, last main-thread sort ${ms(p.webgpuCpuSort?.stats?.lastSortMs)}`)
+  ev.note(`WebGL2 (CPU sort): frame ${p.webgl2?.median?.toFixed(0)} ms, worker sort ${ms(p.webgl2?.stats?.lastWorkerMs)}, last main-thread sort ${ms(p.webgl2?.stats?.lastSortMs)}, first splat frame (main-thread sort) ${p.webgl2?.first?.firstFrameMs?.toFixed(0)} ms`)
 }
 
 fs.writeFileSync(path.join(ev.out, 'summary.json'), JSON.stringify(results, null, 2))

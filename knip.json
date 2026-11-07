@@ -5,6 +5,7 @@
     "planner/**/*.worker.ts",
     "planner/gpu/demo/demo.ts",
     "planner/gpu/demo/*.mjs",
+    "planner/gpu/test/*.test.mjs",
     "server/src/main.ts",
     "server/test/*.test.ts",
     "server/test/lock-child.ts",
