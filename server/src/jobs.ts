@@ -2,15 +2,16 @@
 // scenes' calibrations), one job at a time in the order queued, listed newest first, forgotten by a restart. v1 had a
 // thread per queue; here one async loop per queue does the same.
 import { randomBytes } from 'node:crypto'
-import { jobId } from './logic/jobs.ts'
+import { jobId, jobStep, type JobStatus } from './logic/jobs.ts'
 
 /** A new job id, `<prefix>-YYYYMMDD-HHMMSS-<4 hex>` (UTC now). */
 export function newJobId(prefix: 'c' | 'l' | 'a', now: number = Date.now()): string {
   return jobId(prefix, now, randomBytes(2).toString('hex'))
 }
 
-/** The jobs of one queue: answers are copies, so a caller never changes a job by holding it. */
-export class JobStore<J extends { readonly id: string }> {
+/** The jobs of one queue: answers are copies, so a caller never changes a job by holding it. A job's first terminal
+ *  status wins (jobStep): a late status patch on an ended job is refused. */
+export class JobStore<J extends { readonly id: string; readonly status: JobStatus }> {
   readonly #jobs = new Map<string, J>()
   readonly #order: string[] = []
 
@@ -37,10 +38,15 @@ export class JobStore<J extends { readonly id: string }> {
     return out
   }
 
-  /** Replaces fields of a job (no-op for an unknown id); returns the new copy or null. */
+  /** Replaces fields of a job; returns the new copy, or null for an unknown id or a refused status move (an ended job
+   *  given a different status: jobStep), which leaves the job as it was. */
   update(id: string, patch: Partial<J>): J | null {
     const job = this.#jobs.get(id)
     if (job === undefined) return null
+    if (patch.status !== undefined && !jobStep(job.status, patch.status)) {
+      process.stderr.write('job ' + id + ': ' + job.status + ' -> ' + patch.status + ' refused\n')
+      return null
+    }
     const next: J = { ...job, ...patch }
     this.#jobs.set(id, next)
     return { ...next }

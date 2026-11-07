@@ -7,3 +7,13 @@ import { utcStamp } from '../../../common/logic/time.ts'
 export function jobId(prefix: 'c' | 'l' | 'a', epochMs: number, hex: string): string {
   return prefix + '-' + utcStamp(epochMs) + '-' + hex
 }
+
+/** A job's status (contract §4.4 Job object). `done` and `failed` are terminal. */
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed'
+
+/** Whether a job may move from `from` to `to`: the first terminal status wins, so an ended job takes only its own status
+ *  again (a message-only patch); a queued or running job takes any (rooms end a job from either). */
+export function jobStep(from: JobStatus, to: JobStatus): boolean {
+  if (from === 'queued' || from === 'running') return true
+  return to === from
+}

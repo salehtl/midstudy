@@ -639,6 +639,7 @@
   "server/src/logic/http.ts#stalledMessage",
   "server/src/logic/http.ts#targetParts",
   "server/src/logic/jobs.ts#jobId",
+  "server/src/logic/jobs.ts#jobStep",
   "server/src/logic/mime.ts#(init)",
   "server/src/logic/mime.ts#extension",
   "server/src/logic/mime.ts#mimeType",
