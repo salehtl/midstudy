@@ -55,7 +55,25 @@ let
   utils3d = ps.callPackage ./utils3d.nix { };
   moge = ps.callPackage ./moge.nix { inherit utils3d; };
   weights = pkgs.callPackage ./moge-weights.nix { };
+  # align-room's MASt3R (the `rooms` extra): its code and weights, and the Hugging Face cache the wrapper points at,
+  # with MoGe-2's and MASt3R's snapshots side by side.
+  mast3r = pkgs.callPackage ./mast3r.nix { };
+  hfCache = pkgs.symlinkJoin {
+    name = "midstudy-calib-hf-cache";
+    paths = [
+      weights
+      mast3r.weights
+    ];
+  };
   py = pkgs.python3.withPackages (ps: [
+    # the rooms extra (calib/pyproject.toml): what MASt3R imports beyond calib's own dependencies
+    # roma's torch is nixpkgs' source build: give it torch-bin, so the env has one torch
+    (ps.roma.override { torch = ps.torch-bin; })
+    ps.einops
+    # dust3r's image loading (torchvision.transforms); the wheel that matches torch-bin
+    ps.torchvision-bin
+    ps.safetensors
+    ps.tqdm
     moge
     utils3d
     ps.torch-bin
@@ -84,8 +102,7 @@ let
     "midstudy_calib.contract_types"
     "midstudy_calib.records"
     "midstudy_calib.util"
-    # align-room (contract §4.9): the command and Manhattan (numpy, scipy). MASt3R isn't packaged (roma, einops and a
-    # git checkout of naver/mast3r), so the package's align-room answers `manhattan` (`--solver auto`'s fallback).
+    # align-room (contract §4.9): the command, Manhattan (numpy, scipy) and MASt3R (its own imports: mast3rCheck)
     "midstudy_calib.rooms.command"
     "midstudy_calib.rooms.photos"
     "midstudy_calib.rooms.geometry"
@@ -111,6 +128,18 @@ let
     assert problems("calib", {}), "calib.schema.json accepted {}"
     assert not problems("request", {"id": "1", "cmd": "ingest", "args": ["a.jpg", "--out", "b"]}), "calib-cli.schema.json"
   '';
+  # MASt3R's code is on sys.path only once loaded (rooms/mast3r.py _import), so its modules are checked from there.
+  mast3rCheck = ''
+    import importlib, os
+    from midstudy_calib.rooms import mast3r
+    assert mast3r.installed(), "the rooms extra"
+    root = mast3r.ensure_code()
+    assert str(root) == os.environ["MIDSTUDY_MAST3R_DIR"], root
+    mast3r._import(root)
+    for m in ("mast3r.model", "mast3r.cloud_opt.sparse_ga", "dust3r.image_pairs", "dust3r.utils.image"):
+        importlib.import_module(m)
+    assert mast3r.ensure_weights().joinpath("model.safetensors").is_file()
+  '';
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "midstudy-calib";
@@ -135,7 +164,8 @@ pkgs.stdenvNoCC.mkDerivation {
     makeWrapper ${py}/bin/python3 $out/bin/midstudy-calib \
       --add-flags "-P -c 'import sys; from midstudy_calib.cli import main; sys.exit(main())'" \
       --set PYTHONPATH $out/share/midstudy-calib/src \
-      ${lib.optionalString withWeights "--set-default HF_HUB_CACHE ${weights} --set-default HF_HUB_OFFLINE 1"} \
+      --set-default MIDSTUDY_MAST3R_DIR ${mast3r.code} \
+      ${lib.optionalString withWeights "--set-default HF_HUB_CACHE ${hfCache} --set-default HF_HUB_OFFLINE 1"} \
       ${lib.optionalString pkgs.stdenv.hostPlatform.isLinux "--prefix LD_LIBRARY_PATH : ${pkgs.addDriverRunpath.driverLink}/lib"}
     runHook postInstall
   '';
@@ -147,6 +177,10 @@ pkgs.stdenvNoCC.mkDerivation {
     $out/bin/midstudy-calib serve --help >/dev/null
     PYTHONPATH=$out/share/midstudy-calib/src ${py}/bin/python3 -P -c 'import ${imports}'
     PYTHONPATH=$out/share/midstudy-calib/src ${py}/bin/python3 -P -c ${lib.escapeShellArg schemaCheck}
+    ${lib.optionalString withWeights ''
+      MIDSTUDY_MAST3R_DIR=${mast3r.code} HF_HUB_CACHE=${hfCache} HF_HUB_OFFLINE=1 HOME=$TMPDIR \
+        PYTHONPATH=$out/share/midstudy-calib/src ${py}/bin/python3 -P -c ${lib.escapeShellArg mast3rCheck}
+    ''}
     runHook postInstallCheck
   '';
 
@@ -155,6 +189,8 @@ pkgs.stdenvNoCC.mkDerivation {
       moge
       utils3d
       weights
+      mast3r
+      hfCache
       py
       ;
     torch = ps.torch-bin;

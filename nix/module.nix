@@ -120,6 +120,7 @@ in
         [
           dir
           "${dir}/scenes"
+          "${dir}/rooms"
           "${dir}/library"
           "${dir}/layouts"
           "${dir}/renders"
@@ -172,6 +173,8 @@ in
               (toString cfg.webPort)
               "--scenes-dir"
               "${dir}/scenes"
+              "--rooms-dir"
+              "${dir}/rooms"
               "--library-dir"
               "${dir}/library"
               "--layouts-dir"

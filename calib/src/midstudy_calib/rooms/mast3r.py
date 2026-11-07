@@ -78,6 +78,11 @@ def ensure_code() -> Path:
     """The pinned checkout of MASt3R (with its submodules), cloned on first use; no network once it is there."""
     root = code_dir()
     ready = (root / "dust3r/croco/models").is_dir() and (root / "mast3r/model.py").is_file()
+    stamp = root / ".midstudy-commit"
+    if ready and stamp.is_file():  # a read-only copy without .git (the Nix package's, nix/mast3r.nix): trust its stamp
+        if stamp.read_text().strip() == COMMIT:
+            return root
+        raise SolverUnavailable(f"MASt3R's code at {root} is not the pinned commit {COMMIT[:7]}")
     if ready:
         try:
             head = _git("rev-parse", "HEAD", cwd=root)
