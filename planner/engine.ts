@@ -121,6 +121,7 @@ import type { JsonObject, Kernels } from './logic/num.js'
 import * as sceneLogic from './logic/scenes.js'
 import * as roomLogic from './logic/room.js'
 import type { Pose } from './logic/room.js'
+import * as jobs from './logic/jobs.js'
 import * as text from './logic/text.js'
 import type { DimsCm } from './logic/text.js'
 import * as viewLogic from './logic/view.js'
@@ -266,6 +267,18 @@ function emit<K extends keyof EngineEvents>(name: K, detail: EngineEvents[K]): v
 let awakeUntil = 0
 let framePending = false
 let holdFrames = 0 // > 0 while a capture holds the view (captureShot, captureMask)
+let renderErrorReported = false // the loop's 'Rendering failed' is reported once per scene opened (openSceneAs resets it)
+// The capture mutex: every capture of the view (captureCanvas, captureMask, a thumbnail's render and read-back) runs
+// after the one before it has settled (a failure doesn't break the chain). captureBusy counts the captures queued or
+// running, synchronously from the call, for code that must not attach to the scene while one runs.
+let captureChain: Promise<unknown> = Promise.resolve()
+let captureBusy = 0
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  captureBusy++
+  const run = captureChain.then(fn, fn)
+  captureChain = run.then(() => undefined, () => undefined).finally(() => { captureBusy-- })
+  return run
+}
 function wake(ms = 400): void {
   awakeUntil = Math.max(awakeUntil, performance.now() + ms)
   framePending = true
@@ -817,6 +830,8 @@ const THUMB_BG = new THREE.Color().setRGB(0xe7 / 255, 0xe4 / 255, 0xdf / 255, TH
 let thumbPass: { size: number; model: THREE.RenderTarget; out: THREE.RenderTarget; quad: THREE.QuadMesh } | null = null
 function thumbTargets(size: number): NonNullable<typeof thumbPass> {
   if (thumbPass?.size === size) return thumbPass
+  thumbPass?.model.dispose()
+  thumbPass?.out.dispose()
   const model = new THREE.RenderTarget(size, size, { type: THREE.HalfFloatType, samples: 4, depthBuffer: true })
   const out = new THREE.RenderTarget(size, size, { type: THREE.UnsignedByteType, depthBuffer: false })
   const frame = createFrame()
@@ -828,7 +843,6 @@ async function modelThumbnail(l: LibraryEntry, size = 256): Promise<string> {
   const glb = libView(l).glb
   if (!glb) throw new Error('no GLB')
   const t = await loadGlbTemplate(assetUrl(glb))
-  const th = thumbTargets(size)
   const sc = new THREE.Scene()
   sc.environment = lights.roomEnvironment
   const key = new THREE.DirectionalLight(0xffffff, 1.2)
@@ -842,19 +856,24 @@ async function modelThumbnail(l: LibraryEntry, size = 256): Promise<string> {
   const dir = new THREE.Vector3(0.55, 0.42, 1).normalize()
   thumbCam.position.copy(c).addScaledVector(dir, (radius / Math.sin((30 * DEG) / 2)) * 1.02)
   thumbCam.lookAt(c)
-  lights.withDiffuseIbl(() => {
-    try {
-      renderer.setRenderTarget(th.model)
-      renderer.setClearColor(0x000000, 0)
-      clearTarget(renderer)
-      render(renderer, sc, thumbCam)
-      renderer.setRenderTarget(th.out)
-      renderer.setClearColor(THUMB_BG, 1)
-      clearTarget(renderer)
-      th.quad.render(renderer)
-    } finally { renderer.setRenderTarget(null) }
+  // the render and its read-back go through the capture mutex (a mask capture has maskMode on meanwhile; the GLB load
+  // above stays outside it, so a slow download never holds an export)
+  const px = await exclusive(() => {
+    const th = thumbTargets(size)
+    lights.withDiffuseIbl(() => {
+      try {
+        renderer.setRenderTarget(th.model)
+        renderer.setClearColor(0x000000, 0)
+        clearTarget(renderer)
+        render(renderer, sc, thumbCam)
+        renderer.setRenderTarget(th.out)
+        renderer.setClearColor(THUMB_BG, 1)
+        clearTarget(renderer)
+        th.quad.render(renderer)
+      } finally { renderer.setRenderTarget(null) }
+    })
+    return readRgba(renderer, th.out, size, size)
   })
-  const px = await readRgba(renderer, th.out, size, size)
   const cv = document.createElement('canvas')
   cv.width = cv.height = size
   const g = cv.getContext('2d')
@@ -1629,6 +1648,7 @@ function setPhoto(img: HTMLImageElement, depth: DepthMap | null): void {
   photo.has = true
   P.photo.setPhoto(photo.texture)
   photo.depth = depth
+  // always a new DataTexture: the splat pass's redraw key (splatKey) names the depth by its texture id
   photo.depthTexture = depth ? depthTexture(depth.data, depth.width, depth.height) : null
   P.depth.pass.setDepth(photo.depthTexture)
   syncOcclusion()
@@ -1703,6 +1723,7 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
     clearRuler()
     ruler.active = false
     setPhoto(img, depth)
+    renderErrorReported = false // a new scene reports its own first render failure
     sceneName = name
     sceneData = data
     cam = clampCamera(data['camera'])
@@ -2346,28 +2367,44 @@ async function alignRoom(name: unknown, opts: unknown = {}): Promise<AlignJobInf
   }
   if (!job) throw reportError('Could not start the alignment', new Error("the server's answer has no job"))
   emit('room', { phase: 'aligning', name: r })
-  quiet(followAlign(r))
+  quiet(followAlign(r, job.id))
   return job
 }
-// Polls the room while its alignment is pending or running, then takes the result (the open room's poses).
+// Follows an alignment by its job id (GET /api/rooms/jobs/<id>, §4.9) until it ends, then takes the result from the
+// room (the open room's poses). Every way out ends in a 'room' event: aligned, or align-failed with the job's message,
+// or with the alignment lost: the job store forgot it (a 404: it never prunes, so the server restarted), the room is
+// gone, or the follow ran out (about an hour). The toast and the poses only for the room that is still open.
 const following = new Set<string>()
-async function followAlign(name: string): Promise<void> {
-  if (following.has(name)) return
-  following.add(name)
+const ALIGN_LOST = 'the alignment was lost (the server restarted?)'
+async function followAlign(name: string, jobId: string): Promise<void> {
+  if (following.has(jobId)) return
+  following.add(jobId)
+  const end = (phase: 'aligned' | 'align-failed', info: RoomInfo | null, why: string | null): void => {
+    const open = room?.name === name
+    if (info) setRoomInfo(info) // only the open room's (setRoomInfo checks)
+    quiet(listRoomsInternal().catch(() => undefined))
+    emit('room', { phase, name })
+    if (why !== null && open) toast(`Alignment failed: ${why}`, 'error')
+  }
   try {
     for (let i = 0; i < 2400; i++) {
       await sleep(i < 10 ? 500 : 1500)
-      let info: RoomInfo
-      try { info = await getRoomInternal(name) } catch (e) { if (statusOf(e) === 404) return; continue }
-      const st = info.align_status ?? 'none'
-      if (st === 'pending' || st === 'running') continue
-      setRoomInfo(info)
-      quiet(listRoomsInternal().catch(() => undefined))
-      emit('room', { phase: st === 'failed' ? 'align-failed' : 'aligned', name })
-      if (st === 'failed') toast(`Alignment failed: ${info.align_error ?? 'see the server log'}`, 'error')
+      let http: number | null = 200
+      let job: AlignJobInfo | null = null
+      try { job = alignJob(await apiJson(`/api/rooms/jobs/${encodeURIComponent(jobId)}`)) } catch (e) { http = statusOf(e) }
+      const out = jobs.jobOutcome(http, job?.status)
+      if (out === 'wait') continue
+      if (out === 'lost') { end('align-failed', null, ALIGN_LOST); return }
+      let info: RoomInfo | null = null
+      try { info = await getRoomInternal(name) } catch (e) {
+        if (statusOf(e) === 404) { end('align-failed', null, ALIGN_LOST); return }
+      }
+      if (out === 'failed') end('align-failed', info, [job?.message, info?.align_error].find((m) => !!m) ?? 'see the server log')
+      else end('aligned', info, null)
       return
     }
-  } finally { following.delete(name) }
+    end('align-failed', null, ALIGN_LOST)
+  } finally { following.delete(jobId) }
 }
 /** New room (§4.9 hook createRoom): each photo uploaded (POST /api/scenes), the room made in that order, then an
  *  alignment asked for at once (members still calibrating count toward the align's two photos; the job waits for
@@ -2387,7 +2424,9 @@ async function createRoom(files: unknown, meta: unknown = {}): Promise<{ room: s
   const job = scenes.length >= 2 ? await alignRoom(info.name) : null
   return { room: info.name, scenes, job }
 }
-/** Resolves when every member has finished calibrating and the alignment isn't pending or running (§4.9 hook). */
+/** Resolves when every member has finished calibrating and the alignment isn't pending or running (§4.9 hook). The
+ *  evals' waiter: it has no overall limit while the room answers busy (only unreachable for 15 min gives up); the
+ *  caller's own timeout bounds it. */
 async function waitForRoom(name: unknown): Promise<RoomInfo> {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`"${asText(name)}" isn't a room name`)
   const t0 = performance.now()
@@ -2766,10 +2805,14 @@ export interface Shot {
 }
 
 // The view draws nothing while a capture holds it (holdFrames): a capture changes the camera, the targets and (the
-// mask) the pieces' materials, and waits for its read-back and the splats' sort in between.
+// mask) the pieces' materials, and waits for its read-back and the splats' sort in between. Captures run one at a time
+// (exclusive): two at once shared the targets, the camera and the pieces' materials, so one read the other's frame and
+// the last restore kept the other's state (the grid hidden, the mask's white on the pieces).
 async function holding<T>(fn: () => Promise<T>): Promise<T> {
-  holdFrames++
-  try { return await fn() } finally { holdFrames--; wake() }
+  return exclusive(async () => {
+    holdFrames++
+    try { return await fn() } finally { holdFrames--; wake() }
+  })
 }
 
 // The full photo frame at the photo's resolution (or scaled to maxPx): photo + furniture + splats, no view offset, no
@@ -2998,7 +3041,14 @@ function onFrame(fn: (dt: number) => void): () => boolean {
 try { await kernelsReady } catch (e) { reportError('Could not load the planner kernels', e) }
 applyCamera()
 const clock = new THREE.Clock()
-let renderErrorReported = false
+// A lost GPU device (WebGPU only: GPUDevice.lost) is reported; the renderer isn't re-created (a reload recovers).
+function deviceLost(backend: unknown): Promise<unknown> | null {
+  if (!isRecord(backend) || backend['isWebGPUBackend'] !== true) return null
+  const device = backend['device']
+  const lost = isRecord(device) ? device['lost'] : null
+  return lost instanceof Promise ? lost : null
+}
+quiet(deviceLost(renderer.backend)?.then(() => { reportError('The GPU was lost; reload the page') }))
 void renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(clock.getDelta(), 0.1)
@@ -3187,6 +3237,7 @@ export const engine = {
   getLayoutDetails: (): LayoutSummary[] => layoutDetails.map((d) => ({ ...d })), getLayoutName: (): string => layoutName,
   layoutDisplayName, getScenesTrash: (): TrashedScene[] => scenesTrash.map((t) => ({ ...t })),
   getRenders: (): RenderMeta[] => renders.slice(), isRenderMock: (): boolean => renderMock,
+  isCapturing: (): boolean => captureBusy > 0, // a capture queued or running (the capture mutex)
   getRuler, getState, getRenderSettings, horizonAt,
   // scenes
   listScenesInternal, openScene, closeScene, waitForScene, createScene, deleteScene, restoreScene, renameScene, saveScene, recalibrate,

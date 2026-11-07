@@ -31,6 +31,7 @@
     "eval:align": "node evals/align_eval.mjs",
     "eval:real-room": "node evals/real_room.mjs",
     "eval:ui-smoke": "node planner/ui/test/smoke.mjs",
+    "eval:engine-races": "node planner/ui/test/engine-races.mjs",
     "fixtures:scenes": "node fixtures/make_scene.mjs",
     "check:scenes": "evals/py fixtures/check_scenes.py",
     "build": "node scripts/build.mjs",
@@ -55,6 +56,7 @@
     "test:pipeline": "node --test --test-concurrency=1 pipeline/test/*.test.ts",
     "test:engine": "node planner/engine.test.mjs",
     "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
+    "test:planner": "node --test planner/test/*.test.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },
   "dependencies": {
