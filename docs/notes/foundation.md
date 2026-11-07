@@ -65,3 +65,17 @@ The calib stub: `python3 fixtures/stub_calib.py run <photo.jpg> --out <scene-dir
 - `evals/README.md` was not carried; CLAUDE.md lists the evals.
 - `library_api.sh` prints harmless `cat: …: No such file` noise (nook quirk: some failure details are expanded before the request runs).
 - The stub can't decode PNG/HEIC/WebP, rotate, resize or colour-convert; it warns (size, ICC) or refuses (orientation ≠ 1, non-JPEG). `align` always answers `applied: false`.
+
+## State machines W1: foundation-contract (2026-11-07)
+
+Text-only contract changes for the wave 1 state-machine fixes (docs/notes/state-machines-plan.md); no schema changed, so `node scripts/gen-contract.mjs --check` stays clean and contract/gen/ and the Rust bundle are untouched.
+
+- §2.6: a render whose request dies on the client may still complete and be billed; a client refreshes `GET /api/renders` before retrying.
+- §2.8 Stale: the 3600 s age applies to an owner that can't be checked (another host); a live same-host owner is reclaimed only after 4200 s (timeout + 10 min). Matches `lockVerdict`'s inputs (server-infra-lock implements it).
+- §4.2: the server-private `.calibrating` marker (job id; kept when the server stops under the job); §4.4 Static lists it as never served.
+- §4.4 calib_status: with no job of this run, no `photo.jpg` and no `source.*` → failed with `the upload was lost when the server restarted: delete this scene and upload the photo again` (wins); marker → failed with LOST_CALIBRATION even with `calib.json`. Both are deliberate departures from v1 (v1 read calib.json-and-no-job as done).
+- §4.4/§4.9 and api/README.md: `GET /api/{scenes,rooms}/jobs/<id>` 404 only for an id this run never made (what planner jobOutcome reads as "lost").
+- §4.3: ingest clears calib.json, depth.png, lighting.json, the old photo.jpg and other source.* when the photo changes; fit removes calib.json first and writes it last, deciding first whether it has a new result. A fit over a `moge-2` calibration that can't run MoGe fails (`MoGe-2 couldn't run (<type>: <line>); the earlier calibration was kept`) and writes nothing (departs from v1). The mock miss writes the exif-or-default fallback. Worker: SIGINT or SIGTERM answers `"interrupted"` and exits 1; an `id: null` answer fails the request sent and keeps the worker (the Crash bullet now says so). Optional `moge.revision` in calib.json (the schema leaves `moge` open).
+- §4.9: align-room runs with `--out <rooms>/.align/<job>`; the server moves align.json into `rooms/<room>/` only on success of a job that wasn't dropped; `rooms/.align/` is scratch, swept at startup. evals/rooms_api.mjs still checks the old `--out <rooms>/<room>` until evals-rooms-api-align-out merges.
+- Proof: a new test in contract/test/contract.test.mjs checks each rule's sentence is in CONTRACT.md (red before the edits). It sits outside the package's file list, in foundation's own paths.
+- The LOST_UPLOAD sentence is the one the plan's server-domain-scene-jobs design names; that package must use it verbatim.

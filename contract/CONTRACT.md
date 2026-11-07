@@ -139,6 +139,7 @@ interface Midstudy {
   - The image's size must be readable from its frame header (fill bytes and the length-less markers TEM and RST0–7 are stepped over): qwen is priced by it, so a composite whose size can't be read is `400`, never guessed.
   - Saves `<renders>/<name>.jpg` (the result), `<name>-input.jpg` and `<name>.json` (metadata). `<name>` is `render-YYYYMMDD-HHMMSS` (UTC), numeric suffix on collision.
   - Appends a cost row (`engine` = `render:<model>`), even if the download after a billed call fails.
+  - The call is synchronous and the server finishes it whatever happens to the request: a request that dies on the client (a timeout, a closed tab, a dropped connection) may still complete, be saved and be billed. A client that lost its answer refreshes `GET /api/renders` before retrying, so it doesn't pay twice. (Added with the state-machine fixes; text only, no route change.)
   - `200` with the metadata: `{ name, url, input_url, model, endpoint, cost_usd, mock, prompt, created, layout, width, height, ...§4.7 }`. URLs are site paths (`/renders/<name>.jpg`); renders are served statically.
   - Errors: `400` bad image or unknown model, `503 {"error": "FAL_KEY not set: add FAL_KEY=... to midstudy/.env"}` without a key outside mock mode, `502` when fal fails, `402` over the spend cap (§2.9).
 - `GET /api/renders` → `{ "renders": [metadata, ...] }`, newest first.
@@ -190,7 +191,7 @@ Library writes go to `--library-dir` (default `library/`). The server runs `--mi
 **One writer:** every library write (`library.json`, item folders, the trash) and every `costs.csv` append takes a **lock directory**: `<library>/.lock.d` for the library, `<costs file>.lock.d` for `costs.csv` (never the library's, so a render never waits for a running `midstudy-add`). PATCH, DELETE and restore wait up to 60 s for a running job, then answer `503`. (v1 used `flock` on `<library>/.lock`; Node has none.) The server and `midstudy-add` follow the same protocol:
   - **Take:** make the parent folder, then `mkdir <lock>.d` (not recursive), which either makes the folder or fails with `EEXIST`: one taker wins. The winner writes `owner.json` `{"pid", "host" (the host name), "cmd" (what holds it), "started" (ISO 8601 UTC with milliseconds)}` into it atomically (a temp file, then a rename).
   - **Wait:** on `EEXIST`, read `owner.json` and try again every **50 ms**, until the lock is taken or the wait is over. The server's PATCH, DELETE, restore and thumbnail writes wait 60 s, then answer `503`; a cost row and `midstudy-add` wait as long as it takes.
-  - **Stale:** a lock is reclaimed when its owner's pid is dead on this host (`kill(pid, 0)` fails with `ESRCH`), when it is older than the tool timeout (**3600 s** since `started`), or when it has had no readable `owner.json` for **10 s** (its maker died between the `mkdir` and the write). The waiter renames the folder aside (`<lock>.d.stale-<pid>-<random>`): only one reclaimer's rename succeeds, the others get `ENOENT` and try to take the lock again. The winner reads the `owner.json` it moved: when it isn't the owner it judged stale (a fresh holder took the lock in between), it renames the folder back; else it removes it and takes the lock.
+  - **Stale:** a lock is reclaimed when its owner's pid is dead on this host (`kill(pid, 0)` fails with `ESRCH`), when it is older than the tool timeout (**3600 s** since `started`) and its owner can't be checked (another host), or, when its owner is a live process on this host, older than the tool timeout plus 10 minutes (**4200 s** since `started`; the server ends every tool by 3600 s, so a live same-host holder that old is wedged, and a slow but healthy one is never reclaimed under it), or when it has had no readable `owner.json` for **10 s** (its maker died between the `mkdir` and the write). The waiter renames the folder aside (`<lock>.d.stale-<pid>-<random>`): only one reclaimer's rename succeeds, the others get `ENOENT` and try to take the lock again. The winner reads the `owner.json` it moved: when it isn't the owner it judged stale (a fresh holder took the lock in between), it renames the folder back; else it removes it and takes the lock.
   - **Release:** the holder checks that `owner.json` is still its own (`pid`, `host`, `started`), renames the folder aside (`<lock>.d.released-<pid>-<random>`) and removes it. A holder never removes a lock that isn't its own.
   - v1's flock files (`<library>/.lock`, `<costs file>.lock`) are still created when missing and never removed (E7 checks that cost rows have their own lock file beside `costs.csv`); nothing flocks them since the cutover. A v1 tool and a v2 tool would not exclude each other: never run a v1 checkout's tools on a v2 library.
   - One implementation: `common/lock.ts` (and `common/costs.ts` for the rows), imported by the server and by `node pipeline/src/cli.ts`. `midstudy-add` says `midstudy-add: waiting for another library write to finish (<library>/.lock)` once when it has to wait, as v1 did, and gives its locks back on Ctrl-C or SIGTERM.
@@ -372,12 +373,14 @@ scenes/<name>/depth.png      optional: 16-bit grayscale PNG, mm along the view a
 scenes/<name>/scene.json     scene.schema.json: version, title, created, saved, camera (in use), camera_source, look
                              (furniture look and lighting controls, §4.8), upload
 scenes/<name>/thumb.jpg      thumbnail (made by the planner)
+scenes/<name>/.calibrating   server-private: the id of the calibration job writing this folder (§4.4 calib_status)
 scenes/.trash/<name>-<UTC stamp>/          a deleted scene; its layouts move inside it as layouts/
 layouts/<name>/<layout>.json               the scene's layouts (layout.schema.json, scene_name = <name>)
 renders/<render>.jpg, -input.jpg, .json, optional -raw.jpg   (§4.7)
 ```
 
 - `<name>` is `scene-YYYYMMDD-HHMMSS` (UTC of the upload), with `-2`, `-3`… on collision. It's a slug and never changes; `title` is free text.
+- `.calibrating` (added with the state-machine fixes): the server writes it, holding the job's id, while a calibration job (`run` or `fit`) writes the folder, and removes it when the job ends (done or failed), unless the server stopped under the job: then it stays, so the next server run reads the folder as a calibration lost to a restart (§4.4) rather than as done from the files a half-finished job left. It is never served (§4.4 Static) and never written by `midstudy-calib`. This departs from v1 on purpose: v1 read any folder with `calib.json` and no job as `done`.
 - `depth.png` pixel (i, j) holds the depth at the center of the photo region it covers: the depth map is the same projection at a smaller size (`f` scales with H). Upsampling to the photo's size uses nearest or bilinear lookup on these centers.
 - `camera_source`: `auto` (copied from `calib.json` by the last successful calibration), `manual` (the user changed it in Adjust floor), `default` (no calibration result yet, or it failed).
 - `calib.json` `source` (what the calibration was based on) is independent of `camera_source`: a fallback calibration (`exif`, `default`, or `floor.found: false`) still sets `camera_source: auto`, and the planner flags it (§4.5).
@@ -401,6 +404,8 @@ renders/<render>.jpg, -input.jpg, .json, optional -raw.jpg   (§4.7)
 ```
 
 `"truth"` is used only by the golden scenes (§5.1).
+
+`moge.revision` (optional, added with the state-machine fixes; the schema leaves `moge` open, so no schema change): the Hugging Face Hub revision of the weights that fitted the scene, the pinned sha, or `main` when the pinned one couldn't be had.
 
 ### 4.3 Calibration (`calib/`, console script `midstudy-calib`)
 
@@ -430,6 +435,7 @@ midstudy-calib align-room <scene-dir> <scene-dir> ... --out <room-dir> [--solver
 A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the last stdout line and `midstudy-calib: <the same sentence>` as the last stderr line. The server shows that sentence. A fallback calibration is a success (exit 0).
 
 **Files:** `--out` may already exist (the server creates the scene folder first). The tool writes only `source.<ext>`, `photo.jpg`, `calib.json`, `depth.png` and `lighting.json` there, each atomically (temp file + rename), and never touches `scene.json`, `thumb.jpg` or anything else. `fit` without depth removes a stale `depth.png`; a fit that can't infer the light (a fallback without MoGe, or too few usable pixels) removes a stale `lighting.json`. `--no-depth` doesn't affect `lighting.json`. `run` writes `photo.jpg` before it starts the model, so the planner can show the photo while it calibrates.
+- **Order** (added with the state-machine fixes; `calib.json` is the folder's commit marker): when the new `photo.jpg` differs from the one there (or there is none), ingest first removes `calib.json`, `depth.png`, `lighting.json`, the old `photo.jpg` and any other `source.*`, then writes `source.<ext>` and `photo.jpg`, so a calibration of the old photo never stands beside the new one. An ingest whose `photo.jpg` comes out byte-identical leaves the derived files. Fit removes `calib.json` first and writes it last (after `depth.png` and `lighting.json`), so a fit that dies halfway leaves no `calib.json` beside files it didn't finish. Fit decides whether it has a new result (Fallbacks, below) before it removes anything.
 
 **Ingest:**
 - Accepts JPEG, PNG, HEIC/HEIF and WebP up to 25 MB, recognized by their bytes, not the name (anything else: exit 1, "that file isn't a JPEG, PNG, HEIC or WebP image").
@@ -440,13 +446,13 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **Fit:** MoGe-2 gives a metric point map, normals and intrinsics. Fit the floor with RANSAC over points whose normal points up relative to the camera and that lie below it; prefer the largest such plane in the lower part of the image (beware reflective floors and floors seen through glass: the real lounge photo has both). The plane gives `height_m`, `pitch_deg`, `roll_deg` (in §4.1's convention: the camera is re-expressed so the floor normal is world +Y and yaw is 0); the intrinsics give `fov_y_deg`. **With a known FOV** (EXIF, as above): MoGe-2's FOV runs wide (3.6–7.5° on the golden renders, 3.1° over EXIF on the lounge photo) and its metric scale is short by about the same focal ratio, while its pitch and roll are right. So the camera takes the EXIF FOV, MoGe's pitch and roll, and `height_m × k` with `k = tan(fov_moge / 2) / tan(fov_exif / 2)`; `depth.png` is MoGe's depth times the median ratio, over MoGe's floor pixels, between that camera's floor depth and MoGe's own, so the depth agrees with the floor the planner draws. Measured on the golden scenes with their true FOV given as EXIF: height within 2 %, depth within 5 %, furniture drawn within 3 % of its size (MoGe's own FOV: 7–10 % too big). `depth.png` holds MoGe's depth along the view axis with floor pixels set to 0: at least those within 4 cm of the plane (the tool uses max(4 cm, 1.2 % of the depth), as MoGe is noisier far away), plus every pixel below the plane (reflections in a shiny floor, a lower floor seen through glass), which could never hide anything standing on the floor. With no floor found, `depth.png` is MoGe's depth unmasked (`floor_masked: false`). `inlier_ratio` is the share of image pixels on the plane.
 
-**Fallbacks:** no floor → `floor.found: false`, MoGe's FOV, height 1.40, pitch −10, roll 0. MoGe unavailable or failed → `source: "exif"` (FOV from EXIF) or `"default"` (FOV 55), height 1.40, pitch −10, `depth: null`.
+**Fallbacks:** no floor → `floor.found: false`, MoGe's FOV, height 1.40, pitch −10, roll 0. MoGe unavailable or failed → `source: "exif"` (FOV from EXIF) or `"default"` (FOV 55), height 1.40, pitch −10, `depth: null`. That fallback applies only when the folder has no earlier MoGe calibration: a `fit` of a scene whose `calib.json` has `source: "moge-2"` that can't run MoGe fails (exit 1, `MoGe-2 couldn't run (<error type>: <its first line>); the earlier calibration was kept`) and writes nothing, so a recalibration never trades a good depth map and light for a fallback. This departs from v1 on purpose (v1 fell back, deleting `depth.png` and `lighting.json`).
 
 **Device:** `auto` picks cuda, then mps (with `PYTORCH_ENABLE_MPS_FALLBACK=1`), then cpu.
 
 **Align** (opencv-python-headless): resize the model output to the photo's size, estimate a homography from the output to the photo from features outside the mask (ORB + RANSAC, or ECC), warp, composite `photo × (1 − mask) + warped × mask` with the mask feathered, write `<final.jpg>`. Fewer than 40 inliers or a median residual over 3 px: write nothing, `applied: false` with a `reason`, exit 0. Always runs for real (an identical image is the identity and must apply).
 
-**Mock:** with `MIDSTUDY_CALIB_MOCK=<dir>` (e.g. `fixtures/calib`), `fit` never loads MoGe: it looks up `<dir>/<sha256 of photo.jpg>/`, then `<dir>/<sha256 of source.<ext>>/`, and copies that `calib.json`, `depth.png` and `lighting.json` (each when present); with no match it writes the `default` fallback and no `lighting.json`. `ingest` and `align` still run for real.
+**Mock:** with `MIDSTUDY_CALIB_MOCK=<dir>` (e.g. `fixtures/calib`), `fit` never loads MoGe: it looks up `<dir>/<sha256 of photo.jpg>/`, then `<dir>/<sha256 of source.<ext>>/`, and copies that `calib.json`, `depth.png` and `lighting.json` (each when present); with no match it writes the fallback (`exif` or `default`, as without the mock: Fallbacks, above) and no `lighting.json`. `ingest` and `align` still run for real.
 
 **Mock of `align-room`** (§4.9 Mock): with `MIDSTUDY_CALIB_MOCK=<dir>` it looks up `<dir>/rooms/<key>/align.json` instead of solving; the key and what it writes are in §4.9.
 
@@ -463,7 +469,8 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 - Response: `{"id": <the request's id>, …}`, the rest being exactly the one-shot command's last stdout line (the same object, checked against the same schema). Requests are answered one at a time, in order, and nothing else is written to stdout. The files are written exactly as by the one-shot command.
 - Progress goes to stderr as the one-shot commands write it; a failed request also writes `midstudy-calib: <sentence>` there.
 - A request that fails (not JSON, not a valid request, arguments the CLI refuses, a command that fails) is answered `{"id", "ok": false, "error": "<one sentence>"}` (`id` null when the request had no usable one), and the worker carries on.
-- End of input exits 0. SIGINT answers the request in flight with `"interrupted"` and exits 1.
+- End of input exits 0. SIGINT or SIGTERM answers the request in flight (or the line being parsed) with `"interrupted"` (`{"id", "ok": false, "error": "interrupted"}`) and exits 1; a response line is never left half-written. The server reads that answer after its own SIGTERM (a timeout, or the server stopping) as that outcome, not as a worker failure.
+- An unreadable request is answered with `id` null (above); the server treats that answer as the failure of the request it sent, with the worker's sentence, and keeps the worker.
 - The environment is read for every request as the one-shot commands read it (`MIDSTUDY_CALIB_MOCK` works exactly as there); relative paths are relative to the worker's working directory.
 
 **The server's side** (§4.4):
@@ -471,7 +478,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 - Send the calibration queue's `run`, `fit`, `light` and `align-room` jobs (§4.9 Align) to it, one at a time (the job id makes a good request id). Read its stderr continuously (the job's progress) and its response line within the job's timeout (600 s); handle the response exactly as the one-shot result.
 - With `MIDSTUDY_STRICT=1` (§0) every result, the worker's answers and the one-shot commands' last stdout lines alike (`align`'s too), is checked against `contract/calib-cli.schema.json` (the command's result, or the error result for `ok: false`). One that breaks it fails its job with `contract violation: <schema> <path> (<why>)` (a render's `align`: not applied, with that reason); the worker isn't blamed for it.
 - `align` (the render path) stays one-shot, so a render never waits behind a calibration.
-- Crash: when the worker can't be started, exits, or answers anything but a JSON object with the request's id, kill it (SIGTERM, then SIGKILL after 5 s) and run that job with the one-shot command; the next job starts a new worker. After 3 such failures in a row, use the one-shot command for the rest of the server's life. This covers `--calib "python3 fixtures/stub_calib.py"` too: the stub has no `serve` and exits 2 at once. An `ok: false` answer is the job's failure, not the worker's.
+- Crash: when the worker can't be started, exits, or answers anything but a JSON object with the request's id (or with `id` null: Protocol, above), kill it (SIGTERM, then SIGKILL after 5 s) and run that job with the one-shot command; the next job starts a new worker. After 3 such failures in a row, use the one-shot command for the rest of the server's life. This covers `--calib "python3 fixtures/stub_calib.py"` too: the stub has no `serve` and exits 2 at once. An `ok: false` answer is the job's failure, not the worker's.
 - Timeout: a request still running at the job's timeout fails the job with the one-shot timeout message; kill the worker, and the next job starts another.
 - Idle and shutdown: the server may close the worker's stdin after it has been idle for a while (e.g. 10 minutes) to give its memory back (MoGe-2 ViT-L holds about 1.3 GB on the GPU); the next calibration starts it again. On shutdown, close stdin, wait up to 5 s, then kill it.
 
@@ -484,7 +491,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 | `GET /api/scenes` | | `200 {"scenes": [scene, ...], "trash": [{name, title, created, deleted}, ...]}`, newest first (by `created`, ties by the name's collision suffix as a number: `-10` before `-9`); `trash` lists the deleted scenes |
 | `POST /api/scenes` | raw photo body, `Content-Length` required, `X-Midstudy-Filename` required, optional `X-Midstudy-Meta` (base64 JSON `{title}`) | `202 {job, scene: name}` |
 | `GET /api/scenes/jobs` | | `200 {"jobs": [job, ...]}`, newest first |
-| `GET /api/scenes/jobs/<id>` | | `200` the job object itself, `404` unknown |
+| `GET /api/scenes/jobs/<id>` | | `200` the job object itself, `404` unknown: only for an id this server run never made (jobs are not pruned), so a client may read a `404` for an id it was given as a job lost to a restart |
 | `GET /api/scenes/<name>` | | `200` scene.json + the scene object's fields + `calib` (calib.json without `exif.make`/`exif.model`, or null) + `lighting` (lighting.json as it is, or null without one) + `lighting_status` (`done` with it; else from the scene's newest light job `pending`, `running`, `failed` or `none` (it found no light); else `pending`/`running` while the scene calibrates; else `missing`) + `lighting_error` (string or null); `404` unknown |
 | `PUT /api/scenes/<name>` | JSON with any of `title`, `camera`, `camera_source`, `look` | `200` as GET; `saved` stamped unless only `title` changed; camera values and look numbers clamped (§4.8); a `look` replaces only the keys it carries, and a key set to null is removed; unknown keys or bad values `400` |
 | `PUT /api/scenes/<name>/thumb` | `{"image": "data:image/jpeg;base64,…"}` ≤ 2 MB | `200 {"ok": true, "thumb_url"}` |
@@ -510,9 +517,9 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
   "room": "room-20261106-101530" | null }
 ```
 
-`room` (added with §4.9) is the room the scene is a member of, or null; a server with rooms always sends it (the schema leaves it optional, so a server without rooms still conforms), here and in `GET /api/scenes/<name>`. `photo_url` is null until `photo.jpg` exists; `w`/`h` are `photo.jpg`'s size. `floor_found` is `calib.json`'s `floor.found` (null without one). `calib_status`: `pending` while a job is queued, `running` while it runs, else `done` when `calib.json` exists and the last job (if any) succeeded, else `failed` (including a calibration lost to a restart). Asset URLs may carry a `?v=<mtime>` cache buster.
+`room` (added with §4.9) is the room the scene is a member of, or null; a server with rooms always sends it (the schema leaves it optional, so a server without rooms still conforms), here and in `GET /api/scenes/<name>`. `photo_url` is null until `photo.jpg` exists; `w`/`h` are `photo.jpg`'s size. `floor_found` is `calib.json`'s `floor.found` (null without one). `calib_status`: `pending` while a job is queued, `running` while it runs, else `done` when `calib.json` exists and the last job (if any) succeeded, else `failed` (including a calibration lost to a restart). With no job of this server run for the scene, two cases are `failed` before that rule (added with the state-machine fixes, departing from v1 on purpose): a scene with neither `photo.jpg` nor `source.*` is `failed` with `the upload was lost when the server restarted: delete this scene and upload the photo again` (this one wins), and a scene with the `.calibrating` marker (§4.2) is `failed` with `the calibration didn't finish (the server restarted): calibrate it again`, even when `calib.json` exists (it may be the earlier calibration beside a half-written new one). Asset URLs may carry a `?v=<mtime>` cache buster.
 
-**Static:** `/scenes/<name>/photo.jpg`, `depth.png` and `thumb.jpg` are served (`nosniff`). Everything else under `/scenes/` gets `404`: `source.*`, `calib.json` and `lighting.json` (use the API), `scene.json`, `.trash/`, folder listings, and the same paths spelled with `.`/`..`/percent-encoding (§2.9 Paths).
+**Static:** `/scenes/<name>/photo.jpg`, `depth.png` and `thumb.jpg` are served (`nosniff`). Everything else under `/scenes/` gets `404`: `source.*`, `calib.json` and `lighting.json` (use the API), `scene.json`, `.calibrating`, `.trash/`, folder listings, and the same paths spelled with `.`/`..`/percent-encoding (§2.9 Paths).
 
 ### 4.5 Planner
 
@@ -685,7 +692,9 @@ So the photo's camera stands at `(x_m, height_m, z_m)` in the room frame and loo
 
 ```
 rooms/<room>/room.json        room.schema.json: version, name, title, created, saved, members [{scene, pose, scale, pose_source}], aligned
-rooms/<room>/align.json       align.schema.json: the solver's last answer, written by midstudy-calib align-room (never by the server)
+rooms/<room>/align.json       align.schema.json: the solver's last answer, written by midstudy-calib align-room into
+                              rooms/.align/<job>/ and moved here by the server when the job succeeds (Align, below)
+rooms/.align/<job>/           server scratch: align-room's --out for that job; swept at startup, never served
 rooms/.trash/<room>-<stamp>/  a deleted room: room.json, align.json, trash.json (trash.schema.json $defs/room), layouts/ (its room layouts)
 layouts/@<room>/<layout>.json room layouts: layout.schema.json with room_name (and no scene_name); positions in the room frame
 layouts/@<room>/.trash/<layout>-<stamp>.json   deleted room layouts
@@ -705,7 +714,7 @@ layouts/@<room>/.trash/<layout>-<stamp>.json   deleted room layouts
 | `GET /api/rooms` | | `200 {"rooms": [room object, ...], "trash": [{name, title, created, deleted}, ...]}`, newest first (by `created`, ties by the collision suffix as a number, as scenes) |
 | `POST /api/rooms` | `{title?, scenes: [name, ...]}` (1–32, no repeats) | `201` the room (as GET). First scene: pose `{0, 0, 0}`, `origin`; the others `unplaced`; scales 1. Starts no alignment. `400` bad body or a repeated scene, `404` a scene that doesn't exist, `409` a scene already in a room |
 | `GET /api/rooms/jobs` | | `200 {"jobs": [align job, ...]}`, newest first (align jobs only: they are not listed in `/api/scenes/jobs`) |
-| `GET /api/rooms/jobs/<id>` | | `200` the align job, `404` unknown |
+| `GET /api/rooms/jobs/<id>` | | `200` the align job, `404` unknown: as `/api/scenes/jobs/<id>`, only for an id this server run never made (§4.4) |
 | `GET /api/rooms/<room>` | | `200` the room detail: `room.json`'s fields, each member with `scene_object` (§4.4), `camera` (its `scene.json` camera) and `effective_camera`, `layouts` (how many), `align` (`align.json` as it is, or null), `align_status`, `align_error`; `404` unknown |
 | `PUT /api/rooms/<room>` | any of `title`, `members`, `reset`, `rescale` (below) | `200` as GET; `400` unknown keys or bad values, `404` an unknown scene, `409` a scene in another room, or `reset` before any `align.json` |
 | `DELETE /api/rooms/<room>` | | `200 {"ok": true, "trash": "rooms/.trash/<room>-<stamp>"}` (the rooms folder as it is called): the folder and `layouts/@<room>/` move there; a queued align job for it is dropped, a running one's result is ignored |
@@ -727,8 +736,10 @@ layouts/@<room>/.trash/<layout>-<stamp>.json   deleted room layouts
 `POST /api/rooms/<room>/align` queues an **align job** on the calibration queue (§4.4: one job at a time, 600 s timeout, the worker when it answers): `{id: "a-…", kind: "align", room, status, created, started, finished, message, waiting_for, align}` (api/room-job.schema.json; in memory, a restart forgets it). While any member's calibration is queued or running the job stays `queued`, lists those scenes in `waiting_for` and lets other calibration jobs pass it. Then it runs
 
 ```
-<calib> align-room <scenes>/<anchor> <scenes>/<m2> ... --out <rooms>/<room> [--solver <solver>]
+<calib> align-room <scenes>/<anchor> <scenes>/<m2> ... --out <rooms>/.align/<job> [--solver <solver>]
 ```
+
+(`<job>` is the job's id; added with the state-machine fixes, before them `--out <rooms>/<room>`). The server moves the `align.json` it wrote into `rooms/<room>/` (a rename, so it replaces the old one at once) only when the job succeeds (below) and wasn't dropped (its room deleted, or deleted and restored, while it ran), then removes `rooms/.align/<job>/`; a failed or dropped job leaves `rooms/<room>/` untouched. `rooms/.align/` is server scratch, swept at startup. The calib side is unchanged: it writes only `<room-dir>/align.json`, wherever `--out` points.
 
 (as the worker command `{"cmd": "align-room", "args": [...]}`, else one-shot), on the members that have a `photo.jpg`, in room order except that the **anchor** goes first: the first member (in room order) that has a pose and whose pose the result can't change (`origin` or `manual`, or any placed member with `overwrite_manual`), else the first placed member, else the first member. On success (`ok: true`, and the answer valid in strict mode) the server applies `align.json` to the room as it is then:
 

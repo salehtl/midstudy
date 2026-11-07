@@ -223,3 +223,27 @@ test('the file schemas still accept the golden fixtures and the probe library', 
     }
   }
 })
+
+// The state-machine fixes (docs/notes/state-machines-plan.md, wave 1, foundation-contract): the rules the server,
+// calib and planner packages implement are written in the contract, where those packages read them.
+test('CONTRACT.md states the state-machine rules (wave 1)', () => {
+  const text = fs.readFileSync(path.join(CONTRACT, 'CONTRACT.md'), 'utf8').replace(/\s+/g, ' ')
+  const api = fs.readFileSync(path.join(CONTRACT, 'api/README.md'), 'utf8').replace(/\s+/g, ' ')
+  const rules = {
+    '§2.6 a render that dies on the client may still be billed': 'refreshes `GET /api/renders` before retrying',
+    '§2.8 Stale: a live same-host holder only after the timeout plus 10 minutes': 'older than the tool timeout plus 10 minutes',
+    '§4.2 the .calibrating marker': 'scenes/<name>/.calibrating',
+    '§4.3 ingest clears the derived files first': 'ingest first removes `calib.json`, `depth.png`, `lighting.json`',
+    '§4.3 fit writes calib.json last': 'removes `calib.json` first and writes it last',
+    '§4.3 a fallback never replaces a MoGe calibration': 'the earlier calibration was kept',
+    '§4.3 Mock falls back to exif or default': 'with no match it writes the fallback (`exif` or `default`',
+    '§4.3 calib.json moge.revision': '`moge.revision`',
+    '§4.3 Worker SIGTERM': 'SIGINT or SIGTERM answers the request in flight (or the line being parsed) with `"interrupted"`',
+    '§4.4 LOST_CALIBRATION with the marker, even with calib.json': 'even when `calib.json` exists',
+    '§4.4 LOST_UPLOAD': 'the upload was lost when the server restarted: delete this scene and upload the photo again',
+    '§4.4/§4.9 job 404 means never made by this server run': 'an id this server run never made',
+    '§4.9 align staging': '--out <rooms>/.align/<job>',
+  }
+  for (const [rule, phrase] of Object.entries(rules)) assert.ok(text.includes(phrase), `${rule}: "${phrase}"`)
+  assert.ok(api.includes('this server run never made'), 'api/README.md: job 404s')
+})
