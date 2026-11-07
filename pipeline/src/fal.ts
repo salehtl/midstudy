@@ -13,7 +13,7 @@ import { download as fetchBytes, falQueueUrl, logFal, mockSlug, uploadRecord } f
 import { isFile } from '../../common/files.ts'
 import { pyRepr as repr } from '../../common/logic/pyfmt.ts'
 import { decodeUtf8 } from '../../common/utf8.ts'
-import { MidstudyError, NoMasks, UnexpectedError } from './errors.ts'
+import { Interrupted, MidstudyError, NoMasks, UnexpectedError } from './errors.ts'
 import { copy2 } from './fsx.ts'
 import { out } from './io.ts'
 import { foregroundMask } from './images.ts'
@@ -27,7 +27,8 @@ import { join, name as pathName } from './logic/pypath.ts'
 
 export interface Fal {
   readonly mock: boolean
-  /** Set once a call has returned, i.e. once it has been paid for. */
+  /** Set once a call may have been paid for: when it returned, and (LiveFal) for any failure after its submit was
+   *  accepted but a refusal answered by the result GET. Overstating is the safe side for the daily cap. */
   charged: boolean
   upload(file: string): Promise<string>
   call(ep: string, args: PyValue): Promise<PyValue>
@@ -127,6 +128,10 @@ const REST_URL = 'https://rest.fal.ai'
 const CDN_URL = 'https://v3.fal.media'
 const BACKUP: ReadonlyMap<string, string> = new Map([['fal.run', 'falrun.com'], ['queue.fal.run', 'queue.falrun.com']])
 const MAX_ATTEMPTS = 10
+const REQUEST_TIMEOUT_MS = 120_000
+/** The submit -> poll -> result sequence's deadline: inside the server's 3600 s ADD_TIMEOUT_S (a SIGKILL no handler
+ *  sees) with room for the output downloads and the fit, and below the library lock's stale age. */
+const QUEUE_DEADLINE_MS = 45 * 60_000
 
 /** fal-client's FalClientHTTPError: the response's `detail` (or its text). */
 class FalClientHTTPError extends Error {
@@ -156,49 +161,95 @@ export class LiveFal implements Fal {
   readonly #key: string
   readonly #fetch: FetchFn
   readonly #sleep: (ms: number) => Promise<void>
+  readonly #now: () => number
+  readonly #stop: AbortSignal | null
+  readonly #timeoutMs: number
   #token: { readonly type: string; readonly token: string; readonly expires: number } | null = null
 
-  constructor(key: string, fetchFn: FetchFn = fetch, sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  /** `stop` (midstudy-add's SIGINT/SIGTERM during a paid run) ends a call, an upload or a download with
+   *  Interrupted; `now` measures the queue deadline; `timeoutMs` is each request's timeout (fal-client's 120 s). */
+  constructor(
+    key: string,
+    fetchFn: FetchFn = fetch,
+    sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+    now: () => number = Date.now,
+    stop: AbortSignal | null = null,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
+  ) {
     this.#key = key
     this.#fetch = fetchFn
     this.#sleep = sleep
+    this.#now = now
+    this.#stop = stop
+    this.#timeoutMs = timeoutMs
+  }
+
+  #stopped(): boolean {
+    return this.#stop?.aborted === true
+  }
+
+  /** The injected sleep, ended early (with Interrupted) by the stop signal. */
+  async #pause(ms: number): Promise<void> {
+    const stop = this.#stop
+    if (stop === null) {
+      await this.#sleep(ms)
+      return
+    }
+    if (stop.aborted) throw new Interrupted()
+    const { promise: aborted, reject } = Promise.withResolvers<never>()
+    const onAbort = (): void => { reject(new Interrupted()) }
+    stop.addEventListener('abort', onAbort, { once: true })
+    try {
+      await Promise.race([this.#sleep(ms), aborted])
+    } finally {
+      stop.removeEventListener('abort', onAbort)
+    }
+  }
+
+  /** A request's signal: its own timeout (fresh for every request sent) and the stop signal. */
+  #signal(timeoutMs: number | null): AbortSignal | null {
+    const parts = [...(timeoutMs === null ? [] : [AbortSignal.timeout(timeoutMs)]), ...(this.#stop === null ? [] : [this.#stop])]
+    return parts.length === 0 ? null : AbortSignal.any(parts)
   }
 
   /** One request with fal-client's retries (408, 409, 429, nginx's 502–504, transport errors) and its backup
-   *  domains for fal.run and queue.fal.run. */
-  async #request(url: string, init: RequestInit, timeoutMs: number | null): Promise<Response> {
+   *  domains for fal.run and queue.fal.run. A request that isn't `idempotent` (the queue submit: a resend can
+   *  enqueue a second, billed job) is sent once on a transport error or timeout, with no backup host; the status
+   *  retries, which mean it wasn't accepted, stay. */
+  async #request(url: string, init: RequestInit, timeoutMs: number | null, idempotent: boolean): Promise<Response> {
     for (let attempt = 1; ; attempt++) {
+      if (this.#stopped()) throw new Interrupted()
       let res: Response | null = null
       let error: unknown = null
       try {
-        res = await this.#send(url, init, timeoutMs)
+        res = await this.#send(url, init, timeoutMs, idempotent)
       } catch (e) {
         error = e
       }
+      if (this.#stopped()) throw new Interrupted()
       if (res !== null) {
         if (res.ok) return res
         const text = await res.text()
         const retry = [408, 409, 429].includes(res.status)
           || ([502, 503, 504].includes(res.status) && !res.headers.has('x-fal-request-id') && text.includes('nginx'))
         if (!retry || attempt >= MAX_ATTEMPTS) throw this.#httpError(res.status, text)
-      } else if (attempt >= MAX_ATTEMPTS) {
+      } else if (attempt >= MAX_ATTEMPTS || !idempotent) {
         throw error
       }
       const delay = Math.min(0.1 * 2 ** (attempt - 1), 30) * (0.5 + randomInt(0, 1_000_001) / 1_000_000)
-      await this.#sleep(Math.min(delay, 30) * 1000)
+      await this.#pause(Math.min(delay, 30) * 1000)
     }
   }
 
-  async #send(url: string, init: RequestInit, timeoutMs: number | null): Promise<Response> {
-    const signal = timeoutMs === null ? null : AbortSignal.timeout(timeoutMs)
+  async #send(url: string, init: RequestInit, timeoutMs: number | null, idempotent: boolean): Promise<Response> {
     try {
-      return await this.#fetch(url, { ...init, signal })
+      return await this.#fetch(url, { ...init, signal: this.#signal(timeoutMs) })
     } catch (e) {
       const u = new URL(url)
       const backup = BACKUP.get(u.hostname)
-      if (backup === undefined) throw e
+      if (backup === undefined || !idempotent || this.#stopped()) throw e
       u.hostname = backup
-      return this.#fetch(u.toString(), { ...init, signal })
+      return this.#fetch(u.toString(), { ...init, signal: this.#signal(timeoutMs) })
     }
   }
 
@@ -229,6 +280,7 @@ export class LiveFal implements Fal {
       headers: { Authorization: `Key ${this.#key}`, Accept: 'application/json', 'Content-Type': 'application/json' },
       body: '{}',
       redirect: 'manual',
+      signal: this.#stop,
     })
     if (res.status < 200 || res.status >= 300) throw httpStatusError(res, url)
     const data = await this.#json(res)
@@ -258,47 +310,59 @@ export class LiveFal implements Fal {
           method: 'POST',
           headers: { Authorization: `${token.type} ${token.token}`, 'User-Agent': USER_AGENT, 'Content-Type': mime, 'X-Fal-File-Name': fileName },
           body: data,
-        }, 120_000)
+        }, this.#timeoutMs, true)
         const access = get(await this.#json(res), 'access_url')
         if (access === undefined) throw new UnexpectedError('KeyError', "'access_url'")
         url = pyStr(access)
       } catch {
+        if (this.#stopped()) throw new Interrupted()
+        // a token the CDN rejected while locally unexpired: drop it, so the next upload (the mask) asks for a new one
+        this.#token = null
         // fal-client's fallback repository: the storage upload
         const init = await this.#json(await this.#request(`${REST_URL}/storage/upload/initiate?storage_type=gcs`, {
           method: 'POST',
           headers: { ...this.#authHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({ file_name: fileName, content_type: mime }),
-        }, 120_000))
+        }, this.#timeoutMs, true))
         const uploadUrl = get(init, 'upload_url')
         if (uploadUrl === undefined) throw new UnexpectedError('KeyError', "'upload_url'")
         const fileUrl = get(init, 'file_url')
         if (fileUrl === undefined) throw new UnexpectedError('KeyError', "'file_url'")
-        await this.#request(pyStr(uploadUrl), { method: 'PUT', headers: { ...this.#authHeaders(), 'Content-Type': mime }, body: data }, null)
+        await this.#request(pyStr(uploadUrl), { method: 'PUT', headers: { ...this.#authHeaders(), 'Content-Type': mime }, body: data }, null, true)
         url = pyStr(fileUrl)
       }
       logUpload(file, url)
       return url
     } catch (e) {
+      if (e instanceof Interrupted || this.#stopped()) throw new Interrupted()
       const what = e instanceof UnexpectedError ? `${e.pyType}: ${e.message}` : e instanceof Error ? `${e.name}: ${e.message}` : String(e)
       throw new MidstudyError(`fal upload of ${file} failed (${what}); check FAL_KEY and your credit`)
     }
   }
 
+  /** fal-client's `subscribe`. Once the submit is accepted the job runs and bills on fal, so any later failure (a
+   *  poll, the result's transport or JSON, the deadline, the stop signal) sets `charged`; only an HTTP error the
+   *  result GET answers (the job's own refusal, NoMasks among them) leaves it, as v1's "a refused call isn't
+   *  charged". */
   async call(ep: string, args: PyValue): Promise<PyValue> {
     logCall(ep, args)
+    const start = this.#now()
+    const job = { accepted: false, refused: false }
     try {
-      const submitted = await this.#json(await this.#request(falQueueUrl(ep), {
+      const res = await this.#request(falQueueUrl(ep), {
         method: 'POST',
         headers: { ...this.#authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(plain(args)),
-      }, 120_000))
+      }, this.#timeoutMs, false)
+      job.accepted = true
+      const submitted = await this.#json(res)
       const statusUrl = get(submitted, 'status_url')
       const responseUrl = get(submitted, 'response_url')
       if (statusUrl?.kind !== 'str' || responseUrl?.kind !== 'str') throw new UnexpectedError('KeyError', "'status_url'")
       // on_queue_update: the logs of every status, until it is completed; then get(): one more poll and the result
       for (const withLogs of [true, false]) {
         for (;;) {
-          const status = await this.#json(await this.#request(`${statusUrl.value}?logs=${withLogs ? 'true' : 'false'}`, { method: 'GET', headers: this.#authHeaders() }, 120_000))
+          const status = await this.#json(await this.#request(`${statusUrl.value}?logs=${withLogs ? 'true' : 'false'}`, { method: 'GET', headers: this.#authHeaders() }, this.#timeoutMs, true))
           const s = get(status, 'status')
           const name = s?.kind === 'str' ? s.value : ''
           if (name !== 'IN_QUEUE' && name !== 'IN_PROGRESS' && name !== 'COMPLETED') throw new UnexpectedError('ValueError', `Unknown status: ${name}`)
@@ -310,21 +374,43 @@ export class LiveFal implements Fal {
             }
           }
           if (name === 'COMPLETED') break
-          await this.#sleep(100)
+          if (this.#now() - start > QUEUE_DEADLINE_MS) throw new MidstudyError(`fal call to ${ep} failed (still ${name} after 45 min)`)
+          await this.#pause(100)
         }
       }
-      return await this.#json(await this.#request(responseUrl.value, { method: 'GET', headers: this.#authHeaders() }, 120_000))
+      let result: Response
+      try {
+        result = await this.#request(responseUrl.value, { method: 'GET', headers: this.#authHeaders() }, this.#timeoutMs, true)
+      } catch (e) {
+        job.refused = e instanceof FalClientHTTPError
+        throw e
+      }
+      return await this.#json(result)
     } catch (e) {
+      const billed = job.accepted && !job.refused
+      if (billed) this.charged = true
+      if (e instanceof Interrupted || this.#stopped()) throw new Interrupted()
+      if (e instanceof MidstudyError) throw e
       const raw = e instanceof Error ? e.message : String(e)
       const msg = raw.replace(/\n/g, ' ')
-      if (msg.includes('produced no masks')) throw new NoMasks(msg)
+      if (msg.includes('produced no masks') && !billed) throw new NoMasks(msg)
       const type = e instanceof UnexpectedError ? e.pyType : e instanceof Error ? e.name : 'Error'
       throw new MidstudyError(`fal call to ${ep} failed (${type}: ${msg})`)
     }
   }
 
+  /** A result download (after the call, so already charged), ended by the stop signal with Interrupted. */
   async fetch(url: string, destDir: string): Promise<string> {
-    const out = await download(url, path.join(destDir, urlBasename(url)), this.#fetch)
+    const stop = this.#stop
+    const fetchFn: FetchFn = stop === null ? this.#fetch : (u, init) => this.#fetch(u, { ...init, signal: init.signal === null || init.signal === undefined ? stop : AbortSignal.any([init.signal, stop]) })
+    if (this.#stopped()) throw new Interrupted()
+    let out: string
+    try {
+      out = await download(url, path.join(destDir, urlBasename(url)), fetchFn)
+    } catch (e) {
+      if (this.#stopped()) throw new Interrupted()
+      throw e
+    }
     logFal({ op: 'fetch', url, file: pathName(out) })
     return out
   }

@@ -11,7 +11,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { falKey as loadFalKey } from '../../common/fal.ts'
-import { NoMasks } from '../src/errors.ts'
+import { MidstudyError, NoMasks } from '../src/errors.ts'
 import { LiveFal, MockFal, download, run } from '../src/fal.ts'
 import { parse } from '../src/logic/pyjson.ts'
 import type { PyValue } from '../src/logic/pyjson.ts'
@@ -156,6 +156,159 @@ void test('call: SAM 3D finding nothing is NoMasks (not charged); another error 
   await assert.rejects(new LiveFal('K', broken.fetch, () => Promise.resolve()).call('speridlabs/idol', pyval('{}')), {
     message: "fal call to speridlabs/idol failed (FalClientHTTPError: [{'msg': 'bad image'}])",
   })
+})
+
+// --- the state machines (docs/notes/state-machines-plan.md, wave 1): billing, the stop signal, the deadline, the
+// submit sent once, a fresh backup timeout, the CDN token reset. A literal dummy key, never .env.
+
+type Handler = (url: string, init: RequestInit) => Response | Promise<Response>
+
+/** A fetch that answers every request with `handler` (which may throw, or wait for the request's signal). */
+function routed(handler: Handler): { fetch: (url: string, init: RequestInit) => Promise<Response>; seen: Seen[] } {
+  const seen: Seen[] = []
+  return {
+    seen,
+    fetch: async (url, init) => {
+      seen.push({ url, method: init.method ?? 'GET', headers: headersOf(init), body: bodyOf(init) })
+      const signal = init.signal
+      if (signal?.aborted === true) throw signal.reason
+      return handler(url, init)
+    },
+  }
+}
+
+const SUBMIT = 'https://queue.fal.run/fal-ai/trellis-2'
+const Q = `${SUBMIT}/requests/R`
+const SUBMITTED = { request_id: 'R', status_url: `${Q}/status`, response_url: Q, cancel_url: `${Q}/cancel` }
+const noSleep = (): Promise<void> => Promise.resolve()
+const isInterrupted = (e: unknown): boolean => e instanceof MidstudyError && e.name === 'Interrupted' && e.message === 'interrupted'
+
+/** The queue job up to COMPLETED, then `result` for the result GET. */
+function job(result: Handler): Handler {
+  return (url, init) => {
+    if (url === SUBMIT) return json(SUBMITTED)
+    if (url.startsWith(`${Q}/status`)) return json({ status: 'COMPLETED', logs: [] })
+    return result(url, init)
+  }
+}
+
+void test('call: once submitted, a failed or unreadable result GET is still charged (the job ran and billed)', async () => {
+  const rejected = routed(job(() => Promise.reject(new TypeError('fetch failed'))))
+  const fal = new LiveFal('dummy-key', rejected.fetch, noSleep)
+  await assert.rejects(fal.call('fal-ai/trellis-2', pyval('{}')), { message: 'fal call to fal-ai/trellis-2 failed (TypeError: fetch failed)' })
+  assert.equal(fal.charged, true)
+  const garbled = routed(job(() => new Response('<html>oops</html>', { status: 200 })))
+  const fal2 = new LiveFal('dummy-key', garbled.fetch, noSleep)
+  await assert.rejects(fal2.call('fal-ai/trellis-2', pyval('{}')), (e) => e instanceof MidstudyError && e.message.startsWith('fal call to fal-ai/trellis-2 failed (JSONDecodeError: '))
+  assert.equal(fal2.charged, true)
+})
+
+void test('call: a poll failing every attempt after the submit is charged; a refusal from the result GET is not', async () => {
+  const polls = routed((url) => url === SUBMIT ? json(SUBMITTED) : Promise.reject(new TypeError('fetch failed')))
+  const fal = new LiveFal('dummy-key', polls.fetch, noSleep)
+  await assert.rejects(fal.call('fal-ai/trellis-2', pyval('{}')), { message: 'fal call to fal-ai/trellis-2 failed (TypeError: fetch failed)' })
+  assert.equal(fal.charged, true)
+  const refused = routed(job(() => json({ detail: 'Auto-segmentation produced no masks' }, 422)))
+  const fal2 = new LiveFal('dummy-key', refused.fetch, noSleep)
+  await assert.rejects(fal2.call('fal-ai/trellis-2', pyval('{}')), (e) => e instanceof NoMasks && e.message === 'Auto-segmentation produced no masks')
+  assert.equal(fal2.charged, false)
+  const failed = routed(job(() => json({ detail: 'bad image' }, 400)))
+  const fal3 = new LiveFal('dummy-key', failed.fetch, noSleep)
+  await assert.rejects(fal3.call('fal-ai/trellis-2', pyval('{}')), { message: 'fal call to fal-ai/trellis-2 failed (FalClientHTTPError: bad image)' })
+  assert.equal(fal3.charged, false)
+})
+
+void test('call: the stop signal while polling is Interrupted and charged; before the submit, nothing is sent or charged', async () => {
+  const stop = new AbortController()
+  const s = routed((url) => {
+    if (url === SUBMIT) return json(SUBMITTED)
+    stop.abort()
+    return json({ status: 'IN_PROGRESS', logs: [] })
+  })
+  const fal = new LiveFal('dummy-key', s.fetch, noSleep, Date.now, stop.signal)
+  await assert.rejects(fal.call('fal-ai/trellis-2', pyval('{}')), isInterrupted)
+  assert.equal(fal.charged, true)
+  // a sleep that never ends on its own: the stop signal ends it
+  const stop2 = new AbortController()
+  const hung = routed((url) => url === SUBMIT ? json(SUBMITTED) : json({ status: 'IN_QUEUE' }))
+  const fal2 = new LiveFal('dummy-key', hung.fetch, () => new Promise<void>(() => undefined), Date.now, stop2.signal)
+  const pending = fal2.call('fal-ai/trellis-2', pyval('{}'))
+  setTimeout(() => { stop2.abort() }, 20)
+  await assert.rejects(pending, isInterrupted)
+  assert.equal(fal2.charged, true)
+  const early = new AbortController()
+  early.abort()
+  const none = routed(() => json(SUBMITTED))
+  const fal3 = new LiveFal('dummy-key', none.fetch, noSleep, Date.now, early.signal)
+  await assert.rejects(fal3.call('fal-ai/trellis-2', pyval('{}')), isInterrupted)
+  assert.equal(fal3.charged, false)
+  assert.equal(none.seen.length, 0)
+})
+
+void test('call: a job still running after 45 min fails with the deadline sentence, charged', { timeout: 10_000 }, async () => {
+  let clock = 0
+  const s = routed((url) => url === SUBMIT ? json(SUBMITTED) : json({ status: 'IN_PROGRESS', logs: [] }))
+  const tick = (): Promise<void> => new Promise((r) => { clock += 60_000; setImmediate(r) })
+  const fal = new LiveFal('dummy-key', s.fetch, tick, () => clock)
+  await assert.rejects(fal.call('fal-ai/trellis-2', pyval('{}')), { message: 'fal call to fal-ai/trellis-2 failed (still IN_PROGRESS after 45 min)' })
+  assert.equal(fal.charged, true)
+})
+
+void test('call: the submit is sent once on a transport error or timeout (no retry, no backup host); a 429 is retried', async () => {
+  for (const err of [new TypeError('fetch failed'), new DOMException('The operation was aborted due to timeout', 'TimeoutError')]) {
+    const s = routed(() => Promise.reject(err))
+    const fal = new LiveFal('dummy-key', s.fetch, noSleep)
+    await assert.rejects(fal.call('fal-ai/trellis-2', pyval('{}')), (e) => e instanceof MidstudyError && e.message.startsWith('fal call to fal-ai/trellis-2 failed ('))
+    assert.deepEqual(s.seen.map((r) => r.url), [SUBMIT])
+    assert.equal(fal.charged, false)
+  }
+  let submits = 0
+  const ok = job(() => json({ done: true }))
+  const once = routed((url, init) => url === SUBMIT && submits++ === 0 ? json({ detail: 'slow down' }, 429) : ok(url, init))
+  const fal = new LiveFal('dummy-key', once.fetch, noSleep)
+  assert.equal((await fal.call('fal-ai/trellis-2', pyval('{}'))).kind, 'dict')
+  assert.equal(submits, 2)
+})
+
+void test('call: after a primary-host timeout the backup host gets its own timeout', { timeout: 10_000 }, async () => {
+  const s = routed((url, init) => {
+    const host = new URL(url).hostname
+    const signal = init.signal
+    if (host === 'queue.fal.run' && init.method === 'GET' && signal !== null && signal !== undefined) {
+      // hang until the request's own signal aborts
+      return new Promise<Response>((_, reject) => { signal.addEventListener('abort', () => { reject(signal.reason instanceof Error ? signal.reason : new Error('aborted')) }) })
+    }
+    if (host === 'queue.fal.run') return json(SUBMITTED)
+    return url.includes('/status') ? json({ status: 'COMPLETED', logs: [] }) : json({ done: true })
+  })
+  const fal = new LiveFal('dummy-key', s.fetch, noSleep, Date.now, null, 20)
+  // AbortSignal.timeout's timer is unref'd and the fake fetch holds no socket: keep the event loop alive meanwhile
+  const alive = setTimeout(() => undefined, 5_000)
+  try {
+    assert.equal((await fal.call('fal-ai/trellis-2', pyval('{}'))).kind, 'dict')
+  } finally {
+    clearTimeout(alive)
+  }
+  assert.ok(s.seen.some((r) => r.url.startsWith('https://queue.falrun.com/')))
+})
+
+void test('upload: a CDN token the CDN rejects is dropped, so the next upload asks for a new one', async () => {
+  const dir = fresh('upload-token-reset')
+  const file = path.join(dir, 'engine-input.jpg')
+  fs.writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+  let tokens = 0
+  const s = routed((url, init) => {
+    if (url.startsWith('https://rest.fal.ai/storage/auth/token')) return json({ ...TOKEN, token: tokens++ === 0 ? 'A' : 'B' })
+    if (url === 'https://v3.fal.media/files/upload') {
+      return headersOf(init)['Authorization'] === 'Bearer A' ? json({ detail: 'expired' }, 401) : json({ access_url: 'https://v3.fal.media/files/b/engine-input.jpg' })
+    }
+    if (url.startsWith('https://rest.fal.ai/storage/upload/initiate')) return json({ upload_url: 'https://gcs.example/put', file_url: 'https://fal.media/files/a.jpg' })
+    return new Response('', { status: 200 })
+  })
+  const fal = new LiveFal('dummy-key', s.fetch, noSleep)
+  assert.equal(await fal.upload(file), 'https://fal.media/files/a.jpg')
+  assert.equal(await fal.upload(file), 'https://v3.fal.media/files/b/engine-input.jpg')
+  assert.equal(tokens, 2)
 })
 
 void test('download: a failed fetch is v1\'s sentence; LiveFal.fetch saves under the URL\'s name', async () => {

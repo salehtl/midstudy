@@ -12,6 +12,16 @@ export class NoMasks extends MidstudyError {
   override readonly name: string = 'NoMasks'
 }
 
+/** A live paid run stopped by SIGINT/SIGTERM (LiveFal's stop signal): the cost is recorded and the outputs kept
+ *  before it reaches main(), which exits 130 (docs/notes/state-machines-plan.md, wave 1). */
+export class Interrupted extends MidstudyError {
+  override readonly name: string = 'Interrupted'
+
+  constructor() {
+    super('interrupted')
+  }
+}
+
 /** A failure v1 didn't word: printed as `unexpected error (<type>: <message>)`, `type` named as Python names it. */
 export class UnexpectedError extends Error {
   readonly pyType: string
