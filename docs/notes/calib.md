@@ -393,3 +393,17 @@ fitted camera in cyan, plus the true camera in magenta on golden scenes. `*-dept
   (1.2 GB, no normals), downloaded only for the comparison above. The last one can be deleted.
 - Packaging (PLAN §9): `calib/uv.lock` locks macOS-friendly torch from PyPI. For CUDA on homeserver, the packager needs
   `torch-bin`. `utils3d` and `moge` are git dependencies (pinned commits above).
+
+## State machines W1: calib-moge-device
+
+- `moge_runner.infer`: `Loaded.device` is now `str | None`; it is set to None before `net.to(device)` and to the
+  device after the move returns. A move that raises midway (an MPS out-of-memory can leave layers on both devices)
+  so leaves the device unknown, and `fit._infer`'s cpu retry moves the whole network instead of skipping the move
+  because the field still said `cpu`. No failed-device memory for `pick_device`: one transient MPS fault would pin
+  a warm worker to cpu for its whole life.
+- `_checkpoint` returns `(path, revision)`: the pinned sha, or `"main"` when the pinned one couldn't be had.
+  `Loaded.revision` (required) and `MogeOutput.revision` (default `"main"`, so `fit.py` and the tests' fakes build
+  unchanged) carry it. Writing it to `calib.json` (`records.MogeInfo.revision`, `fit._moge`) is calib-scene-files'
+  part of the same fix; this package doesn't touch `fit.py` or `records.py`.
+- Tests: `test_failed_move_forces_a_full_move_on_retry`, `test_pinned_revision_is_recorded`, and
+  `test_one_model_at_a_time` / `test_pinned_revision_then_main` updated for the tuple.

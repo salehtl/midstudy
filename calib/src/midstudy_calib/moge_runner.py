@@ -50,13 +50,17 @@ class MogeNet(Protocol):
 
 @dataclass
 class Loaded:
-    """A MoGe-2 network in this process: its Hugging Face repo, the device it sits on, how long loading took."""
+    """A MoGe-2 network in this process: its Hugging Face repo and the revision its weights came from (the pinned sha,
+    or "main" when that couldn't be had), how long loading took, and the device it sits on. The device is None while
+    a move is under way and after one that raised: a move that fails midway can leave layers on both devices, so the
+    next infer moves the whole network again whatever it is asked for."""
 
     net: MogeNet
     model: Model
     repo: str
     load_s: float
-    device: str = "cpu"
+    revision: str
+    device: str | None = "cpu"
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,7 @@ class MogeOutput:
     """MoGe-2's output, numpy, in the OpenCV camera frame (x right, y down, z forward): points (h, w, 3) metric,
     normal (h, w, 3) unit (None from a model without normals), mask (h, w) valid pixels, intrinsics (3, 3) normalized
     (fx in units of the width, fy of the height); plus the seconds this request spent loading (0 when the network
-    was already loaded) and inferring, and the weights' repo."""
+    was already loaded) and inferring, and the weights' repo and revision (the pinned sha, or "main")."""
 
     points: NDArray[np.float32]
     normal: NDArray[np.float32] | None
@@ -73,6 +77,7 @@ class MogeOutput:
     load_s: float
     infer_s: float
     repo: str
+    revision: str = "main"
 
 
 _LOADED: dict[Model, Loaded] = {}
@@ -138,18 +143,19 @@ def pick_device(want: Device) -> RealDevice:
     return want
 
 
-def _checkpoint(model: Model) -> Path:
-    """model.pt in the Hugging Face cache (downloaded on first use): the pinned revision when there is one, else the
-    Hub's main (also when the pinned one can't be had, e.g. a cache that only holds another revision, offline)."""
+def _checkpoint(model: Model) -> tuple[Path, str]:
+    """model.pt in the Hugging Face cache (downloaded on first use) and the revision it is: the pinned one when there
+    is one, else the Hub's "main" (also when the pinned one can't be had, e.g. a cache that only holds another
+    revision, offline), so a calibration can say which weights fitted it."""
     from huggingface_hub import hf_hub_download  # pyright: ignore[reportUnknownVariableType] - its user_agent: dict is untyped
 
     repo, rev = MODELS[model], REVISIONS.get(model)
     if rev:
         try:
-            return Path(hf_hub_download(repo_id=repo, filename="model.pt", revision=rev))
+            return Path(hf_hub_download(repo_id=repo, filename="model.pt", revision=rev)), rev
         except Exception as e:
             log(f"{repo}@{rev[:7]} isn't available ({type(e).__name__}); trying the Hub's main")
-    return Path(hf_hub_download(repo_id=repo, filename="model.pt"))
+    return Path(hf_hub_download(repo_id=repo, filename="model.pt")), "main"
 
 
 @contextlib.contextmanager
@@ -213,10 +219,11 @@ def load(model: Model) -> tuple[Loaded, float]:
     unload()
     repo = MODELS[model]
     t0 = time.monotonic()
-    net = _build(_checkpoint(model))
-    loaded = Loaded(net=net, model=model, repo=repo, load_s=time.monotonic() - t0)
+    checkpoint, revision = _checkpoint(model)
+    net = _build(checkpoint)
+    loaded = Loaded(net=net, model=model, repo=repo, load_s=time.monotonic() - t0, revision=revision)
     _LOADED[model] = loaded
-    log(f"loaded {repo} in {loaded.load_s:.1f} s")
+    log(f"loaded {repo}@{revision[:7]} in {loaded.load_s:.1f} s")
     return loaded, loaded.load_s
 
 
@@ -239,11 +246,13 @@ def _f32(t: torch.Tensor) -> NDArray[np.float32]:
 
 
 def infer(loaded: Loaded, rgb: NDArray[np.uint8], device: RealDevice, load_s: float) -> MogeOutput:
-    """Run MoGe-2 on an RGB uint8 array (h, w, 3) on `device` (the network moves there and stays)."""
+    """Run MoGe-2 on an RGB uint8 array (h, w, 3) on `device` (the network moves there and stays; a move that raises
+    leaves loaded.device None, so a retry on another device moves all of it)."""
     import torch
 
     t0 = time.monotonic()
     if loaded.device != device:
+        loaded.device = None
         loaded.net.to(device)
         loaded.device = device
     x = torch.tensor(np.ascontiguousarray(rgb), dtype=torch.float32, device=device).permute(2, 0, 1) / 255.0
@@ -258,4 +267,4 @@ def infer(loaded: Loaded, rgb: NDArray[np.uint8], device: RealDevice, load_s: fl
     normal = out.get("normal")
     return MogeOutput(points=_f32(out["points"]), normal=None if normal is None else _f32(normal),
                       mask=np.asarray(out["mask"].cpu().numpy(), np.bool_), intrinsics=_f32(out["intrinsics"]),
-                      load_s=load_s, infer_s=infer_s, repo=loaded.repo)
+                      load_s=load_s, infer_s=infer_s, repo=loaded.repo, revision=loaded.revision)
