@@ -11,7 +11,7 @@ import { isFile } from '../../../common/files.ts'
 import type { RenderService } from '../scenes/render.ts'
 import {
   KEEP_ROOM_NEEDS_MASK, KEEP_ROOM_NEEDS_SCENE, NOT_JPEG_URI, NO_FRAME, NO_PHOTO_YET, maskSizeProblem, modelChoice, renderLayout, renderPrice, takesReference,
-  renderPrompt,
+  renderPrompt, upscaleScale,
 } from '../scenes/logic/render.ts'
 import { noScene } from '../scenes/logic/scene.ts'
 import { isRecord } from '../scenes/logic/values.ts'
@@ -132,10 +132,37 @@ async function postRender(ctx: RequestContext, scenes: SceneService, rooms: Room
   }
 }
 
+/** §4.7 Upscale: `POST /api/renders/<name>/upscale` with `{scale?: 2 | 4}`. */
+async function postUpscale(ctx: RequestContext, renders: RenderService, name: string): Promise<void> {
+  const body = await ctx.readJson()
+  if (!isRecord(body)) {
+    await ctx.error(400, 'body must be a JSON object')
+    return
+  }
+  const choice = upscaleScale(body['scale'])
+  if (choice.kind !== 'scale') {
+    await ctx.error(400, choice.error)
+    return
+  }
+  const outcome = await renders.upscale(name, choice.scale)
+  switch (outcome.kind) {
+    case 'done':
+      await ctx.send(200, outcome.meta)
+      return
+    case 'refused':
+      await ctx.send(402, outcome.body)
+      return
+    case 'error':
+      await ctx.error(outcome.status, outcome.error)
+      return
+  }
+}
+
 export const routes: RouteModule = (deps) => {
   const { scenes, rooms, renders } = scenesFor(deps)
   return [
     { method: 'POST', path: /^\/api\/render$/, handle: (ctx) => postRender(ctx, scenes, rooms, renders) },
+    { method: 'POST', path: /^\/api\/renders\/([^/]*)\/upscale$/, handle: (ctx, [name = '']) => postUpscale(ctx, renders, name) },
     {
       method: 'GET', path: /^\/api\/renders$/, handle: async (ctx) => {
         await ctx.send(200, { renders: renders.list(ctx.query('scene'), ctx.query('room')), mock: falMock() })

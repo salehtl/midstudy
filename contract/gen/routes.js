@@ -56,6 +56,18 @@ export const routes = Object.freeze({
       }
     },
     {
+      "method": "POST",
+      "path": "/api/renders/{render}/upscale",
+      "contract": "§4.7 Upscale",
+      "request": {
+        "body": "midstudy/api/upscale-request.schema.json"
+      },
+      "responses": {
+        "200": "midstudy/api/render-meta.schema.json",
+        "402": "midstudy/api/spend-refused.schema.json"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/layouts",
       "contract": "§2.7, §4.9",

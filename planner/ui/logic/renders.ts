@@ -92,6 +92,17 @@ export function goText(mock: boolean, price: number): string {
   return mock ? 'Render · $0 (mock)' : `Render · ${money(price)}`
 }
 
+/** The Render button when every photo of a room is rendered (§4.7 Render every photo): the count and the total. */
+export function goRoomText(mock: boolean, price: number, photos: number): string {
+  const what = `Render ${String(photos)} photo${photos === 1 ? '' : 's'}`
+  return mock ? `${what} · $0 (mock)` : `${what} · ${money(price * photos)}`
+}
+
+/** A room run's row title: which photo, of how many, and whether it is waiting or rendering. */
+export function roomRowTitle(index: number, count: number, waiting: boolean): string {
+  return `${waiting ? 'Waiting' : 'Rendering'} · photo ${String(index + 1)} of ${String(count)}${waiting ? '' : '…'}`
+}
+
 /** The picture that gets sent: its size, and what it is. */
 export function sentSize(width: number, height: number): string {
   return `${String(width)} × ${String(height)} JPEG`

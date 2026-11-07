@@ -272,11 +272,20 @@ export function maskTarget(p: Passes, w: number, h: number): RenderTarget {
   return sized(p.targets.mask, w, h)
 }
 
-/** Draws the furniture scene with its pieces' materials swapped to `p.maskMat` (white), black elsewhere. */
+/** Draws the furniture scene with its pieces' materials swapped to `p.maskMat` (white), black elsewhere. Without the
+ *  scene's environment: the mask is white on black and needs no reflections, and right after a room photo switch
+ *  the photo's environment map is being made again and has no GPU texture yet, which made this draw throw
+ *  ("Invalid value used as weak map key") and every keep-room render after a switch fail. */
 export function drawMask(p: Passes, scene: Scene, camera: PerspectiveCamera, rt: RenderTarget): void {
   const r = p.renderer
   r.setRenderTarget(rt)
   r.setClearColor(0x000000, 1)
   clearTarget(r)
-  render(r, scene, camera)
+  const env = scene.environment
+  scene.environment = null
+  try {
+    render(r, scene, camera)
+  } finally {
+    scene.environment = env
+  }
 }

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "midstudy/api/upscale-request.schema.json",
+  "title": "UpscaleRequest",
+  "description": "POST /api/renders/<name>/upscale (contract \u00a74.7 Upscale).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scale": {
+      "description": "Default 2.",
+      "enum": [
+        2,
+        4
+      ]
+    }
+  }
+}

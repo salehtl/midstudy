@@ -2883,6 +2883,9 @@
             "null"
           ],
           "minimum": 1
+        },
+        "upscaled": {
+          "$ref": "#/definitions/UpscaleInfo"
         }
       }
     },
@@ -4283,6 +4286,70 @@
         "bytes": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "UpscaleInfo": {
+      "description": "The upscaled render (contract §4.7 Upscale), present once it was upscaled.",
+      "type": "object",
+      "required": [
+        "url",
+        "scale",
+        "cost_usd",
+        "mock",
+        "created",
+        "out_w",
+        "out_h"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^/renders/render-\\d{8}-\\d{6}(-\\d+)?-upscaled\\.jpg$"
+        },
+        "scale": {
+          "enum": [
+            2,
+            4
+          ]
+        },
+        "cost_usd": {
+          "$ref": "#/definitions/Usd"
+        },
+        "mock": {
+          "type": "boolean"
+        },
+        "created": {
+          "$ref": "#/definitions/DateTime"
+        },
+        "out_w": {
+          "description": "The upscaled image's size; null when its frame header can't be read.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "out_h": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "UpscaleRequest": {
+      "description": "POST /api/renders/<name>/upscale (contract §4.7 Upscale).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scale": {
+          "description": "Default 2.",
+          "enum": [
+            2,
+            4
+          ]
         }
       }
     },

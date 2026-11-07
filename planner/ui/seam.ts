@@ -14,7 +14,7 @@ export type { DeletedLayout, Engine, ItemInfo, ItemSnapshot, LightingReport, Sho
 export type { Library } from '../data.js'
 export type { LayoutSummary, LibraryEntry, LibraryJob, RenderMeta, RoomInfo, SceneSummary, Spend, TrashedItem, TrashedRoom, TrashedScene } from '../wire.js'
 export type { DimsCm } from '../logic/text.js'
-export { CAMERA_RANGE, MAX_ELEVATION, RENDER_MODELS, dimsText, fmtUsd, quiet, renderPrice } from '../engine.js'
+export { CAMERA_RANGE, MAX_ELEVATION, RENDER_MODELS, dimsText, fmtUsd, quiet, renderPrice, upscalePrice } from '../engine.js'
 export { DEFAULT_IMAGE_ENGINE, LIB_PRICE, clock, estimateCost, fmtBytes, friendlyDate, relDate, sceneTitle, shortDate } from '../data.js'
 export { isLibraryJob } from '../wire.js'
 export { isRenderModel } from '../logic/money.js'

@@ -45,6 +45,12 @@ export function megapixels(width: number, height: number): number {
   return (width * height) / 1e6
 }
 
+/** An upscale's price (contract §4.7 Upscale): crystal-upscaler's $0.016 a megapixel of the output, which is the
+ * render's size times `scale` on each side. The server rounds it to 4 places; this is the estimate shown first. */
+export function upscalePrice(width: number, height: number, scale: number): number {
+  return 0.016 * megapixels(width * scale, height * scale)
+}
+
 /** The default image engine (contract §2.8, §3.2): $0.10, a splat with a stand-in box. */
 export const DEFAULT_IMAGE_ENGINE = 'idol'
 

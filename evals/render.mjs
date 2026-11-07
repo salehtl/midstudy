@@ -175,6 +175,40 @@ ev.check('on the desktop the two renders sit side by side', cv.sideBySide === tr
 ev.check('Compare has a draggable split slider', cv.slider > 0, fmt({ slider: cv.slider, toggled: cv.toggled ?? null }))
 await P.page.screenshot({ path: path.join(ev.out, 'compare.png') }).catch(() => {})
 
+ev.section('Upscale (§4.7 Upscale)')
+r = await api.send(srv.base, 'POST', `/api/renders/${mine[0]}/upscale`, {})
+const upUrl = r.json?.upscaled?.url
+const served = upUrl ? await fetch(srv.base + upUrl) : null
+const upBytes = served?.ok ? Buffer.from(await served.arrayBuffer()) : Buffer.alloc(0)
+ev.check('POST /api/renders/<name>/upscale: 200, upscaled 2× at $0 (mock), the image served as a JPEG', r.status === 200 && r.json?.upscaled?.scale === 2 && r.json?.upscaled?.cost_usd === 0 && r.json?.upscaled?.mock === true
+  && upBytes[0] === 0xff && upBytes[1] === 0xd8, `${r.status} ${fmt(r.json?.upscaled ?? r.json)}; served ${served?.status} ${upBytes.length} B`)
+r = await api.send(srv.base, 'POST', `/api/renders/${mine[0]}/upscale`, { scale: 3 })
+const r404 = await api.send(srv.base, 'POST', '/api/renders/render-20000101-000000/upscale', {})
+ev.check('upscale refuses a scale that isn\'t 2 or 4 (400) and an unknown render (404)', r.status === 400 && r404.status === 404, `${r.status} ${r404.status}`)
+await P.page.keyboard.press('Escape').catch(() => {})
+await sleep(400)
+let row = newest ? P.page.locator(`button[data-render="${newest}"]`) : null
+if (row && !(await row.isVisible().catch(() => false))) {
+  const panel = await control(P.page, 'renders', [/renders/i])
+  if (panel.loc) { await panel.loc.click().catch(() => {}); await sleep(600) }
+  row = P.page.locator(`button[data-render="${newest}"]`)
+}
+if (row) await row.click().catch(() => {})
+await sleep(600)
+const upBtn = await control(P.page, 'upscale', [/^upscale/i])
+const upLabel = upBtn.loc ? (await upBtn.loc.textContent().catch(() => '')) ?? '' : ''
+if (upBtn.loc) await upBtn.loc.click().catch(() => {})
+const upDone = await waitFor(async () => ((await hook(P.page, 'listRenders')).value || []).find((x) => x.name === newest)?.upscaled?.scale === 2, { timeoutMs: 60000 })
+await sleep(600)
+const tab = await P.page.getByRole('radio', { name: /^upscaled$/i }).count().catch(() => 0) + await P.page.getByRole('button', { name: /^upscaled$/i }).count().catch(() => 0) + await P.page.getByRole('tab', { name: /^upscaled$/i }).count().catch(() => 0)
+const shownUp = newest ? await P.page.locator(`img[src*="${newest}-upscaled.jpg"]`).count() : 0
+ev.check('the viewer\'s Upscale button ("Upscale 2× · $0") upscales the render; the viewer then shows it under Upscaled', !!upBtn.loc && /2×/.test(upLabel) && !!upDone && tab > 0 && shownUp > 0, `${upBtn.how}; "${upLabel.trim()}"; done ${!!upDone}; tab ${tab}; shown ${shownUp}`)
+const next = await control(P.page, 'upscale', [/^upscale/i])
+const nextLabel = next.loc ? (await next.loc.textContent().catch(() => '')) ?? '' : ''
+ev.check('after 2× the viewer offers 4×', /4×/.test(nextLabel), `"${nextLabel.trim()}"`)
+await P.page.screenshot({ path: path.join(ev.out, 'upscaled.png') }).catch(() => {})
+await P.page.keyboard.press('Escape').catch(() => {})
+
 ev.section('errors')
 ev.check('no page errors', P.errors.page.length === 0, P.errors.page.join(' | ') || 'none')
 ev.check('no console errors', P.errors.console.length === 0, P.errors.console.join(' | ') || 'none')

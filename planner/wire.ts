@@ -255,12 +255,25 @@ export interface RenderMeta {
   readonly height?: number | null
   readonly out_w?: number | null
   readonly out_h?: number | null
+  /** The upscaled render (§4.7 Upscale), once it was upscaled. */
+  readonly upscaled?: UpscaleInfo | null
+}
+/** A render's upscale (§4.7 Upscale). */
+interface UpscaleInfo {
+  readonly url: string
+  readonly scale: number
+  readonly cost_usd?: number | null
+  readonly mock?: boolean | null
+  readonly created?: string | null
+  readonly out_w?: number | null
+  readonly out_h?: number | null
 }
 const RENDER: Fields = {
   name: str, url: str, input_url: str, raw_url: opt(str), model: str, cost_usd: opt(num), mock: opt(bool), prompt: opt(str),
   created: str, scene: opt(str), room: opt(str), layout: opt(str), reference: opt(bool), keep_room: opt(bool),
   aligned: opt(shape({ applied: opt(bool), inliers: opt(num), residual_px: opt(num), reason: opt(str) })),
   width: opt(num), height: opt(num), out_w: opt(num), out_h: opt(num),
+  upscaled: opt(shape({ url: str, scale: num, cost_usd: opt(num), mock: opt(bool), created: opt(str), out_w: opt(num), out_h: opt(num) })),
 }
 function isRender(v: unknown): v is RenderMeta {
   return isObject(v) && conforms(v, RENDER)

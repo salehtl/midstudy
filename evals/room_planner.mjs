@@ -242,6 +242,37 @@ async function desktopPass(browser, backend) {
   ev.check(`${T}: after a reload the room reopens with its layout (the sofa at its room position, 1 mm)`, st?.room?.name === ROOM && st?.layout === 'golden' && back && Math.hypot(back.position[0] - SOFA.center[0], back.position[2] - SOFA.center[2]) < 0.001,
     fmt({ room: st?.room?.name, layout: st?.layout, item: back?.position }))
 
+  // --- render every photo (§4.7 Render every photo) ------------------------------------------------------------------------------
+  if (full) {
+    ev.section(`${T}: Render · Every photo`)
+    const startScene = (await roomState(page))?.room?.photo ?? sceneOf('room-2')
+    const before = new Set(((await C.get(`/api/renders?room=${ROOM}`)).json?.renders || []).map((x) => x.name))
+    const rb = await control(page, 'render', [/^render/i])
+    if (rb.loc) await rb.loc.click().catch(() => {})
+    await sleep(800)
+    const every = page.locator('[data-midstudy="render-room"]').getByText(/^every photo/i)
+    const hasEvery = await every.count().catch(() => 0)
+    if (hasEvery) await every.first().click().catch(() => {})
+    const goR = await control(page, 'render-go', [/^render/i])
+    const goLabel = goR.loc ? (await goR.loc.textContent().catch(() => '')) ?? '' : ''
+    ev.check(`${T}: the Render dialog in a room offers Every photo (${ROOM_IDS.length}); its button says "Render ${ROOM_IDS.length} photos"`, hasEvery > 0 && new RegExp(`Render ${ROOM_IDS.length} photos`).test(goLabel), `every ${hasEvery}; "${goLabel.trim()}"`)
+    await page.screenshot({ path: path.join(ev.out, 'render-every-dialog.png') }).catch(() => {})
+    if (goR.loc) await goR.loc.click().catch(() => {})
+    const fresh = async () => ((await C.get(`/api/renders?room=${ROOM}`)).json?.renders || []).filter((x) => !before.has(x.name))
+    await waitFor(async () => (await fresh()).length >= ROOM_IDS.length, { timeoutMs: 300000 })
+    const made = await fresh()
+    const scenes = new Set(made.map((x) => x.scene))
+    ev.check(`${T}: Every photo renders each of the ${ROOM_IDS.length} placed photos once, in the room, with the room layout`,
+      made.length === ROOM_IDS.length && ROOM_IDS.every((id) => scenes.has(S[id])) && made.every((x) => x.room === ROOM && x.layout === 'golden'),
+      fmt(made.map((x) => [idOfScene[x.scene], x.room === ROOM, x.layout])))
+    await waitFor(async () => (await roomState(page))?.room?.photo === startScene, { timeoutMs: 30000 })
+    const after = await roomState(page)
+    ev.check(`${T}: after the run the view is back on the photo it started on, and no row is left pending`,
+      after?.room?.photo === startScene && (await page.locator('.rn-row.is-rendering, .rn-row.is-failed').count().catch(() => -1)) === 0,
+      fmt({ photo: after?.room?.photo, start: startScene }))
+    await page.screenshot({ path: path.join(ev.out, 'render-every-done.png') }).catch(() => {})
+  }
+
   // --- the floor plan -------------------------------------------------------------------------------------------------------------
   ev.section(`${T}: the floor plan`)
   st = await roomState(page)

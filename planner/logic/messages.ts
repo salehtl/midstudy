@@ -96,6 +96,11 @@ export function renderFailText(status: number | null): string {
   return status === 402 ? "Not rendered: today's fal budget is used up" : 'Render failed'
 }
 
+/** The error line when an upscale fails (§4.7 Upscale). */
+export function upscaleFailText(status: number | null): string {
+  return status === 402 ? "Not upscaled: today's fal budget is used up" : status === 409 ? 'That render is already being upscaled' : 'Upscale failed'
+}
+
 /** renderView's model check (contract §4.7): the models, the default first. */
 function unknownModelText(model: string, models: readonly string[]): string {
   return `Unknown render model "${model}" (use ${models.join(', ')})`

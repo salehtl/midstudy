@@ -150,7 +150,12 @@ await call('GET', `/api/layouts/nope?scene=${A}`, undefined, { note: 'no such la
 await call('DELETE', `/api/layouts/corner?scene=${A}`)
 
 ev.section('render (§2.6, §4.7)')
-await call('POST', '/api/render', { image: TINY, scene: A, layout: 'front' }, { note: 'nano-banana with the scene photo as reference (mock: the result is the input)' })
+const first = await call('POST', '/api/render', { image: TINY, scene: A, layout: 'front' }, { note: 'nano-banana with the scene photo as reference (mock: the result is the input)' })
+const firstName = first.json?.name
+await call('POST', `/api/renders/${firstName}/upscale`, {}, { note: '2× with crystal-upscaler (mock: the result is the render)' })
+await call('POST', `/api/renders/${firstName}/upscale`, { scale: 4 }, { note: 'again at 4×: replaces the upscale' })
+await call('POST', `/api/renders/${firstName}/upscale`, { scale: 3 }, { note: 'a scale that isn\'t 2 or 4' })
+await call('POST', '/api/renders/render-20000101-000000/upscale', {}, { note: 'unknown render' })
 await call('POST', '/api/render', { image: TINY, model: 'kontext', prompt: 'Make it photoreal.', scene: A }, { note: 'kontext, a given prompt' })
 const mask = maskPng(photoW, photoH, [[600, 500, 1000, 1000]])
 await call('POST', '/api/render', { image: TINY, scene: A, layout: 'front', keep_room: true, mask: dataUri('image/png', mask) }, { note: 'keep room (the calib stub\'s align never applies)' })

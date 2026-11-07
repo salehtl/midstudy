@@ -12,6 +12,7 @@ an error status without its own entry answers [error.schema.json](error.schema.j
 | `PUT /api/settings` | `settings-put` | 200 `settings` (400 out of range, 409 with `--daily-spend-usd`) |
 | `POST /api/render` (§2.6, §4.7) | `render-request` | 200 `render-meta`, 402 `spend-refused` |
 | `GET /api/renders[?scene=]` | | 200 `render-list` |
+| `POST /api/renders/<name>/upscale` (§4.7 Upscale) | `upscale-request` | 200 `render-meta`, 402 `spend-refused` |
 | `GET /api/layouts?scene=` or `?room=` (§2.7, §4.9) | | 200 `layout-list` |
 | `GET /api/layouts/<layout>?scene=` | | 200 `../layout.schema.json` |
 | `PUT /api/layouts/<layout>?scene=` | `layout-put` | 200 `../layout.schema.json` |

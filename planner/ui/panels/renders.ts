@@ -7,13 +7,13 @@
 // The workspace's Render button sends shell event 'render-request' and its "Render ready · View" toast 'open-render'
 // { meta }; this panel takes both (preventDefault). engine.compare(a, b) (the hook) opens Compare.
 // The words: logic/renders.ts.
-import { RENDER_MODELS, clock, isRenderModel, relDate, renderPrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
+import { RENDER_MODELS, clock, isRenderModel, relDate, renderPrice, upscalePrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
 import type { SegOption } from '../kit.js'
 import { pic, withIcon, emptyState, money, modelShort, imageShot, messageOf } from './common.js'
 import { dots } from '../logic/text.js'
 import {
   ABOUT_S, alignNote, confirmSub, confirmTitle, defaultPromptText, failedTitle, failureReason, goText, modelNote, notAlignedText, ofText, ownPrompt,
-  pickHint, renderCost, renderMeta, runningMeta, sentCaption, sentSize, sentWhat, spentOn, stepIndex,
+  goRoomText, pickHint, renderCost, renderMeta, roomRowTitle, runningMeta, sentCaption, sentSize, sentWhat, spentOn, stepIndex,
 } from '../logic/renders.js'
 
 /** A capture with the photo's size it is sent at (the price and the "what gets sent" line use it). */
@@ -26,10 +26,14 @@ interface Pending {
   readonly model: string
   readonly prompt: string
   readonly shot: SentShot | null
-  readonly started: number
   readonly keepRoom: boolean
   readonly fromPast: boolean
-  state: 'rendering' | 'failed'
+  /** A room run (§4.7 Render every photo): the photo, its place in the run and the run's length. */
+  readonly scene?: string
+  readonly roomIndex?: number
+  readonly roomCount?: number
+  started: number
+  state: 'queued' | 'rendering' | 'failed'
   at: number | undefined
   error: string | undefined
   reason: string | undefined
@@ -57,6 +61,8 @@ export function mount(ctx: UiContext): void {
   let tick: ReturnType<typeof setInterval> | null = null
   let modal: Modal | null = null
   let picking: string[] | null = null // names while choosing two renders for Compare
+  const upscaling = new Set<string>() // renders being upscaled now (§4.7 Upscale)
+  let roomRun: string | null = null // the room whose every photo is being rendered: its photo switches keep the list (§4.7 Render every photo)
 
   const panel = shell.registerPanel({ id: 'renders', label: 'Renders', icon: 'renders', phoneDetent: 'half', mount: () => { /* filled below */ } })
   panel.body.classList.add('rn')
@@ -98,7 +104,7 @@ export function mount(ctx: UiContext): void {
   function render(): void {
     const renders = engine.getRenders()
     const phone = shell.isPhone()
-    panel.setCount(String(renders.length + pending.filter((p) => p.state === 'rendering').length))
+    panel.setCount(String(renders.length + pending.filter((p) => p.state !== 'failed').length))
     summary.hidden = !renders.length && !pending.length
     summary.replaceChildren(h('span', engine.getSceneName() ? 'This scene · newest first' : 'Newest first'), h('span.rn-spent.tnum', `${money(spentOn(renders))} spent`))
     compareBtn.setAttribute('aria-pressed', String(!!picking))
@@ -107,15 +113,17 @@ export function mount(ctx: UiContext): void {
     if (picking) pickBar.replaceChildren(pic('info', { size: 16 }), h('span', pickHint(picking.length, phone)))
     const rows: HTMLElement[] = []
     for (const p of pending) {
-      const going = p.state === 'rendering'
-      rows.push(h(`div.rn-row.is-${p.state}`, { role: 'listitem' },
-        h(`span.rn-thumb.is-${p.state}`, going ? h('span', ctx.icons.ring(null, { size: 18 })) : pic('warning', { size: 18 })),
+      const going = p.state !== 'failed'
+      const waiting = p.state === 'queued'
+      const inRun = p.roomIndex !== undefined && p.roomCount !== undefined
+      rows.push(h(`div.rn-row.is-${going ? 'rendering' : 'failed'}`, { role: 'listitem' },
+        h(`span.rn-thumb.is-${going ? 'rendering' : 'failed'}`, going ? h('span', waiting ? pic('render', { size: 18 }) : ctx.icons.ring(null, { size: 18 })) : pic('warning', { size: 18 })),
         h('span.rn-text',
-          h('span.rn-title', going ? 'Rendering…' : failedTitle(p.reason ?? '')),
-          h('span.rn-meta.tnum', going ? runningMeta(modelShort(p.model), p.keepRoom, (Date.now() - p.started) / 1000) : `Not charged · ${clock(p.at)}`)),
+          h('span.rn-title', going ? (inRun ? roomRowTitle(p.roomIndex ?? 0, p.roomCount ?? 1, waiting) : 'Rendering…') : failedTitle(p.reason ?? '')),
+          h('span.rn-meta.tnum', waiting ? modelShort(p.model) : going ? runningMeta(modelShort(p.model), p.keepRoom, (Date.now() - p.started) / 1000) : `Not charged · ${clock(p.at)}`)),
         going
           ? h('span.rn-cost.is-pending.tnum', engine.isRenderMock() ? '$0' : money(renderPrice(p.model, p.shot)))
-          : h('button.rn-retry', { type: 'button', onclick: () => { quiet(openConfirm({ retry: p })) } }, 'Retry…'),
+          : h('button.rn-retry', { type: 'button', onclick: () => { quiet(retryRow(p)) } }, 'Retry…'),
         going ? null : h('button.rn-dismiss', { type: 'button', 'aria-label': 'Dismiss', onclick: () => { pending = pending.filter((x) => x !== p); changed() } }, pic('close', { size: 16 }))))
     }
     for (const m of renders) {
@@ -132,7 +140,7 @@ export function mount(ctx: UiContext): void {
   }
   function changed(): void {
     render()
-    const going = pending.some((p) => p.state === 'rendering')
+    const going = pending.some((p) => p.state !== 'failed')
     if (going && !tick) tick = setInterval(render, 5000)
     if (!going && tick) { clearInterval(tick); tick = null }
   }
@@ -181,6 +189,10 @@ export function mount(ctx: UiContext): void {
     // On by default since the live check (PLAN.md §8, 2026-11-05): the room stays the photo at full size, sharp.
     let keepRoom = retry ? retry.keepRoom : current
     const items = engine.getItems().length
+    // §4.7 Render every photo: a room view with two or more placed photos offers them all, for the scene as it is now.
+    const rs = engine.getRoomState()
+    const placed = current && rs ? rs.members.filter((x) => x.pose !== null).map((x) => x.scene) : []
+    let every = false
     let loadError: string | null = null
     if (!shot && !from) {
       try {
@@ -194,7 +206,7 @@ export function mount(ctx: UiContext): void {
       const sub = confirmSub(from ? relDate(from.created) : null, !!retry)
       const sizeShot = shot ? { width: (shot.sentW ?? 0) || shot.width, height: (shot.sentH ?? 0) || shot.height } : null
       const price = (): number => (engine.isRenderMock() ? 0 : renderPrice(model, sizeShot))
-      const goLabel = (): string => goText(engine.isRenderMock(), price())
+      const goLabel = (): string => (every ? goRoomText(engine.isRenderMock(), price(), placed.length) : goText(engine.isRenderMock(), price()))
       const go = withIcon(button({ label: goLabel(), kind: 'primary', block: phone, disabled: !shot, onClick: () => { submit() } }), 'render')
       go.dataset['autofocus'] = ''
       go.dataset['midstudy'] = 'render-go'
@@ -222,6 +234,10 @@ export function mount(ctx: UiContext): void {
         const hint = keep.querySelector('.toggle-hint')
         if (hint) hint.textContent = 'Only for the scene as it is now'
       }
+      const scope = placed.length > 1
+        ? segmented<string>([{ value: 'one', label: 'This photo' }, { value: 'every', label: `Every photo (${String(placed.length)})` }], every ? 'every' : 'one', (v) => { every = v === 'every'; setGo() }, { small: true, label: 'Photos' })
+        : null
+      if (scope) scope.dataset['midstudy'] = 'render-room'
       const preview = h('div.rc-preview', shot ? h('img', { src: shot.dataUrl, alt: 'The picture that gets sent' }) : h('span.rc-preview-wait', loadError ? `Could not load that picture: ${loadError}` : 'Loading that picture…'))
       const sizeText = sizeShot ? sentSize(sizeShot.width, sizeShot.height) : '…'
       const whatText = sentWhat(!!from, items)
@@ -237,15 +253,16 @@ export function mount(ctx: UiContext): void {
       function submit(): void {
         if (!shot) return
         close()
+        if (every) { quiet(runRoom({ scenes: placed, preview: shot, model, prompt: prompt.trim(), keepRoom })); return }
         quiet(run({ shot: current ? null : shot, preview: shot, model, prompt: prompt.trim(), keepRoom: current && keepRoom }))
       }
       if (phone) {
         return { label: title, el: h('div.rc-sheet', h('div.sheet-grab', { 'aria-hidden': 'true' }), head,
-          h('div.rc-body', h('div.rc-top', preview, facts), h('span.caps.rc-label', 'Model'), models, keep, h('label.rc-prompt-wrap', pic('pencil', { size: 16 }), promptEl), mockNote),
+          h('div.rc-body', h('div.rc-top', preview, facts), scope ? h('span.caps.rc-label', 'Photos') : null, scope, h('span.caps.rc-label', 'Model'), models, keep, h('label.rc-prompt-wrap', pic('pencil', { size: 16 }), promptEl), mockNote),
           h('div.rc-foot', go, h('button.rc-cancel', { type: 'button', onclick: () => { close() } }, 'Cancel'))) }
       }
       return { label: title, el: h('div.rc-dialog', head,
-        h('div.rc-body', preview, h('span.caps.rc-label', 'Model'), models, keep, h('span.caps.rc-label', 'Prompt · optional'), promptEl, mockNote),
+        h('div.rc-body', preview, scope ? h('span.caps.rc-label', 'Photos') : null, scope, h('span.caps.rc-label', 'Model'), models, keep, h('span.caps.rc-label', 'Prompt · optional'), promptEl, mockNote),
         h('footer.rc-foot', h('p.rc-note', `Goes to fal via the server; the key stays there. About ${String(ABOUT_S)} s.`), button({ label: 'Cancel', kind: 'secondary', onClick: () => { close() } }), go)) }
     })
     if (from && !shot) {
@@ -274,6 +291,57 @@ export function mount(ctx: UiContext): void {
     }
   }
 
+  // §4.7 Render every photo: each placed photo in member order is opened, captured and rendered, one after another;
+  // a photo that fails is a failed row and the rest go on; the view goes back to the photo it started on.
+  async function runRoom({ scenes, preview, model, prompt, keepRoom }: { readonly scenes: readonly string[]; readonly preview: SentShot; readonly model: string; readonly prompt: string; readonly keepRoom: boolean }): Promise<void> {
+    const st = engine.getRoomState()
+    if (!st) return
+    const start = st.photo
+    const here = (): boolean => roomRun === st.name && engine.getRoomState()?.name === st.name
+    const rows: Pending[] = scenes.map((scene, i) => ({ id: `r${String(++seq)}`, model, prompt, shot: preview, started: Date.now(), state: 'queued', keepRoom, fromPast: false, scene, roomIndex: i, roomCount: scenes.length, at: undefined, error: undefined, reason: undefined }))
+    pending.unshift(...rows)
+    roomRun = st.name
+    changed()
+    try {
+      for (const p of rows) {
+        if (!here() || !pending.includes(p)) return // the room was closed, or another scene opened
+        p.state = 'rendering'
+        p.started = Date.now()
+        changed()
+        try {
+          if (p.scene !== undefined) await engine.setRoomPhoto(p.scene)
+          const meta = await engine.renderViewInternal({ model, prompt: prompt || undefined, keepRoom })
+          pending = pending.filter((x) => x !== p)
+          changed()
+          if (meta.keep_room && meta.aligned && !meta.aligned.applied) shell.toast(notAlignedText(meta.aligned.reason), { id: `align-${meta.name}`, ms: 9000 })
+        } catch (e) {
+          const m = messageOf(e)
+          p.state = 'failed'
+          p.at = Date.now()
+          p.error = m
+          p.reason = failureReason(m)
+          changed()
+        }
+      }
+      if (start !== null && here()) await engine.setRoomPhoto(start)
+    } catch { /* reported by the engine */ } finally {
+      const stillHere = here()
+      roomRun = null
+      if (stillHere) quiet(engine.listRendersInternal())
+    }
+  }
+  // A failed row: a room run's photo is opened and rendered as it is now; any other gets the confirm with its picture.
+  async function retryRow(p: Pending): Promise<void> {
+    if (p.scene !== undefined && engine.getRoomState()) {
+      pending = pending.filter((x) => x !== p)
+      changed()
+      try { await engine.setRoomPhoto(p.scene) } catch { return }
+      await openConfirm()
+      return
+    }
+    await openConfirm({ retry: p })
+  }
+
   // --- viewer ----------------------------------------------------------------------------------------------------
   function openViewer(which: string | RenderMeta | null | undefined): void {
     const all = (): readonly RenderMeta[] => engine.getRenders()
@@ -291,8 +359,21 @@ export function mount(ctx: UiContext): void {
       const p = ownPrompt(r.prompt)
       const promptEl = p ? h('p.rv-prompt', pic('pencil', { size: 14 }), h('span', p)) : null
       const closeBtn = h('button.btn.btn-icon.rv-close', { type: 'button', 'aria-label': 'Close', onclick: () => { close() } }, pic('close', { size: 16 }))
-      const sides: SegOption<string>[] = [{ value: 'input', label: 'Sent' }, { value: 'render', label: 'Render' }, ...(r.raw_url ? [{ value: 'raw', label: 'Raw' }] : [])]
-      const srcOf = (v: string): string | undefined => (v === 'input' ? r.input_url : v === 'raw' ? r.raw_url ?? undefined : r.url)
+      const up = r.upscaled ?? null
+      if ((side === 'upscaled' && !up) || (side === 'raw' && !r.raw_url)) side = 'render'
+      const sides: SegOption<string>[] = [{ value: 'input', label: 'Sent' }, { value: 'render', label: 'Render' }, ...(r.raw_url ? [{ value: 'raw', label: 'Raw' }] : []), ...(up ? [{ value: 'upscaled', label: 'Upscaled' }] : [])]
+      const srcOf = (v: string): string | undefined => (v === 'input' ? r.input_url : v === 'raw' ? r.raw_url ?? undefined : v === 'upscaled' ? up?.url : r.url)
+      // §4.7 Upscale: 2× first, then 4× from the render (never of the upscale); none past 4×.
+      const nextScale = up ? (up.scale < 4 ? 4 : null) : 2
+      const baseW = (r.out_w ?? 0) || (r.width ?? 0)
+      const baseH = (r.out_h ?? 0) || (r.height ?? 0)
+      const busy = upscaling.has(r.name)
+      const upBtn = nextScale === null ? null : withIcon(button({
+        label: busy ? 'Upscaling…' : `Upscale ${String(nextScale)}× · ${engine.isRenderMock() ? '$0' : money(upscalePrice(baseW, baseH, nextScale))}`,
+        kind: 'secondary', disabled: busy || !baseW || !baseH,
+        onClick: () => { quiet(upscale(r.name, nextScale)) },
+      }), 'upscale')
+      if (upBtn) { upBtn.dataset['midstudy'] = 'upscale'; upBtn.dataset['tip'] = 'Sharper and larger, with crystal-upscaler on fal' }
       const note = alignNote(r)
       const alignEl = note ? h('span.rv-align', note) : null
       if (phone) {
@@ -303,11 +384,14 @@ export function mount(ctx: UiContext): void {
         return { label: `Render, ${relDate(r.created)}`, el: h('div.rv-phone',
           h('header.rv-head', closeBtn, h('div.rv-titles', h('h2.rv-title.tnum', layoutOf(r) || relDate(r.created)), h('span.rv-sub.tnum', dots([layoutOf(r) ? relDate(r.created) : null, of, modelShort(r.model), renderCost(r)])))),
           h('div.rv-seg', seg), stage,
-          h('footer.rv-foot', alignEl, promptEl, h('div.rv-actions', cmp, again))) }
+          h('footer.rv-foot', alignEl, promptEl, h('div.rv-actions', cmp, upBtn, again))) }
       }
       const size = h('span.tnum', r.out_w ? `${String(r.out_w)} × ${String(r.out_h)}` : '')
-      const right: HTMLImageElement = h('img', { src: (side === 'raw' ? r.raw_url : r.url) ?? undefined, alt: 'The render', onload: () => { size.textContent = `${String(right.naturalWidth)} × ${String(right.naturalHeight)}` } })
-      const which2 = r.raw_url ? segmented<string>([{ value: 'render', label: 'Render' }, { value: 'raw', label: 'Raw' }], side === 'raw' ? 'raw' : 'render', (v) => { side = v; right.src = (v === 'raw' ? r.raw_url : r.url) ?? '' }, { small: true, label: 'Show' }) : null
+      const rightSide = side === 'input' ? 'render' : side
+      const right: HTMLImageElement = h('img', { src: srcOf(rightSide), alt: 'The render', onload: () => { size.textContent = `${String(right.naturalWidth)} × ${String(right.naturalHeight)}` } })
+      const openLink: HTMLAnchorElement = h('a.btn.btn-quiet', { href: srcOf(rightSide), target: '_blank', rel: 'noopener' }, 'Open image')
+      const rightSides = sides.filter((x) => x.value !== 'input')
+      const which2 = rightSides.length > 1 ? segmented<string>(rightSides, rightSide, (v) => { side = v; right.src = srcOf(v) ?? ''; openLink.href = srcOf(v) ?? '' }, { small: true, label: 'Show' }) : null
       const nav = rs.length > 1 ? h('div.rv-nav',
         h('button.btn.btn-icon.btn-quiet', { type: 'button', 'aria-label': 'Newer', dataset: { tip: 'Newer', kbd: '←' }, onclick: () => { step(-1) } }, pic('chevron-left', { size: 16 })),
         h('span.tnum', of),
@@ -316,13 +400,25 @@ export function mount(ctx: UiContext): void {
         h('header.rv-head', h('h2.rv-title.tnum', `Render · ${relDate(r.created)}`),
           h('span.rv-sub.tnum', dots([layoutOf(r) || null, isRenderModel(r.model) ? RENDER_MODELS[r.model].label : r.model, renderCost(r)])),
           h('span.rv-spacer'),
-          h('a.btn.btn-quiet', { href: (side === 'raw' ? r.raw_url : r.url) ?? undefined, target: '_blank', rel: 'noopener' }, 'Open image'), nav, h('span.rv-sep'), closeBtn),
+          openLink, nav, h('span.rv-sep'), closeBtn),
         h('div.rv-pair',
           h('figure', h('div.rv-frame', h('img', { src: r.input_url, alt: 'What was sent' })), h('figcaption', h('span.caps', 'Sent'), h('span', 'The photo with the furniture'))),
           h('figure', h('div.rv-frame', right), h('figcaption', h('span.caps', 'Render'), which2, size))),
         h('footer.rv-foot', h('div.rv-prompt-block', alignEl, h('span.caps', 'Prompt'), p ? h('p', p) : h('p.muted', defaultPromptText(!!r.reference))),
-          h('div.rv-actions', cmp, again))) }
+          h('div.rv-actions', cmp, upBtn, again))) }
     })
+    async function upscale(name: string, scale: number): Promise<void> {
+      upscaling.add(name)
+      m.rerender()
+      try {
+        await engine.upscaleRender(name, scale)
+        if (modal === m) { side = 'upscaled'; m.rerender() }
+        shell.toast(`Upscaled ${String(scale)}×`, { id: `upscale-${name}` })
+      } catch { /* reported by the engine */ } finally {
+        upscaling.delete(name)
+        if (modal === m) m.rerender()
+      }
+    }
     m.step = (k: number) => { const n = all().length; if (n < 2) return; idx = stepIndex(idx, k, n); m.rerender() }
   }
 
@@ -401,7 +497,11 @@ export function mount(ctx: UiContext): void {
   }
 
   engine.events.addEventListener('renders', () => { render(); if (modal?.kind === 'viewer') modal.rerender() })
-  engine.events.addEventListener('scene', (e) => { if (e.detail.phase === 'opened' || e.detail.phase === 'closed') { picking = null; pending = []; modal?.close(); changed() } })
+  engine.events.addEventListener('scene', (e) => {
+    const sameRoom = roomRun !== null && engine.getRoomState()?.name === roomRun
+    if (sameRoom && e.detail.phase === 'opened') return // a room run switching photos (§4.7 Render every photo)
+    if (e.detail.phase === 'opened' || e.detail.phase === 'closed') { roomRun = null; picking = null; pending = []; modal?.close(); changed() }
+  })
   engine.events.addEventListener('compare', (e) => { quiet(openCompare(e.detail.a, e.detail.b)) })
   shell.events.addEventListener('render-request', (e) => { e.preventDefault(); quiet(openConfirm()) })
   shell.events.addEventListener('open-render', (e) => { e.preventDefault(); openViewer(e.detail.meta) })

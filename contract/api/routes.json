@@ -7,6 +7,7 @@
     { "method": "PUT", "path": "/api/settings", "contract": "§2.9", "request": { "body": "midstudy/api/settings-put.schema.json" }, "responses": { "200": "midstudy/api/settings.schema.json" } },
     { "method": "POST", "path": "/api/render", "contract": "§2.6, §4.7", "request": { "body": "midstudy/api/render-request.schema.json" }, "responses": { "200": "midstudy/api/render-meta.schema.json", "402": "midstudy/api/spend-refused.schema.json" } },
     { "method": "GET", "path": "/api/renders", "contract": "§2.6, §4.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/api/render-list.schema.json" } },
+    { "method": "POST", "path": "/api/renders/{render}/upscale", "contract": "§4.7 Upscale", "request": { "body": "midstudy/api/upscale-request.schema.json" }, "responses": { "200": "midstudy/api/render-meta.schema.json", "402": "midstudy/api/spend-refused.schema.json" } },
 
     { "method": "GET", "path": "/api/layouts", "contract": "§2.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/api/layout-list.schema.json" } },
     { "method": "GET", "path": "/api/layouts/{layout}", "contract": "§2.7, §4.9", "query": ["scene", "room"], "responses": { "200": "midstudy/layout.schema.json" } },

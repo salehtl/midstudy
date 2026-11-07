@@ -138,3 +138,47 @@ void test('the spend cap refuses a render that would cross it, before any call',
   assert.equal(r.calls.length, 0)
   assert.deepEqual(rows(r.costs), [])
 })
+
+// --- upscale (§4.7 Upscale) ----------------------------------------------------------------------------------------
+
+void test('upscale: the render goes to crystal-upscaler, the result is <name>-upscaled.jpg, the meta gains upscaled, a cost row', async () => {
+  const r = rig()
+  const made = await r.renders.render(job('kontext'))
+  assert.ok(made.kind === 'done')
+  const name = made.meta.name
+  const out = await r.renders.upscale(name, 2)
+  const last = r.calls.at(-1)
+  // The render is the downloaded PORTRAIT (1200 × 1600): 2400 × 3200 out is 7.68 MP at $0.016.
+  assert.deepEqual(last, { endpoint: 'clarityai/crystal-upscaler', key: 'test-key', args: { image_url: uri(PORTRAIT), scale_factor: 2, output_format: 'jpg' } })
+  assert.ok(out.kind === 'done')
+  const up = out.meta['upscaled']
+  assert.ok(up !== null && typeof up === 'object')
+  assert.deepEqual({ ...up, created: '' }, { url: '/renders/' + name + '-upscaled.jpg', scale: 2, cost_usd: 0.1229, mock: false, created: '', out_w: 1200, out_h: 1600 })
+  assert.deepEqual(fs.readFileSync(path.join(r.dir, 'renders', name + '-upscaled.jpg')), PORTRAIT)
+  const stored: unknown = JSON.parse(fs.readFileSync(path.join(r.dir, 'renders', name + '.json'), 'utf8'))
+  assert.deepEqual(stored, out.meta, 'the meta on disk is the answer')
+  assert.match(rows(r.costs).at(-1) ?? '', new RegExp(',' + name + ',upscale:crystal,0.1229,false,scene-20261105-120000$'))
+  assert.equal(r.spend.view().reserved_usd, 0)
+  const listed = r.renders.list(null)
+  assert.equal(listed.length, 1, 'still one render')
+})
+
+void test('upscale: an unknown render is a 404; the cap refuses before any call; a fal failure is a 502 and the meta is unchanged', async () => {
+  const r = rig()
+  assert.deepEqual(await r.renders.upscale('render-20261105-120000', 2), { kind: 'error', status: 404, error: "no render 'render-20261105-120000'" })
+  assert.deepEqual(await r.renders.upscale('../x', 2), { kind: 'error', status: 404, error: "no render '../x'" })
+  const made = await r.renders.render(job('kontext'))
+  assert.ok(made.kind === 'done')
+  const capped = rig({ cap: 0.1 })
+  const made2 = await capped.renders.render(job('kontext'))
+  assert.ok(made2.kind === 'done')
+  const refused = await capped.renders.upscale(made2.meta.name, 4)
+  assert.equal(refused.kind, 'refused')
+  assert.equal(capped.calls.length, 1, 'only the render was called')
+  const failing = rig({ answer: (e) => (e === 'clarityai/crystal-upscaler' ? new FalError('fal clarityai/crystal-upscaler returned HTTP 500: boom') : { images: [{ url: 'https://fal.example/r.jpg' }] }) })
+  const made3 = await failing.renders.render(job('kontext'))
+  assert.ok(made3.kind === 'done')
+  assert.deepEqual(await failing.renders.upscale(made3.meta.name, 2), { kind: 'error', status: 502, error: 'fal clarityai/crystal-upscaler returned HTTP 500: boom' })
+  const stored: unknown = JSON.parse(fs.readFileSync(path.join(failing.dir, 'renders', made3.meta.name + '.json'), 'utf8'))
+  assert.ok(stored !== null && typeof stored === 'object' && !('upscaled' in stored))
+})

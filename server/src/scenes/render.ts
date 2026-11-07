@@ -18,8 +18,8 @@ import { exists, isFile, removeTree, replace, resolvePath } from '../../../commo
 import { notInstalled } from './logic/jobs.ts'
 import { compareRenders, numbered, renderBase } from './logic/names.ts'
 import {
-  alignFailed, alignResult, alignTimedOut, downloadFailed, modelSpec, noImage, renderMeta, resultUrl, type AlignResult, type RenderMeta,
-  type RenderModel,
+  UPSCALE_ENDPOINT, UPSCALE_NO_SIZE, alignFailed, alignResult, alignTimedOut, alreadyUpscaling, downloadFailed, modelSpec, noImage, noRender,
+  renderMeta, resultUrl, upscaleInfo, upscalePrice, type AlignResult, type RenderMeta, type RenderModel, type UpscaleScale,
 } from './logic/render.ts'
 import { isRecord, pyStr } from './logic/values.ts'
 import { calibResultSchema } from './logic/worker.ts'
@@ -50,6 +50,12 @@ export interface RenderJob {
 /** What a render came to: its metadata, a 402, or v1's 502/503 sentence. */
 export type RenderOutcome =
   | { readonly kind: 'done'; readonly meta: RenderMeta }
+  | { readonly kind: 'refused'; readonly body: SpendRefusal }
+  | { readonly kind: 'error'; readonly status: number; readonly error: string }
+
+/** What an upscale came to (§4.7 Upscale): the render's meta with `upscaled`, a 402, or an error with its status. */
+export type UpscaleOutcome =
+  | { readonly kind: 'done'; readonly meta: Readonly<Record<string, unknown>> }
   | { readonly kind: 'refused'; readonly body: SpendRefusal }
   | { readonly kind: 'error'; readonly status: number; readonly error: string }
 
@@ -97,6 +103,8 @@ export class RenderService {
   readonly #fal: FalAccess
   /** Names given to renders still being made (v1 `reserved_names`): a name stays taken after a failure. */
   readonly #reserved = new Set<string>()
+  /** Renders being upscaled now (one upscale per render at a time). */
+  readonly #upscaling = new Set<string>()
 
   constructor(options: RenderServiceOptions) {
     this.dir = options.rendersDir
@@ -116,7 +124,7 @@ export class RenderService {
     const base = renderBase(now)
     let n = 1
     let name = base
-    while (this.#reserved.has(name) || ['.jpg', '-input.jpg', '-raw.jpg', '.json'].some((x) => exists(path.join(this.dir, name + x)))) {
+    while (this.#reserved.has(name) || ['.jpg', '-input.jpg', '-raw.jpg', '-upscaled.jpg', '.json'].some((x) => exists(path.join(this.dir, name + x)))) {
       n += 1
       name = numbered(base, n)
     }
@@ -199,6 +207,66 @@ export class RenderService {
     if (mock) await appendCost(this.#options.costsFile, { date: stamp, id: name, engine, costUsd: cost, mock: true, input }, 'midstudy server')
     this.#reserved.delete(name) // the files now hold the name; after a failure it stays reserved
     return { kind: 'done', meta }
+  }
+
+  /** §4.7 Upscale: render `name` through crystal-upscaler at `scale`, reserved against the cap first (its key is
+   *  `<name>-upscale`); writes `<name>-upscaled.jpg` and the meta's `upscaled`. Mock: a copy of the render, $0. */
+  async upscale(name: string, scale: UpscaleScale): Promise<UpscaleOutcome> {
+    const metaPath = path.join(this.dir, name + '.json')
+    const jpgPath = path.join(this.dir, name + '.jpg')
+    const stored = isRenderName(name) ? readJson(metaPath) : null
+    if (!isRecord(stored) || !isFile(jpgPath)) return { kind: 'error', status: 404, error: noRender(name) }
+    if (this.#upscaling.has(name)) return { kind: 'error', status: 409, error: alreadyUpscaling(name) }
+    const render = fs.readFileSync(jpgPath)
+    const size = jpegFrame(render)
+    if (!size.ok) return { kind: 'error', status: 400, error: UPSCALE_NO_SIZE }
+    const price = upscalePrice(size.value.width, size.value.height, scale)
+    const mock = this.#fal.mock()
+    const key = mock ? null : this.#fal.key()
+    if (!mock && key === null) return { kind: 'error', status: 503, error: NO_KEY }
+    const hold = name + '-upscale'
+    const refused = this.#options.spend.reserve(hold, !mock || this.#fal.mockCost() ? price : 0)
+    if (refused !== null) return { kind: 'refused', body: refused }
+    this.#upscaling.add(name)
+    try {
+      const now = this.#now()
+      const stamp = isoUtc(now)
+      const engine = 'upscale:crystal'
+      const input = typeof stored['scene'] === 'string' ? stored['scene'] : ''
+      let cost = mock && this.#fal.mockCost() ? price : 0
+      let result: Uint8Array
+      if (mock || key === null) {
+        result = render
+      } else {
+        let answer: unknown
+        try {
+          answer = await this.#fal.call(UPSCALE_ENDPOINT, { image_url: dataUri(render), scale_factor: scale, output_format: 'jpg' }, key)
+        } catch (e) {
+          if (e instanceof FalError) return { kind: 'error', status: 502, error: e.message }
+          throw e
+        }
+        cost = price
+        await appendCost(this.#options.costsFile, { date: stamp, id: name, engine, costUsd: cost, mock: false, input }, 'midstudy server')
+        const url = resultUrl(answer)
+        if (url === null) return { kind: 'error', status: 502, error: noImage(UPSCALE_ENDPOINT, cost) }
+        try {
+          if (typeof url !== 'string') throw new Error(notTextUrl(url))
+          result = await this.#fal.download(url)
+        } catch (e) {
+          return { kind: 'error', status: 502, error: downloadFailed(e instanceof Error ? e.message : String(e), cost) }
+        }
+      }
+      writeBytesSync(path.join(this.dir, name + '-upscaled.jpg'), result)
+      const out = jpegFrame(result)
+      const upscaled = upscaleInfo(name, scale, cost, mock, isoUtcMs(now), out.ok ? out.value.width : null, out.ok ? out.value.height : null)
+      const meta: Readonly<Record<string, unknown>> = { ...stored, upscaled }
+      writeJsonSync(metaPath, meta, 'midstudy/api/render-meta.schema.json')
+      if (mock) await appendCost(this.#options.costsFile, { date: stamp, id: name, engine, costUsd: cost, mock: true, input }, 'midstudy server')
+      return { kind: 'done', meta }
+    } finally {
+      this.#upscaling.delete(name)
+      this.#options.spend.release(hold)
+    }
   }
 
   /** v1 `align` (keep room exact, §4.7): `<calib> align <scene photo.jpg> <name>-raw.jpg <mask.png> --out <tmp name>`;

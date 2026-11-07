@@ -71,7 +71,7 @@
 //   saveLayoutInternal(name, { title }), loadLayoutInternal(name), deleteLayoutInternal(name) → the doc (for Undo),
 //   restoreLayoutInternal(doc), listLayoutsInternal()
 //   captureComposite({ maxPx, quality }) → Promise<Shot>, postRender(shot, opts), renderViewInternal(opts),
-//   listRendersInternal(), compare(a, b)
+//   listRendersInternal(), upscaleRender(name, scale), compare(a, b)
 //   reportError(msg, err) → Error, onFrame(fn), worldToScreen(p) → { x, y, visible } (client px), photoToFloor(px, py),
 //   floorToPhoto(p), photoToClient(px, py)
 // Events (engine.events: a typed Bus, planner/bus.ts; e.detail is EngineEvents[name])
@@ -2896,6 +2896,10 @@ export const RENDER_MODELS: Readonly<Record<RenderModel, { readonly label: strin
   'gpt-image': { label: money.renderLabel('gpt-image'), price: (mp) => money.renderModelPrice('gpt-image', mp) },
 }
 export const fmtUsd = (v: number): string => text.fmtUsd(v)
+/** §4.7 Upscale: the price of upscaling a render of width × height at `scale`. */
+export function upscalePrice(width: number, height: number, scale: number): number {
+  return money.upscalePrice(width, height, scale)
+}
 /** A render's price before asking: qwen by the capture's megapixels (1 MP without a capture). */
 export function renderPrice(model: string, shot: { width: number; height: number } | null | undefined): number {
   if (!money.isRenderModel(model)) throw new TypeError("Cannot read properties of undefined (reading 'price')")
@@ -2950,6 +2954,22 @@ async function renderViewInternal(opts: unknown = {}): Promise<RenderMeta> {
     if (a.keepRoom) mask = await captureMask()
   } catch (e) { throw reportError('Could not capture the view', e) }
   return postRender(shot, { model: a.model, prompt: a.prompt, keepRoom: a.keepRoom, mask })
+}
+/** §4.7 Upscale: crystal-upscaler on render `name` at `scale` (2 or 4); the list gets the updated meta. */
+async function upscaleRender(name: string, scale = 2): Promise<RenderMeta> {
+  let answer: unknown
+  try {
+    answer = await apiJson(`/api/renders/${encodeURIComponent(name)}/upscale`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scale }),
+    })
+  } catch (e) { throw reportError(msg.upscaleFailText(statusOf(e)), e) }
+  const meta = renderMeta(answer)
+  if (!meta) throw reportError(msg.upscaleFailText(null), new Error("the server's answer isn't a render"))
+  if (renders.some((r) => r.name === meta.name)) {
+    renders = renders.map((r) => (r.name === meta.name ? meta : r))
+    emit('renders', { renders: renders.slice() })
+  }
+  return meta
 }
 async function listRendersInternal(): Promise<RenderMeta[]> {
   let data: JsonObject | null
@@ -3193,7 +3213,7 @@ export const engine = {
   // layouts
   saveLayoutInternal, loadLayoutInternal, deleteLayoutInternal, restoreLayoutInternal, listLayoutsInternal,
   // renders
-  captureComposite, postRender, renderViewInternal, listRendersInternal, compare, exportImage,
+  captureComposite, postRender, renderViewInternal, listRendersInternal, upscaleRender, compare, exportImage,
   // errors + overlays + projection
   reportError, onFrame, worldToScreen, photoToFloor, floorToPhoto, photoToClient,
 }

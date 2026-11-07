@@ -792,6 +792,7 @@ export type RenderMeta = {
   /** The result's size; null when its frame header can't be read. */
   readonly out_w: number | null
   readonly out_h: number | null
+  readonly upscaled?: UpscaleInfo
 }
 
 /** POST /api/render (contract §2.6, §4.7). A model that isn't listed, an image that isn't a JPEG (or whose size can't be read) and keep_room without scene or mask are 400; an unknown scene is 404. */
@@ -1174,6 +1175,24 @@ export type Upload = {
   readonly filename?: string
   readonly ext?: "jpg" | "png" | "heic" | "webp"
   readonly bytes?: number
+}
+
+/** The upscaled render (contract §4.7 Upscale), present once it was upscaled. */
+export type UpscaleInfo = {
+  readonly url: string
+  readonly scale: 2 | 4
+  readonly cost_usd: Usd
+  readonly mock: boolean
+  readonly created: DateTime
+  /** The upscaled image's size; null when its frame header can't be read. */
+  readonly out_w: number | null
+  readonly out_h: number | null
+}
+
+/** POST /api/renders/<name>/upscale (contract §4.7 Upscale). */
+export type UpscaleRequest = {
+  /** Default 2. */
+  readonly scale?: 2 | 4
 }
 
 /** An amount in US dollars. */

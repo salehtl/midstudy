@@ -189,6 +189,8 @@ export interface RenderMeta {
   readonly out_h: number | null
   /** The room it was made in (contract §4.9): present exactly when the request named one (the shell adds it). */
   readonly room?: string
+  /** The upscaled render (§4.7 Upscale), once it was upscaled. */
+  readonly upscaled?: UpscaleInfo
 }
 
 /** What a render was, for its metadata. */
@@ -236,4 +238,56 @@ export function renderMeta(f: RenderFacts): RenderMeta {
     out_w: f.outW,
     out_h: f.outH,
   }
+}
+
+// --- upscale (§4.7 Upscale) ------------------------------------------------------------------------------------------
+
+/** The upscaler's fal endpoint. */
+export const UPSCALE_ENDPOINT = 'clarityai/crystal-upscaler'
+
+/** The scales offered: 2 (default) or 4. */
+export type UpscaleScale = 2 | 4
+
+/** What `scale` came to: a scale, or the 400 sentence. */
+export type ScaleChoice = { readonly kind: 'scale'; readonly scale: UpscaleScale } | { readonly kind: 'refused'; readonly error: string }
+
+/** The request's `scale`: absent or null is 2; else it must be 2 or 4. */
+export function upscaleScale(v: unknown): ScaleChoice {
+  if (v === undefined || v === null || v === 2) return { kind: 'scale', scale: 2 }
+  if (v === 4) return { kind: 'scale', scale: 4 }
+  return { kind: 'refused', error: 'scale must be 2 or 4' }
+}
+
+/** $0.016 a megapixel of the output (the render's size times the scale on each side), rounded to 4 places. */
+export function upscalePrice(width: number, height: number, scale: UpscaleScale): number {
+  return pyRound(0.016 * ((width * scale * height * scale) / 1e6), 4)
+}
+
+/** The 404 for a render name that isn't one. */
+export function noRender(name: string): string {
+  return 'no render ' + pyRepr(name)
+}
+
+/** The 409 while the render is already being upscaled. */
+export function alreadyUpscaling(name: string): string {
+  return 'render ' + pyRepr(name) + ' is already being upscaled'
+}
+
+/** The 400 for a render whose size can't be read (the price depends on it). */
+export const UPSCALE_NO_SIZE = "the render's size can't be read, so it can't be priced for an upscale"
+
+/** The upscale's record in the render meta. */
+export interface UpscaleInfo {
+  readonly url: string
+  readonly scale: UpscaleScale
+  readonly cost_usd: number
+  readonly mock: boolean
+  readonly created: string
+  readonly out_w: number | null
+  readonly out_h: number | null
+}
+
+/** The `upscaled` entry for render `name`. */
+export function upscaleInfo(name: string, scale: UpscaleScale, cost: number, mock: boolean, created: string, outW: number | null, outH: number | null): UpscaleInfo {
+  return { url: '/renders/' + name + '-upscaled.jpg', scale, cost_usd: cost, mock, created, out_w: outW, out_h: outH }
 }
