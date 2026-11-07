@@ -220,23 +220,31 @@ export function drawFrame(p: Passes, target: RenderTarget | null, f: FrameOpts):
   if (s && p.splat.quad) p.splat.quad.render(r)
 }
 
+// Set while a full frame is up: withFullFrame isn't reentrant (the inner one would save the outer's frame as the one to
+// restore), and the engine's capture mutex keeps it from being entered twice; this is the tripwire if that ever breaks.
+let inFullFrame = false
+
 /** The full photo frame at w × h (no view offset, no grid): the passes set for it while `fn` runs, then restored by
- * `restore` (the engine's updateView). The engine holds its frames meanwhile (fn awaits read-backs and sorts). */
+ * `restore` (the engine's updateView). The engine holds its frames meanwhile (fn awaits read-backs and sorts), and runs
+ * one at a time (its capture mutex); a second one entered while one is up throws. */
 export async function withFullFrame<T>(p: Passes, camera: PerspectiveCamera, aspect: number, w: number, h: number, fn: () => Promise<T>, restore: () => void): Promise<T> {
+  if (inFullFrame) throw new Error("withFullFrame isn't reentrant: a capture started while another was running")
   const gridWas = p.grid.visible
   const furn: [number, number] = [p.furnRT.width, p.furnRT.height]
-  p.grid.visible = false
-  camera.clearViewOffset()
-  camera.aspect = aspect
-  camera.updateProjectionMatrix()
-  setFrame(p.frame, [0, 0, w, h])
-  sizeTargets(p, w, h)
+  inFullFrame = true
   try {
+    p.grid.visible = false
+    camera.clearViewOffset()
+    camera.aspect = aspect
+    camera.updateProjectionMatrix()
+    setFrame(p.frame, [0, 0, w, h])
+    sizeTargets(p, w, h)
     return await fn()
   } finally {
     p.grid.visible = gridWas
     sizeTargets(p, furn[0], furn[1])
     p.renderer.setRenderTarget(null)
+    inFullFrame = false
     restore()
   }
 }

@@ -161,6 +161,7 @@
   "planner/logic/input.ts#pans",
   "planner/logic/input.ts#tapSlop",
   "planner/logic/input.ts#wheelFactor",
+  "planner/logic/jobs.ts#jobOutcome",
   "planner/logic/keymap.ts#(init)",
   "planner/logic/keymap.ts#alias",
   "planner/logic/keymap.ts#arrowStep",

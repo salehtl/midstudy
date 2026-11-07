@@ -202,3 +202,35 @@ calib track's.
 - Deleting a scene has no undo in the UI (the server keeps it in `scenes/.trash/`).
 - Evals that write to the same `evals/out/<eval>/` folder must not run concurrently (two runs of E9 at once produced
   two scenes and a false failure once; one run at a time passes).
+
+## State machines W1: planner-engine-base (sm1-planner-engine-base)
+
+From `docs/notes/state-machines-plan.md`, package planner-engine-base (guard-only fixes, no contract change):
+
+- **Capture mutex.** `exclusive(fn)` in `planner/engine.ts` chains every capture after the one before (a failure
+  doesn't break the chain) and counts `captureBusy` from the call to the settle (`engine.isCapturing()`); `holding()`
+  goes through it, so `captureCanvas` and `captureMask` run one at a time (they never nest: `renderViewInternal` calls
+  them in sequence). `modelThumbnail` keeps its GLB load outside and puts only its render and read-back (and
+  `thumbTargets`, which now disposes the old targets on a size change) inside. `withFullFrame` has an `inFullFrame`
+  tripwire that throws if it is entered twice. Before: two overlapping exports differed by 246 levels and left the grid
+  hidden; two overlapping keep-room captures left the pieces white (the mask material).
+- **Align follow by job id.** `alignRoom` passes the 202's job id to `followAlign(name, jobId)`, which polls
+  `GET /api/rooms/jobs/<id>` and reads the room for the poses at the end. The pure step is `jobOutcome(httpStatus,
+  status)` in the new `planner/logic/jobs.ts` (TScert, baselined): 404 is lost (the job store never prunes), no answer
+  or another error status waits, done/failed end it, any other status waits (the loop's limit ends it as lost). Every
+  exit emits a terminal `room` phase: `aligned`, or `align-failed` with the job's message, or with "the alignment was
+  lost (the server restarted?)" (lost, a 404 on the room, or the loop running out). The toast only for the room still
+  open. Before, a 404 returned silently and the UI stayed "aligning", and 'none'/'done' after a restart read as success.
+  `waitForRoom` keeps no overall limit while busy (documented at it).
+- **Render loop.** `renderErrorReported` resets when a scene opens (one 'Rendering failed' per scene, not per session;
+  its declaration moved up next to `holdFrames`). On WebGPU, `device.lost` reports "The GPU was lost; reload the page"
+  (a type guard on `renderer.backend`; re-creating the renderer is deferred).
+- **Splat key** (wont-fix): a comment at `setPhoto` that the key relies on a fresh depth DataTexture per photo.
+- **Tests.** `npm run test:planner` (`node --test planner/test/*.test.mjs`, picked up by `check:tests`): the
+  `jobOutcome` table. `npm run eval:engine-races` (`planner/ui/test/engine-races.mjs`, through the eval lock; not in
+  `eval:all`, whose `evals/all.mjs` is the evals track's): overlapping exports, overlapping keep-room captures (the
+  POST is refused by `page.route`, nothing is sent), a throwing frame callback counted per scene, and a job routed to
+  one "running" then 404. All five checks were red at 3a25cc6 and pass now.
+- **Deviations.** `waitForRoom`'s default for a member with no `scene_object` (taken as calibrated) is left as is: the
+  fix entry defers it to server-domain, while the plan's seam note gives it to this package; not changed here, to be
+  settled with the server's room GET shape.
