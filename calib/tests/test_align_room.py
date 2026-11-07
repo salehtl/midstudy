@@ -4,6 +4,7 @@ learned solver's cameras -> §4.9 poses) on cameras made from the golden room's 
 test_align_room_golden.py runs the real solver."""
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -324,6 +325,30 @@ def test_a_wrong_placement_is_not_confident() -> None:
     off = Placement(t[1].x + 0.4 * -math.sin(t[1].yaw), t[1].z + 0.4 * -math.cos(t[1].yaw), t[1].yaw, 1.0)
     scored, _ = score(photos, [Candidate(t[0]), Candidate(off), Candidate(t[2])])
     assert scored[1].placement is None and scored[2].placement is not None
+
+
+def test_depth_png_is_scored_at_its_own_scale() -> None:
+    """MoGe-2's depth.png can disagree with its own height_m by several per cent (docs/notes/rooms-calib-real.md):
+    room-2's depth 7 % deeper than its camera height says leaves its true pose far apart from the others at the
+    height's scale, and in agreement again when the candidate carries depth.png's own scale (Candidate.depth_scale)."""
+    photos = [load(SCENES / s) for s in ("living-wide", "room-1", "room-2")]
+    photos[2] = dataclasses.replace(photos[2], depth=photos[2].dep() * 1.07)
+    t = [truth_pose(s) for s in ("living-wide", "room-1", "room-2")]
+    floor, _ = score(photos, [Candidate(p) for p in t], min_confidence=0.0)
+    own, _ = score(photos, [Candidate(t[0]), Candidate(t[1]), Candidate(t[2], depth_scale=1 / 1.07)], min_confidence=0.0)
+    r_floor, r_own = floor[2].residual_cm, own[2].residual_cm
+    assert r_floor is not None and r_own is not None and r_floor > 10 and r_own < 1.5, (r_floor, r_own)
+    assert own[2].confidence > floor[2].confidence
+
+
+def test_robust_up_leaves_out_a_tilted_view() -> None:
+    """A view whose up is 5° off (a photo whose calibrated pitch is off) doesn't move the room's up."""
+    ups = [np.array([math.sin(math.radians(a)), math.cos(math.radians(a)), 0.0]) for a in (0.2, -0.3, 0.1, 0.0, 5.0)]
+    u, keep = solver.robust_up(ups)
+    assert keep == [True, True, True, True, False]
+    assert math.degrees(math.acos(float(np.clip(u[1], -1.0, 1.0)))) < 0.1
+    u2, keep2 = solver.robust_up([*ups[:2], ups[4]])
+    assert sum(keep2) == 2 and keep2[2] is False and float(u2[1]) > 0.9999
 
 
 # ---------------------------------------------------------------------------------------------------- from_views

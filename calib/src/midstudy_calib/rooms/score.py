@@ -2,11 +2,20 @@
 
 - residual_cm: each placed member's depth.png points, carried into the room through its pose and into every other
   placed member's camera; the median |view-axis depth difference| (cm, room scale) over the points that member sees
-  within OVERLAP_CUT_M; a member's residual is the median over the members it overlaps.
+  within OVERLAP_CUT_M; a member's residual is the median over the members it overlaps. The camera stands where the
+  placement says (its height × the placement's scale), but its depth points are carried at `Candidate.scale_of_depth`:
+  MoGe-2's depth.png and its height_m (the floor fit) disagree in scale by up to ~9 % on the golden photos (a wrong fov
+  bends the floor's rays), so carrying depth.png at the height's scale left 15–20 cm residuals at the true poses
+  (docs/notes/rooms-calib-real.md). A learned solver measures each photo's depth scale against its own depth; with
+  the fixtures' exact depth the two scales agree within 0.3 %.
 - confidence = min(1, overlap / CONF_OVERLAP) · exp(−residual / CONF_RESIDUAL_CM) · exp(−tilt / CONF_TILT_DEG)
   · the solver's own · min(1, constraint / CONF_CONSTRAINT), where overlap is the largest share of its points another
   member sees, tilt how far the solver's floor is from the photo's own floor fit, and constraint λmin/λmax of the
   horizontal parts of its own surface normals (a bare wall: 0, its shift along the wall is unconstrained).
+- CONF_OVERLAP 0.35 and CONF_RESIDUAL_CM 40 (Phase A had 0.3 and 20, tuned on the fixtures' exact depth): on MoGe-2's
+  depth the residual at the right pose is still 5–18 cm and hardly grows with a 10–20 cm error, so it can only catch
+  gross ones; the solver's wrong placements on the golden room all had overlap ≤ 0.25 or a bare wall (constraint). Tuned
+  on the golden room and its 21 pairs, held out on 16 other sets (docs/notes/rooms-calib-real.md, evals/rooms_moge.py).
 - A member below MIN_CONFIDENCE is unplaced (Phase A: 0.5 turns every low-overlap pair placement into unplaced and
   costs MASt3R nothing on the golden room), the least sure first and one at a time: the rest are scored again without
   it (a wrong member spoils the residuals of the members it overlaps), until none is below.
@@ -21,12 +30,12 @@ from typing import Final
 
 import numpy as np
 
-from .geometry import F64, Placement
+from .geometry import F64, Placement, ry
 from .photos import RoomPhoto
 
 MIN_CONFIDENCE: Final = 0.5
-CONF_OVERLAP: Final = 0.3
-CONF_RESIDUAL_CM: Final = 20.0
+CONF_OVERLAP: Final = 0.35
+CONF_RESIDUAL_CM: Final = 40.0
 CONF_TILT_DEG: Final = 5.0
 CONF_CONSTRAINT: Final = 0.1
 OVERLAP_CUT_M: Final = 0.5
@@ -45,6 +54,14 @@ class Candidate:
     solver_confidence: float = 1.0
     tilt_deg: float = 0.0
     diag: Diag = field(default_factory=dict[str, float | str | bool | None])
+    depth_scale: float | None = None
+
+    @property
+    def scale_of_depth(self) -> float:
+        """The scale that carries this member's depth.png into the room: the solver's own measure of it when it has
+        one (a learned solver: depth.png against its own depth, `depth_scale`), else the placement's."""
+        d = self.depth_scale
+        return d if d is not None and math.isfinite(d) and d > 0 else self.placement.scale
 
 
 @dataclass
@@ -57,12 +74,26 @@ class Scored:
     diag: Diag
 
 
-def pair_residual(a: RoomPhoto, pa: Placement, b: RoomPhoto, pb: Placement, pts_a: F64) -> tuple[float | None, float]:
+def to_room(s: RoomPhoto, c: Candidate, rel: F64) -> F64:
+    """(n, 3) points relative to s's camera (scene axes, depth.png's metres) -> room frame (module doc)."""
+    p = c.placement
+    cam = np.array([0.0, s.cam().height * p.scale, 0.0])
+    return (cam + c.scale_of_depth * rel) @ ry(p.yaw).T + np.array([p.x, 0.0, p.z])
+
+
+def from_room(s: RoomPhoto, c: Candidate, room: F64) -> F64:
+    """to_room's inverse, as s's scene-frame points (camera at its own height, depth.png's metres)."""
+    p = c.placement
+    rel = (room - np.array([p.x, 0.0, p.z])) @ ry(p.yaw) - np.array([0.0, s.cam().height * p.scale, 0.0])
+    return rel / c.scale_of_depth + np.array([0.0, s.cam().height, 0.0])
+
+
+def pair_residual(a: RoomPhoto, ca: Candidate, b: RoomPhoto, cb: Candidate, rel_a: F64) -> tuple[float | None, float]:
     """(median |depth difference| in metres at room scale, or None with too few shared points; the share of a's
-    points b sees within OVERLAP_CUT_M)."""
-    if len(pts_a) == 0:
+    points b sees within OVERLAP_CUT_M). rel_a: a's depth points relative to its camera (`RoomPhoto.lift_rel`)."""
+    if len(rel_a) == 0:
         return None, 0.0
-    q = pb.room_to_scene(pa.scene_to_room(pts_a))
+    q = from_room(b, cb, to_room(a, ca, rel_a))
     px, py, d = b.project(q)
     db_map = b.dep()
     dh, dw = db_map.shape
@@ -70,9 +101,9 @@ def pair_residual(a: RoomPhoto, pa: Placement, b: RoomPhoto, pb: Placement, pts_
     if not inside.any():
         return None, 0.0
     db = db_map[py[inside].astype(np.int64), px[inside].astype(np.int64)]
-    diff = np.abs(d[inside] - db) * pb.scale
+    diff = np.abs(d[inside] - db) * cb.scale_of_depth
     seen = (db > 0) & (diff < OVERLAP_CUT_M)
-    share = float(seen.sum()) / len(pts_a)
+    share = float(seen.sum()) / len(rel_a)
     if int(seen.sum()) < MIN_SEEN:
         return None, share
     return float(np.median(diff[seen])), share
@@ -129,7 +160,7 @@ def score_once(photos: list[RoomPhoto], placed: list[Candidate | None], pts: lis
         for j, (t, o) in enumerate(zip(photos, placed, strict=True)):
             if i == j or o is None:
                 continue
-            r, share = pair_residual(s, c.placement, t, o.placement, pts[i])
+            r, share = pair_residual(s, c, t, o, pts[i])
             shares.append(share)
             if r is not None:
                 res.append(r)
@@ -154,7 +185,7 @@ def score_once(photos: list[RoomPhoto], placed: list[Candidate | None], pts: lis
 def score(photos: list[RoomPhoto], cands: list[Candidate | None], min_confidence: float = MIN_CONFIDENCE) -> tuple[list[Scored], float | None]:
     """Score; unplace the least sure member below min_confidence (its pose kept as `rejected_*` in its diagnostics) and
     score the rest again, until none is below. Member 0 always stays (the frame)."""
-    pts = [p.lift(step=6) if p.usable else np.zeros((0, 3)) for p in photos]
+    pts = [p.lift_rel(step=6) if p.usable else np.zeros((0, 3)) for p in photos]
     placed = list(cands)
     rejected: dict[int, Scored] = {}
     while True:
