@@ -1,8 +1,11 @@
 // A form sheet for the v4 flows (library add / edit, retrain): a centred dialog on the desktop, a bottom sheet on the
 // phone (scrolling body, actions pinned at the bottom, lifted above the keyboard). One at a time; Esc, the scrim or
-// Cancel close it, and the engine's keys are swallowed while it's open. Styles: styles/manage.css.
+// Cancel close it. It is a 'sheet' layer on the shell's stack (shell.pushLayer): the shell's Esc closes it when it is
+// the innermost layer, and the engine's keys are swallowed while it's open. Styles: styles/manage.css.
 //   openSheet(shell, { title, sub, body: Node, actions: [Node], cls, onClose, label }) →
 //     { el, body, close(), setActions(nodes), setTitle(text, sub), isOpen() }
+//   isSheetOpen()  whether any sheet is open: an async open() checks it after its awaits, so it never closes a sheet
+//                  that appeared meanwhile. Close your own handle (`const mine = openSheet(…)`, `mine.close()`).
 import { h, type Child } from './kit.js'
 import { icon } from './icons.js'
 import { keyboardInset } from './logic/chrome.js'
@@ -27,18 +30,12 @@ export interface Sheet {
 }
 
 let current: Sheet | null = null
-let filterAdded = false
+
+/** @public the async open()s of Export and Settings (planner-ui-sheets) check it after their awaits */
+export const isSheetOpen = (): boolean => current !== null
 
 export function openSheet(shell: Shell, { title = '', sub = '', body = null, actions = [], cls = '', onClose, label }: SheetOptions = {}): Sheet {
   current?.close()
-  if (!filterAdded) {
-    filterAdded = true
-    shell.addKeyFilter((e) => {
-      if (!current) return false
-      if (e.key === 'Escape') { e.preventDefault(); current.close() }
-      return true
-    })
-  }
   const phone = shell.isPhone()
   const titleEl = h('h2.ms-title', title)
   const subEl = h('p.ms-sub', { hidden: !sub }, sub)
@@ -63,6 +60,7 @@ export function openSheet(shell: Shell, { title = '', sub = '', body = null, act
   place()
   const onMode = (): void => { api.close() }
   shell.events.addEventListener('mode', onMode)
+  const layer = shell.pushLayer('sheet', () => { api.close() })
   const api: Sheet = {
     el,
     body: bodyEl,
@@ -70,6 +68,7 @@ export function openSheet(shell: Shell, { title = '', sub = '', body = null, act
     close() {
       if (current !== api) return
       current = null
+      layer.remove()
       vv?.removeEventListener('resize', place)
       shell.events.removeEventListener('mode', onMode)
       scrim.remove()

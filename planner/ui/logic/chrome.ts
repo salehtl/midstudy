@@ -20,6 +20,12 @@ export function isDetent(v: string | null | undefined): v is Detent {
   return v === 'peek' || v === 'half' || v === 'full'
 }
 
+/** Whether the phone sheet may change detent now: on the phone, with a panel in it and the sheet open (a detent set).
+ *  A closed sheet stays closed (an awaited Place must not reopen it at peek). */
+export function detentAllowed(mode: Mode | null, openId: string | null, detent: Detent | null): boolean {
+  return mode === 'phone' && openId !== null && detent !== null
+}
+
 /** The window's height less the safe areas, at least 240 px. */
 export function usableHeight(height: number, safeTop: number, safeBottom: number): number {
   return Math.max(240, height - safeTop - safeBottom)

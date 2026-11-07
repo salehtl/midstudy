@@ -12,28 +12,40 @@
 //     `short` is the dock/rail label ("In scene"); `label` is the panel title ("In the scene").
 //   The photo's stage (the part of the window it fits into) is set by the workspace from 'layout' and 'panel' events.
 //   openPanel(id, { detent }), closePanel(), togglePanel(id), getOpenPanel() → { id, detent } | null
-//   setDetent('peek'|'half'|'full')  phone only
+//   setDetent('peek'|'half'|'full')  phone only, and only while the sheet is open (a closed sheet stays closed)
+//   A mode change that closes or opens a panel (the phone sheet starts closed; the desktop shows its side panel) calls
+//   that panel's onClose / onOpen and sends 'panel', as an openPanel / closePanel does.
 // Pages (phone: full-height sheet; desktop: overlay under the bar, `width` px wide)
 //   registerPage({ id, label, width = 880, mount(body, api), onOpen(info), onClose() }) → api (same shape as a panel's)
 //   openPage(id), closePage(), getOpenPage() → id | null
 // Feedback
-//   toast(text, { kind: 'info'|'ok'|'error', icon, action: { label, onClick }, ms, id }) → { el, close(), update(text) }
+//   toast(text, { kind: 'info'|'ok'|'error', icon, action: { label, onClick }, ms, id, onGone }) → { el, close(), update(text) }
 //     info/ok leave after 4 s (8 s with an action); errors stay until closed. Same id or text replaces the old one.
+//     onGone() runs once, however the toast goes (its time, Dismiss, its action, a replacement, the phone's one-at-a-time,
+//     more than three); after that the handle's close() and update() do nothing and its action never runs.
 //   confirm({ title, body, icon, danger, confirm: 'OK', cancel: 'Cancel' }) → Promise<boolean>
 //   confirm({ title, body, icon, actions: [{ label, value, kind: 'primary'|'secondary'|'danger'|'quiet', default, cancel }] }) → Promise<value>
 //     desktop: dialog (Enter = default action, Esc = cancel); phone: action sheet (cancel is the separate bottom button)
 //   menu(anchorEl, [{ label, icon, kbd, danger, disabled, midstudy (a data-midstudy test handle), onSelect } | '-'], { align: 'end'|'start' }) → { close() }
 //   Tooltips: any element with data-tip="Measure" (and data-kbd="M") shows the kit tooltip on desktop hover.
-// Keys: shell.addKeyFilter(fn) — fn(keydown) → true swallows it before engine input sees it. While a dialog, menu or
-// page is open, every key is swallowed (they handle their own).
+// Layers: one stack of what lies over the room, innermost last: 'confirm' and 'menu' (the shell's own), 'page' (Scenes),
+// 'sheet' (ui/sheet.ts) and 'modal' (the renders viewer). pushLayer(kind, cancel) → { remove() } (idempotent); topLayer()
+// → the innermost kind | null. One Esc cancels one layer (logic/layers.ts escTarget: in a field, not the page) and goes
+// no further: not to a lower layer, not to the keymap (deselect, leave Adjust floor or the ruler). A mode change cancels
+// the open menus and confirms (a confirm answers its cancel value).
+// Keys: shell.addKeyFilter(fn) — fn(keydown) → true swallows it before engine input sees it. The filters run first (the
+// renders arrows, the Shortcuts key), then while any layer is open every other key is swallowed (they handle their own).
+// epoch: a uiEpoch (ui/epoch.ts) for the async actions that must not land on another photo or another set of pieces.
 import { icon, ring, unsavedGlyph } from './icons.js'
 import { h, kbd } from './kit.js'
 import { Bus } from '../bus.js'
+import { uiEpoch, type UiEpoch } from './epoch.js'
 import {
-  chromeMetrics, detentPx, dockSplit, dragSheetHeight, isDetent, menuSpot, modeFor, movedAway, phoneToastCloses, settleDetent,
-  tapDetent, tipSpot, toastIcon, toastLife, usableHeight,
+  chromeMetrics, detentAllowed, detentPx, dockSplit, dragSheetHeight, isDetent, menuSpot, modeFor, movedAway, phoneToastCloses,
+  settleDetent, tapDetent, tipSpot, toastIcon, toastLife, usableHeight,
   type Detent, type Edges, type Mode,
 } from './logic/chrome.js'
+import { escTarget, type LayerKind } from './logic/layers.js'
 import type { ToastKind } from '../logic/messages.js'
 import type { Engine, RenderMeta } from './seam.js'
 
@@ -121,6 +133,12 @@ interface ToastOptions {
   readonly action?: { readonly label: string; readonly onClick?: () => void } | undefined
   readonly ms?: number
   readonly id?: string
+  /** once, when the toast goes, however it goes */
+  readonly onGone?: () => void
+}
+/** A layer pushed on the shell's stack (pushLayer). */
+interface LayerHandle {
+  readonly remove: () => void
 }
 export interface ToastHandle {
   readonly el: HTMLDivElement
@@ -181,6 +199,9 @@ export interface Shell {
   }
   readonly menu: (anchor: Element | null, items: readonly (MenuItem | '-')[], opts?: { readonly align?: 'end' | 'start'; readonly above?: boolean }) => { readonly close: () => void }
   readonly addKeyFilter: (fn: (e: KeyboardEvent) => boolean) => () => void
+  readonly pushLayer: (kind: LayerKind, cancel: () => void) => LayerHandle
+  readonly topLayer: () => LayerKind | null
+  readonly epoch: UiEpoch
   readonly glyphs: { readonly ring: typeof ring; readonly unsavedGlyph: typeof unsavedGlyph }
 }
 
@@ -202,9 +223,10 @@ interface Toast {
   timer: ReturnType<typeof setTimeout> | undefined
   close: (instant?: boolean) => void
 }
-interface Modal {
-  readonly els: readonly Element[]
+interface Layer {
+  readonly kind: LayerKind
   readonly cancel: () => void
+  /** a confirm's default action (Enter) */
   enter: (() => void) | null
 }
 interface SheetDrag {
@@ -265,11 +287,30 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     const next = modeFor(window.innerWidth, coarse.matches)
     if (next === mode) return false
     const prev = mode
+    const wasOpen = getOpenPanel()
     mode = next
     root.dataset['mode'] = mode
-    if (prev) rehost(prev)
+    hideTip()
+    if (prev) {
+      rehost(prev)
+      panelMoved(wasOpen, getOpenPanel())
+      // menus and confirms are laid out for the old mode: cancel them (a confirm answers its cancel value, the safe one)
+      for (const l of [...layers].reverse()) if (l.kind === 'menu' || l.kind === 'confirm') l.cancel()
+    }
     events.emit('mode', { mode })
     return true
+  }
+  // A mode change closed or opened a panel: tell it and the listeners, as openPanel / closePanel do.
+  function panelMoved(was: { readonly id: string } | null, now: { readonly id: string; readonly detent: Detent | null } | null): void {
+    if (was?.id === now?.id) return
+    if (was) {
+      panels.get(was.id)?.spec.onClose?.()
+      events.emit('panel', { id: was.id, open: false, detent: null })
+    }
+    if (now) {
+      panels.get(now.id)?.spec.onOpen?.({ mode: currentMode(), detent: now.detent })
+      events.emit('panel', { id: now.id, open: true, detent: now.detent })
+    }
   }
 
   // --- panels -------------------------------------------------------------------------------------------------
@@ -327,7 +368,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     openId = id
     if (mode === 'phone') {
       showInSheet(p)
-      setDetent(isDetent(d) ? d : was?.id === id && detent ? detent : p.phoneDetent, { silent: true })
+      applyDetent(isDetent(d) ? d : was?.id === id && detent ? detent : p.phoneDetent, true)
     } else {
       collapsed = false
       store.set('midstudy.panel.collapsed', '0')
@@ -342,6 +383,9 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     const was = getOpenPanel()
     if (!was) return
     const p = panels.get(was.id)
+    // a drag still down ends here: its pointerup finds no drag and cannot reopen the sheet
+    drag = null
+    sheet.classList.remove('is-dragging')
     if (mode === 'phone') { detent = null; sheet.classList.remove('is-open'); sheet.style.height = '0px' } else { collapsed = true; store.set('midstudy.panel.collapsed', '1') }
     p?.spec.onClose?.()
     syncChrome()
@@ -407,8 +451,14 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     sheet.setAttribute('aria-label', p.spec.label)
     sheet.classList.add('is-open')
   }
+  // setDetent (the API, the scrim, the grabber) acts only while the sheet is open: an awaited Place or a job's Place that
+  // settles after the sheet closed leaves it closed. openPanel, which runs while it is still closed, applies its own.
   function setDetent(d: Detent, { silent = false }: { readonly silent?: boolean } = {}): void {
-    if (mode !== 'phone' || !openId || !isDetent(d)) return
+    if (!detentAllowed(mode, openId, detent) || !isDetent(d)) return
+    applyDetent(d, silent)
+  }
+  function applyDetent(d: Detent, silent: boolean): void {
+    if (mode !== 'phone' || !openId) return
     detent = d
     sheet.style.height = `${String(px(d) + m.safe.bottom)}px`
     syncChrome()
@@ -439,6 +489,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     const d = drag
     drag = null
     sheet.classList.remove('is-dragging')
+    if (detent === null) return // the sheet closed under the finger
     if (!d.moved) { setDetent(tapDetent(detent)); return } // tap: grow
     const best = settleDetent(d.h0 - (d.y - d.y0), d.v, m.usable)
     if (best === null) { closePanel(); return }
@@ -491,6 +542,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
   // --- pages (Scenes) -------------------------------------------------------------------------------------
   const pages = new Map<string, Page>()
   let pageOpen: string | null = null
+  let pageLayer: (() => void) | null = null
   let pageEls: HTMLElement[] = []
   function registerPage(spec: PageSpec): PageApi {
     if (!spec.id || pages.has(spec.id)) throw new Error(`registerPage: missing or duplicate id "${spec.id}"`)
@@ -547,6 +599,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     if (pageOpen && pageOpen !== id) closePage()
     if (pageOpen === id) return
     pageOpen = id
+    pageLayer = addLayer('page', () => { closePage() }).remove
     mountPage(p)
     p.spec.onOpen?.({ mode: currentMode() })
     events.emit('page', { id, open: true })
@@ -555,6 +608,8 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     if (!pageOpen) return
     const p = pages.get(pageOpen)
     pageOpen = null
+    pageLayer?.()
+    pageLayer = null
     for (const el of pageEls) el.remove()
     pageEls = []
     p?.spec.onClose?.()
@@ -565,25 +620,33 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
 
   // --- toasts --------------------------------------------------------------------------------------------
   const toasts: Toast[] = []
-  function toast(text: string, { kind = 'info', icon: ic, action, ms, id }: ToastOptions = {}): ToastHandle {
+  function toast(text: string, { kind = 'info', icon: ic, action, ms, id, onGone }: ToastOptions = {}): ToastHandle {
     const key = (id ?? '') || `${kind}:${text}`
     const old = toasts.find((t) => t.key === key)
     if (old) old.close(true)
     const textEl = h('span.toast-text', text)
     const el = h(`div.toast.toast-${kind}`, { role: kind === 'error' ? 'alert' : 'status' }, icon(toastIcon(kind, ic), { size: 20 }), textEl)
+    let gone = false
     const t: Toast = {
       key, el, kind, timer: undefined,
+      // every exit comes here once: its time, Dismiss, its action, a replacement, the phone rule, more than three
       close: (instant = false) => {
+        if (gone) return
+        gone = true
         clearTimeout(t.timer)
         const i = toasts.indexOf(t)
         if (i >= 0) toasts.splice(i, 1)
-        if (instant) { el.remove(); return }
-        el.classList.add('is-leaving')
-        setTimeout(() => { el.remove() }, 200)
+        if (instant) el.remove()
+        else {
+          el.classList.add('is-leaving')
+          setTimeout(() => { el.remove() }, 200)
+        }
+        onGone?.()
       },
     }
-    const update = (next: string): void => { textEl.textContent = next }
-    if (action) el.append(h('button.toast-action', { type: 'button', onclick: () => { t.close(); action.onClick?.() } }, action.label))
+    const update = (next: string): void => { if (!gone) textEl.textContent = next }
+    // a leaving toast's button does nothing (and takes no pointer: kit.css .toast.is-leaving)
+    if (action) el.append(h('button.toast-action', { type: 'button', onclick: () => { if (!toasts.includes(t)) return; t.close(); action.onClick?.() } }, action.label))
     el.append(h('button.toast-close', { type: 'button', 'aria-label': 'Dismiss', onclick: () => { t.close() } }, icon('close', { size: 16 })))
     const life = toastLife(kind, !!action, ms)
     if (life > 0) t.timer = setTimeout(() => { t.close() }, life)
@@ -595,13 +658,19 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     return { el, close: () => { t.close() }, update }
   }
 
-  // --- layer: dialogs, action sheets, menus, tooltips ------------------------------------------------------
-  const modals: Modal[] = [] // innermost last
-  function pushModal(els: readonly Element[], cancel: () => void): { readonly modal: Modal; readonly done: () => void } {
-    const modal: Modal = { els, cancel, enter: null }
-    modals.push(modal)
+  // --- layers: the one overlay stack; dialogs, action sheets, menus, tooltips --------------------------------
+  const layers: Layer[] = [] // innermost last
+  function addLayer(kind: LayerKind, cancel: () => void): { readonly layer: Layer; readonly remove: () => void } {
+    const layer: Layer = { kind, cancel, enter: null }
+    layers.push(layer)
+    return { layer, remove: () => { const i = layers.indexOf(layer); if (i >= 0) layers.splice(i, 1) } }
+  }
+  const pushLayer = (kind: LayerKind, cancel: () => void): LayerHandle => ({ remove: addLayer(kind, cancel).remove })
+  const topLayer = (): LayerKind | null => layers.at(-1)?.kind ?? null
+  function pushModal(kind: 'confirm' | 'menu', els: readonly Element[], cancel: () => void): { readonly layer: Layer; readonly done: () => void } {
+    const { layer, remove } = addLayer(kind, cancel)
     mounts.layer.append(...els)
-    return { modal, done: () => { const i = modals.indexOf(modal); if (i >= 0) modals.splice(i, 1); for (const e of els) e.remove() } }
+    return { layer, done: () => { remove(); for (const e of els) e.remove() } }
   }
 
   function ask<V>(base: ConfirmBase, actions: readonly ConfirmAction<V>[]): Promise<V | null> {
@@ -620,12 +689,12 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
             h('div.dialog-text', h('h2.dialog-title', title), body ? h('p.dialog-body', body) : null)),
           h('div.dialog-actions', btns))
         const sc = h('div.scrim', { onclick: () => { finish(cancelValue) } })
-        const pushed = pushModal([sc, dlg], () => { finish(cancelValue) })
+        const pushed = pushModal('confirm', [sc, dlg], () => { finish(cancelValue) })
         done = pushed.done
         const def = actions.findIndex((a) => a.default)
         ;(btns[def] ?? btns.at(-1))?.focus()
         const defAction = actions[def]
-        pushed.modal.enter = defAction ? () => { finish(defAction.value) } : null
+        pushed.layer.enter = defAction ? () => { finish(defAction.value) } : null
       } else {
         const main = actions.filter((a) => a !== cancelAction).map((a) => { const b = mkBtn(a); b.classList.add('btn-block'); return b })
         const sheetEl = h('div.actionsheet', { role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title },
@@ -634,7 +703,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
             main.length ? h('div.actionsheet-buttons', main) : null),
           cancelAction ? h('button.actionsheet-cancel', { type: 'button', onclick: () => { finish(cancelValue) } }, cancelAction.label) : null)
         const sc = h('div.scrim', { onclick: () => { finish(cancelValue) } })
-        done = pushModal([sc, sheetEl], () => { finish(cancelValue) }).done
+        done = pushModal('confirm', [sc, sheetEl], () => { finish(cancelValue) }).done
       }
     })
   }
@@ -660,7 +729,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
       return b
     }))
     const catcher = h('div', { style: { position: 'fixed', inset: '0' }, onpointerdown: (e) => { e.preventDefault(); close() } })
-    done = pushModal([catcher, el], close).done
+    done = pushModal('menu', [catcher, el], close).done
     anchor?.setAttribute('aria-expanded', 'true')
     // place it under (or above) the anchor, inside the window
     const r: Edges = anchor?.getBoundingClientRect() ?? { left: m.width / 2, right: m.width / 2, top: m.height / 2, bottom: m.height / 2, width: 0, height: 0 }
@@ -692,7 +761,7 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     hideTip()
     if (!(t instanceof HTMLElement) || e.buttons) return // not during a drag (the rotate grip moves under the pointer)
     tipTimer = setTimeout(() => {
-      if (!t.isConnected || !t.matches(':hover') || dragging) return
+      if (mode !== 'desktop' || !t.isConnected || !t.matches(':hover') || dragging) return // (a switch to the phone hides it too)
       const tip = h('div.tooltip', { role: 'tooltip' }, h('span', t.dataset['tip']), t.dataset['kbd'] ? kbd(t.dataset['kbd']) : null)
       tipEl = tip
       mounts.layer.append(tip)
@@ -712,23 +781,29 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     if (e.buttons || !tipFor.el.isConnected || movedAway(r.left, r.top, tipFor.x, tipFor.y)) hideTip()
   }, true)
 
-  // --- keys: Esc closes the innermost layer; modals swallow keys before the engine's input sees them -------------
+  // --- keys: Esc cancels the one innermost layer; open layers swallow keys before the engine's input sees them -------
   const keyFilters: ((e: KeyboardEvent) => boolean)[] = []
   const addKeyFilter = (fn: (e: KeyboardEvent) => boolean): (() => void) => {
     keyFilters.push(fn)
-    return () => { keyFilters.splice(keyFilters.indexOf(fn), 1) }
+    return () => { const i = keyFilters.indexOf(fn); if (i >= 0) keyFilters.splice(i, 1) }
   }
+  // An Esc the stack handled: it goes no further (not to the key filters, not to the keymap's deselect / leave).
+  const escDone = new WeakSet<Event>()
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return
-    const top = modals.at(-1)
-    if (top) { e.preventDefault(); top.cancel(); return }
-    if (pageOpen && !elementOf(e.target)?.closest('input, textarea')) { e.preventDefault(); closePage() }
+    const i = escTarget(layers.map((l) => l.kind), !!elementOf(e.target)?.closest('input, textarea'))
+    const layer = i === null ? undefined : layers[i]
+    if (!layer) return
+    e.preventDefault()
+    escDone.add(e)
+    layer.cancel()
   }, true)
   window.addEventListener('keydown', (e) => {
-    const enter = modals.at(-1)?.enter
+    const enter = layers.at(-1)?.enter
     if (e.key === 'Enter' && enter && !elementOf(e.target)?.closest('button, input, textarea')) { e.preventDefault(); enter() }
   }, true)
-  engine?.input?.setKeyFilter((e) => modals.length > 0 || pageOpen !== null || keyFilters.some((f) => f(e)))
+  // The filters first (the renders arrows and the Shortcuts key act while their own layer is open), then any layer.
+  engine?.input?.setKeyFilter((e) => escDone.has(e) || keyFilters.some((f) => f(e)) || layers.length > 0)
 
   // --- touch: no page zoom (iOS ignores user-scalable=no) ----------------------------------------------
   for (const t of ['gesturestart', 'gesturechange']) document.addEventListener(t, (e) => { e.preventDefault() }, { passive: false })
@@ -768,6 +843,9 @@ export function createShell({ engine }: { readonly engine: Engine | null }): She
     confirm,
     menu,
     addKeyFilter,
+    pushLayer,
+    topLayer,
+    epoch: uiEpoch(engine),
     glyphs: { ring, unsavedGlyph },
   }
 }
