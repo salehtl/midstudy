@@ -30,7 +30,7 @@ an error status without its own entry answers [error.schema.json](error.schema.j
 | `GET /api/scenes` (§4.4) | | 200 `scene-list` |
 | `POST /api/scenes` | raw body; `X-Midstudy-Meta`: `scene-meta` | 202 `scene-created` |
 | `GET /api/scenes/jobs` | | 200 `scene-jobs` |
-| `GET /api/scenes/jobs/<id>` | | 200 `scene-job` (a `CalibrationJob` or a `LightJob`) |
+| `GET /api/scenes/jobs/<id>` | | 200 `scene-job` (a `CalibrationJob` or a `LightJob`); 404 only for an id this server run never made |
 | `GET /api/scenes/<name>` (§4.4, §4.8) | | 200 `scene-detail` |
 | `PUT /api/scenes/<name>` | `scene-put` | 200 `scene-detail` |
 | `DELETE /api/scenes/<name>` | | 200 `scene-deleted` |
@@ -41,7 +41,7 @@ an error status without its own entry answers [error.schema.json](error.schema.j
 | `GET /api/rooms` (§4.9) | | 200 `room-list` |
 | `POST /api/rooms` | `room-create` | 201 `room-detail` |
 | `GET /api/rooms/jobs` | | 200 `room-jobs` |
-| `GET /api/rooms/jobs/<id>` | | 200 `room-job` (an `AlignJob`) |
+| `GET /api/rooms/jobs/<id>` | | 200 `room-job` (an `AlignJob`); 404 only for an id this server run never made |
 | `GET /api/rooms/<room>` | | 200 `room-detail` |
 | `PUT /api/rooms/<room>` | `room-put` | 200 `room-detail` |
 | `DELETE /api/rooms/<room>` | | 200 `room-deleted` |
