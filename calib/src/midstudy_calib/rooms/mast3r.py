@@ -111,6 +111,12 @@ def ensure_code() -> Path:
     """The pinned checkout of MASt3R (with its submodules), cloned on first use; no network once it is there. One
     process at a time: the others wait on the lock and find it ready."""
     root = code_dir()
+    if (root / STAMP).is_file() and not (root / ".git").exists():
+        # A read-only copy without .git (the Nix package's, nix/mast3r.nix): its stamp is all there is to check, and
+        # neither the lock nor a provision can be written next to it.
+        if (root / STAMP).read_text() == COMMIT:
+            return root
+        raise SolverUnavailable(f"MASt3R's code at {root} is not the pinned commit {COMMIT[:7]}")
     root.parent.mkdir(parents=True, exist_ok=True)
     with (root.parent / ".mast3r.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
