@@ -25,7 +25,7 @@ import { SpendCap } from './spend.ts'
 import { startCap } from './logic/spend.ts'
 import { readJsonFile } from '../../common/files.ts'
 import { enableStrict, strictRequested } from './strict.ts'
-import { splitCommand } from '../../common/tools.ts'
+import { killAllTools, liveToolPids, splitCommand } from '../../common/tools.ts'
 import { routes as libraryRoutes } from './routes/library.ts'
 import { routes as layoutsRoutes } from './routes/layouts.ts'
 import { routes as renderRoutes } from './routes/render.ts'
@@ -37,6 +37,9 @@ import { routes as productRoutes } from './product/route.ts'
 /** The repository root (server/src/main.ts → ../..). */
 const REPO = path.resolve(import.meta.dirname, '../..')
 const PROG = 'main.ts'
+/** How long the stop waits for requests, tools and hooks: the tools' 5 s kill grace plus room for their 'close' and
+ *  a cost row; under the eval harness's own stop ladder. */
+const STOP_LIMIT_MS = 7000
 
 /** The /api route modules, in v1's order (within a method the first full match wins). */
 function allRoutes(deps: ServerDeps): readonly ApiRoute[] {
@@ -158,14 +161,49 @@ async function main(argv: readonly string[]): Promise<void> {
   if (falMock()) process.stdout.write('midstudy planner: MIDSTUDY_FAL_MOCK is set, so Render makes no fal calls and costs $0\n')
 
   let stopping = false
+  // Requests still open, for the line the stop logs when it gives up waiting. While stopping, a connection whose
+  // request just ended is closed as soon as it is idle (else a keep-alive one would hold the close for its timeout).
+  let openRequests = 0
+  server.on('request', (_req, res) => {
+    openRequests += 1
+    res.once('close', () => {
+      openRequests -= 1
+      if (stopping) {
+        setImmediate(() => {
+          server.closeIdleConnections()
+        })
+      }
+    })
+  })
+  // The stop (SIGINT/SIGTERM): no new connections, idle ones closed, requests in flight allowed to finish (a render
+  // between its fal answer and its cost row); every tool ended (SIGTERM, SIGKILL after 5 s) behind killAllTools'
+  // latch, so the library queue can't start the next job's tool; the shutdown hooks run. All of it under one limit,
+  // after which what is still pending is named, the connections cut and the process exits (common/tools.ts' 'exit'
+  // handler SIGKILLs any tool left). A second signal exits at once.
   const stop = (): void => {
-    if (stopping) return
+    if (stopping) process.exit(0)
     stopping = true
-    server.close()
-    server.closeAllConnections()
-    const finish = Promise.allSettled(hooks.map((fn) => fn()))
-    const limit = new Promise((resolve) => setTimeout(resolve, 5000).unref())
-    void Promise.race([finish, limit]).then(() => {
+    const serverClosed = new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
+    server.closeIdleConnections()
+    const toolsGone = killAllTools()
+    const unsettled = new Set<number>()
+    const hookRuns = hooks.map((fn, i) => {
+      unsettled.add(i + 1)
+      return Promise.resolve().then(fn).finally(() => unsettled.delete(i + 1))
+    })
+    const finish = Promise.allSettled([Promise.allSettled(hookRuns), serverClosed, toolsGone]).then(() => true)
+    const limit = new Promise<boolean>((resolve) => setTimeout(resolve, STOP_LIMIT_MS, false).unref())
+    void Promise.race([finish, limit]).then((clean) => {
+      if (!clean) {
+        const pids = liveToolPids()
+        process.stderr.write('midstudy server: stopping after ' + String(STOP_LIMIT_MS / 1000) + ' s with ' + String(openRequests) + ' request(s) open, tool pid(s) ' +
+          (pids.length === 0 ? 'none' : pids.join(' ')) + ', shutdown hook(s) ' + (unsettled.size === 0 ? 'none' : [...unsettled].join(' ')) + ' unsettled\n')
+        server.closeAllConnections()
+      }
       process.exit(0)
     })
   }
