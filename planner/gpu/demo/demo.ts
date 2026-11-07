@@ -1,7 +1,9 @@
 // The WebGPU check's demo: a golden scene drawn by the planner's own render code (planner/engine.passes.ts drawFrame,
 // planner/lighting.ts, planner/gpu/splat-layer.ts, the kernels' depth decode), without the engine's state and UI, so one
 // page can be forced onto either backend and either sort. Driven by planner/gpu/demo/check.mjs through window.gpuDemo.
-// URL: ?backend=webgpu|webgl&sort=gpu|cpu&keyBits=16|24|32
+// URL: ?backend=webgpu|webgl&sort=gpu|cpu&keyBits=16|24|32&sortWorker=throw-load|throw-sort|throw-uncaught
+// (sortWorker: a broken CPU sort worker, from a Blob URL: one that throws as it loads, one that answers every sort with
+// a fatal error as sort.worker.ts's catch does, one whose sort handler throws uncaught.)
 import * as THREE from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { azElOf, decodeDepth, dirOf, loadKernels, splatMultiplier } from '../../../core/js/web.js'
@@ -21,9 +23,19 @@ const params = new URLSearchParams(location.search)
 const forceWebGL = params.get('backend') === 'webgl'
 const sortParam = params.get('sort')
 const keyBitsParam = Number(params.get('keyBits') ?? 16)
+const sortWorkerParam = params.get('sortWorker')
+
+// A broken sort worker for the failure checks (no bundled file): a module worker from a Blob URL.
+function brokenWorkerUrl(kind: string): string | null {
+  const body = kind === 'throw-load' ? "throw new Error('the sort worker failed to load (sortWorker=throw-load)')"
+    : kind === 'throw-sort' ? "self.addEventListener('message', (e) => { const m = e.data; if (m.type !== 'sort') return; try { throw new Error('the sort failed (sortWorker=throw-sort)') } catch (err) { self.postMessage({ type: 'error', id: m.id, message: String(err), fatal: true }) } })"
+      : kind === 'throw-uncaught' ? "self.addEventListener('message', (e) => { if (e.data.type === 'sort') throw new Error('the sort threw (sortWorker=throw-uncaught)') })"
+        : null
+  return body === null ? null : URL.createObjectURL(new Blob([body], { type: 'text/javascript' }))
+}
 
 interface Camera { fov_y_deg: number; height_m: number; pitch_deg: number; roll_deg: number }
-interface ItemSpec { uid: string; glb?: string; splat?: string; dims_cm?: { w: number; d: number; h: number }; position: [number, number, number]; rotation_y_deg?: number }
+interface ItemSpec { uid: string; glb?: string; splat?: string; dims_cm?: { w: number; d: number; h: number }; position: [number, number, number]; rotation_y_deg?: number; settle?: boolean }
 interface ItemRec { uid: string; group: THREE.Group; box: THREE.Box3; splat: SplatData | null; shadow: THREE.Mesh }
 interface Timing { fetchMs: number; decodeMs: number; firstFrameMs: number; splats: number }
 
@@ -44,6 +56,9 @@ window.gpuDemo = api
 let started: (v: { backend: string; canvas: number[] }) => void = () => undefined
 let failed: (e: unknown) => void = () => undefined
 api['ready'] = new Promise((resolve, reject) => { started = resolve; failed = reject })
+// an exception anywhere in the module's evaluation rejects ready (failed() on a settled promise does nothing)
+window.addEventListener('error', (e) => { failed(e.error) })
+window.addEventListener('unhandledrejection', (e) => { failed(e.reason) })
 await Promise.all([renderer.init(), loadKernels(new URL('midstudy_wasm_web_bg.wasm', new URL('../bundle/', location.href)))]).catch((e: unknown) => { failed(e); throw e })
 
 const P = createPasses(renderer)
@@ -140,7 +155,8 @@ function ensureSplats(): SplatLayer {
   if (splats) return splats
   const sort: SortMode | undefined = sortParam === 'cpu' || sortParam === 'gpu' ? sortParam : undefined
   const keyBits = keyBitsParam === 24 || keyBitsParam === 32 ? keyBitsParam : 16
-  splats = new SplatLayer({ renderer, ...(sort ? { sort } : {}), keyBits, workerUrl: new URL('../bundle/sort.worker.js', location.href) })
+  const workerUrl = (sortWorkerParam ? brokenWorkerUrl(sortWorkerParam) : null) ?? new URL('../bundle/sort.worker.js', location.href)
+  splats = new SplatLayer({ renderer, ...(sort ? { sort } : {}), keyBits, workerUrl })
   setSplatSource(P, splats.target.texture)
   return splats
 }
@@ -152,7 +168,8 @@ function boxChild(d: { w: number; d: number; h: number }): { obj: THREE.Object3D
 }
 
 // An item as the engine builds one (attachBuilt): its GLB or box, its lights, its depth layer, its splats and their
-// shadow-only caster, its contact shadow.
+// shadow-only caster, its contact shadow. settle: false returns at once, without waiting for (or timing) the first
+// splat frame.
 async function addItem(spec: ItemSpec): Promise<{ uid: string; splats: number | null; timing: Timing | null }> {
   const t0 = performance.now()
   const group = new THREE.Group()
@@ -187,8 +204,8 @@ async function addItem(spec: ItemSpec): Promise<{ uid: string; splats: number | 
   group.updateMatrixWorld(true)
   items.set(spec.uid, { uid: spec.uid, group, box: child.box, splat: data, shadow })
   if (data) ensureSplats().add(spec.uid, data, group)
-  if (timing && splats) {
-    await splats.settle(camera) // the CPU sort's first order (the GPU sort runs in the draw)
+  if (timing && splats && spec.settle !== false) {
+    await splats.settle(camera) // the order for this camera and set (the CPU sort's on the main thread, the GPU's in the draw)
     draw(null)
     await gpuSync()
     timing.firstFrameMs = performance.now() - t0
@@ -228,12 +245,13 @@ async function gpuSync(): Promise<void> {
   if (gl instanceof WebGL2RenderingContext) { const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px) }
 }
 
-// The full photo frame at its own resolution, splats sorted for the capture camera first (§4.7), as a PNG.
-async function capture(): Promise<{ dataUrl: string; width: number; height: number; ms: number }> {
+// The full photo frame at its own resolution, splats sorted for the capture camera first (§4.7), as a PNG; settle: false
+// draws whatever order the layer has (what the next frame on screen would show).
+async function capture(opts: { settle?: boolean } = {}): Promise<{ dataUrl: string; width: number; height: number; ms: number }> {
   const t0 = performance.now()
   const w = photo.w, h = photo.h
   const px = await withFullFrame(P, camera, photo.w / photo.h, w, h, async () => {
-    if (splats && splats.splats > 0) await splats.settle(camera)
+    if (splats && splats.splats > 0 && opts.settle !== false) await splats.settle(camera)
     const out = captureTarget(P, w, h)
     draw(out)
     return readRgba(renderer, out, w, h)
@@ -328,6 +346,17 @@ Object.assign(api, {
     return { median: median(t), all: t, gpuRender: g }
   },
   debugSort,
+  // how long settle() takes for the current camera, or its error
+  settleMs: async () => {
+    const t0 = performance.now()
+    try { await splats?.settle(camera); return { ms: performance.now() - t0, error: null } } catch (e) { return { ms: performance.now() - t0, error: String(e) } }
+  },
+  // every splat item nudged by 1 mm and one frame drawn: a change the CPU sort hands to its worker
+  nudgeSplats: async () => {
+    for (const r of items.values()) if (r.splat) { r.group.position.x += 0.001; r.group.updateMatrixWorld(true) }
+    draw(null)
+    await gpuSync()
+  },
   stats: () => ({ splats: splats?.stats() ?? null, info: { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, compute: renderer.info.compute.calls }, heap: heapUsed() }),
 })
 started({ backend: isWebGPU(renderer) ? 'webgpu' : 'webgl2', canvas: [renderer.domElement.width, renderer.domElement.height] })

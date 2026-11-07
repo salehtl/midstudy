@@ -53,6 +53,7 @@
     "test:scenes": "node --test --test-concurrency=1 server/test/scenes/*.test.ts",
     "test:library": "node --test --test-concurrency=1 server/test/library/*.test.ts",
     "test:pipeline": "node --test --test-concurrency=1 pipeline/test/*.test.ts",
+    "test:splats": "node --test planner/gpu/test/*.test.mjs",
     "test:engine": "node planner/engine.test.mjs",
     "test:ui": "node planner/ui/test/logic-vs-v1.mjs && node planner/ui/test/bus.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"

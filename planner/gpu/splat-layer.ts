@@ -9,9 +9,11 @@
 //                                                               depth and the meshes, depth only), splats tested,
 //                                                               no depth writes; layer.target is composited by the
 //                                                               screen pass (planner/gpu/passes.ts createSplatComposite)
-//   await layer.settle(camera)                                  the order is for this camera and set (captures)
-//   onChange()                                                  a worker sort landed: the drawn order changed
-//   layer.stats() · layer.dispose()
+//   await layer.settle(camera)                                  the order is for this camera and set (captures): at
+//                                                               once (the CPU sort sorts here when it is stale)
+//   onChange()                                                  a worker sort landed (the drawn order changed), or the
+//                                                               worker failed (draw again: the main thread sorts now)
+//   layer.stats() · layer.dispose()                             after dispose() every call but stats() throws
 //
 // Drawing follows Spark 2.4 (what v1 draws with), so the two look alike: each splat is an instanced quad around its
 // center, its 3D covariance (Σ = R S² Rᵀ, item frame) turned into view space with the item's and the camera's
@@ -22,8 +24,12 @@
 //
 // Order: one back-to-front order over every placed splat (all items together), by depth along the view axis.
 // WebGPU: a key kernel (16-bit depth keys over the frame's depth range) and GpuRadixSort, in one compute submission
-// before the draw, re-run only when the camera, a transform or the set changed. WebGL2 (no compute): the same keys
-// and a counting sort in a worker (sort.worker.ts); the previous order draws until the new one lands.
+// before the draw, re-run only when the camera (its view and near plane), a transform or the set changed (sortKey,
+// planner/logic/splats.ts). WebGL2 (no compute): the same keys and a counting sort (sort-cpu.ts). A set change and a
+// capture (settle) sort on the main thread, so a new set never draws a blank frame; camera and transform changes sort
+// in a worker (sort.worker.ts), the previous order drawing until the new one lands. A worker that fails (it does not
+// load, a message cannot be read, or it answers with a fatal error) is down for good: everything sorts on the main
+// thread from then on. The decisions are planner/logic/splats.ts's (cpuSortAction, cpuReplyVerdict).
 import {
   DataTexture, FloatType, HalfFloatType, InstancedBufferAttribute, InstancedBufferGeometry, Float32BufferAttribute, Matrix4, Mesh,
   NearestFilter, NodeMaterial, RGBAFormat, RenderTarget, Scene, Vector2, Vector3, CustomBlending, DoubleSide, OneFactor, OneMinusSrcAlphaFactor,
@@ -38,6 +44,10 @@ import { GpuRadixSort, padToBlock } from './radix-sort.js'
 import type { SplatData } from './splat-data.js'
 import { clearTarget, isWebGPU, render } from './passes.js'
 import type { FromWorker, ToWorker } from './sort-messages.js'
+import { newScratch, sortSplats } from './sort-cpu.js'
+import type { SortScratch } from './sort-cpu.js'
+import { cpuReplyVerdict, cpuSortAction, cpuSortStart, sortKey } from '../logic/splats.js'
+import type { CpuSort } from '../logic/splats.js'
 
 const TEX_W = 2048          // data texture width (texels); rows grow with the capacity
 const MAX_ITEMS = 256       // item slots (transform texture rows)
@@ -57,13 +67,15 @@ export interface SplatLayerOptions {
   keyBits?: 16 | 24 | 32
   /** the bundled sort.worker.js (the CPU sort; default: beside this module's chunk) */
   workerUrl?: string | URL
-  /** called when a worker sort lands (the drawn order changed: draw again) */
+  /** called when a worker sort lands (the drawn order changed: draw again), or when the worker fails */
   onChange?: () => void
 }
 
 export interface SplatStats {
   sortMode: SortMode, backend: 'webgpu' | 'webgl2', splats: number, items: number, capacity: number, sorts: number,
-  lastSortMs: number | null, lastWorkerMs: number | null, gpuBytes: number, keyBits: number
+  lastSortMs: number | null, lastWorkerMs: number | null, gpuBytes: number, keyBits: number,
+  /** the CPU sort's worker: not made yet, up, or down for good (null: the GPU sort) */
+  cpuWorker: CpuSort['worker'] | null
 }
 
 interface Item { uid: string, data: SplatData, object: Object3D, slot: number, start: number }
@@ -195,10 +207,12 @@ export class SplatLayer {
   private workerUrl: string | URL | undefined
   private onChange: (() => void) | undefined
   private sortId = 0
-  private pending: { id: number, key: string, resolve: (() => void)[] } | null = null
-  private sortedKey = ''      // what the drawn order was sorted for
-  private wantKey = ''        // what the last update asked for
-  private settleWaiters: { key: string, resolve: () => void }[] = []
+  private cpu: CpuSort = cpuSortStart()  // the CPU sort's state (its sortedKey is what the drawn order is for)
+  private cpuSet: { version: number, centers: Float32Array, slots: Uint16Array, count: number } | null = null // the set, kept here too
+  private scratch: SortScratch = newScratch(0)
+  private gpuSortedKey = ''   // the GPU sort's: what the drawn order was sorted for
+  private wantKey = ''        // what the last update asked for ('' after a set change, until the next update)
+  private disposed = false
   private sorts = 0
   private lastSortMs: number | null = null
   private lastWorkerMs: number | null = null
@@ -231,7 +245,8 @@ export class SplatLayer {
   itemIds(): string[] { return [...this.items.keys()] }
 
   add(uid: string, data: SplatData, object: Object3D): void {
-    if (this.items.has(uid)) this.remove(uid)
+    this.live()
+    if (this.items.has(uid)) this.drop(uid) // replaced: one rebuild, below
     const slot = this.slotFree.pop()
     if (slot === undefined) throw new Error(`at most ${String(MAX_ITEMS)} splat items`)
     this.items.set(uid, { uid, data, object, slot, start: 0 })
@@ -239,11 +254,20 @@ export class SplatLayer {
   }
 
   remove(uid: string): void {
+    this.live()
+    if (this.drop(uid)) this.rebuild()
+  }
+
+  private drop(uid: string): boolean {
     const it = this.items.get(uid)
-    if (!it) return
+    if (!it) return false
     this.items.delete(uid)
     this.slotFree.push(it.slot)
-    this.rebuild()
+    return true
+  }
+
+  private live(): void {
+    if (this.disposed) throw new Error('the splat layer was disposed')
   }
 
   // The combined set: every item's splats back to back, uploaded as data textures; the GPU sort and the draw are
@@ -278,12 +302,18 @@ export class SplatLayer {
     }
     tex.center.needsUpdate = tex.cov.needsUpdate = tex.cov2.needsUpdate = true
     this.uCount.value = n
-    if (this.geometry) this.geometry.instanceCount = this.sortMode === 'gpu' ? n : 0
-    this.sortedKey = ''
-    if (this.sortMode === 'cpu') {
+    this.wantKey = ''
+    if (this.sortMode === 'gpu') {
+      if (this.geometry) this.geometry.instanceCount = n
+      this.gpuSortedKey = ''
+    } else {
+      // the previous order keeps drawing until the next update sorts the new set here (render() updates first)
+      if (this.geometry) this.geometry.instanceCount = Math.min(this.geometry.instanceCount, n)
+      this.cpuSet = { version: this.version, centers, slots, count: n }
+      this.cpu = { ...this.cpu, sortedKey: '', setChanged: true }
       const w = this.ensureWorker()
       const msg: ToWorker = { type: 'set', version: this.version, centers, slots, count: n }
-      w.postMessage(msg, [centers.buffer, slots.buffer])
+      w?.postMessage(msg) // a copy: the set stays here for the main-thread sorts
     }
     if (this.mesh) this.mesh.visible = n > 0
   }
@@ -356,55 +386,102 @@ export class SplatLayer {
     return kernel
   }
 
-  private ensureWorker(): Worker {
+  private ensureWorker(): Worker | null {
+    if (this.cpu.worker === 'down') return null
     if (this.worker) return this.worker
     const url = this.workerUrl ?? new URL('./sort.worker.js', import.meta.url)
-    const w = new Worker(url, { type: 'module' })
+    let w: Worker
+    try { w = new Worker(url, { type: 'module' }) } catch (e) { this.workerDown(e instanceof Error ? e.message : String(e)); return null }
     w.onmessage = (e: MessageEvent<FromWorker>) => { this.onWorker(e.data) }
-    w.onerror = (e) => { console.warn('[splats] sort worker failed', e.message) }
+    w.onerror = (e) => { e.preventDefault(); this.workerDown(e.message || 'the worker failed') }
+    w.onmessageerror = () => { this.workerDown('a message from the worker could not be read') }
     this.worker = w
+    this.cpu = { ...this.cpu, worker: 'up' }
     return w
   }
 
+  // Down for good (the KernelWorker pattern): no more posts; update() sorts on the main thread; onChange redraws.
+  private workerDown(why: string): void {
+    if (this.cpu.worker === 'down') return
+    this.worker?.terminate()
+    this.worker = null
+    this.cpu = { ...this.cpu, worker: 'down', pending: null }
+    if (this.disposed) return
+    console.warn('[splats] the sort worker failed, sorting on the main thread from now on:', why)
+    this.onChange?.()
+  }
+
   private onWorker(m: FromWorker): void {
-    const p = this.pending
-    if (p?.id !== m.id) return
-    this.pending = null
-    if (m.type === 'error') { console.warn('[splats] sort failed:', m.message); for (const r of p.resolve) r(); return }
-    if (m.version !== this.version || !this.order || !this.geometry) {
-      for (const r of p.resolve) r()
-      if (this.wantKey && this.wantKey !== this.sortedKey) this.requestCpuSort(this.wantKey, this.lastRows, this.lastRange) // the set changed meanwhile
+    if (this.disposed) return
+    if (m.type === 'error') {
+      if (m.fatal) { this.workerDown(m.message); return }
+      if (m.id !== this.cpu.pending?.id) return
+      this.cpu = { ...this.cpu, pending: null } // the worker's version check: drop, decide again
+      this.redecide()
       return
     }
-    const arr = this.order.array
-    if (arr instanceof Uint32Array) arr.set(m.order.subarray(0, m.visible))
-    this.order.needsUpdate = true
-    this.geometry.instanceCount = m.visible
-    this.sortedKey = p.key
-    this.sorts++
-    this.lastWorkerMs = m.ms
-    for (const r of p.resolve) r()
-    this.flushWaiters()
-    this.onChange?.()
-    // the camera may have moved while this sort ran
-    if (this.wantKey && this.wantKey !== this.sortedKey) this.requestCpuSort(this.wantKey, this.lastRows, this.lastRange)
+    const verdict = cpuReplyVerdict(this.cpu, m, this.version, this.wantKey)
+    if (verdict === 'ignore') return
+    const p = this.cpu.pending
+    this.cpu = { ...this.cpu, pending: null }
+    const order = this.order, geometry = this.geometry
+    if (verdict === 'apply' && p && order && geometry) {
+      const arr = order.array
+      if (arr instanceof Uint32Array) arr.set(m.order.subarray(0, m.visible))
+      order.needsUpdate = true
+      geometry.instanceCount = m.visible
+      this.cpu = { ...this.cpu, sortedKey: p.key }
+      this.sorts++
+      this.lastWorkerMs = m.ms
+      this.onChange?.()
+    }
+    this.redecide() // the camera may have moved while this sort ran (lastRows and lastRange are wantKey's)
+  }
+
+  private redecide(): void {
+    if (!this.wantKey || !this.count || !this.tex) return
+    if (this.cpuStep(this.wantKey, false)) this.onChange?.()
+  }
+
+  // Does what cpuSortAction says for key; true when it sorted here (the drawn order changed).
+  private cpuStep(key: string, settling: boolean): boolean {
+    const a = cpuSortAction(this.cpu, key, settling)
+    if (a === 'here') { this.sortHere(key); return true }
+    if (a === 'post') return this.post(key)
+    return false
   }
 
   private lastRows = new Float32Array(4 * MAX_ITEMS)
   private lastRange = { near: 0.05, dmin: 0, dmax: 1 }
 
-  private requestCpuSort(key: string, rows: Float32Array, range: { near: number, dmin: number, dmax: number }): void {
-    if (this.pending) return // one at a time; onWorker starts the next
-    const id = ++this.sortId
-    this.pending = { id, key, resolve: [] }
-    const msg: ToWorker = { type: 'sort', id, version: this.version, rows: rows.slice(), near: range.near, dmin: range.dmin, dmax: range.dmax }
-    this.ensureWorker().postMessage(msg)
+  // The main-thread sort, for lastRows and lastRange (prepare()'s, so key's); a request in flight is now older.
+  private sortHere(key: string): void {
+    const set = this.cpuSet, order = this.order, geometry = this.geometry
+    if (!set || !order || !geometry) return
+    const arr = order.array
+    if (!(arr instanceof Uint32Array)) return
+    if (this.scratch.keys.length < set.count) this.scratch = newScratch(set.count)
+    const t0 = performance.now()
+    const r = this.lastRange
+    const visible = sortSplats({ centers: set.centers, slots: set.slots, rows: this.lastRows, near: r.near, dmin: r.dmin, dmax: r.dmax, count: set.count }, arr, this.scratch)
+    this.lastSortMs = performance.now() - t0
+    order.needsUpdate = true
+    geometry.instanceCount = visible
+    const p = this.cpu.pending
+    this.cpu = { ...this.cpu, sortedKey: key, setChanged: false, pending: p ? { ...p, superseded: true } : null }
+    this.sorts++
   }
 
-  private flushWaiters(): void {
-    const left: { key: string, resolve: () => void }[] = []
-    for (const w of this.settleWaiters) { if (w.key === this.sortedKey) w.resolve(); else left.push(w) }
-    this.settleWaiters = left
+  // Posts a sort to the worker (true: sorted here instead, the worker being down).
+  private post(key: string): boolean {
+    const w = this.ensureWorker()
+    if (!w) { this.sortHere(key); return true }
+    const id = ++this.sortId
+    this.cpu = { ...this.cpu, pending: { id, key, version: this.version, superseded: false } }
+    const range = this.lastRange
+    const msg: ToWorker = { type: 'sort', id, version: this.version, rows: this.lastRows.slice(), near: range.near, dmin: range.dmin, dmax: range.dmax }
+    w.postMessage(msg)
+    return false
   }
 
   // Per frame: the item transforms into their texture rows, the camera's depth range over the items' bounds, and
@@ -418,14 +495,14 @@ export class SplatLayer {
     const itemsData = tex.items.image.data
     if (!(itemsData instanceof Float32Array)) throw new Error('item texture is not float')
     let dmin = Infinity, dmax = -Infinity
-    const parts: string[] = [String(this.version), ...ve.map((v) => v.toFixed(6))]
+    const mats: number[][] = []
     const rows = this.lastRows
     const corner = new Vector3()
     for (const it of this.items.values()) {
       it.object.updateWorldMatrix(true, false)
       const e = it.object.matrixWorld.elements
       itemsData.set(e, 16 * it.slot)
-      parts.push(...e.map((v) => v.toFixed(6)))
+      mats.push(e)
       // the view z row of V·M for the CPU sort: r_j = Σ_k V[2][k] M[k][j]
       for (let j = 0; j < 4; j++) rows[4 * it.slot + j] = ve[2] * (e[4 * j] ?? 0) + ve[6] * (e[4 * j + 1] ?? 0) + ve[10] * (e[4 * j + 2] ?? 0) + ve[14] * (e[4 * j + 3] ?? 0)
       const { min: lo, max: hi } = it.data
@@ -445,41 +522,43 @@ export class SplatLayer {
     this.uDmin.value = lo
     this.uDmax.value = hi
     this.lastRange = { near, dmin: lo, dmax: hi }
-    return parts.join(',')
+    return sortKey(this.version, ve, near, mats)
   }
 
-  /** Sorts for the camera when anything changed since the last sort (WebGPU: now; CPU: in the worker). */
-  update(camera: PerspectiveCamera): void {
+  /** Sorts for the camera when anything changed since the last sort (WebGPU: now; CPU: here for a set change or
+   * when settling or the worker is down, else in the worker). */
+  update(camera: PerspectiveCamera, settling = false): void {
+    this.live()
     if (!this.count || !this.tex) return
     const key = this.prepare(camera)
     this.wantKey = key
-    if (key === this.sortedKey) return
     if (this.sortMode === 'gpu') {
+      if (key === this.gpuSortedKey) return
       const sorter = this.sorter, keyKernel = this.keyKernel
       if (!sorter || !keyKernel) return
       const t0 = performance.now()
       void this.renderer.compute([keyKernel, ...sorter.kernels]) // a Promise only before init()
       this.lastSortMs = performance.now() - t0 // CPU-side encode + submit; GPU time: see stats via timestamps
-      this.sortedKey = key
+      this.gpuSortedKey = key
       this.sorts++
-      this.flushWaiters()
     } else {
-      this.requestCpuSort(key, this.lastRows, this.lastRange)
+      this.cpuStep(key, settling)
     }
   }
 
-  /** Resolves once the drawn order is for this camera and the current set (a render capture waits for it). */
-  settle(camera: PerspectiveCamera, timeoutMs = 30000): Promise<void> {
-    this.update(camera)
-    if (!this.count || this.sortedKey === this.wantKey) return Promise.resolve()
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { reject(new Error('the splats were still sorting')) }, timeoutMs)
-      this.settleWaiters.push({ key: this.wantKey, resolve: () => { clearTimeout(timer); resolve() } })
-    })
+  /** Makes the drawn order this camera's and the current set's (a render capture awaits it): the GPU sort runs at
+   * submit, the CPU sort here when its order is stale, so it settles at once; it rejects only when it could not. */
+  settle(camera: PerspectiveCamera): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error('the splat layer was disposed'))
+    this.update(camera, true)
+    const drawn = this.sortMode === 'gpu' ? this.gpuSortedKey : this.cpu.sortedKey
+    if (!this.count || drawn === this.wantKey) return Promise.resolve()
+    return Promise.reject(new Error('the splats were still sorting'))
   }
 
   /** Draws the splats into this.target at width × height: colour cleared, depth from drawDepth(), then the splats. */
   render(camera: PerspectiveCamera, width: number, height: number, drawDepth: () => void): void {
+    this.live()
     const r = this.renderer
     if (this.target.width !== width || this.target.height !== height) this.target.setSize(width, height)
     this.update(camera)
@@ -501,7 +580,8 @@ export class SplatLayer {
   stats(): SplatStats {
     const bytes = this.capacity * (16 * 3) + (this.sorter ? this.sorter.capacity * 16 + this.sorter.hist.array.byteLength : this.capacity * 4) + 4 * 4 * MAX_ITEMS * 4
     return { sortMode: this.sortMode, backend: this.backend, splats: this.count, items: this.items.size, capacity: this.capacity, sorts: this.sorts,
-      lastSortMs: this.lastSortMs, lastWorkerMs: this.lastWorkerMs, gpuBytes: bytes, keyBits: this.sortMode === 'gpu' ? this.keyBits : 16 }
+      lastSortMs: this.lastSortMs, lastWorkerMs: this.lastWorkerMs, gpuBytes: bytes, keyBits: this.sortMode === 'gpu' ? this.keyBits : 16,
+      cpuWorker: this.sortMode === 'cpu' ? this.cpu.worker : null }
   }
 
   /** Debug: the GPU keys and the sorted order, read back (the check compares them with a CPU stable sort). */
@@ -525,10 +605,13 @@ export class SplatLayer {
   }
 
   dispose(): void {
+    this.disposed = true
     this.disposeGpu()
     this.target.dispose()
     this.worker?.terminate()
     this.worker = null
+    this.cpu = { ...this.cpu, worker: 'down', pending: null }
+    this.cpuSet = null
     this.items.clear()
   }
 }
