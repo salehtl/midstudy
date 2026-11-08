@@ -95,6 +95,7 @@ import {
   worldBounds as kWorldBounds, wrapAz, wrapDeg,
 } from '../core/js/web.js'
 import type { DepthMap, ItemBox, KeepRoomMask, Plane, Rect } from '../core/js/web.js'
+import { startErrors } from './ready.js'
 import { V1_KEY_DIR, V1_SOFTNESS, createLighting } from './lighting.js'
 import {
   SHADOW_Y, captureTarget, createPasses, drawFrame, drawMask, makeContactShadow, maskTarget, noRaycast, onDepthLayer, readRgba, setScreen,
@@ -287,7 +288,7 @@ function wake(ms = 400): void {
   framePending = true
 }
 for (const t of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'keyup', 'resize', 'touchmove']) window.addEventListener(t, () => { wake() }, { passive: true, capture: true })
-const errors: string[] = []
+const errors = startErrors // the array window.midstudy has held since ready.ts ran
 function toast(textLine: string, kind: msg.ToastKind = 'info', ms = 6000): void {
   emit('toast', { text: textLine, kind, ms })
 }

@@ -507,3 +507,17 @@ Deviations: the dial's guard has a check after all, from synthetic PointerEvents
 already ends a recalibrate on a scene change at its next poll, so the panel's stale flag only shows while the POST is
 out; the section holds that POST to see it, and the stale-toast guard could not be made red. Found, not changed: while the
 form's input keeps focus (Enter to submit), `render()` skips the card, so a failed Save as new shows no failure row.
+## State machines W5: planner-core-startup (2026-11-08)
+
+- **One errors array.** `ready.ts` exports `startErrors`; the placeholder hook, `engine.errors` and main.ts's hook all hold it.
+- **A failed start settles `ready`.** `ready.ts` listens for one window 'error' until `startupDone()` (main.ts, right after
+  it installs the hook). After a macrotask, so the engine's own listener reports first, it pushes `Startup failed: …` if
+  nothing was reported, and settles. Not 'unhandledrejection'. Chrome does raise the error event for the engine's rejected
+  top-level await, so the dynamic-import fallback was not needed.
+- **Tests.** `planner/test/ready.test.mjs`, `planner/ui/test/sections/startup.mjs` (no WebGPU, no canvas context; hung with
+  `errors` empty before).
+
+Deviation: the browser check went in `sections/startup.mjs`, not `smoke.mjs`, which is a sections runner since W1. Checked
+for the earlier reviews: `startScene` returns the name of an open in flight, so main.ts doesn't put the Scenes page over
+it. Left: `refreshLayouts` can drop its event when the hook's direct `listLayouts` overtakes it (`layoutDetails` updates,
+no 'layouts' event; only the hook calls it directly); engine.ts is limited to the errors initialiser in this package.

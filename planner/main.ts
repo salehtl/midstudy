@@ -3,7 +3,7 @@
 // §2.4 and §4.6. Every UI module exports mount(ctx), ctx: UiContext = { engine, scenes, lib, shell, icons, kit, keys }
 // (ui/seam.ts). ready.ts comes first: it puts the hook's `ready` on window.midstudy before the engine's modules wait
 // for the renderer and the kernels.
-import { ready, settleReady } from './ready.js'
+import { ready, settleReady, startupDone } from './ready.js'
 import { engine } from './engine.js'
 import type { PlannerState, RenderSettings } from './engine.js'
 import { installInput } from './input.js'
@@ -161,6 +161,7 @@ function pointOf(p: unknown): readonly number[] | { x: number; y: number; z: num
   return [Number.NaN, Number.NaN, Number.NaN]
 }
 window.midstudy = hook // the test hook (contract §2.4, §4.6), its `ready` the one ready.ts put there first
+startupDone()
 
 // First state (§4.5): ?scene=<name>, else the scene last opened on this device, else the Scenes page.
 engine.init()
