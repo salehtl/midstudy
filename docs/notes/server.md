@@ -111,3 +111,8 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - PATCH queues its rescale inside the lock. `#run` returns unless the job is still queued.
 - Deviations: `adopt` is an optional last parameter (the existing callers and `jobs.test.ts` stay as they are). The scene-create fault replaces the scenes folder with a file instead of making it read-only: `makeDir` only special-cases EEXIST, but a file is deterministic whatever the user's permissions. The 402 path's removeTree is now the shared `finally`. New fixture `server/test/fixtures/record-add.mjs`. Upload's route test is in-process (a throwing SpendCap through ServerDeps); the others use a started server.
 - The PATCH order test can't be made red reliably: today's window between the lock's release and newJob is a few microtasks.
+## State machines W5: server-infra-layouts (layout PUT re-checks its owner)
+
+- `PUT /api/layouts/{layout}` tests the scene or room again after the body arrived, right before the synchronous write, and answers the same 404 as the first check. A scene or room deleted during the upload no longer gets its layouts folder recreated, which blocked its restore. Proof: `server/test/layouts.test.ts`.
+- An invalid body on an owner that has gone still answers 400: the re-test comes after the layout check, as designed.
+- Deferred: versioning or ETag on layout PUT stays last-writer-wins (needs a contract, planner and conflict-UI change). Wont-fix: trash copies are never purged.

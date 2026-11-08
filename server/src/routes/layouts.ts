@@ -65,6 +65,12 @@ async function layoutOwnerOf(ctx: RequestContext, scenes: SceneService, rooms: R
   return owner
 }
 
+/** The owner's 404 when it has gone since `layoutOwnerOf` looked, or null while it is still there. */
+function ownerGone(owner: Owner, scenes: SceneService, rooms: RoomService): string | null {
+  if (owner.kind === 'room') return rooms.exists(owner.name) ? null : noRoom(owner.name)
+  return scenes.exists(owner.name) ? null : noScene(owner.name)
+}
+
 function missing(owner: Owner, name: string): string {
   return owner.kind === 'room' ? noRoomLayout(owner.name, name) : noLayout(owner.name, name)
 }
@@ -114,6 +120,13 @@ export const routes: RouteModule = (deps) => {
         const check = owner.kind === 'room' ? checkRoomLayout(body, name, owner.name, updated) : checkLayout(body, name, owner.name, updated)
         if (!check.ok) {
           await ctx.error(400, check.error)
+          return
+        }
+        // The owner may have been deleted while the body arrived; writing would recreate its folder and block its restore.
+        // Nothing can interleave between this test and the synchronous write.
+        const gone = ownerGone(owner, scenes, rooms)
+        if (gone !== null) {
+          await ctx.error(404, gone)
           return
         }
         writeJsonSync(file(owner, name), check.layout, 'midstudy/layout.schema.json')
