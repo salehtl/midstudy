@@ -2,6 +2,17 @@
 
 As of 2026-11-06, branch `v2`. The plan is [REFACTOR.md](REFACTOR.md); each track's notes are in `docs/notes/`.
 
+## State machines (2026-11-09, waves 1 to 6 merged on `sm-next`)
+
+The fixes from the sweep of implicit state machines are merged through wave 6; each track's notes say what changed.
+On `sm-next` at c7ba919: `npm run check` all ok (443 node tests, TScert 879/921 with every baselined function, Rust 210
+tests with Miri and Kani, 14 fuzz targets, 574 Lean theorems); `eval:engine-races` 73/73, `eval:selftest` 50/50,
+`eval:selftest-runner` 18/18, `eval:ui-smoke` 189/189. `eval:all` is the wave merge's to run, and is not counted here.
+**`eval:perf --compare` fails** (exit 1, twice). Five of its regressions were already there at 3a25cc6, before the first
+wave, at the same size: `planner_load_desktop_warm`, `drag_frames_p50`, `render_keep_room` and its client part, and
+`splat_first_frame` (13 to 14 s against v1's 0.3 s). `api_scenes_p95` is new in both runs (0.77 ms before, 1.8 to 1.9 ms
+after), not investigated. Details: [notes/integration.md](notes/integration.md).
+
 ## Rooms (docs/ROOMS.md; integrated 2026-11-07 on `rooms-integrate`)
 
 Built; Phase D (the user's own room) pending. A room groups several photos (scenes) into one room frame (contract
