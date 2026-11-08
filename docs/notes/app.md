@@ -507,3 +507,11 @@ Deviations: the dial's guard has a check after all, from synthetic PointerEvents
 already ends a recalibrate on a scene change at its next poll, so the panel's stale flag only shows while the POST is
 out; the section holds that POST to see it, and the stale-toast guard could not be made red. Found, not changed: while the
 form's input keeps focus (Enter to submit), `render()` skips the card, so a failed Save as new shows no failure row.
+## State machines W5: planner-gpu-backend-guards (2026-11-08)
+
+- `planner/gpu/passes.ts`. `isWebGPU` reads both of three's backend flags and throws `unknown three.js backend (three
+  upgraded?)` when neither is there. `clearTarget`'s workaround is gated on `isWebGLBackend`; if `state`, `setColorMask`,
+  `bindFramebuffer` or `gl` has moved it logs one console.error, which fails check.mjs. The upgrade note (rerun check.mjs and
+  gltrace.mjs) is the comment above `clearTarget`.
+- Deviation: the guard also covers a missing `gl`, which the brief did not list: without it the framebuffer bind would be off
+  silently. The workaround is now all or nothing: with any piece missing, neither half runs.
