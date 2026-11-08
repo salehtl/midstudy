@@ -122,9 +122,20 @@ export function decodePly(bytes: Uint8Array): SplatData {
   const offsets = new Map<string, { offset: number, type: string }>()
   let stride = 0
   let inVertex = false
+  let seenVertex = false
   for (const line of header.split('\n')) {
     const p = line.trim().split(/\s+/)
-    if (p[0] === 'element') { inVertex = p[1] === 'vertex'; if (inVertex) count = Number(p[2]) }
+    if (p[0] === 'element') {
+      inVertex = p[1] === 'vertex'
+      if (inVertex) {
+        seenVertex = true
+        count = Number(p[2])
+        if (!Number.isSafeInteger(count) || count < 0) throw new Error('the splat PLY\'s vertex count is not a number')
+      } else if (!seenVertex) {
+        // the vertex data is read from the end of the header, so an element before it would decode the wrong bytes
+        throw new Error('the splat PLY must declare its vertex element first')
+      }
+    }
     else if (p[0] === 'property' && inVertex) {
       if (p[1] === 'list') throw new Error('PLY list properties are not supported in a splat')
       const type = p[1] ?? '', name = p[2] ?? '', size = SIZES[type]

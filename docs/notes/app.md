@@ -529,3 +529,9 @@ no 'layouts' event; only the hook calls it directly); engine.ts is limited to th
   gltrace.mjs) is the comment above `clearTarget`.
 - Deviation: the guard also covers a missing `gl`, which the brief did not list: without it the framebuffer bind would be off
   silently. The workaround is now all or nothing: with any piece missing, neither half runs.
+## State machines W6: planner-gpu-ply (2026-11-08)
+
+- `planner/gpu/splat-data.ts`. `decodePly` refuses an element declared before `vertex` (the data is read from the end of the
+  header, so it would have decoded the wrong bytes) and a vertex count that is not a safe non-negative integer (NaN used to
+  pass the length check). Elements after `vertex` stay fine. Tests: `planner/gpu/test/splat-data.test.mjs`, under `test:splats`.
+- GpuRadixSort: no change (wont-fix in the plan); both call sites run the key kernel right before the full list.
