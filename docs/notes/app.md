@@ -371,3 +371,24 @@ Deviations and notes: `jobChange` now needs a busy 'before' (a narrowing from v1
 `freshAnswer` is used by the jobs poll alone. The brief says both "10 s after 3 failures" and "from the fourth": the
 fourth failure in a row is the first followed by 10 s. A jobs failure older than an applied answer is not counted as an
 outage. test:planner already existed (W1). Baseline entries added by hand, sorted.
+## State machines W3: planner-ui-workspace (2026-11-08)
+
+`planner/ui/workspace.ts` and friends, per docs/notes/state-machines-plan.md:
+
+- **Undo.** `lastRemoved` carries `ep` from `shell.epoch.items()`; `edit.undo` asks `undoUsable`, and an items() move clears
+  the slot (a room's photo switch does not). The undo closure restores once. `ctx.workspace.removeWithUndo(uids)` is the
+  one channel; In the scene's Remove goes through it.
+- **Height +/−.** The repeat is tied to the press's piece and ends with its button or selection; `pressed` clears only
+  when the pointer leaves while down.
+- **Chip.** `rendering` is `{ n, t0 }` (`renderStarted`, `renderEnded`), so it stays until the last render ends.
+- **Drags.** The horizon and ruler handle drags end when their mode goes off, in the 'adjust' / 'ruler' listeners and in
+  pointermove.
+- **Adjust floor.** One `floorBusy` latch for Looks right and Set scale, buttons disabled from it. Looks right says and
+  closes nothing if the photo changed or Adjust floor was left during the save.
+- **Tests.** `planner/ui/test/machines-workspace.test.mjs`, `planner/ui/test/sections/workspace.mjs`.
+
+Deviations: the undo closure also checks `epoch.items()`, and each removal's toast closes when the items epoch moves (the
+design only cleared the slot, which left a live Undo button that could restore into another scene). `applyTrue` also
+checks `floorBusy`, so Enter can't rescale a scene's camera during a Looks right. The chip counts rather than keys on the
+render event's `id`, as the design says; the seam's note about keying on the id is not needed for a count. The Renders
+panel half of the render fix is planner-ui-renders'.

@@ -25,6 +25,25 @@ export interface Insets {
   readonly bottom: number
 }
 
+/** ⌘Z's slot is usable only for the set of pieces it was removed from (`ep` against the items epoch now). */
+export function undoUsable(slot: { readonly ep: number } | null, now: number): boolean {
+  return slot !== null && slot.ep === now
+}
+
+/** Renders running at once, and when the earliest started: the chip stays until the last ends. */
+export interface RenderSlot {
+  readonly n: number
+  readonly t0: number
+}
+export function renderStarted(slot: RenderSlot | null, now: number): RenderSlot {
+  if (slot === null) return { n: 1, t0: now }
+  return { n: slot.n + 1, t0: slot.t0 < now ? slot.t0 : now }
+}
+export function renderEnded(slot: RenderSlot | null): RenderSlot | null {
+  if (slot === null || slot.n <= 1) return null
+  return { n: slot.n - 1, t0: slot.t0 }
+}
+
 /** The rendering chip: its ring's progress and its words, from the seconds since the render started. */
 export interface RenderChip {
   readonly progress: number
