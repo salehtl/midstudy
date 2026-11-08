@@ -33,10 +33,21 @@ function dimsFields(dims: DimsCm | null | undefined, onInput: () => void): DimsF
   return Object.assign(el, { value: () => dimsOf(w.input.value, d.input.value, ht.input.value), inputs: [w.input, d.input, ht.input] as const })
 }
 
+/** A failure whose sheet is gone has nowhere to show: a toast, unless the engine's report already made one. */
+function toastIfClosed(ctx: UiContext, sheet: Sheet, e: unknown, id: string): void {
+  if (sheet.isOpen() || (e instanceof Error && ctx.engine.errors.includes(e.message))) return
+  ctx.shell.toast(messageOf(e), { kind: 'error', id })
+}
+
 function budgetEl(spend: Spend | null, cost: number): HTMLSpanElement {
   const b = budgetLine(spend, cost, fmtUsd)
   return h(`span.ms-budget${b.over ? '.is-over' : ''}`, b.text)
 }
+
+// The sources of the adds in flight (a link, or a file's name|size|lastModified): closing and reopening the sheet can't
+// pay twice for the same piece; a different one is never blocked.
+const adding = new Set<string>()
+const fileKey = (f: File | null): string => (f ? `${f.name}|${String(f.size)}|${String(f.lastModified)}` : '')
 
 type Source = 'product' | 'photo' | 'link' | 'model'
 interface AddState {
@@ -107,7 +118,7 @@ export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (
     engineRow, resRow, cost, replaceEl, errEl)
   const cancel = h('button.btn.btn-secondary.ms-btn', { type: 'button', onclick: () => { sheet.close() } }, 'Cancel')
   const go = h('button.btn.btn-primary.ms-btn.ms-primary', { type: 'button', onclick: () => { void submit() } })
-  const sheet = openSheet(shell, { title: 'Add furniture', sub: 'Made at its real size from a product page, a photo, an image link or a 3D file.', body, actions: [cancel, go], cls: 'ms-add', onClose: () => { if (preview) URL.revokeObjectURL(preview) } })
+  const sheet = openSheet(shell, { title: 'Add furniture', sub: 'Made at its real size from a product page, a photo, an image link or a 3D file.', body, actions: [cancel, go], cls: 'ms-add', onClose: () => { if (preview) URL.revokeObjectURL(preview); lib.events.removeEventListener('spend', onSpend) } })
 
   function showSource(): void {
     product.setActive(st.source === 'product')
@@ -172,8 +183,14 @@ export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (
     replaceEl.hidden = !existing
     if (existing) replaceText.textContent = replacesText(libName(existing))
   }
+  const sourceKey = (): string => (st.source === 'link' ? urlInput.value.trim()
+    : st.source === 'product' ? product.pictureUrl() ?? ''
+      : fileKey(st.source === 'model' ? st.model : st.file))
   async function submit(): Promise<void> {
     if (problem() || st.busy) return
+    const key = sourceKey()
+    if (adding.has(key)) { st.error = 'This one is already being added; it shows in the Library'; sync(); return }
+    adding.add(key)
     st.busy = true
     st.error = ''
     sync()
@@ -188,6 +205,9 @@ export function openAddSheet(ctx: UiContext, { onAdded }: { readonly onAdded?: (
       st.busy = false
       st.error = messageOf(e)
       sync()
+      toastIfClosed(ctx, sheet, e, 'lib-add-failed')
+    } finally {
+      adding.delete(key)
     }
   }
   const onSpend = (): void => { if (sheet.isOpen()) sync() }
@@ -253,6 +273,7 @@ export function openEditSheet(ctx: UiContext, item: LibraryEntry, { onRemove }: 
       st.busy = false
       st.error = messageOf(e)
       sync()
+      toastIfClosed(ctx, sheet, e, 'lib-edit-failed')
     }
   }
   sync()
