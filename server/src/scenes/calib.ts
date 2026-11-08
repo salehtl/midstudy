@@ -10,8 +10,10 @@
 //     failures in a row the one-shot command is used for the rest of the server's life. fixtures/stub_calib.py has no
 //     `serve` (it exits 2 at once), so the stub's jobs end up one-shot.
 //   - A request still running at the timeout fails its job with the one-shot timeout sentence; the worker is killed.
-//   - An idle worker's stdin is closed after 10 minutes (MoGe-2 gives its memory back); on shutdown its stdin is closed,
-//     then it is killed after 5 s.
+//   - An idle worker's stdin is closed after 10 minutes (MoGe-2 gives its memory back) and it is killed after 5 s if it
+//     hasn't exited; the next job waits for that, so only one model is ever loaded. What it writes to stderr while idle
+//     is logged if it then dies by itself. On shutdown its stdin is closed, then it is killed after 5 s.
+//   - After shutdown nothing starts (the job ends 'the server stopped'), and a one-shot run in flight is ended.
 //   - `align` (renders) never goes through the worker: a render never waits behind a calibration.
 //   - In strict mode every result line and worker answer is checked against contract/calib-cli.schema.json (the command's
 //     result, or the error result for `ok: false`); one that breaks it fails its job with `contract violation: …`.
@@ -59,6 +61,11 @@ export interface CalibRunnerOptions {
 const STDERR_KEEP = 1024 * 1024
 /** The longest answer line read (a calib.json is a few kB). */
 const MAX_LINE = 64 * 1024 * 1024
+/** After the SIGKILL, how long a stop waits for 'close' (a grandchild that left the group can hold the pipes open). */
+const CLOSE_CAP_MS = 5000
+
+/** The worker's answer to a request cut by SIGTERM or SIGINT (contract §4.3 Worker). */
+const INTERRUPTED = 'interrupted'
 
 type Answer =
   | { readonly kind: 'answer'; readonly ok: boolean; readonly line: Readonly<Record<string, unknown>>; readonly raw: Readonly<Record<string, unknown>>; readonly stderr: string }
@@ -80,6 +87,9 @@ class Worker {
   #gone: string | null = null
   #exited: Promise<void>
   #idle: NodeJS.Timeout | null = null
+  /** The one stop under way (SIGTERM or the end of stdin, one SIGKILL timer); kill() and close() share it. */
+  #stopping: Promise<void> | null = null
+  #told = false
   readonly #onGone: (w: Worker) => void
 
   constructor(options: CalibRunnerOptions, onGone: (w: Worker) => void) {
@@ -106,6 +116,7 @@ class Worker {
     })
     // 'close', not 'exit': a last answer written just before it exits is read first.
     child.on('close', (code, signal) => {
+      this.#logIdleDeath(signal ?? 'code ' + String(code))
       this.#lost('it exited (' + (signal ?? 'code ' + String(code)) + ')')
       markExited()
     })
@@ -116,7 +127,6 @@ class Worker {
       this.#read(chunk)
     })
     child.stderr?.on('data', (chunk: Buffer) => {
-      if (this.#pending === null) return
       this.#stderr += chunk.toString('utf8')
       if (this.#stderr.length > STDERR_KEEP) this.#stderr = this.#stderr.slice(-STDERR_KEEP)
     })
@@ -127,11 +137,29 @@ class Worker {
     return this.#gone
   }
 
+  /** The stop under way, or null: the runner waits for it before starting another worker. */
+  get stopping(): Promise<void> | null {
+    return this.#stopping
+  }
+
+  /** It died by itself with nothing in flight (no answer will say why): what it wrote goes to the log. */
+  #logIdleDeath(how: string): void {
+    if (this.#pending !== null || this.#gone !== null) return
+    this.#options.log('midstudy server: the calibration worker exited while idle (' + how + '): ' + this.#stderr.slice(-4096).trim())
+  }
+
+  /** Tells the runner, once, that this worker can't be used any more. */
+  #tell(): void {
+    if (this.#told) return
+    this.#told = true
+    this.#onGone(this)
+  }
+
   #lost(why: string): void {
     if (this.#gone === null) this.#gone = why
     this.#clearIdle()
     this.#settle({ kind: 'broken', why })
-    this.#onGone(this)
+    this.#tell()
   }
 
   #settle(a: Answer): void {
@@ -166,6 +194,7 @@ class Worker {
   #line(line: string): void {
     const p = this.#pending
     if (p === null) {
+      if (this.#stopping !== null) return // its answer to our SIGTERM ("interrupted"), after the job has ended
       if (line.trim() !== '') this.#broke('it wrote to stdout with no request in flight')
       return
     }
@@ -177,6 +206,7 @@ class Worker {
     }
     const result = Object.fromEntries(read.result)
     this.#settle({ kind: 'answer', ok: read.ok, line: result, raw: { id: p.id, ...result }, stderr: this.#stderr })
+    this.#stderr = ''
     this.#armIdle()
   }
 
@@ -185,6 +215,7 @@ class Worker {
     if (this.#gone === null) this.#gone = why
     this.#settle({ kind: 'broken', why })
     void this.kill()
+    this.#tell()
   }
 
   #clearIdle(): void {
@@ -197,8 +228,8 @@ class Worker {
     this.#idle = setTimeout(() => {
       if (this.#pending === null && this.#gone === null) {
         this.#gone = 'it was idle'
-        this.child?.stdin?.end()
-        this.#onGone(this)
+        void this.close()
+        this.#tell()
       }
     }, this.#options.idleMs)
     this.#idle.unref()
@@ -243,30 +274,42 @@ class Worker {
     return c?.exitCode === null && c.signalCode === null
   }
 
-  /** SIGTERM to its process group, SIGKILL after the grace period; resolves when it has exited. */
-  async kill(): Promise<void> {
-    if (this.#gone === null) this.#gone = 'it was stopped'
+  /** Starts the one stop: `begin`, then SIGKILL after the grace period; resolves when it has exited (or at the cap). */
+  #stop(begin: () => void): Promise<void> {
     this.#clearIdle()
+    this.#stopping ??= this.#stopped(begin)
+    return this.#stopping
+  }
+
+  async #stopped(begin: () => void): Promise<void> {
     if (!this.#running()) return
-    this.#signal('SIGTERM')
+    begin()
+    const grace = this.#options.killGraceMs
     const timer = setTimeout(() => {
       this.#signal('SIGKILL')
-    }, this.#options.killGraceMs)
-    await this.#exited
+    }, grace)
+    let cap: NodeJS.Timeout | undefined
+    await Promise.race([this.#exited, new Promise((resolve) => {
+      cap = setTimeout(resolve, grace + CLOSE_CAP_MS)
+    })])
     clearTimeout(timer)
+    clearTimeout(cap)
+  }
+
+  /** SIGTERM to its process group, SIGKILL after the grace period; resolves when it has exited. */
+  kill(): Promise<void> {
+    if (this.#gone === null) this.#gone = 'it was stopped'
+    return this.#stop(() => {
+      this.#signal('SIGTERM')
+    })
   }
 
   /** Closes its stdin (it exits when it has nothing in flight), then kills it after the grace period. */
-  async close(): Promise<void> {
+  close(): Promise<void> {
     if (this.#gone === null) this.#gone = 'the server stopped'
-    this.#clearIdle()
-    if (!this.#running()) return
-    this.child?.stdin?.end()
-    const timer = setTimeout(() => {
-      this.#signal('SIGKILL')
-    }, this.#options.killGraceMs)
-    await this.#exited
-    clearTimeout(timer)
+    return this.#stop(() => {
+      this.child?.stdin?.end()
+    })
   }
 }
 
@@ -285,6 +328,10 @@ export class CalibRunner {
   #worker: Worker | null = null
   #failures = 0
   #closing = false
+  /** Workers being stopped apart from a job (idle, or broken while idle), each until it has exited. */
+  readonly #retiring = new Map<Worker, Promise<void>>()
+  /** The one-shot runs in flight, each with its run's end, for shutdown. */
+  readonly #oneShots = new Map<AbortController, Promise<unknown>>()
 
   constructor(options: CalibRunnerOptions) {
     this.#options = options
@@ -297,7 +344,12 @@ export class CalibRunner {
 
   /** The one-shot command: `<calib> <cmd> <args>`, stdin closed, the job's timeout (v1's subprocess.run). */
   async oneShot(req: CalibRequest): Promise<CalibOutcome> {
-    const run = await runTool([...this.#options.calib, req.cmd, ...req.args], { cwd: this.#options.cwd, timeoutMs: this.#options.timeoutMs })
+    const abort = new AbortController()
+    const running = runTool([...this.#options.calib, req.cmd, ...req.args], { cwd: this.#options.cwd, timeoutMs: this.#options.timeoutMs, signal: abort.signal, killGraceMs: this.#options.killGraceMs })
+    this.#oneShots.set(abort, running)
+    const run = await running
+    this.#oneShots.delete(abort)
+    if (abort.signal.aborted) return { kind: 'stopped' }
     switch (run.kind) {
       case 'exited': {
         const line = lastJsonLine(run.stdout)
@@ -311,22 +363,28 @@ export class CalibRunner {
 
   /** One job's step. */
   async run(req: CalibRequest): Promise<CalibOutcome> {
+    if (this.#stopped()) return { kind: 'stopped' }
+    if (this.#retiring.size > 0) {
+      await Promise.all(this.#retiring.values()) // one model at a time
+      if (this.#stopped()) return { kind: 'stopped' }
+    }
     if (!this.usesWorker) return this.oneShot(req)
     let worker = this.#worker
     if (worker?.gone !== null) {
       worker = new Worker(this.#options, (w) => {
-        if (this.#worker === w) this.#worker = null
+        this.#dropped(w)
       })
       this.#worker = worker.gone === null ? worker : null
     }
     const answer = await worker.ask(req, this.#options.timeoutMs)
     if (answer.kind === 'answer') {
+      if (this.#stopped() && answer.line['error'] === INTERRUPTED) return { kind: 'stopped' }
       this.#failures = failuresAfter(this.#failures, 'answered')
       return checked(req, answer.raw, { kind: 'result', returnCode: answer.ok ? 0 : 1, line: answer.line, stderr: answer.stderr })
     }
     if (this.#worker === worker) this.#worker = null
     await worker.kill()
-    if (this.#closing) return { kind: 'stopped' } // no one-shot run that would outlive the server
+    if (this.#stopped()) return { kind: 'stopped' } // no one-shot run that would outlive the server
     if (answer.kind === 'timeout') {
       this.#failures = failuresAfter(this.#failures, 'timeout')
       return { kind: 'timeout' }
@@ -339,11 +397,29 @@ export class CalibRunner {
     return this.oneShot(req)
   }
 
-  /** On shutdown: no new worker; the running one's stdin closed, then killed after the grace period. */
+  /** Whether shutdown has begun (a method: it changes across the awaits in run()). */
+  #stopped(): boolean {
+    return this.#closing
+  }
+
+  /** A worker said it can't be used any more; one being stopped is waited for before the next starts. */
+  #dropped(w: Worker): void {
+    if (this.#worker === w) this.#worker = null
+    const stopping = w.stopping
+    if (stopping === null) return
+    this.#retiring.set(w, stopping)
+    void stopping.then(() => {
+      this.#retiring.delete(w)
+    })
+  }
+
+  /** On shutdown: nothing new starts; the workers' stdin closed, then killed after the grace period; one-shot runs ended. */
   async shutdown(): Promise<void> {
     this.#closing = true
-    const w = this.#worker
+    const workers = [...this.#retiring.keys()]
+    if (this.#worker !== null) workers.push(this.#worker)
     this.#worker = null
-    if (w !== null) await w.close()
+    for (const abort of this.#oneShots.keys()) abort.abort()
+    await Promise.all([...workers.map((w) => w.close()), ...this.#oneShots.values()])
   }
 }

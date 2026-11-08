@@ -10,6 +10,11 @@
 //   FAKE_CALIB_SERVE=hang        never answers
 //   FAKE_CALIB_SERVE=fail        answers {ok: false, error: "the photo is unreadable"}
 //   FAKE_CALIB_SERVE=second-crash   answers the first request, exits 3 on the second
+//   FAKE_CALIB_SERVE=ignore-eof     answers as ok, but keeps running after its stdin ends (only a signal ends it)
+//   FAKE_CALIB_SERVE=idle-crash     answers as ok, then writes a trace to stderr and exits 1 while idle
+//   FAKE_CALIB_SERVE=late-answer    never answers by itself and ignores the end of stdin; each SIGTERM is logged as
+//                                   {sigterm}, the first answers "interrupted" and it exits 300 ms later
+//   FAKE_CALIB_SERVE=id-null        answers {id: null, ok: false, error: "the request is unreadable"} and carries on
 //   FAKE_CALIB_OFF_CONTRACT=1    run/fit results (one-shot and served) lack `camera`: they break calib-cli.schema.json
 import fs from 'node:fs'
 import path from 'node:path'
@@ -52,6 +57,17 @@ if (mode === 'exit2') {
 }
 process.stderr.write('fake-calib: worker ready\n')
 let served = 0
+let inFlight: unknown = null
+let terminated = false
+if (mode === 'late-answer') {
+  process.on('SIGTERM', () => {
+    note({ sigterm: true, pid: process.pid })
+    if (terminated) return
+    terminated = true
+    process.stdout.write(JSON.stringify({ id: inFlight, ok: false, error: 'interrupted' }) + '\n')
+    setTimeout(() => process.exit(1), 300)
+  })
+}
 const rl = readline.createInterface({ input: process.stdin })
 rl.on('line', (line) => {
   const req: unknown = JSON.parse(line)
@@ -66,12 +82,22 @@ rl.on('line', (line) => {
   else if (mode === 'wrong-id') process.stdout.write(JSON.stringify({ id: 'someone-else', ...result(reqCmd, reqArgs) }) + '\n')
   else if (mode === 'crash' || (mode === 'second-crash' && served === 2)) process.exit(mode === 'crash' ? 1 : 3)
   else if (mode === 'hang') return
+  else if (mode === 'late-answer') inFlight = id
+  else if (mode === 'id-null') process.stdout.write(JSON.stringify({ id: null, ok: false, error: 'the request is unreadable' }) + '\n')
   else if (mode === 'fail') {
     process.stderr.write('midstudy-calib: the photo is unreadable\n')
     process.stdout.write(JSON.stringify({ id, ok: false, error: 'the photo is unreadable' }) + '\n')
-  } else process.stdout.write(JSON.stringify({ id, ...result(reqCmd, reqArgs) }) + '\n')
+  } else {
+    process.stdout.write(JSON.stringify({ id, ...result(reqCmd, reqArgs) }) + '\n')
+    if (mode === 'idle-crash') {
+      setTimeout(() => {
+        process.stderr.write('Traceback: the GPU went away\n', () => process.exit(1))
+      }, 100)
+    }
+  }
 })
 rl.on('close', () => {
   note({ eof: true, pid: process.pid })
-  process.exit(0)
+  if (mode === 'ignore-eof' || mode === 'late-answer') setInterval(() => undefined, 1000)
+  else process.exit(0)
 })

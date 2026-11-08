@@ -24,7 +24,7 @@ interface Rig {
 let count = 0
 
 /** A SceneService on scratch folders with `n` scenes that have photo.jpg, calibrating with `calib`. */
-function rig(n: number, mode: string, options: { readonly calib?: readonly string[]; readonly timeoutMs?: number; readonly idleMs?: number } = {}): Rig {
+function rig(n: number, mode: string, options: { readonly calib?: readonly string[]; readonly timeoutMs?: number; readonly idleMs?: number; readonly killGraceMs?: number } = {}): Rig {
   count += 1
   const dir = path.join(SCRATCH, String(process.pid) + '-' + String(count))
   fs.rmSync(dir, { recursive: true, force: true })
@@ -44,29 +44,33 @@ function rig(n: number, mode: string, options: { readonly calib?: readonly strin
   const lines: string[] = []
   const scenes = new SceneService({
     scenesDir, layoutsDir: path.join(dir, 'layouts'), calib: options.calib ?? FAKE, repo: REPO,
-    log: (line) => { lines.push(line) }, timeoutMs: options.timeoutMs ?? 20_000, workerIdleMs: options.idleMs ?? 60_000, killGraceMs: 500,
+    log: (line) => { lines.push(line) }, timeoutMs: options.timeoutMs ?? 20_000, workerIdleMs: options.idleMs ?? 60_000, killGraceMs: options.killGraceMs ?? 500,
   })
   return { scenes, dir, log, lines }
 }
 
 /** The fake's log: process starts (`argv`) and worker requests. */
-function calls(r: Rig): { readonly starts: string[][]; readonly requests: unknown[]; readonly eofs: number; readonly mock: boolean[] } {
+function calls(r: Rig): { readonly starts: string[][]; readonly requests: unknown[]; readonly eofs: number; readonly mock: boolean[]; readonly pids: number[]; readonly sigterms: number } {
   const text = fs.existsSync(r.log) ? fs.readFileSync(r.log, 'utf8') : ''
   const entries: unknown[] = text.split('\n').filter((l) => l !== '').map((l): unknown => JSON.parse(l))
   const starts: string[][] = []
   const requests: unknown[] = []
   const mock: boolean[] = []
+  const pids: number[] = []
   let eofs = 0
+  let sigterms = 0
   for (const e of entries) {
     if (typeof e !== 'object' || e === null) continue
     if ('argv' in e && Array.isArray(e.argv)) {
       starts.push(e.argv.map(String))
       mock.push('mock' in e && e.mock === true)
+      if ('pid' in e && typeof e.pid === 'number') pids.push(e.pid)
     }
     if ('request' in e) requests.push(e.request)
     if ('eof' in e) eofs += 1
+    if ('sigterm' in e) sigterms += 1
   }
-  return { starts, requests, eofs, mock }
+  return { starts, requests, eofs, mock, pids, sigterms }
 }
 
 const sceneName = (i: number): string => 'scene-20261105-12000' + String(i)
@@ -207,6 +211,183 @@ void test('an idle worker gets its stdin closed; the next calibration starts ano
   await calibrateAll(r, 2)
   assert.deepEqual(calls(r).starts, [['serve'], ['serve']])
   await r.scenes.shutdown()
+})
+
+function alive(pid: number | undefined): boolean {
+  if (pid === undefined) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Ends what a test left running when it failed. */
+function reap(r: Rig): void {
+  for (const pid of calls(r).pids) {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // already gone
+    }
+  }
+}
+
+async function until(what: string, ok: () => boolean, ms = 5000): Promise<void> {
+  const t0 = Date.now()
+  while (!ok()) {
+    assert.ok(Date.now() - t0 < ms, 'waited ' + String(ms) + ' ms for ' + what)
+    await sleep(5)
+  }
+}
+
+void test('an idle worker that ignores the end of its stdin is killed after the grace period', async () => {
+  const r = rig(1, 'ignore-eof', { idleMs: 100, killGraceMs: 200 })
+  try {
+    await calibrateAll(r, 1)
+    const pid = calls(r).pids[0]
+    assert.ok(alive(pid), 'it runs after its answer')
+    await until('the idle worker to be gone', () => !alive(pid), 1500)
+    await r.scenes.shutdown()
+  } finally {
+    reap(r)
+  }
+})
+
+void test('a job right after the idle close starts its worker only once the old one has exited: one model at a time', async () => {
+  const r = rig(2, 'ignore-eof', { idleMs: 100, killGraceMs: 400 })
+  try {
+    await calibrateAll(r, 1)
+    const first = calls(r).pids[0]
+    await until('the idle close', () => calls(r).eofs === 1)
+    assert.ok(alive(first), 'still in its grace period')
+    const res = r.scenes.calibrate(sceneName(2))
+    assert.ok('job' in res)
+    await until('the second worker', () => calls(r).starts.length === 2)
+    assert.ok(!alive(first), 'the old worker was still there when the new one started')
+    await r.scenes.drained()
+    assert.equal(r.scenes.getJob(res.job.id)?.status, 'done')
+    assert.deepEqual(calls(r).starts, [['serve'], ['serve']])
+    await r.scenes.shutdown()
+  } finally {
+    reap(r)
+  }
+})
+
+void test('shutdown also ends a worker in its idle grace period', async () => {
+  const r = rig(1, 'ignore-eof', { idleMs: 100, killGraceMs: 300 })
+  try {
+    await calibrateAll(r, 1)
+    const pid = calls(r).pids[0]
+    await until('the idle close', () => calls(r).eofs === 1)
+    await r.scenes.shutdown()
+    assert.ok(!alive(pid), 'shutdown waited for it')
+  } finally {
+    reap(r)
+  }
+})
+
+void test('a worker that dies while idle: its stderr reaches the log', async () => {
+  const r = rig(2, 'idle-crash')
+  await calibrateAll(r, 1)
+  await until('the log line', () => r.lines.length > 0)
+  assert.match(r.lines[0] ?? '', /Traceback: the GPU went away/)
+  assert.ok(!(r.lines[0] ?? '').includes('fake-calib: request'), 'only what it wrote while idle')
+  await calibrateAll(r, 2)
+  assert.deepEqual(calls(r).starts, [['serve'], ['serve']], 'the next job starts another')
+  await r.scenes.shutdown()
+})
+
+void test('a timeout, then the late "interrupted" answer: one SIGTERM, the job is the timeout, the worker is not blamed', async () => {
+  const r = rig(1, 'late-answer', { timeoutMs: 300, killGraceMs: 2000 })
+  try {
+    const [job] = await calibrateAll(r, 1)
+    assert.equal(job?.status, 'failed')
+    assert.equal(job.message, 'the calibration ran for more than 0 minutes and was stopped')
+    assert.equal(calls(r).sigterms, 1)
+    assert.deepEqual(calls(r).starts, [['serve']], 'no one-shot run')
+    assert.equal(r.lines.length, 0, r.lines.join('\n'))
+  } finally {
+    reap(r)
+  }
+})
+
+void test('"interrupted" while the server stops: the job ends as stopped', async () => {
+  const r = rig(1, 'late-answer', { killGraceMs: 2000 })
+  try {
+    const res = r.scenes.calibrate(sceneName(1))
+    assert.ok('job' in res)
+    await until('the request', () => calls(r).requests.length === 1)
+    const stop = r.scenes.shutdown()
+    process.kill(calls(r).pids[0] ?? 0, 'SIGTERM')
+    await stop
+    await r.scenes.drained()
+    assert.equal(r.scenes.getJob(res.job.id)?.message, 'the server stopped')
+  } finally {
+    reap(r)
+  }
+})
+
+void test('an id-null answer fails that job with the worker\'s sentence and keeps the worker', async () => {
+  const r = rig(2, 'id-null')
+  const jobs = await calibrateAll(r, 2)
+  for (const j of jobs) {
+    assert.equal(j.status, 'failed')
+    assert.equal(j.message, 'the request is unreadable')
+  }
+  assert.deepEqual(calls(r).starts, [['serve']])
+  assert.equal(r.lines.length, 0, r.lines.join('\n'))
+  await r.scenes.shutdown()
+})
+
+const ROOMS_CALIB = ['node', path.join(REPO, 'server/test/rooms-calib.ts')]
+
+/** A runner on rooms-calib.ts (its `serve` exits 2, so jobs go one-shot), one scene folder and the start log. */
+function oneShotRig(): { readonly runner: CalibRunner; readonly sceneDir: string; readonly starts: () => { readonly argv: string[]; readonly pid: number }[] } {
+  const r = rig(1, 'ok')
+  const log = path.join(r.dir, 'rooms-calib.jsonl')
+  process.env['ROOMS_CALIB_LOG'] = log
+  process.env['ROOMS_CALIB_DELAY_MS'] = '5000'
+  const runner = new CalibRunner({ calib: ROOMS_CALIB, cwd: REPO, timeoutMs: 20_000, idleMs: 60_000, killGraceMs: 500, log: () => undefined })
+  const starts = (): { readonly argv: string[]; readonly pid: number }[] => {
+    const text = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : ''
+    return text.split('\n').filter((l) => l !== '').flatMap((l) => {
+      const e: unknown = JSON.parse(l)
+      if (typeof e !== 'object' || e === null || !('argv' in e) || !Array.isArray(e.argv) || !('pid' in e) || typeof e.pid !== 'number') return []
+      return [{ argv: e.argv.map(String), pid: e.pid }]
+    })
+  }
+  return { runner, sceneDir: path.join(r.dir, 'scenes', sceneName(1)), starts }
+}
+
+void test('shutdown stops a one-shot run in flight: its process is gone, nothing is written, the outcome is stopped', async () => {
+  try {
+    const { runner, sceneDir, starts } = oneShotRig()
+    const running = runner.run({ id: 'c-stop', cmd: 'fit', args: [sceneDir] })
+    await until('the one-shot run', () => starts().some((s) => s.argv[0] === 'fit'), 10_000)
+    const pid = starts().find((s) => s.argv[0] === 'fit')?.pid
+    await runner.shutdown()
+    assert.ok(!alive(pid), 'the one-shot run outlived the shutdown')
+    assert.deepEqual(await running, { kind: 'stopped' })
+    assert.ok(!fs.existsSync(path.join(sceneDir, 'calib.json')))
+  } finally {
+    delete process.env['ROOMS_CALIB_LOG']
+    delete process.env['ROOMS_CALIB_DELAY_MS']
+  }
+})
+
+void test('after shutdown nothing starts: run answers stopped with no process', async () => {
+  try {
+    const { runner, sceneDir, starts } = oneShotRig()
+    await runner.shutdown()
+    assert.deepEqual(await runner.run({ id: 'c-late', cmd: 'fit', args: [sceneDir] }), { kind: 'stopped' })
+    await sleep(200)
+    assert.deepEqual(starts(), [])
+  } finally {
+    delete process.env['ROOMS_CALIB_LOG']
+    delete process.env['ROOMS_CALIB_DELAY_MS']
+  }
 })
 
 void test('a calibration tool that is not there: the worker cannot start, the one-shot says so as v1 did', async () => {

@@ -59,6 +59,8 @@ void test('direct cases: statuses, names, values, render choices, worker lines',
   assert.deepEqual(readWorkerLine('{"id": "c-1", "ok": true, "x": 1}', 'c-1'), { kind: 'answer', ok: true, result: [['ok', true], ['x', 1]] })
   assert.equal(readWorkerLine('{"id": "c-2", "ok": true}', 'c-1').kind, 'garbled')
   assert.equal(readWorkerLine('[1]', 'c-1').kind, 'garbled')
+  assert.deepEqual(readWorkerLine('{"id": null, "ok": false, "error": "unreadable"}', 'c-1'), { kind: 'answer', ok: false, result: [['ok', false], ['error', 'unreadable']] })
+  assert.equal(readWorkerLine('{"id": null, "ok": true}', 'c-1').kind, 'garbled')
   assert.equal(readWorkerLine('NaN', 'c-1').kind, 'garbled')
   assert.deepEqual(readWorkerLine('{"id": "c-1", "ok": false, "error": "e"}', 'c-1'), { kind: 'answer', ok: false, result: [['ok', false], ['error', 'e']] })
 

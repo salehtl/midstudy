@@ -56,3 +56,17 @@
 - Open, for the pipeline track or integration: `pipeline/test/lock.test.ts:88` still pins the old rule (a live same-host
   owner reclaimed at 3601 s), so test:pipeline and check:tests fail on that one test. It is outside this package's files
   and the server track. Changing `3601` to `4201` there makes it pass (checked on a throwaway copy).
+## State machines W2: server-domain-calib-runner (worker lifecycle, runner shutdown)
+
+- `scenes/calib.ts`, Worker: the idle close now goes through close() (stdin end, SIGKILL after the grace). kill() and
+  close() share one cached stop, capped 5 s after the SIGKILL. stderr is always kept and reset after each answer, and a
+  worker that dies by itself while idle logs it. A stop's late "interrupted" line is ignored instead of read as a broken
+  worker. Every drop now tells the runner (once).
+- CalibRunner: run() returns 'stopped' after shutdown. Workers being stopped apart from a job (`#retiring`) are awaited
+  before the next job, so one model is resident. One-shots run with an AbortSignal and shutdown aborts and awaits them;
+  abort maps to 'stopped'. "interrupted" while stopping is 'stopped' too.
+- `logic/worker.ts`: `{id: null, ok: false, …}` is the sent request's failure, with the worker's sentence (contract §4.3).
+- Deviations: the fix entry says id-null answers stay garbled; the seam settlement and contract §4.3 say the opposite, and
+  those were followed. The seam's "re-run only before a 'done' line" is not done: the protocol has no such line, so a
+  broken answer still re-runs one-shot (costs time only, contract §4.3 Crash). `#retiring` also holds a worker that broke
+  while idle, not only idle ones. `server/test/rooms-calib.ts` logs its pid (needed by the proof).
