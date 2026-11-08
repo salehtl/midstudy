@@ -11,7 +11,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { REPO, BROWSER, BROWSER_ARGS, PHONE, DESKTOP, PROBE, boxGlb, golden, api, clip, fmt, sleep, waitFor, seedScene, project, photoToFloor } from './harness.mjs'
+import { REPO, BROWSER, BROWSER_ARGS, PROBE, boxGlb, golden, api, clip, fmt, sleep, waitFor, openPlanner, seedScene, project, photoToFloor } from './harness.mjs'
 import { matchRoute, responseSchema } from '../../contract/gen/routes.js'
 import { violation } from '../../contract/gen/validate.js'
 
@@ -184,16 +184,15 @@ export async function seedGoldenScenes(srv, ids) {
   for (const id of ids) out[id] = await seedScene(srv, id, id)
   return out
 }
-export async function waitAlignDone(base, room, timeoutMs = 60000) {
-  return waitFor(async () => {
-    const r = await api.get(base, `/api/rooms/${room}`)
-    return r.status === 200 && ['done', 'failed', 'none'].includes(r.json?.align_status) ? r.json : null
-  }, { timeoutMs, intervalMs: 250 })
-}
+// A poll ends on a 200 whose status is a string outside the in-progress ones (as harness.mjs's waitScene): a status added
+// later ends it instead of running it to its timeout, and a body without one keeps it polling.
+const JOB_IN_PROGRESS = ['pending', 'queued', 'running']
 export async function waitJob(base, id, timeoutMs = 60000) {
   return waitFor(async () => {
     const r = await api.get(base, `/api/rooms/jobs/${id}`)
-    return r.status === 200 && ['done', 'failed'].includes(r.json?.status) ? r.json : null
+    if (r.status !== 200) throw new Error(`GET /api/rooms/jobs/${id} answered ${r.status} ${r.error ?? ''}`)
+    const status = r.json?.status
+    return typeof status === 'string' && !JOB_IN_PROGRESS.includes(status) ? r.json : null
   }, { timeoutMs, intervalMs: 200 })
 }
 export const memberOf = (detail, scene) => detail?.members?.find((m) => m.scene === scene) || null
@@ -210,33 +209,11 @@ export async function launchBackend(ev, { webgpu = true } = {}) {
 }
 // openPlanner (harness.mjs) for a room: ?room=<room>[&photo=<scene>][&webgpu=0]. Returns {page, context, errors, hookOk, why, url}.
 export async function openRoomPage(browser, base, { room = null, photo = null, device = 'desktop', viewport = null, webgpu = true, query = '' } = {}) {
-  const ctxOpts = device === 'phone' ? { ...PHONE, ...(viewport ? { viewport } : {}) } : { ...DESKTOP, ...(viewport ? { viewport } : {}) }
-  const context = await browser.newContext(ctxOpts)
-  const page = await context.newPage()
-  page.setDefaultTimeout(20000)
-  const errors = { page: [], console: [], refused: [] }
-  page.on('console', (m) => { if (m.type() === 'error') errors.console.push(clip(`${m.text()} ${m.location()?.url || ''}`, 300)) })
-  page.on('pageerror', (e) => errors.page.push(clip(e.stack || String(e), 500)))
-  page.on('response', (r) => { if (r.status() === 403) errors.refused.push(`${r.request().method()} ${r.url()}`) })
-  page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? 'eval-layout' : undefined).catch(() => {}))
-  await page.addInitScript(() => addEventListener('DOMContentLoaded', () => {
-    const s = document.createElement('style')
-    s.textContent = '*,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important;animation-delay:0s!important;transition-delay:0s!important}'
-    document.head.append(s)
-  }))
   const q = new URLSearchParams()
   if (room) q.set('room', room)
   if (photo) q.set('photo', photo)
   if (!webgpu) q.set('webgpu', '0')
-  const qs = [q.toString(), query].filter(Boolean).join('&')
-  const url = `${base}/planner/${qs ? `?${qs}` : ''}`
-  let why = ''
-  try { await page.goto(url, { waitUntil: 'load', timeout: 30000 }) } catch (e) { why = `page load failed: ${String(e).split('\n')[0]}` }
-  const ok = !why && await page.waitForFunction(() => !!window.midstudy, null, { timeout: 30000 }).then(() => true, () => false)
-  if (!ok && !why) why = `hook missing: window.midstudy${errors.page.length || errors.console.length ? ` (page errors: ${clip([...errors.page, ...errors.console].slice(0, 3).join(' | '), 400)})` : ''}`
-  let ready = ''
-  if (ok) ready = await page.evaluate(() => Promise.race([Promise.resolve(window.midstudy.ready).then(() => ''), new Promise((r) => setTimeout(() => r('window.midstudy.ready did not resolve in 90 s'), 90000))]).catch((e) => `window.midstudy.ready rejected: ${e}`))
-  return { page, context, errors, hookOk: ok && !ready, why: why || ready, url }
+  return openPlanner(browser, base, { device, viewport, query: [q.toString(), query].filter(Boolean).join('&'), readyMs: 90000 })
 }
 // Waits until the room view shows this photo (getState().room.photo and getState().scene.name), then a short settle.
 export async function waitPhoto(page, scene, timeoutMs = 30000) {

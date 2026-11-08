@@ -106,3 +106,11 @@ Pitch and roll are excellent (≤ 0.7°). I checked that the depth error isn't a
 ## State machines W2: E18 and the staged align --out
 
 `evals/rooms_api.mjs` accepts align-room's `--out <rooms>/.align/<job>` (contract §4.9) as well as the older `<rooms>/<room>`, so it can merge before or after server-domain-room-align. `argvOf` maps a scratch folder to its room by the job id. New checks: `align.json` is in `rooms/<room>/` after the job and the scratch is gone; with a staged `--out`, a failed job or an invalid answer leaves no `align.json` in the room. Proved red (4 checks) and then green against a temporary staged patch of `server/src/rooms/service.ts`, not committed. No deviation.
+
+## State machines W6: tooling-evals-lib
+
+- `evals/all.mjs`: SIGINT, SIGTERM and SIGHUP go to the running step (one forward per 2 s burst; SIGKILL after 50 s), later steps don't start, the summary so far marks the step `INTR`, exit 130. A step with no summary line says `(no summary line: exited <code> before its summary)`. `MIDSTUDY_ALL_STEPS` (JSON) is the test-only step list.
+- `evals/lib/gated_calib.py`: a closed gate gives up after `MIDSTUDY_EVAL_CALIB_GATE_S` (default 120), or as soon as its parent is gone, with the §4.3 failure (exit 1, `{ok:false,error}`); `serve` exits 2, the one-shot fallback.
+- `evals/lib/rooms.mjs`: `waitJob` ends on any string status outside pending/queued/running, `waitAlignDone` is gone, `openRoomPage` wraps `openPlanner`.
+- `evals/runner_selftest.mjs` (`npm run eval:selftest-runner`) proves the first two.
+- Beyond the brief: a signal more than 2 s after the last forward is forwarded again, so a second Ctrl-C reaches createEval's give-up path. A non-200 from `waitJob` now throws inside `waitFor` (as `waitScene`), so the timeout's stderr line names it; the poll still continues.
