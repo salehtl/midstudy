@@ -1,6 +1,7 @@
 // E10 eval:all — runs E1 and E3–E9 one after another (PLAN.md §6.2), then E11 and E12 (the verify round 1 and 2 UX regressions), E13 (v1.1 splats), E14 and E15 (product page reader and form),
 // E16 (lighting inferred from the photo), E17 (shortcuts, multi-select, Export), E18–E20 (rooms: the API, the room
 // planner, align-room's mock through the stub), and E2 (real MoGe and E20's real solver, then --mock) only with --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
+// SIGINT, SIGTERM or SIGHUP stops the run: the running step is told and waited for (SIGKILL after 50 s), later steps don't start, the summary so far is printed, exit 130.
 // Usage: node evals/all.mjs [--with-calib] [--only E3,E4]   (or npm run eval:all [-- --with-calib])
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -10,7 +11,7 @@ const args = process.argv.slice(2)
 const withCalib = args.includes('--with-calib')
 const onlyArg = args.find((a) => a.startsWith('--only'))
 const only = onlyArg ? (onlyArg.includes('=') ? onlyArg.split('=')[1] : args[args.indexOf(onlyArg) + 1] || '').split(',').map((s) => s.trim().toUpperCase()) : null
-const steps = [
+const allSteps = [
   ['E1', 'scenes-api', 'node', ['evals/scenes_api.mjs']],
   ...(withCalib ? [['E2', 'calib (real MoGe)', 'evals/py', ['evals/calib_eval.py']], ['E2', 'calib --mock', 'evals/py', ['evals/calib_eval.py', '--mock']]] : []),
   ['E3', 'planner', 'node', ['evals/planner_scene.mjs']],
@@ -30,29 +31,64 @@ const steps = [
   ['E18', 'rooms-api', 'node', ['evals/rooms_api.mjs']],
   ['E19', 'room-planner', 'node', ['evals/room_planner.mjs']],
   ['E20', 'align --mock', 'node', ['evals/align_eval.mjs', '--mock']],
-].filter(([id]) => !only || only.includes(id))
+]
+// Test-only: a JSON list of [id, name, cmd, argv] replaces the steps (evals/runner_selftest.mjs).
+const steps = (process.env.MIDSTUDY_ALL_STEPS ? JSON.parse(process.env.MIDSTUDY_ALL_STEPS) : allSteps).filter(([id]) => !only || only.includes(id))
+
+// The step's bounded wait sits above createEval's 40 s finish and below eval-lock's 60 s group grace.
+const STEP_WAIT_MS = 50000, SIGNAL_BURST_MS = 2000
+let step = null // {p, interrupted, killer} while a step runs
+let stopSignal = null
+let forwardedAt = 0
+// A later signal (past the burst) is forwarded too, which is how a second Ctrl-C makes createEval give up on its cleanups.
+function onSignal(sig) {
+  const now = Date.now()
+  stopSignal ??= sig
+  if (now - forwardedAt < SIGNAL_BURST_MS) return
+  forwardedAt = now
+  if (!step) return
+  step.interrupted ??= sig
+  step.p.kill(sig)
+  const { p } = step
+  step.killer ??= setTimeout(() => p.kill('SIGKILL'), STEP_WAIT_MS)
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => onSignal(sig))
+// After a hang-up nobody reads our output; that mustn't kill the runner before the step is down.
+process.stdout.on('error', () => {})
+process.stderr.on('error', () => {})
 
 const run = (cmd, argv) => new Promise((resolve) => {
   const t0 = Date.now()
   let tail = ''
   const p = spawn(cmd, argv, { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], env: process.env })
+  const current = { p, interrupted: null, killer: null }
+  step = current
+  const done = (r) => { clearTimeout(current.killer); step = null; resolve({ ...r, interrupted: current.interrupted }) }
   const onData = (stream) => (d) => { stream.write(d); tail = (tail + d).slice(-4000) }
   p.stdout.on('data', onData(process.stdout))
   p.stderr.on('data', onData(process.stderr))
-  p.on('error', (e) => resolve({ code: 127, secs: 0, line: String(e) }))
+  p.on('error', (e) => done({ code: 127, secs: 0, line: String(e) }))
   p.on('exit', (code, sig) => {
-    const line = tail.split('\n').reverse().find((l) => /(checks passed|checks passed in|\d+\/\d+)/.test(l)) || ''
-    resolve({ code: code ?? (sig ? 1 : 0), secs: ((Date.now() - t0) / 1000).toFixed(0), line: line.trim() })
+    const line = tail.split('\n').reverse().find((l) => /(checks passed|checks passed in|\d+\/\d+)/.test(l)) || `(no summary line: exited ${code ?? sig} before its summary)`
+    done({ code: code ?? (sig ? 1 : 0), secs: ((Date.now() - t0) / 1000).toFixed(0), line: line.trim() })
   })
 })
 
 const summary = []
 for (const [id, name, cmd, argv] of steps) {
+  if (stopSignal) break
   console.log(`\n=================== ${id} eval:${name} (${[cmd, ...argv].join(' ')})`)
   const r = await run(cmd, argv)
   summary.push({ id, name, ...r })
 }
 console.log('\n=================== summary')
-for (const s of summary) console.log(`${s.code === 0 ? 'PASS' : 'FAIL'} ${s.id} ${s.name.padEnd(20)} ${String(s.secs).padStart(4)} s  ${s.line}`)
+for (const s of summary) {
+  const mark = s.interrupted ? 'INTR' : s.code === 0 ? 'PASS' : 'FAIL'
+  console.log(`${mark} ${s.id} ${s.name.padEnd(20)} ${String(s.secs).padStart(4)} s  ${s.interrupted ? `(interrupted by ${s.interrupted}) ` : ''}${s.line}`)
+}
+if (stopSignal) {
+  console.log(`     (stopped by ${stopSignal}: ${steps.length - summary.length} later step(s) not started)`)
+  process.exit(130)
+}
 if (!withCalib && !only) console.log('     (E2 eval:calib not run: add --with-calib for real MoGe and the ingest checks)')
 process.exit(summary.every((s) => s.code === 0) ? 0 : 1)
