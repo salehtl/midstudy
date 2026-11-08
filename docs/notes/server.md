@@ -72,3 +72,19 @@
   while idle, not only idle ones. `server/test/rooms-calib.ts` logs its pid (needed by the proof).
 
 Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a live same-host owner still waits at 3601 s, reclaimed at 4201 s).
+
+## State machines W3: server-domain-scene-jobs (spawn-error, restore guard, .calibrating, crash-ordered trash)
+
+- `scenes/service.ts`: spawn-error goes through `#finish`. `#queueJob` redraws a colliding id and writes `scenes/<name>/.calibrating`
+  (job id) for calibrations. `#after` removes it only when it is this job's and the job wasn't 'stopped'. `queueTask` throws on a
+  repeated id. `restore` answers 'exists' while `#current` (started, #after not reached) is a dropped job of the scene, then
+  forgets dropped `#last`/`#lightLast` entries. `delete` writes trash.json in the live folder before the moves; `restore` removes it last.
+- `logic/status.ts` `calibStatus(job, hasCalib, interrupted, hasInput)`: with no job this run, LOST_UPLOAD wins, then the marker
+  reads LOST_CALIBRATION even with calib.json. This departs from v1 on purpose (contract §4.2, §4.4).
+- The marker and delete (the earlier review's question): delete removes the marker of a queued, never-started job, so a restore
+  reads from its files. A running job's marker goes to the trash with the folder and comes back: the restored scene reads
+  LOST_CALIBRATION even when calib.json is good, because its tool may have half-written the folder before the move. Calibrating
+  again clears it. The contract doesn't spell this case out.
+- trash.json left in a live folder after a thrown move or rejoin is ignored and is only for a hand repair; there is no retry.
+- Wont-fix, as planned: camera_source (a comment above `#ended`), align admission counting busy members.
+- Proof: `server/test/scenes/jobs.test.ts` (all ten red before the change), rows in `logic.test.ts`.

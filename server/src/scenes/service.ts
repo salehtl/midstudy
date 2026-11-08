@@ -33,6 +33,8 @@ const CALIB_TIMEOUT_SECONDS = 600
 const WORKER_IDLE_MS = 10 * 60 * 1000
 /** v1 TRASH_META: {name, title, deleted} in a trashed scene's folder. */
 const TRASH_META = 'trash.json'
+/** Server-private (§4.2): the id of the calibration job writing this folder; never served. */
+const CALIBRATING = '.calibrating'
 
 /** A job of the calibration queue as the API serves it (scene-job.schema.json), in v1's key order. */
 export interface JobView {
@@ -125,6 +127,10 @@ export class SceneService {
   readonly #last = new Map<string, string>()
   /** scene → its newest light job id (never in #last). */
   readonly #lightLast = new Map<string, string>()
+  /** The job #run has started and #after hasn't reached: its tool may still write under the scene's folder. */
+  #current: string | null = null
+  /** Jobs that ended because the server stopped under them: they keep their marker for the next run (§4.2). */
+  readonly #stopped = new Set<string>()
   readonly #queue: SerialQueue
   readonly #runner: CalibRunner
   /** Queued work that isn't a calibration or light job (align jobs), by id. */
@@ -157,8 +163,10 @@ export class SceneService {
     this.#rooms = hooks
   }
 
-  /** Queues work of another kind on the calibration queue (§4.9 Align); `id` must be unique among the queue's jobs. */
+  /** Queues work of another kind on the calibration queue (§4.9 Align); `id` must be unique among the queue's jobs (a
+   *  repeat is a programming error, and throws). */
   queueTask(id: string, task: QueueTask): void {
+    if (this.#tasks.has(id) || this.#work.has(id)) throw new Error('queueTask: job id already queued: ' + id)
     this.#tasks.set(id, task)
     this.#queue.push(id)
   }
@@ -234,7 +242,13 @@ export class SceneService {
 
   /** v1 `status`. */
   status(name: string, hasCalib: boolean): CalibStatus {
-    return calibStatus(this.#jobs.get(this.#last.get(name) ?? ''), hasCalib)
+    return calibStatus(this.#jobs.get(this.#last.get(name) ?? ''), hasCalib, isFile(path.join(this.dir, name, CALIBRATING)), this.#hasInput(name))
+  }
+
+  /** The scene has something to calibrate from: photo.jpg or source.*. */
+  #hasInput(name: string): boolean {
+    const d = path.join(this.dir, name)
+    return isFile(path.join(d, 'photo.jpg')) || listDir(d).some((f) => f.startsWith('source.'))
   }
 
   #assetUrl(name: string, file: string): string | null {
@@ -353,7 +367,10 @@ export class SceneService {
 
   #queueJob(name: string, cmd: CalibCommand, args: readonly string[], cleanup: string | null, kind: 'calibrate' | 'light'): JobView {
     const now = this.#now()
-    const id = newJobId(kind === 'light' ? 'l' : 'c', now)
+    const prefix = kind === 'light' ? 'l' : 'c'
+    let id = newJobId(prefix, now)
+    while (this.#jobs.get(id) !== null) id = newJobId(prefix, now)
+    if (kind === 'calibrate') writeBytesSync(path.join(this.dir, name, CALIBRATING), Buffer.from(id))
     const base = { id, kind, scene: name, status: 'queued', created: isoUtc(now), started: null, finished: null, message: QUEUED, calib: null } as const
     const job: JobView = kind === 'light' ? { ...base, lighting: null } : base
     const snapshot = this.#jobs.add(job)
@@ -444,7 +461,9 @@ export class SceneService {
     for (const job of this.#jobs.list().reverse()) {
       if (job.scene !== name || (job.status !== 'queued' && job.status !== 'running')) continue
       this.#dropped.add(job.id)
-      if (job.status === 'queued') this.#jobs.update(job.id, { status: 'failed', finished: isoUtc(now), message: SCENE_DELETED })
+      if (job.status !== 'queued') continue // a running job's marker goes to the trash with the folder its tool may have half-written
+      this.#jobs.update(job.id, { status: 'failed', finished: isoUtc(now), message: SCENE_DELETED })
+      if (job.kind === 'calibrate') this.#removeMarker(name, job.id) // it never started: a restored scene reads from its files
     }
     const base = trashBase(name, now)
     const trashRoot = path.join(this.dir, '.trash')
@@ -457,11 +476,12 @@ export class SceneService {
     makeDirs(trashRoot)
     const title = this.read(name)?.['title']
     const room = this.#rooms?.leave(name) ?? null
+    // trash.json before the moves: if one throws, the room record is still on disk (a later delete overwrites it).
+    const meta = { name, title: typeof title === 'string' ? title : null, deleted: isoUtc(now) }
+    writeJsonSync(path.join(this.dir, name, TRASH_META), room === null ? meta : { ...meta, room }, 'midstudy/trash.schema.json#/$defs/scene')
     const moved = move(path.join(this.dir, name), trash)
     const layouts = path.join(this.layoutsDir, name)
     if (isDir(layouts)) move(layouts, path.join(moved, 'layouts'))
-    const meta = { name, title: typeof title === 'string' ? title : null, deleted: isoUtc(now) }
-    writeJsonSync(path.join(moved, TRASH_META), room === null ? meta : { ...meta, room }, 'midstudy/trash.schema.json#/$defs/scene')
     return path.basename(this.dir) + '/.trash/' + path.basename(moved)
   }
 
@@ -507,17 +527,23 @@ export class SceneService {
   restore(name: string): { readonly scene: SceneObject | null } | 'none' | 'exists' {
     const copy = this.trash().find((t) => t.name === name)
     if (copy === undefined) return 'none'
+    // A dropped job still running may yet re-make the folder; it is over at #after.
+    if (this.#current !== null && this.#dropped.has(this.#current) && this.#jobs.get(this.#current)?.scene === name) return 'exists'
     const dest = path.join(this.dir, name)
     if (exists(dest) || exists(path.join(this.layoutsDir, name))) return 'exists'
     const moved = move(path.join(this.dir, '.trash', copy.dir), dest)
     const meta = readJson(path.join(moved, TRASH_META))
-    fs.rmSync(path.join(moved, TRASH_META), { force: true })
+    // The delete's dropped jobs say nothing about the restored scene: its status comes from its files again.
+    for (const last of [this.#last, this.#lightLast]) {
+      if (this.#dropped.has(last.get(name) ?? '')) last.delete(name)
+    }
     if (isDir(path.join(moved, 'layouts'))) {
       makeDirs(this.layoutsDir)
       move(path.join(moved, 'layouts'), path.join(this.layoutsDir, name))
     }
     const room = isRecord(meta) ? meta['room'] : undefined
     if (room !== undefined) this.#rooms?.rejoin(name, room)
+    fs.rmSync(path.join(moved, TRASH_META), { force: true }) // last: until here it is the only record of the room
     return { scene: this.sceneObject(name) }
   }
 
@@ -535,6 +561,12 @@ export class SceneService {
   #removeLeftover(name: string): void {
     const left = path.join(this.dir, name)
     if (isDir(left) && !exists(path.join(left, 'scene.json'))) removeTree(left)
+  }
+
+  /** Removes the scene's marker when it is this job's (another job may have written its own since). */
+  #removeMarker(name: string, id: string): void {
+    const file = path.join(this.dir, name, CALIBRATING)
+    if (isFile(file) && fs.readFileSync(file, 'utf8') === id) fs.rmSync(file, { force: true })
   }
 
   /** v1 `finish`: a job that ended without a result to apply. */
@@ -563,10 +595,13 @@ export class SceneService {
     const work = this.#work.get(id)
     if (job === null || work === undefined || job.status !== 'queued') return // dropped while it waited
     this.#jobs.update(id, { status: 'running', started: isoUtc(this.#now()), message: runningMessage(job.kind) })
+    this.#current = id
     const outcome = await this.#runner.run({ id, cmd: work.cmd, args: work.args })
     this.#ended(id, job.kind, outcome)
   }
 
+  // Reads scene.json, merges the camera and writes it back below: this must stay in one synchronous turn, or a manual
+  // PUT during the calibration could be overwritten.
   #ended(id: string, kind: 'calibrate' | 'light', outcome: CalibOutcome): void {
     switch (outcome.kind) {
       case 'not-found':
@@ -576,9 +611,10 @@ export class SceneService {
         this.#finish(id, false, timedOut(kind, this.#timeoutMs / 1000))
         return
       case 'spawn-error':
-        this.#jobs.update(id, { status: 'failed', finished: isoUtc(this.#now()), message: serverFailed('OSError', outcome.message) })
+        this.#finish(id, false, serverFailed('OSError', outcome.message))
         return
       case 'stopped':
+        this.#stopped.add(id)
         this.#finish(id, false, 'the server stopped')
         return
       case 'violation':
@@ -652,6 +688,10 @@ export class SceneService {
       else this.#tasks.delete(id)
       return Promise.resolve()
     }
+    if (this.#current === id) this.#current = null
+    const job = this.#jobs.get(id)
+    if (job?.kind === 'calibrate' && !this.#stopped.has(id)) this.#removeMarker(job.scene, id)
+    this.#stopped.delete(id)
     const work = this.#work.get(id)
     this.#work.delete(id)
     if (work?.cleanup !== null && work?.cleanup !== undefined) removeTree(work.cleanup)
