@@ -529,3 +529,14 @@ no 'layouts' event; only the hook calls it directly); engine.ts is limited to th
   gltrace.mjs) is the comment above `clearTarget`.
 - Deviation: the guard also covers a missing `gl`, which the brief did not list: without it the framebuffer bind would be off
   silently. The workaround is now all or nothing: with any piece missing, neither half runs.
+
+## State machines W6: planner-core-gesture (2026-11-09)
+
+- **Drag token** (`planner/input.ts`). The gesture keeps the drag it began (`getDrag()` after `beginItemDrag`) and drives or ends the engine's drag only while `sameDrag` holds; otherwise it lets go. A press while the grip holds a rotate begins nothing.
+- **Pinch pair.** `pinch` holds two pointer ids. Lifting one with two or more left re-seeds from `nextPinchPair` (zoom, distance and midpoint as they are now); lifting an unpaired third finger changes nothing.
+- **Residual hand-off.** A pinch down to one finger becomes that finger's gesture (`residualKind`, `residualPans`, moved and multi, so no tap). This narrows v1, where the remaining finger was dead: on a zoomed view it now pans.
+- **Scene token.** A release on another scene than the press does nothing (same-name reopen not told apart, accepted); the shift-to-lift promotion checks it too.
+- **Selection removal path.** Verified landed in `removeItemInternal` through `setSelection`; engine.ts not edited here.
+- **Tests.** `planner/test/gesture.test.mjs`, `planner/ui/test/sections/gesture.mjs`.
+
+Deviations: the browser cases are `sections/gesture.mjs` (smoke.mjs is a runner since W1). CDP's `Input.dispatchTouchEvent` cannot release one finger of several here (a touchMove without it leaves it down), so (b) and (c) use synthetic PointerEvents on the canvas; (a) and (a') use CDP touches and lift all fingers at once, so the canvas finger's lift alone is not driven. A finger that lost or never had the drag is inert (multi = true: no pan, no tap), slightly stricter than the design's 'other', because a tap on the photo would deselect and end the grip's rotate. `tscert-ratchet --files --update` does not write the baseline, so the four names were added by hand. eval:keys E17.11 and E17.26 fail on sm-next's own `input.ts` as well (same run conditions), so they are not from this package.
