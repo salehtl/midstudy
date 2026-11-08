@@ -82,7 +82,9 @@ function sameItem(a: MicroItem, b: MicroItem): boolean {
   return true
 }
 
-/** v1's `_Page`: one pass over a page. */
+/** v1's `_Page`: one pass over a page. Kept as v1 had them (contract §0): the eviction past 4000 open tags, which can
+ *  finalize the innermost item and an open out, title, h1 or capture early; the 64-entry window in end() and #in();
+ *  <base> rewriting `base` mid-parse; and a ParseStopped returning what was read without close(). */
 export class Page {
   base: string
   readonly lines: string[] = []
@@ -347,6 +349,7 @@ class Driver implements TokenHandler {
   onStartTag(token: Token.TagToken): void {
     this.#skipNewLine = false
     let raw = false
+    const entered = token.tagID === TAG_ID.SVG || token.tagID === TAG_ID.MATH
     if (token.tagID === TAG_ID.SVG) this.#enter(NS.SVG)
     else if (token.tagID === TAG_ID.MATH) this.#enter(NS.MATHML)
     if (this.#foreign) {
@@ -372,6 +375,8 @@ class Driver implements TokenHandler {
     this.#page.start(tag, attrs)
     // v1 (html.parser) read <x/> as a start and an end tag; a raw text element stays open, as the tokenizer is now in it
     if (token.selfClosing && !VOID.has(tag) && !raw) this.#page.end(tag)
+    // the spec pops a self-closing foreign element at once: <svg/> must not leave what follows in foreign content
+    if (entered && token.selfClosing) this.#leave()
   }
 
   onEndTag(token: Token.TagToken): void {
