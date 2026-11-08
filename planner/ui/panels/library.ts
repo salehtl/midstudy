@@ -61,14 +61,16 @@ export function mount(ctx: UiContext): void {
     if (!engine.getSceneName()) { shell.toast('Open a scene first, then add furniture to it.', { id: 'no-scene' }); shell.openPage('scenes'); return }
     let uid: string
     const name = libName(item)
+    const ep = shell.epoch.items() // the pieces this add belongs to; a room's photo switch keeps them
     // A splat can take a few seconds to download and set up: say so if it isn't there at once.
     const loading: { toast: ToastHandle | null } = { toast: null }
     const slow = setTimeout(() => { loading.toast = shell.toast(`Placing ${name}…`, { ms: 60000 }) }, 400)
     try { uid = await engine.addItemInternal(item.id) } catch { return } finally { clearTimeout(slow); loading.toast?.close() } // reported (toast)
+    if (shell.epoch.items() !== ep) return
     engine.select(uid)
     lastAdded = item.id
-    shell.toast(`${name} added`, { kind: 'ok', id: `added:${uid}`, action: { label: 'Undo', onClick: () => { engine.removeItemInternal(uid) } } })
-    if (shell.isPhone()) shell.setDetent('peek')
+    shell.toast(`${name} added`, { kind: 'ok', id: `added:${uid}`, action: { label: 'Undo', onClick: () => { if (shell.epoch.items() === ep) engine.removeItemInternal(uid) } } })
+    if (shell.isPhone() && panel.isOpen()) shell.setDetent('peek')
     render()
     showAdded()
   }

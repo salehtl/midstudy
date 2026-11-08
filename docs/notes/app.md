@@ -471,3 +471,21 @@ repeat fetches. The backoff check repaints with the wheel over the plan rather t
 Deviations: the upload's epoch check runs after the upload as well as across the confirm, so opening another scene while
 one uploads isn't replaced either. The latch is a separate `roomBusy` rather than `roomMaking`, which is only set after
 the confirm. The page's first room read shares the poll's failure path.
+## State machines W4: planner-ui-sheets (2026-11-08)
+
+- **Export.** One `exporting` promise across sheets; a run closes its own handle; a sheet opened during a run has Save off
+  until it ends. `open()` returns after the capture if any sheet opened meanwhile.
+- **Settings.** A `saving` latch shared by Enter and Save; a save closes its own handle; same `isSheetOpen()` check.
+- **Product page.** A paste during a read stays in the box with "Still reading the last one; paste again in a moment".
+  `seq` is gone. The bookmarklet's reset timer is cleared before a new one.
+- **Add / Edit sheets.** `adding` holds the sources in flight (link, or file name|size|lastModified); the 'spend' listener
+  goes with the Add sheet.
+- **Library add.** Scoped to `shell.epoch.items()`: no select or toast after it moved, the Undo does nothing, and the phone
+  detent drops to peek only while the Library is the open panel.
+- **Tests.** `planner/ui/test/sections/sheets.mjs`.
+
+Deviations: `lib.addFromUrl`, `addFromFile` and `edit` already report their failures, and main.ts toasts every engine
+error, so a failure after closing the sheet was never hidden; the planned toast would be a second one. `toastIfClosed`
+toasts only an error nothing reported yet. The 'spend' listener count wraps `lib.events` (a Bus) directly: it is not an
+EventTarget, so the planned wrap of EventTarget.prototype would see nothing. A paste during a read lets the browser's paste
+happen (no preventDefault), so the page does stay in the box as the design says.

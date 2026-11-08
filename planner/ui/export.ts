@@ -4,7 +4,7 @@
 // this device. The Export tool and ⌘E open it (ui/workspace.ts). On a phone that can share files, Share… sits beside
 // Save. Choices and names: ui/logic/export.ts. Styles: styles/manage.css (.ex-*).
 // ctx.exporter: { open(), exportNow(opts) → { blob, name, width, height } }
-import { openSheet, type Sheet } from './sheet.js'
+import { isSheetOpen, openSheet, type Sheet } from './sheet.js'
 import { quiet, type ExportOptions, type UiContext } from './seam.js'
 import { FORMATS, LAYOUTS, dimsFor, exportName, formatOf, pairShape, rememberedChoices, sizesFor } from './logic/export.js'
 
@@ -27,6 +27,7 @@ export function mount(ctx: UiContext): void {
   const { engine, shell, kit } = ctx
   const { h, button, segmented } = kit
   let sheet: Sheet | null = null
+  let exporting: Promise<void> | null = null // one Export at a time, across closing and reopening its sheet
   const photoSize = (): { w: number; h: number } => { const p = engine.getPhotoSize(); return { w: p.w, h: p.h } }
   const fileName = (o: { format: string; layout: string }, w: number, hh: number): string => {
     const sc = engine.getScene()
@@ -96,10 +97,9 @@ export function mount(ctx: UiContext): void {
     const p = photoSize()
     const sizes = sizesFor(Math.max(p.w, p.h))
     const o = rememberedChoices(store.get(), sizes)
-    let busy = false
     let preview
     try { preview = await engine.captureComposite({ maxPx: 720, quality: 0.8 }) } catch (e) { engine.reportError('Could not capture the scene', e); return }
-    if (sheet?.isOpen()) return
+    if (isSheetOpen()) return // another sheet opened during the capture: it stays
     const phone = shell.isPhone()
     const remember = (): void => { store.set(o) }
 
@@ -119,6 +119,7 @@ export function mount(ctx: UiContext): void {
       info.textContent = `${String(out.w)} × ${String(out.h)} ${fmt.label} · ${fmt.note}`
       pv.dataset['layout'] = o.layout
       pv.dataset['shape'] = d.w >= d.h ? 'wide' : 'tall'
+      const busy = exporting !== null
       go.disabled = busy
       if (share) share.disabled = busy
       const label = go.lastChild
@@ -141,10 +142,14 @@ export function mount(ctx: UiContext): void {
       info,
       h('p.ms-note', ctx.icons.icon('info', { size: 14 }), h('span', 'The view as drawn here, without AI: free, and nothing leaves this device. For a photoreal image, use Render.')))
 
-    async function run(how: 'save' | 'share'): Promise<void> {
-      if (busy) return
-      busy = true
+    function run(how: 'save' | 'share'): Promise<void> {
+      if (exporting) return Promise.resolve()
+      const job = work(how).finally(() => { exporting = null; sync() })
+      exporting = job
       sync()
+      return job
+    }
+    async function work(how: 'save' | 'share'): Promise<void> {
       try {
         const r = await exportNow(o)
         if (how === 'share') {
@@ -154,20 +159,19 @@ export function mount(ctx: UiContext): void {
           save(r.blob, r.name)
           shell.toast(`Saved ${r.name}`, { kind: 'ok', id: 'export-saved', ms: 5000 })
         }
-        sheet?.close()
+        mine.close()
       } catch (e) {
         if (!(e instanceof Error && engine.errors.includes(e.message))) engine.reportError('Export failed', e)
-      } finally {
-        busy = false
-        if (sheet?.isOpen()) sync()
       }
     }
-    sheet = openSheet(shell, {
+    const mine = openSheet(shell, {
       title: 'Export image', sub: 'Free · no AI', label: 'Export image', cls: 'ex-sheet', body,
-      actions: [phone ? null : button({ label: 'Cancel', kind: 'secondary', onClick: () => { sheet?.close() } }), share, go],
-      onClose: () => { sheet = null },
+      actions: [phone ? null : button({ label: 'Cancel', kind: 'secondary', onClick: () => { mine.close() } }), share, go],
+      onClose: () => { if (sheet === mine) sheet = null },
     })
+    sheet = mine
     sync()
+    if (exporting) quiet(exporting.then(() => { if (mine.isOpen()) sync() })) // opened during a run: Save comes back when it ends
   }
 
   ctx.exporter = { open: () => { quiet(open()) }, exportNow }

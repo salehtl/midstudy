@@ -112,14 +112,13 @@ interface ReadState {
   picture: number
   failed: Set<number>
   error: ReadError | null
-  seq: number
   active: boolean
 }
 type PutKey = 'name' | 'w' | 'd' | 'h' | 'category'
 type StatusKind = 'busy' | 'ok' | 'warn' | null
 
 export function productSource({ lib, form, onChange, onUseLink }: { readonly lib: Library; readonly form: ProductForm; readonly onChange?: () => void; readonly onUseLink?: (imageUrl: string | null) => void }): ProductSource {
-  const st: ReadState = { busy: false, data: null, readUrl: '', size: 0, picture: -1, failed: new Set(), error: null, seq: 0, active: true }
+  const st: ReadState = { busy: false, data: null, readUrl: '', size: 0, picture: -1, failed: new Set(), error: null, active: true }
   // what the last prefill put in each field: a field still holding it (or empty) is ours to replace
   const last: Record<PutKey, string> = { name: '', w: '', d: '', h: '', category: '' }
   let lastRug = false
@@ -159,6 +158,7 @@ export function productSource({ lib, form, onChange, onUseLink }: { readonly lib
   pasteBox.setAttribute('autocorrect', 'off')
   // the page is read straight from the clipboard: megabytes of source never sit in the box
   pasteBox.addEventListener('paste', (e) => {
+    if (st.busy) { stillReading(); return } // the browser's own paste: it stays in the box
     const t = e.clipboardData?.getData('text/plain')
     if (!t) return
     e.preventDefault()
@@ -179,13 +179,17 @@ export function productSource({ lib, form, onChange, onUseLink }: { readonly lib
     bmHint,
     h('p.ms-hint', 'On a phone: bookmark any page, edit the bookmark, and paste the copied address in place of its own.'),
     pasteBox)
+  let bmReset: ReturnType<typeof setTimeout> | undefined
   async function copyBookmarklet(): Promise<void> {
     let ok = false
     try { await navigator.clipboard.writeText(BOOKMARKLET); ok = true } catch { /* below */ }
     bmCopy.replaceChildren(h('span', ok ? 'Copied' : 'Couldn’t copy: drag the button instead'))
-    setTimeout(() => { bmCopy.replaceChildren(h('span', 'Copy its address')) }, 2500)
+    clearTimeout(bmReset)
+    bmReset = setTimeout(() => { bmCopy.replaceChildren(h('span', 'Copy its address')) }, 2500)
   }
+  function stillReading(): void { setStatus('busy', 'Still reading the last one; paste again in a moment') }
   function takePasted(t: string): void {
+    if (st.busy) { stillReading(); return } // the page stays in the box; read()'s finally puts the placeholder back
     pasteBox.value = ''
     pasteBox.placeholder = `Pasted a page (${pageSize(t.length)}): reading it…`
     void read({ html: t })
@@ -254,21 +258,18 @@ export function productSource({ lib, form, onChange, onUseLink }: { readonly lib
       url.focus()
       return
     }
-    const seq = ++st.seq
     st.busy = true
     st.error = null
     render()
     changed()
     try {
       const answer = await lib.readProduct(link, html !== null ? { html } : undefined)
-      if (seq !== st.seq) return
       const d = parseProduct(answer)
       if (html !== null && d.url !== null && isLink(d.url)) { url.value = d.url; link = d.url } // the page that was read
       st.data = d
       st.readUrl = link
       prefill(d)
     } catch (e) {
-      if (seq !== st.seq) return
       if (st.data) clearPrefill()
       st.data = null
       st.readUrl = ''
@@ -278,13 +279,11 @@ export function productSource({ lib, form, onChange, onUseLink }: { readonly lib
       if (st.error.blocked) pasteEl.open = true
     } finally {
       if (html !== null) pasteBox.placeholder = 'Paste the copied page here'
-      if (seq === st.seq) {
-        const hadFocus = document.activeElement === readBtn || document.activeElement === document.body
-        st.busy = false
-        render()
-        changed()
-        if (hadFocus) (st.error && !useLink.hidden ? useLink : readBtn).focus({ preventScroll: true }) // focus stays in the sheet
-      }
+      const hadFocus = document.activeElement === readBtn || document.activeElement === document.body
+      st.busy = false
+      render()
+      changed()
+      if (hadFocus) (st.error && !useLink.hidden ? useLink : readBtn).focus({ preventScroll: true }) // focus stays in the sheet
     }
   }
 
