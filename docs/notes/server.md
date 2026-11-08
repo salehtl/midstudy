@@ -134,3 +134,9 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - `PUT /api/layouts/{layout}` tests the scene or room again after the body arrived, right before the synchronous write, and answers the same 404 as the first check. A scene or room deleted during the upload no longer gets its layouts folder recreated, which blocked its restore. Proof: `server/test/layouts.test.ts`.
 - An invalid body on an owner that has gone still answers 400: the re-test comes after the layout check, as designed.
 - Deferred: versioning or ETag on layout PUT stays last-writer-wins (needs a contract, planner and conflict-UI change). Wont-fix: trash copies are never purged.
+## State machines W6: product-parser-guards (self-closing svg/math, Shopify first-wins)
+
+- `Driver.onStartTag` (`product/html.ts`) leaves the namespace after a self-closing `<svg/>` or `<math/>`, so a following `<script>` stays raw text and inline JSON with `<` is no longer tokenized as markup. Attribute adjustment is unchanged. Proof: `server/test/product-html.test.ts`.
+- `shopifySizes` returns early when `sz.variants` is already set, before any parse, as `wooSizes` does. Shopify runs first today, so the output is identical; v1 had no guard.
+- The other parser risks stay v1's `_Page` (contract §0), listed in a comment on `Page`. `<script>` inside a non-self-closing `<svg>` is still foreign content, v2's documented tokenizer choice.
+- Deviation: the brief's parity case `<svg><svg/><title>x</title></svg>` is pinned as `title === null`, since `Page` ignores a `<title>` inside an svg.

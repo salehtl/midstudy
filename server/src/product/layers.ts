@@ -293,6 +293,7 @@ function firstOf(list: readonly (string | MicroItem)[] | undefined): string | Mi
 export function shopifySizes(doc: Doc, ctx: Ctx, sz: Sizes, used: Set<string>): void {
   const f = doc.shopify
   if (f === null) return
+  if (sz.variants.length > 0) return
   for (const opt of asList(f.get('options'))) {
     if (isDict(opt) && sizes.matches('size_opt', pyStr(getOr(opt, 'name', '')))) {
       const values: string[] = []
