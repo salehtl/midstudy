@@ -11,7 +11,7 @@
 // It also tells the engine which part of the window the photo may use (engine.setStageInsets).
 // Shortcuts (ctx.keys): Delete / Backspace remove the selection (Undo toast), ⌘Z undoes that, Esc leaves Adjust floor,
 // O toggles Occlusion, ⌘E opens Export.
-// ctx.workspace: { setAdjust(on) } (the Scene panel's Adjust floor… button)
+// ctx.workspace: { setAdjust(on), syncStage(), removeWithUndo(uids) } (the Scene panel's Adjust floor…, the In the scene rows' Remove)
 // Shell events it sends (cancelable; preventDefault() to take over): 'render-request' {}, 'open-render' { meta }
 // The decisions, placements and words: logic/workspace.ts.
 import { ring, unsavedGlyph, icon, svgFrom } from './icons.js'
@@ -23,8 +23,8 @@ import { fixedMinus, readDecimal, readSigned, signed1 } from './logic/text.js'
 import { roomScaleText, roomTitleText } from './logic/rooms.js'
 import {
   adjustNote, bottomBar, clipInset, elevCm as cmOf, elevMeters, fillPercent, floorSavedText, frontCorner, gripSpot, horizonHandle as handleSpot,
-  labelSpot, missingText, renderChip, repeatCm, repeatDelayMs, rulerHint as rulerHintText, scaleText, stageInsets, switcher as switcherOf, switcherLabel, upText,
-  type Pt, type Rect,
+  labelSpot, missingText, renderChip, renderEnded, renderStarted, repeatCm, repeatDelayMs, rulerHint as rulerHintText, scaleText, stageInsets, switcher as switcherOf, switcherLabel, undoUsable, upText,
+  type Pt, type Rect, type RenderSlot,
 } from './logic/workspace.js'
 
 const NS = 'http://www.w3.org/2000/svg'
@@ -72,10 +72,13 @@ function cameraPatch(key: CameraKey, v: number): CameraPatch {
 export function mount(ctx: UiContext): void {
   const { engine, scenes, shell, kit, keys } = ctx
   const { h, kbd } = kit
+  const epoch = shell.epoch
   const root = document.documentElement
   const phone = (): boolean => shell.isPhone()
-  let rendering: { readonly t0: number } | null = null    // while a render runs
-  let lastRemoved: { readonly snaps: readonly ItemSnapshot[]; readonly toast: ToastHandle; readonly undo: () => void } | null = null  // for Undo / ⌘Z
+  let rendering: RenderSlot | null = null    // while any render runs
+  // for Undo / ⌘Z: the last removal, while its pieces' scene is open (ep: epoch.items() when removed)
+  let lastRemoved: { readonly ep: number; readonly snaps: readonly ItemSnapshot[]; readonly toast: ToastHandle; readonly undo: () => void } | null = null
+  epoch.on('items', () => { lastRemoved = null })
 
   // --- top bar ---------------------------------------------------------------------------------------------------
   const switcher = h('button.ws-switcher', { type: 'button', 'aria-label': 'Scenes', dataset: { tip: 'All scenes' }, onclick: () => { shell.openPage('scenes') } })
@@ -145,12 +148,11 @@ export function mount(ctx: UiContext): void {
   engine.events.addEventListener('render', (e) => {
     const { phase, meta } = e.detail
     if (phase === 'start') {
-      rendering = { t0: performance.now() }
-      clearInterval(renderTimer)
-      renderTimer = setInterval(renderChips, 1000)
+      rendering = renderStarted(rendering, performance.now())
+      renderTimer ??= setInterval(renderChips, 1000)
     } else {
-      rendering = null
-      clearInterval(renderTimer)
+      rendering = renderEnded(rendering)
+      if (!rendering) { clearInterval(renderTimer); renderTimer = undefined }
       if (phase === 'done' && meta) shell.toast('Render ready', { kind: 'ok', id: 'render-ready', ms: 10000, action: { label: 'View', onClick: () => { if (shell.events.emit('open-render', { meta }, true)) shell.openPanel('renders') } } })
     }
     renderChips()
@@ -234,16 +236,28 @@ export function mount(ctx: UiContext): void {
 
   // --- selection bar + height (§2.10) ------------------------------------------------------------------------------
   // Removes every selected piece; one toast, and Undo (or ⌘Z) puts them all back, selected.
-  function removeSelected(): void {
-    const snaps = engine.getSelection().flatMap((u) => { const sn = engine.removeItemWithUndo(u); return sn ? [sn] : [] })
+  // One Undo channel: In the scene's Remove comes through here too. The toast and ⌘Z restore at most once, and only into
+  // the set of pieces they came from (a room's photo switch keeps it); the toast goes when that set does.
+  function removeWithUndo(uids: readonly string[]): void {
+    const snaps = uids.flatMap((u) => { const sn = engine.removeItemWithUndo(u); return sn ? [sn] : [] })
     const first = snaps[0]
     if (!first) return
-    const undo = (): void => { if (lastRemoved?.snaps === snaps) lastRemoved = null; quiet(snaps.length === 1 ? engine.restoreItem(first) : engine.restoreItems(snaps)) }
+    const ep = epoch.items()
+    let done = false
+    const undo = (): void => {
+      if (done || epoch.items() !== ep) return
+      done = true
+      if (lastRemoved?.snaps === snaps) lastRemoved = null
+      quiet(snaps.length === 1 ? engine.restoreItem(first) : engine.restoreItems(snaps))
+    }
     const text = snaps.length === 1 ? `${first.name} removed` : `${String(snaps.length)} pieces removed`
-    const t = shell.toast(text, { id: `removed:${first.uid}`, icon: 'trash', ms: 6000, action: { label: 'Undo', onClick: undo } })
+    let offEpoch = (): void => { /* set just below */ }
+    const t = shell.toast(text, { id: `removed:${first.uid}`, icon: 'trash', ms: 6000, action: { label: 'Undo', onClick: undo }, onGone: () => { offEpoch() } })
+    offEpoch = epoch.on('items', () => { t.close() })
     if (!phone()) t.el.querySelector('.toast-action')?.append(kbd(keys.lookup('edit.undo')))
-    lastRemoved = { snaps, toast: t, undo }
+    lastRemoved = { ep, snaps, toast: t, undo }
   }
+  function removeSelected(): void { removeWithUndo(engine.getSelection()) }
   function explainMissing(): void {
     const it = engine.getItem(engine.getSelected())
     shell.toast(missingText(it ? it.name : null, !!it?.noGlb), { id: 'missing-why', ms: 9000 })
@@ -260,21 +274,36 @@ export function mount(ctx: UiContext): void {
     let t: ReturnType<typeof setTimeout> | undefined
     let n = 0
     const stop = (): void => { clearTimeout(t); t = undefined }
-    let pressed = false
-    return h(`button.${cls}`, {
+    let pressed = false // the click that follows a press is the press's, and is swallowed
+    let down = false
+    // pressed is cleared only when the pointer leaves while still down: on touch, leave comes after up and before click
+    const left = (): void => { stop(); if (down) pressed = false; down = false }
+    const btn: HTMLButtonElement = h(`button.${cls}`, {
       type: 'button', 'aria-label': labelText, dataset: { midstudy: midstudyName, tip: labelText, kbd: dir > 0 ? 'PgUp' : 'PgDn' },
       onpointerdown: (e) => {
         if (e.button) return
+        stop()
         pressed = true
+        down = true
         n = 0
+        const uid0 = selUid()
         nudge(dir)
-        const go = (): void => { n++; nudge(dir * repeatCm(n)); t = setTimeout(go, repeatDelayMs(n)) }
+        if (uid0 === null) return
+        // the repeat belongs to this press's piece, and ends with its button or its selection (no pointerup comes then)
+        const go = (): void => {
+          if (!btn.isConnected || selUid() !== uid0) { stop(); return }
+          n++
+          engine.nudgeElevation(uid0, dir * repeatCm(n) / 100)
+          t = setTimeout(go, repeatDelayMs(n))
+        }
         t = setTimeout(go, 450)
       },
-      onpointerup: stop, onpointerleave: stop, onpointercancel: stop, oncontextmenu: (e) => { e.preventDefault() },
+      onpointerup: () => { down = false; stop() },
+      onpointerleave: left, onpointercancel: left, oncontextmenu: (e) => { e.preventDefault() },
       // a click without a pointer press (keyboard, or a script's element.click()) nudges once
       onclick: () => { if (!pressed) nudge(dir); pressed = false },
     }, icon(dir > 0 ? 'plus' : 'minus', { size }))
+    return btn
   }
   const elevInputs = new Set<HTMLInputElement>()
   function elevInput(cls: string): HTMLInputElement {
@@ -400,6 +429,8 @@ export function mount(ctx: UiContext): void {
   // two-tap ruler; Reset (back to the automatic camera) and Looks right (save; manual if anything changed).
   const camRows = new Map<string, { readonly row: HTMLLabelElement; readonly sync: () => void }>()
   let adjustSync: (() => void) | null = null
+  let floorBusy = false // Looks right or Set scale is on its way (one latch: either blocks both)
+  const setFloorBusy = (on: boolean): void => { floorBusy = on; adjustSync?.() }
   function camSlider(id: string, key: CameraKey, text: string, unit: string, min: number, max: number, step: number, toUi: (v: number) => number, fromUi: (v: number) => number, digits: number): HTMLLabelElement {
     const out = h('span.ws-adj-value.tnum')
     const input = h('input.slider', { type: 'range', min, max, step, 'aria-label': text, dataset: { midstudy: id } })
@@ -428,6 +459,7 @@ export function mount(ctx: UiContext): void {
     const trueInput = h('input.input.ws-adj-true.tnum', { type: 'text', inputmode: 'decimal', enterkeyhint: 'done', autocomplete: 'off', spellcheck: false, placeholder: phone() ? 'Real length' : 'e.g. 200', 'aria-label': 'Its real length, cm', dataset: { midstudy: 'ruler-true' } })
     const inRoom = !!engine.getRoomState()
     const applyTrue = (): void => {
+      if (floorBusy) return
       const cm = readDecimal(trueInput.value)
       if (!(cm > 0)) { trueInput.focus(); return }
       if (inRoom) { quiet(roomScale(cm)); return }
@@ -442,10 +474,11 @@ export function mount(ctx: UiContext): void {
     // "Know its real length? [ ] cm · Set scale". So the card (and with it the photo above) doesn't move between the
     // taps, and on the phone the instruction has a whole line instead of hiding behind Reset.
     const rulerHint = h('span.ws-adj-rhint', { role: 'status' })
+    const setScale = h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: inRoom ? 'room-scale' : 'ruler-set', tip: inRoom ? 'Scale the whole room (every photo) so the ruler reads this length' : 'Scale the room so the ruler reads this length' }, onclick: applyTrue }, 'Set scale')
     const trueBox = h('div.ws-adj-truebox', { hidden: true },
       h('span.ws-adj-true-cap', 'Know its real length?'), h('label.ws-adj-true-field', trueInput, h('span', 'cm')),
       // in a room view (§4.9) Set scale scales the whole room (every photo), not this photo's camera: room-scale
-      h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: inRoom ? 'room-scale' : 'ruler-set', tip: inRoom ? 'Scale the whole room (every photo) so the ruler reads this length' : 'Scale the room so the ruler reads this length' }, onclick: applyTrue }, 'Set scale'))
+      setScale)
     const trueRow = h('div.ws-adj-truerow', { hidden: true }, rulerHint, trueBox)
     const reset = h('button.ws-adj-btn', { type: 'button', dataset: { midstudy: 'floor-reset', tip: 'Back to the automatic camera' }, onclick: () => { engine.resetCamera() } }, 'Reset')
     const ok = h('button.ws-adj-btn.is-primary', { type: 'button', dataset: { midstudy: 'floor-ok' }, onclick: () => { quiet(looksRight()) } }, 'Looks right')
@@ -474,18 +507,26 @@ export function mount(ctx: UiContext): void {
       trueBox.hidden = !measured
       if (trueRow.hidden === r.active) { trueRow.hidden = !r.active; requestAnimationFrame(syncStage) }
       reset.disabled = false
+      ok.disabled = floorBusy
+      setScale.disabled = floorBusy
     }
     adjustSync()
   }
   async function roomScale(cm: number): Promise<void> {
+    if (floorBusy) return
+    setFloorBusy(true)
     let k: number | null
-    try { k = await engine.setRoomScale(cm / 100) } catch { return }
+    try { k = await engine.setRoomScale(cm / 100) } catch { return } finally { setFloorBusy(false) }
     if (k === null) return
     shell.toast(roomScaleText(k), { kind: 'ok', id: 'ruler-scale', ms: 5000 })
   }
   async function looksRight(): Promise<void> {
+    if (floorBusy) return
+    setFloorBusy(true)
+    const ep = epoch.now() // per photo, as saveScene is
     const before = engine.getSavedScene()
-    try { await engine.saveScene() } catch { return }
+    try { await engine.saveScene() } catch { return } finally { setFloorBusy(false) }
+    if (epoch.now() !== ep || !engine.getAdjustFloor()) return // the user left (or is on another photo): nothing to close or say
     engine.setAdjustFloor(false)
     const src = engine.getCameraSource()
     shell.toast(floorSavedText(src === 'manual', before?.camera_source === 'manual'), { kind: 'ok', id: 'floor-saved', ms: 3000 })
@@ -589,7 +630,7 @@ export function mount(ctx: UiContext): void {
   // --- keys: Del with Undo, ⌘Z, Esc leaves Adjust floor, O, ⌘E (the keymap; the engine's own are in input.ts) ------------
   const sceneOpen = (): boolean => !busy()
   keys.register({ id: 'item.remove', group: 'Move and turn', label: 'Remove (with Undo)', keys: ['delete', 'backspace'], repeat: false, when: () => sceneOpen() && engine.getSelection().length > 0 && !engine.getAdjustFloor(), run: () => { removeSelected() } })
-  keys.register({ id: 'edit.undo', group: 'Move and turn', label: 'Undo a remove', keys: ['mod+z'], repeat: false, when: () => !!lastRemoved, run: () => { const l = lastRemoved; lastRemoved = null; l?.toast.close(); l?.undo() } })
+  keys.register({ id: 'edit.undo', group: 'Move and turn', label: 'Undo a remove', keys: ['mod+z'], repeat: false, when: () => undoUsable(lastRemoved, epoch.items()), run: () => { const l = lastRemoved; lastRemoved = null; l?.toast.close(); l?.undo() } })
   keys.register({ id: 'adjust.leave', group: 'Tools', label: 'Leave Adjust floor', keys: ['escape'], priority: 10, repeat: false, hidden: true, when: () => engine.getAdjustFloor() && !engine.getRuler().active, run: () => { setAdjust(false) } })
   keys.register({ id: 'tool.occlusion', group: 'Tools', label: 'Occlusion on or off', keys: ['o'], repeat: false, when: sceneOpen, run: () => { toggleOcclusion() } })
   keys.register({ id: 'tool.export', group: 'Tools', label: 'Export an image (free, no AI)', keys: ['mod+e'], repeat: false, when: sceneOpen, run: () => { ctx.exporter?.open() } })
@@ -620,11 +661,17 @@ export function mount(ctx: UiContext): void {
   })
   horizonHandle.addEventListener('pointermove', (e) => {
     if (hz?.id !== e.pointerId) return
+    if (!engine.getAdjustFloor()) { endHorizon(); return }
     const rect = engine.getPhotoRect()
     const s = rect.w / engine.getPhotoSize().w
     engine.setPitchFromHorizon(horizonDragRow(hz.py0, e.clientY - hz.y0, s, horizonDragGain(engine.getCamera().fov_y_deg, rect.h)))
   })
   const hzUp = (): void => { hz = null; horizonHandle.classList.remove('is-active') }
+  function endHorizon(): void {
+    if (hz && horizonHandle.hasPointerCapture(hz.id)) horizonHandle.releasePointerCapture(hz.id)
+    hzUp()
+  }
+  engine.events.addEventListener('adjust', (e) => { if (!e.detail.on) endHorizon() })
   horizonHandle.addEventListener('pointerup', hzUp)
   horizonHandle.addEventListener('pointercancel', hzUp)
   horizonHandle.addEventListener('keydown', (e) => {
@@ -633,15 +680,25 @@ export function mount(ctx: UiContext): void {
   horizonHandle.tabIndex = 0
 
   // --- ruler handles: drag a point along the floor ------------------------------------------------------------------------
-  let rDrag: { readonly i: number; readonly touch: boolean } | null = null
+  let rDrag: { readonly i: number; readonly id: number; readonly touch: boolean } | null = null
+  function endRulerDrag(): void {
+    const el = rDrag ? handles[rDrag.i] : undefined
+    if (rDrag && el?.hasPointerCapture(rDrag.id)) el.releasePointerCapture(rDrag.id)
+    rDrag = null
+  }
+  engine.events.addEventListener('ruler', (e) => { if (!e.detail.active) endRulerDrag() })
   handles.forEach((el, i) => {
     el.addEventListener('pointerdown', (e) => {
       if (!engine.getRuler().active) return
       e.preventDefault()
       el.setPointerCapture(e.pointerId)
-      rDrag = { i, touch: e.pointerType !== 'mouse' }
+      rDrag = { i, id: e.pointerId, touch: e.pointerType !== 'mouse' }
     })
-    el.addEventListener('pointermove', (e) => { if (rDrag?.i === i) engine.setRulerPointAt(i, e.clientX, e.clientY - (rDrag.touch ? 30 : 0)) })
+    el.addEventListener('pointermove', (e) => {
+      if (rDrag?.i !== i) return
+      if (!engine.getRuler().active) { endRulerDrag(); return }
+      engine.setRulerPointAt(i, e.clientX, e.clientY - (rDrag.touch ? 30 : 0))
+    })
     const up = (): void => { if (rDrag?.i === i) rDrag = null }
     el.addEventListener('pointerup', up)
     el.addEventListener('pointercancel', up)
@@ -774,7 +831,7 @@ export function mount(ctx: UiContext): void {
   vv?.addEventListener('scroll', syncKb)
   syncKb()
 
-  ctx.workspace = { setAdjust, syncStage: () => { syncStage(); sync() } }
+  ctx.workspace = { setAdjust, syncStage: () => { syncStage(); sync() }, removeWithUndo }
   buildTools()
   sync()
   syncStage()

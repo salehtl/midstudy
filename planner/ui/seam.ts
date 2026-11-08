@@ -29,6 +29,8 @@ interface WorkspaceApi {
   readonly setAdjust: (on: boolean) => void
   /** the stage (the part of the window the photo uses) again: a room view's strip or floor plan changed (ui/room.ts) */
   readonly syncStage: () => void
+  /** removes these pieces with the one Undo (toast and ⌘Z); In the scene's Remove comes through it */
+  readonly removeWithUndo: (uids: readonly string[]) => void
 }
 
 /** What the Shortcuts sheet adds (ui/shortcuts.ts). */

@@ -27,6 +27,7 @@ export function mount(ctx: UiContext): void {
   panel.body.append(list, empty, hint, keyList)
 
   function remove(uid: string): void {
+    if (ctx.workspace) { ctx.workspace.removeWithUndo([uid]); return }
     const snap = engine.removeItemWithUndo(uid)
     if (!snap) return
     shell.toast(`${snap.name} removed`, { id: `removed:${uid}`, icon: 'trash', ms: 6000, action: { label: 'Undo', onClick: () => { quiet(engine.restoreItem(snap)) } } })
