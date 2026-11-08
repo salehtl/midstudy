@@ -2,8 +2,9 @@
 `midstudy-calib light` (§4.8): lighting.json alone.
 
 Everything a fit writes is computed and validated first (calib.json and lighting.json against their schemas), then
-written: depth.png, lighting.json, calib.json, each atomically. A result that doesn't match its schema is a bug and
-fails the command before any file changes.
+written: calib.json is removed, then depth.png, lighting.json and calib.json are written, each atomically, so calib.json
+is the folder's commit marker (contract §4.3 Order). A result that doesn't match its schema is a bug and fails the
+command before any file changes, and so does a re-fit that can't run MoGe over an earlier MoGe calibration.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from .ingest import exif_block
 from .lighting import LightFit
 from .moge_runner import MogeOutput
 from .records import CalibOut, Device, FittedFloor, Model, MogeInfo, RealDevice
-from .util import Fail, camera_block, default_camera, log, read_json, source_file, write_atomic
+from .util import SCENE_FILES, Fail, camera_block, default_camera, invalidate, log, read_json, source_file, sweep_tmp, write_atomic
 
 type U8 = NDArray[np.uint8]
 
@@ -121,10 +122,8 @@ def _mock(scene: Path, mock_dir: Path, w: int, h: int, exif: CalibExif | None, n
                 calib["depth"] = None
             light = _valid_lighting_file(d / "lighting.json") if (d / "lighting.json").is_file() else None
             return FitOutput(calib, depth, light)
-    log(f"no mock for photo.jpg in {mock_dir}: writing the default fallback")
-    calib = _base(w, h, exif)
-    calib["fallback_reason"] = "MIDSTUDY_CALIB_MOCK has no calibration for this photo"
-    return FitOutput(calib, None, None)
+    log(f"no mock for photo.jpg in {mock_dir}: writing the fallback")
+    return FitOutput(fallback(w, h, exif, "MIDSTUDY_CALIB_MOCK has no calibration for this photo"), None, None)
 
 
 def _png16(mm: NDArray[np.uint16]) -> bytes:
@@ -231,7 +230,7 @@ def _moge(scene: Path, w: int, h: int, exif: CalibExif | None, model: Model, dev
         depth_scale = k if use_exif else 1.0
     calib["fov_source"] = "exif" if use_exif else "moge"
     moge = MogeInfo(fov_x_deg=round(fov_x, 2), fov_y_deg=round(fov_y, 2), input=[dw, dh], load_s=round(out.load_s, 2),
-                    infer_s=round(out.infer_s, 2), floor_fit_s=round(fit_s, 2))
+                    infer_s=round(out.infer_s, 2), floor_fit_s=round(fit_s, 2), revision=out.revision)
     calib["moge"] = moge
     if use_exif:
         moge["height_m"] = round(float(calib["camera"]["height_m"]) / k, 4) if calib["floor"]["found"] else None
@@ -260,8 +259,11 @@ def _moge(scene: Path, w: int, h: int, exif: CalibExif | None, model: Model, dev
 
 
 def _write(scene: Path, out: FitOutput) -> None:
-    """depth.png, lighting.json (each written, or a stale one removed), then calib.json (checked against its schema)."""
+    """calib.json removed, depth.png and lighting.json (each written, or a stale one removed), then calib.json (already
+    checked against its schema): a crash in between reads as "not fitted", never as the old calib.json beside new files."""
     calib_bytes = (json.dumps(out.calib, indent=2) + "\n").encode()
+    sweep_tmp(scene, SCENE_FILES)
+    invalidate(scene, ("calib.json",))
     if out.depth_png is not None:
         write_atomic(scene / "depth.png", out.depth_png)
     else:
@@ -271,6 +273,15 @@ def _write(scene: Path, out: FitOutput) -> None:
     else:
         (scene / "lighting.json").unlink(missing_ok=True)
     write_atomic(scene / "calib.json", calib_bytes)
+
+
+def _has_moge_calibration(scene: Path) -> bool:
+    """Whether the folder's calib.json is a real MoGe calibration (a fallback one is nothing to protect)."""
+    try:
+        calib = read_json(scene / "calib.json")
+    except (OSError, ValueError):
+        return False
+    return isinstance(calib, dict) and cast(dict[str, object], calib).get("source") == "moge-2"
 
 
 def fit(scene: Path, model: Model = "vitl", device: Device = "auto", no_depth: bool = False) -> CalibOut:
@@ -293,6 +304,8 @@ def fit(scene: Path, model: Model = "vitl", device: Device = "auto", no_depth: b
             raise
         except Exception as e:
             first = str(e).splitlines()[0][:200] if str(e) else ""
+            if _has_moge_calibration(scene):  # it pairs with this photo: ingest removes it when the photo changes
+                raise Fail(f"MoGe-2 couldn't run ({type(e).__name__}: {first}); the earlier calibration was kept") from None
             out = FitOutput(fallback(w, h, exif, f"MoGe unavailable or failed ({type(e).__name__}: {first})"), None, None)
     out.calib["elapsed_s"] = round(time.monotonic() - t0, 2)
     validate.require("calib", out.calib, "calib.json")

@@ -1,17 +1,21 @@
-"""Small shared pieces: the one failure type, stderr progress, atomic writes (validated ones for JSON), the camera
-block."""
+"""Small shared pieces: the one failure type, stderr progress, atomic writes (validated ones for JSON), a scene
+folder's commit order (invalidate, sweep_tmp), the camera block."""
 from __future__ import annotations
 
 import json
 import os
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Final, Literal
 
 from . import validate
 from .contract_types import Camera
+
+# What calib writes in a scene folder (contract §4.3); everything else there is the server's.
+SCENE_FILES: Final[tuple[str, ...]] = ("photo.jpg", "source.*", "calib.json", "depth.png", "lighting.json")
+DERIVED_FILES: Final[tuple[str, ...]] = ("calib.json", "depth.png", "lighting.json")  # calib.json first: it commits the rest
 
 type CameraKey = Literal["fov_y_deg", "height_m", "pitch_deg", "roll_deg"]
 CAMERA_KEYS: Final[tuple[CameraKey, ...]] = ("fov_y_deg", "height_m", "pitch_deg", "roll_deg")
@@ -54,11 +58,28 @@ def write_atomic(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
         os.chmod(tmp, 0o644)  # noqa: PTH101 - on the temp file's name, before the rename
         os.replace(tmp, path)  # noqa: PTH105
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def sweep_tmp(folder: Path, names: Iterable[str]) -> None:
+    """Remove the `.<name>.<random>.tmp` a killed run of ours left behind, for these names only (globs allowed): the
+    server writes scene.json and thumb.jpg in the same folder with the same pattern. Safe because the server runs one
+    calibration job at a time and waits for a killed worker to exit before the next."""
+    for name in names:
+        for tmp in folder.glob(f".{name}.*.tmp"):
+            tmp.unlink(missing_ok=True)
+
+
+def invalidate(folder: Path, names: Iterable[str]) -> None:
+    """Remove these files in order (contract §4.3 Order: calib.json, the commit marker, goes first)."""
+    for name in names:
+        (folder / name).unlink(missing_ok=True)
 
 
 def write_json(path: Path, obj: Mapping[str, object], schema: validate.Target) -> None:

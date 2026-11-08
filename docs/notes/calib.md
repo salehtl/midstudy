@@ -407,3 +407,25 @@ fitted camera in cyan, plus the true camera in magenta on golden scenes. `*-dept
   part of the same fix; this package doesn't touch `fit.py` or `records.py`.
 - Tests: `test_failed_move_forces_a_full_move_on_retry`, `test_pinned_revision_is_recorded`, and
   `test_one_model_at_a_time` / `test_pinned_revision_then_main` updated for the tuple.
+
+## State machines W2: calib-scene-files
+
+- `calib.json` is the folder's commit marker. `util.write_atomic` fsyncs; `util.sweep_tmp` removes a killed run's
+  `.<name>.*.tmp` for calib's own names only (the server writes `.scene.json.*.tmp` and `.thumb.jpg.*.tmp` beside them);
+  `util.invalidate` removes files in order.
+- `ingest` builds the new `photo.jpg` in memory and compares it first. Different (or none): removes `calib.json`,
+  `depth.png`, `lighting.json`, the old `photo.jpg` and other `source.*`, then writes `source.<ext>` and `photo.jpg`.
+  Identical: the photo and the fit stay. A refused upload changes nothing.
+- `fit._write` removes `calib.json` first and writes it last. A re-fit over a `source: "moge-2"` `calib.json` that can't
+  run MoGe fails with "the earlier calibration was kept" and writes nothing; the §4.3 fallback stays for scenes without
+  an earlier MoGe calibration.
+- A mock miss uses `fallback()`, so a photo with an EXIF FOV gets `source: "exif"`, as without the mock. `moge.revision`
+  is written to `calib.json`, closing the second half of W1's revision fix.
+- `jpeg_walk` refuses a second SOI. Deviation from the brief's proof: libjpeg refuses the crafted file too, so ingest
+  ends in the "damaged or truncated" `Fail` instead of a re-encode; the test asserts that `Fail` and that no `photo.jpg`
+  is written, so the crafted bytes are never served.
+- Same-named source: when the new upload has the old one's extension, the old `source.<ext>` stays until the atomic
+  replace, so a crash in that window leaves the old upload alone in the folder. Consistent: Calibrate re-runs it.
+- Unchanged, for evals: `fixtures/stub_calib.py` doesn't mirror the ingest clearing or the mock-miss EXIF; no eval needs it.
+- For kernels: check the Rust walker in `core/crates/media/src/jpeg.rs` for the same stray-SOI gap (`standalone`, and the
+  size walker that skips `0xD8`). Not changed here.

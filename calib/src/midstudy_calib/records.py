@@ -30,7 +30,7 @@ class AlignRoomArgs:
 
 class MogeInfo(TypedDict):
     """calib.json `moge`: MoGe-2's own estimates and timings; with `fov_source: "exif"` also the correction (MoGe's own
-    height, the focal ratio k and the depth scale)."""
+    height, the focal ratio k and the depth scale), and the Hub revision of the weights."""
 
     fov_x_deg: float
     fov_y_deg: float
@@ -41,6 +41,7 @@ class MogeInfo(TypedDict):
     height_m: NotRequired[float | None]
     scale: NotRequired[float]
     depth_scale: NotRequired[float]
+    revision: NotRequired[str]
 
 
 class FittedFloor(CalibFloor):
