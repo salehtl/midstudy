@@ -76,9 +76,11 @@ function libraryText(data: PyValue): string {
   return `${d.text}\n`
 }
 
-/** v1's `upsert`: replaces the item with the entry's id (the first one; later duplicates go) or appends it, writes
- *  library.json, and says whether it replaced one. */
-export async function upsert(libDir: string, data: PyValue, item: PyValue): Promise<{ readonly data: PyValue; readonly replaced: boolean }> {
+/** v1's `upsert` up to the write: reads library.json now (not a snapshot from the start of a long run), replaces the
+ *  item with the entry's id (the first one; later duplicates go) or appends it, validates, and returns the text to
+ *  write and whether it replaced one. Nothing is written, so a refusal here leaves the library untouched. */
+export async function prepareUpsert(libDir: string, item: PyValue): Promise<{ readonly text: string; readonly replaced: boolean }> {
+  const data = load(libDir)
   const id = get(item, 'id') ?? str('')
   const items = get(data, 'items')
   const old = items?.kind === 'list' ? items.items : []
@@ -89,8 +91,12 @@ export async function upsert(libDir: string, data: PyValue, item: PyValue): Prom
     ? dict(data.entries.map((e) => (e.key === 'items' ? entry('items', list(next)) : e)))
     : data
   await validate('midstudy/library.schema.json', plain(out))
-  atomicWriteSync(path.join(libDir, 'library.json'), libraryText(out))
-  return { data: out, replaced: first !== undefined }
+  return { text: libraryText(out), replaced: first !== undefined }
+}
+
+/** Writes a prepared library.json, atomically and synchronously. */
+export function writeLibrary(libDir: string, text: string): void {
+  atomicWriteSync(path.join(libDir, 'library.json'), text)
 }
 
 /** v1's `append_cost`: one row (`date,id,engine,cost_usd,mock,input`, the amount as midstudy-add wrote it) under
