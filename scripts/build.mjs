@@ -14,7 +14,8 @@
 //    planner/dist/libs/ for DRACOLoader/KTX2Loader.
 //
 // Incremental: each step keeps a stamp of its inputs (path, size, mtime) in build/stamps/; when nothing changed it is a
-// no-op (one stat per input, well under a second). Concurrent runs are safe: a lock per step serializes them (the second
+// no-op (one stat per input, well under a second). A build during which an input was saved writes no stamp, so the next
+// one rebuilds (scripts/lib/stamps.mjs). Concurrent runs are safe: a lock per step serializes them (the second
 // one then finds the stamp current), every output file is written to a temporary name and renamed into place, chunks
 // before the entry (app.js) and the stamp last, and files of older builds are removed only after a grace period.
 //
@@ -23,6 +24,8 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { readOwner, tryClaim } from './lib/dirlock.mjs'
+import { decide, MISSING, PRUNE_GRACE_MS } from './lib/stamps.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const args = new Set(process.argv.slice(2))
@@ -33,7 +36,6 @@ const rel = (p) => path.relative(ROOT, p) || '.'
 const ms = () => `${Math.round(performance.now() - t0)} ms`
 const log = (s) => { if (!QUIET) console.log(s) }
 const STAMPS = path.join(ROOT, 'build/stamps')
-const GRACE_MS = 10 * 60_000 // files of an older build stay this long, for a page that loaded the old app.js
 
 // --- inputs, stamps, locks ------------------------------------------------------------------------------------------------
 function walk(dir, skip = () => false, out = []) {
@@ -47,20 +49,31 @@ function walk(dir, skip = () => false, out = []) {
   }
   return out
 }
-const statKey = (p) => { try { const s = fs.statSync(p); return `${s.size}:${Math.round(s.mtimeMs)}` } catch { return 'missing' } }
-const fingerprint = (files) => Object.fromEntries([...new Set(files)].sort().map((f) => [rel(f), statKey(f)]))
-function stampCurrent(name, want) {
+const statOf = (p) => { try { const s = fs.statSync(p); return { key: `${s.size}:${Math.round(s.mtimeMs)}`, mtimeMs: s.mtimeMs } } catch { return { key: MISSING, mtimeMs: null } } }
+const statsOf = (files) => Object.fromEntries([...new Set(files)].sort().map((f) => [rel(f), statOf(f)]))
+const keysOf = (stats) => Object.fromEntries(Object.entries(stats).map(([f, s]) => [f, s.key]))
+// `inputs`: the files the step knows it reads before it runs; one the stamp never saw makes it stale.
+function stampCurrent(name, want, inputs = []) {
   if (FORCE) return false
   try {
     const have = JSON.parse(fs.readFileSync(path.join(STAMPS, `${name}.json`), 'utf8'))
     if (JSON.stringify(have.key) !== JSON.stringify(want.key)) return false
-    for (const [f, k] of Object.entries(have.inputs)) if (statKey(path.join(ROOT, f)) !== k) return false
+    const now = statsOf([...Object.keys(have.inputs).map((f) => path.join(ROOT, f)), ...inputs])
+    if (decide(have, now) !== 'current') return false
     for (const f of have.outputs) if (!fs.existsSync(path.join(ROOT, f))) return false
     return true
   } catch { return false }
 }
-function writeStamp(name, key, inputs, outputs) {
-  atomicWrite(path.join(STAMPS, `${name}.json`), JSON.stringify({ key, inputs: fingerprint(inputs), outputs: outputs.map(rel) }, null, 1))
+// Stats the inputs once: what is checked against buildStart is what the stamp records. `before`: the inputs at the start.
+function writeStamp(name, key, inputs, outputs, buildStart, before = null) {
+  const stats = statsOf(inputs)
+  const file = path.join(STAMPS, `${name}.json`)
+  if (decide(before, stats, buildStart) === 'do-not-write') {
+    fs.rmSync(file, { force: true })
+    log(`${name}: an input changed during the build; it rebuilds next time`)
+    return
+  }
+  atomicWrite(file, JSON.stringify({ key, inputs: keysOf(stats), outputs: outputs.map(rel) }, null, 1))
 }
 function atomicWrite(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -69,31 +82,36 @@ function atomicWrite(file, data) {
   fs.renameSync(tmp, file)
 }
 const alive = (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } }
-// A lock directory per step; a lock whose owner died (or older than 15 minutes) is taken over.
+// A lock directory per step (scripts/lib/dirlock.mjs): a live holder keeps it however long it runs; a dead one's, or one
+// with no readable owner after 10 s, is taken over. No signal handlers on purpose: the tools run through spawnSync, so a
+// JS handler would wait for the child and make the build unkillable for minutes. A SIGTERMed build leaves a lock with a
+// dead pid, which the next build reclaims at once.
 async function withLock(name, fn) {
   const dir = path.join(ROOT, 'build/locks', `${name}.lock`)
-  fs.mkdirSync(path.dirname(dir), { recursive: true })
   const deadline = Date.now() + 30 * 60_000
-  for (;;) {
-    try { fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, 'pid'), String(process.pid)); break } catch {
-      let stale = false
-      try {
-        const pid = Number(fs.readFileSync(path.join(dir, 'pid'), 'utf8'))
-        stale = !alive(pid) || Date.now() - fs.statSync(dir).mtimeMs > 15 * 60_000
-      } catch { stale = (() => { try { return Date.now() - fs.statSync(dir).mtimeMs > 10_000 } catch { return false } })() }
-      if (stale) { fs.rmSync(dir, { recursive: true, force: true }); continue }
-      if (Date.now() > deadline) throw new Error(`build: ${rel(dir)} held for 30 min`)
-      await new Promise((r) => setTimeout(r, 150))
-    }
+  let held
+  while ((held = tryClaim(dir, { cmd: `build ${name}` })) === null) {
+    if (Date.now() > deadline) throw new Error(`build: ${rel(dir)} held for 30 min${readOwner(dir) ? ` by pid ${readOwner(dir).pid}` : ''}`)
+    await new Promise((r) => setTimeout(r, 150))
   }
-  try { return await fn() } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+  try { return await fn() } finally { held.release() }
 }
 // Removes files under `dir` that this build did not write, once they are older than the grace period.
 function prune(dir, keep) {
   const now = Date.now()
   for (const f of walk(dir)) {
     if (keep.has(f) || path.basename(f).startsWith('.')) continue
-    try { if (now - fs.statSync(f).mtimeMs > GRACE_MS) fs.rmSync(f, { force: true }) } catch { /* gone already */ }
+    try { if (now - fs.statSync(f).mtimeMs > PRUNE_GRACE_MS) fs.rmSync(f, { force: true }) } catch { /* gone already */ }
+  }
+}
+// The .tmp-<crate>-<pid> folders of builds that died (SIGTERM has no cleanup here).
+function sweepDeadTemps() {
+  const dir = path.join(ROOT, 'build/wasm')
+  let names = []
+  try { names = fs.readdirSync(dir) } catch { return }
+  for (const n of names) {
+    const m = /^\.tmp-.+-(\d+)$/.exec(n)
+    if (m && !alive(Number(m[1]))) fs.rmSync(path.join(dir, n), { recursive: true, force: true })
   }
 }
 // The real path of a tool on PATH: its Nix store path names its version, so a toolchain change rebuilds.
@@ -104,7 +122,8 @@ function which(cmd) {
   }
   return null
 }
-const scriptKey = createHash('sha256').update(fs.readFileSync(import.meta.filename)).digest('hex').slice(0, 16)
+const scriptKey = createHash('sha256').update(fs.readFileSync(import.meta.filename))
+  .update(fs.readFileSync(path.join(import.meta.dirname, 'lib/stamps.mjs'))).digest('hex').slice(0, 16)
 
 // --- 1. wasm --------------------------------------------------------------------------------------------------------------
 const CORE = path.join(ROOT, 'core')
@@ -134,17 +153,29 @@ function run(cmd, argv, opts = {}) {
   return r
 }
 
+// Everything cargo can read: include_str! and build.rs data count. Cargo.lock by name, so its appearing flips the stamp.
+const wasmInputs = () => [
+  ...walk(path.join(CORE, 'crates'), (p, e) => e.isDirectory() && (['target', 'node_modules'].includes(e.name) || e.name.startsWith('.'))),
+  ...walk(path.join(CORE, '.cargo')),
+  path.join(CORE, 'Cargo.toml'),
+  path.join(CORE, 'Cargo.lock'),
+]
+
 async function buildWasm() {
+  sweepDeadTemps()
+  // scripts/test/build-lock.test.mjs: the step is a sleep under its lock.
+  if (args.has('--lock-selftest')) return withLock('wasm', async () => { console.log('lock-selftest: entered'); await new Promise((r) => setTimeout(r, Number(process.env.MIDSTUDY_BUILD_STEP_SLEEP_MS))); return 'wasm: lock-selftest' })
   if (!WASM_CRATES.length) return 'wasm: no core/crates/wasm-* crate yet, nothing to build'
-  const inputs = walk(CORE, (p, e) => e.isDirectory() && ['target', 'fuzz', '.git'].includes(e.name))
-    .filter((f) => /\.(rs|toml|lock)$/.test(f))
   const tools = ['cargo', 'rustc', 'wasm-bindgen', 'wasm-opt'].map((t) => [t, which(t)])
   const missing = tools.filter(([, p]) => !p).map(([t]) => t)
   if (missing.length) throw new Error(`wasm: ${missing.join(', ')} not on PATH (run inside \`nix develop\`)`)
   const key = { script: scriptKey, tools, crates: WASM_CRATES.map((c) => c.crate) }
   return withLock('wasm', async () => {
     const outputsOf = () => WASM_CRATES.flatMap((c) => walk(c.out).filter((f) => !path.basename(f).startsWith('.')))
-    if (stampCurrent('wasm', { key })) return `wasm: up to date (${WASM_CRATES.map((c) => rel(c.out)).join(', ')})`
+    const inputs = wasmInputs()
+    if (stampCurrent('wasm', { key }, inputs)) return `wasm: up to date (${WASM_CRATES.map((c) => rel(c.out)).join(', ')})`
+    const buildStart = Date.now()
+    const before = { inputs: keysOf(statsOf(inputs)) }
     // --locked once core/Cargo.lock exists (it is shared-append: the kernel tracks commit it with their crates).
     const locked = fs.existsSync(path.join(CORE, 'Cargo.lock')) ? ['--locked'] : []
     const meta = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', ...locked], { cwd: CORE, encoding: 'utf8', maxBuffer: 64 << 20 }))
@@ -176,7 +207,7 @@ async function buildWasm() {
       fs.rmSync(tmp, { recursive: true, force: true })
       prune(c.out, new Set(written))
     }
-    writeStamp('wasm', key, inputs, outputsOf())
+    writeStamp('wasm', key, inputs, outputsOf(), buildStart, before)
     return `wasm: built ${WASM_CRATES.map((c) => rel(c.out)).join(', ')} (${written.length} files)`
   })
 }
@@ -219,6 +250,7 @@ async function buildPlanner() {
   const key = { script: scriptKey, entries: Object.fromEntries(Object.entries(entries).map(([k, v]) => [k, rel(v)])), wasm: webWasm.map(rel) }
   return withLock('planner', async () => {
     if (stampCurrent('planner', { key })) return 'planner: up to date (planner/dist/app.js)'
+    const buildStart = Date.now()
     let esbuild
     try { esbuild = await import('esbuild') } catch { throw new Error('planner: esbuild missing: run `nix develop -c npm install`') }
     const result = await esbuild.build({
@@ -258,7 +290,7 @@ async function buildPlanner() {
     for (const o of outs.filter((o) => isEntry(o.path))) { atomicWrite(o.path, o.contents); written.add(o.path) }
     prune(DIST, written)
     const inputs = [...Object.keys(result.metafile.inputs).map((f) => path.resolve(ROOT, f)), ...webWasm, ...decoderFiles, path.join(ROOT, 'package-lock.json')]
-    writeStamp('planner', key, inputs, [...written])
+    writeStamp('planner', key, inputs, [...written], buildStart)
     const js = outs.filter((o) => o.path.endsWith('.js'))
     const cdn = new Set(js.flatMap((o) => o.text.match(CDN) || []))
     const appKb = Math.round((outs.find((o) => path.basename(o.path) === 'app.js')?.contents.length || 0) / 1024)
