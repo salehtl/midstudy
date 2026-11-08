@@ -5,19 +5,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { falKey as loadFalKey, falMockDir, mockCost } from '../../common/fal.ts'
-import { exists, isDir, isFile, move, removeTree as rmtree, replace, resolvePath as resolve } from '../../common/files.ts'
+import { exists, isDir, isFile, removeTree as rmtree, resolvePath as resolve } from '../../common/files.ts'
 import { releaseAllSync } from '../../common/lock.ts'
 import { pyFloat } from '../../common/logic/csv.ts'
 import { numText, pyFixed as fixed, pyRepr as repr, pyStrip as strip } from '../../common/logic/pyfmt.ts'
 import { isSlug, slugify } from '../../common/logic/slug.ts'
 import { isoUtc } from '../../common/logic/time.ts'
-import { MidstudyError, UnexpectedError, describe } from './errors.ts'
+import { keepPaidOutputs, replaceTogether, swapIn } from './commit.ts'
+import { Interrupted, MidstudyError, UnexpectedError, describe } from './errors.ts'
 import { type Fal, LiveFal, MockFal, download, run as runEngine, urlBasename } from './fal.ts'
 import { copy2, expanduser, mkdtemp } from './fsx.ts'
 import { normalize as normalizeGlb, standInBox } from './glb.ts'
 import { checkImage, engineInput, makeThumb } from './images.ts'
 import { err, out, outRaw } from './io.ts'
-import { appendCost, load, locked, upsert, validate } from './library.ts'
+import { appendCost, load, locked, prepareUpsert, validate, writeLibrary } from './library.ts'
 import { HELP, type Options, parseArgs } from './logic/args.ts'
 import { dimsCm, fitValue, itemEntry, summary } from './logic/entry.ts'
 import { dimsMetres, spzLine } from './logic/fit.ts'
@@ -38,12 +39,28 @@ const MATH = { sqrt: Math.sqrt, cos: Math.cos, sin: Math.sin }
 /** Staging folders to remove if the run is interrupted. */
 const scratch = new Set<string>()
 
+type StopSignal = 'SIGINT' | 'SIGTERM'
+
+/** Aborted by the first signal of a live paid run: LiveFal's requests and sleeps end with Interrupted. */
+const stop = new AbortController()
+/** A live fal run, from the engine call until its commit ends: a first signal unwinds it so the cost is recorded. */
+let paidRun = false
+/** The signal unwinding a paid run. */
+let interruptRequested: StopSignal | null = null
+/** From the item swap to the cost row: a first signal waits for the section's end. */
+let inCommit = false
+/** The signal waiting for the commit section to end. */
+let pendingSignal: StopSignal | null = null
+
 /** Lets a pending Ctrl-C or SIGTERM in between two steps. The steps run synchronously (the kernels; a mocked fal
  *  answers at once), and Node only sees a signal when its event loop turns: v1's KeyboardInterrupt came between any
- *  two bytecodes. */
+ *  two bytecodes. In a live paid run it ends the build with Interrupted, so the paid branch can record the cost. */
 function tick(): Promise<void> {
-  return new Promise((resolve) => {
-    setImmediate(resolve)
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      if (interruptRequested === null) resolve()
+      else reject(new Interrupted())
+    })
   })
 }
 
@@ -73,12 +90,13 @@ function libraryDir(o: Options): string {
   return dir
 }
 
-/** The summary line (`json.dumps`), checked against add-summary.schema.json in strict mode. */
-async function printSummary(value: PyValue): Promise<void> {
+/** The summary line (`json.dumps`), checked against add-summary.schema.json in strict mode: done before the commit,
+ *  so a violation can't report a finished add as a failure. */
+async function summaryLine(value: PyValue): Promise<string> {
   await validate('midstudy/add-summary.schema.json', plain(value))
   const d = dumps(value, { indent: null, ensureAscii: true, allowNan: true })
   if (!d.ok) throw new UnexpectedError('ValueError', d.error)
-  out(d.text)
+  return d.text
 }
 
 /** `{fit['w']}/{fit['d']}/{fit['h']}`. */
@@ -89,11 +107,10 @@ function fitText(fit: PyValue): string {
   }).join('/')
 }
 
-/** `shutil.rmtree(p)`, which refuses a symbolic link and a file. */
-function rmtreeChecked(p: string): void {
+/** What `shutil.rmtree(p)` refuses (a symbolic link, a file), checked before the commit starts. */
+function checkReplaceable(p: string): void {
   if (fs.lstatSync(p).isSymbolicLink()) throw new UnexpectedError('OSError', 'Cannot call rmtree on a symbolic link')
   if (!isDir(p)) throw new UnexpectedError('NotADirectoryError', `[Errno 20] Not a directory: ${repr(p)}`)
-  rmtree(p, false)
 }
 
 interface AddPlan {
@@ -194,7 +211,7 @@ function head4(file: string): string {
 async function add(p: AddPlan): Promise<void> {
   const { o, libDir, id, w, d, h } = p
   const engine = o.engine
-  const data = load(libDir)
+  load(libDir) // v1's early refusal of a file that isn't a version 1 library; the commit reads it afresh
   // library.json and costs.csv are tracked in git and library.json is served: a local file is recorded by its name
   // only (no home-folder path), a URL as given; serve.py passes the upload's own name
   const sourceInput = o.sourceInput !== null && o.sourceInput !== '' ? o.sourceInput : p.isUrl ? p.rawInput : pathName(p.rawInput)
@@ -203,12 +220,15 @@ async function add(p: AddPlan): Promise<void> {
   const staging = mkdtemp(`midstudy-add-${id}-`)
   scratch.add(staging)
   let fal: Fal | null = null
-  let committed = false
+  // where the new item's files are while they aren't in the library yet (null: at the item's final name)
+  let outputs: string | null = staging
+  let costRecorded = false
   let local = p.local ?? ''
   let sourceName = ''
   let hasSplat = false
   let glbFit: PyValue = NULL
   let splatFit: PyValue | null = null
+  let line = ''
   const itemDir = join(libDir, id)
   try {
     if (p.isUrl) {
@@ -249,13 +269,14 @@ async function add(p: AddPlan): Promise<void> {
       for (const n of await rug.build(local, w, d, h, modelSrc, thumbSrc)) say(`note: ${n}`)
       await tick()
     } else if (isFalEngine(engine)) {
-      fal = mock ? new MockFal(p.mockDir) : new LiveFal(p.falKey ?? '')
+      fal = mock ? new MockFal(p.mockDir) : new LiveFal(p.falKey ?? '', fetch, undefined, Date.now, stop.signal)
       say(`${engine}${mock ? ' (mock, $0)' : ` ($${fixed(cost, 2)})`}: ${p.rawInput}`)
-      const outputs = await runEngine(fal, engine, local, p.prompt, p.resolution, path.join(staging, 'raw'))
+      paidRun = !mock
+      const engineOutputs = await runEngine(fal, engine, local, p.prompt, p.resolution, path.join(staging, 'raw'))
       await tick()
-      modelSrc = outputs.glb
-      splatSrc = outputs.splat
-      splatToGlb = outputs.splatToGlb
+      modelSrc = engineOutputs.glb
+      splatSrc = engineOutputs.splat
+      splatToGlb = engineOutputs.splatToGlb
     } else if (ext === '.gltf') {
       say('note: a .gltf input is packed into a single GLB; source.gltf is kept without its side files')
     }
@@ -287,56 +308,80 @@ async function add(p: AddPlan): Promise<void> {
     // v1: shutil.rmtree / unlink, which raise (the staging folder's own scratch: an error here is a real one)
     for (const s of ['download', 'unzipped', 'converted.glb', 'converted.jpg']) rmtree(path.join(staging, s), false)
 
-    // commit: the item folder, then library.json, then costs.csv
+    // prepare: every refusal comes before anything in the library changes
     const created = utcStamp()
     fs.mkdirSync(libDir, { recursive: true })
-    if (exists(itemDir)) {
-      // re-running on this item's own raw output (e.g. to fix --yaw): keep those raw files
-      const oldRaw = path.join(itemDir, 'raw')
-      if (isDir(oldRaw) && !exists(path.join(staging, 'raw')) && resolve(p.rawInput).startsWith(`${resolve(itemDir)}/`)) {
-        move(oldRaw, path.join(staging, 'raw'))
-      }
-      rmtreeChecked(itemDir)
-    }
-    move(staging, itemDir)
-    scratch.delete(staging)
-    committed = true
-
+    // re-running on this item's own raw output (e.g. to fix --yaw): keep those raw files
+    const hasOld = exists(itemDir)
+    if (hasOld) checkReplaceable(itemDir)
+    const carryRaw = hasOld && isDir(path.join(itemDir, 'raw')) && !exists(path.join(staging, 'raw')) && resolve(p.rawInput).startsWith(`${resolve(itemDir)}/`)
     const item = itemEntry({
       id, name: p.name, category: o.category, w, d, h, splat: hasSplat, thumb: p.imageInput, engine,
       sourceInput, prompt: p.prompt, cost, mock, created, glbFit, splatFit, notes: o.notes, mount: o.mount,
     })
-    const up = await upsert(libDir, data, item)
-    say(up.replaced ? `replaced existing item '${id}' in ${join(libDir, 'library.json')}` : `added '${id}' to ${join(libDir, 'library.json')}`)
-    await appendCost(libDir, created, id, engine, cost, mock, sourceInput)
-  } catch (e) {
-    if (fal === null || fal.mock || !fal.charged || committed) throw e
-    // a live call was paid for: record the cost, and keep its outputs for a free `--engine glb` retry
-    const stamp = utcStamp()
-    fs.mkdirSync(libDir, { recursive: true })
-    await appendCost(libDir, stamp, id, engine, cost, mock, sourceInput)
-    const kept = join(join(libDir, '_failed'), `${id}-${stamp.replaceAll(':', '')}`)
-    if (!isDir(parent(kept))) fs.mkdirSync(parent(kept))
-    move(staging, kept)
+    const prepared = await prepareUpsert(libDir, item)
+    line = await summaryLine(summary(id, engine, cost, mock, {
+      library: join(libDir, 'library.json'),
+      item: itemDir,
+      glb: join(itemDir, 'model.glb'),
+      splat: hasSplat ? join(itemDir, 'splat.ply') : null,
+      spz: hasSplat ? join(itemDir, 'splat.spz') : null,
+      thumb: p.imageInput ? join(itemDir, 'thumb.jpg') : null,
+      source: join(itemDir, sourceName),
+      raw: carryRaw || isDir(path.join(staging, 'raw')) ? join(itemDir, 'raw') : null,
+      costs: join(libDir, 'costs.csv'),
+    }, fitValue(glbFit, splatFit)))
+    await tick()
+
+    // commit: the item folder, then library.json, then costs.csv
+    inCommit = true
+    const swap = swapIn(staging, itemDir, libDir, carryRaw)
+    if (!swap.ok) {
+      outputs = swap.outputs
+      throw swap.error
+    }
+    outputs = null
     scratch.delete(staging)
+    try {
+      writeLibrary(libDir, prepared.text)
+    } catch (e) {
+      outputs = swap.undo()
+      throw e
+    }
+    // a second signal during the wait for the costs lock exits at once: the old item must not stay behind then
+    if (swap.aside !== null) scratch.add(swap.aside)
+    say(prepared.replaced ? `replaced existing item '${id}' in ${join(libDir, 'library.json')}` : `added '${id}' to ${join(libDir, 'library.json')}`)
+    try {
+      await appendCost(libDir, created, id, engine, cost, mock, sourceInput)
+      costRecorded = true
+    } finally {
+      swap.finish()
+      if (swap.aside !== null) scratch.delete(swap.aside)
+    }
+  } catch (e) {
+    if (fal === null || fal.mock || !fal.charged || costRecorded) throw e
+    // a live call was paid for: keep its outputs for a free `--engine glb` retry, and record the cost
+    const stamp = utcStamp()
+    const { kept, problems } = await keepPaidOutputs(outputs, libDir, id, stamp, () => appendCost(libDir, stamp, id, engine, cost, mock, sourceInput))
+    if (kept !== null) outputs = null
+    const recorded = problems.some((t) => t.startsWith('the cost row')) ? '' : `$${fixed(cost, 2)} recorded in costs.csv`
+    const where = kept !== null ? `engine outputs kept in ${join(kept, 'raw')}` : ''
+    const details = [recorded, where, ...problems].filter((t) => t !== '').join('; ')
+    if (e instanceof Interrupted || interruptRequested !== null) {
+      say(details)
+      throw new Interrupted()
+    }
     const msg = e instanceof MidstudyError ? e.message : `unexpected error (${describe(e)})`
-    throw new MidstudyError(`${msg} ($${fixed(cost, 2)} recorded in costs.csv; engine outputs kept in ${join(kept, 'raw')})`)
+    throw new MidstudyError(`${msg} (${details})`)
   } finally {
+    if (outputs !== null && outputs !== staging && exists(outputs)) rmtree(outputs)
     if (exists(staging)) rmtree(staging)
     scratch.delete(staging)
+    paidRun = false
+    leaveCommit()
   }
 
-  await printSummary(summary(id, engine, cost, mock, {
-    library: join(libDir, 'library.json'),
-    item: itemDir,
-    glb: join(itemDir, 'model.glb'),
-    splat: hasSplat ? join(itemDir, 'splat.ply') : null,
-    spz: hasSplat ? join(itemDir, 'splat.spz') : null,
-    thumb: p.imageInput ? join(itemDir, 'thumb.jpg') : null,
-    source: join(itemDir, sourceName),
-    raw: isDir(join(itemDir, 'raw')) ? join(itemDir, 'raw') : null,
-    costs: join(libDir, 'costs.csv'),
-  }, fitValue(glbFit, splatFit)))
+  out(line)
 }
 
 /** `float(v)` of a dims_cm value as v1 reads it (numbers, bools, numeric strings), or null where that raises. */
@@ -371,33 +416,11 @@ async function rescale(o: Options, id: string): Promise<void> {
   }
   const libDir = libraryDir(o)
   if (!isFile(join(libDir, 'library.json'))) throw new MidstudyError(`no library at ${libDir}: --rescale only works on an existing item`)
-  const r = await locked(libDir, () => refit(o, id, libDir, newDims))
-  const thumb = get(r.assets, 'thumb')
-  const itemDir = parent(r.glbSrc)
-  await printSummary(summary(id, 'rescale', 'int-zero', resolveMockDir() !== null, {
-    library: join(libDir, 'library.json'),
-    item: itemDir,
-    glb: r.glbSrc,
-    splat: r.splatSrc,
-    spz: r.spzDst,
-    thumb: thumb !== undefined && truthy(thumb) ? join(libDir, pyStr(thumb)) : null,
-    source: null,
-    raw: isDir(join(itemDir, 'raw')) ? join(itemDir, 'raw') : null,
-    costs: join(libDir, 'costs.csv'),
-  }, fitValue(r.glbFit, r.splatFit)))
+  out(await locked(libDir, () => refit(o, id, libDir, newDims)))
 }
 
-interface Refit {
-  readonly assets: PyValue
-  readonly glbSrc: string
-  readonly splatSrc: string | null
-  readonly spzDst: string | null
-  readonly glbFit: PyValue
-  readonly splatFit: PyValue | null
-}
-
-/** The part of `rescale` under the library lock. */
-async function refit(o: Options, id: string, libDir: string, newDims: Dims | null): Promise<Refit> {
+/** The part of `rescale` under the library lock; returns the summary line, validated before anything was replaced. */
+async function refit(o: Options, id: string, libDir: string, newDims: Dims | null): Promise<string> {
   const data = load(libDir)
   const items = get(data, 'items')
   const found = items?.kind === 'list' ? items.items.find((it) => {
@@ -436,10 +459,9 @@ async function refit(o: Options, id: string, libDir: string, newDims: Dims | nul
   const dims = dimsMetres(w, d, h)
   const staging = mkdtemp(`midstudy-rescale-${id}-`)
   scratch.add(staging)
-  let glbFit: PyValue
   let splatFit: PyValue | null = null
   try {
-    glbFit = await normalizeGlb(glbSrc, rotation, dims, path.join(staging, 'model.glb'), MATH)
+    const glbFit = await normalizeGlb(glbSrc, rotation, dims, path.join(staging, 'model.glb'), MATH)
     say(`model.glb refit to ${numText(w)} x ${numText(d)} x ${numText(h)} cm, yaw +${String(o.yaw)} (error % w/d/h: ${fitText(glbFit)})`)
     await tick()
     if (splatSrc !== null) {
@@ -452,33 +474,50 @@ async function refit(o: Options, id: string, libDir: string, newDims: Dims | nul
       say(spzLine(spz.count, spz.bytes, spz.dropped))
       await tick()
     }
-    // commit: every file passed its self-check, so they are replaced in place
-    replace(path.join(staging, 'model.glb'), glbSrc)
-    if (splatSrc !== null && spzDst !== null) {
-      replace(path.join(staging, 'splat.ply'), splatSrc)
-      replace(path.join(staging, 'splat.spz'), spzDst)
+    let item = set(found, 'dims_cm', dimsCm(w, d, h))
+    if (spzRel !== null) {
+      // every splat.ply has its splat.spz beside it (§1): an item from before v1.1 gains one here
+      const known = ['glb', 'splat', 'spz', 'thumb']
+      item = set(item, 'assets', dict([
+        entry('glb', get(assets, 'glb') ?? NULL),
+        entry('splat', get(assets, 'splat') ?? NULL),
+        entry('spz', str(spzRel)),
+        entry('thumb', get(assets, 'thumb') ?? NULL),
+        ...(assets.kind === 'dict' ? assets.entries.filter((e) => !known.includes(e.key)) : []),
+      ]))
     }
+    item = set(item, 'fit', fitValue(glbFit, splatFit))
+    const prepared = await prepareUpsert(libDir, item)
+    const thumb = get(assets, 'thumb')
+    const itemDir = parent(glbSrc)
+    const line = await summaryLine(summary(id, 'rescale', 'int-zero', resolveMockDir() !== null, {
+      library: join(libDir, 'library.json'),
+      item: itemDir,
+      glb: glbSrc,
+      splat: splatSrc,
+      spz: spzDst,
+      thumb: thumb !== undefined && truthy(thumb) ? join(libDir, pyStr(thumb)) : null,
+      source: null,
+      raw: isDir(join(itemDir, 'raw')) ? join(itemDir, 'raw') : null,
+      costs: join(libDir, 'costs.csv'),
+    }, fitValue(glbFit, splatFit)))
+    await tick()
+
+    // commit: every file passed its self-check. No await from here to the end of the library write, so no signal can
+    // land in between (a handler only runs when the event loop turns).
+    replaceTogether([
+      { from: path.join(staging, 'model.glb'), to: glbSrc },
+      ...(splatSrc !== null && spzDst !== null ? [
+        { from: path.join(staging, 'splat.ply'), to: splatSrc },
+        { from: path.join(staging, 'splat.spz'), to: spzDst },
+      ] : []),
+    ], () => { writeLibrary(libDir, prepared.text) })
+    say(`refit '${id}' in ${join(libDir, 'library.json')} ($0, no cost row)`)
+    return line
   } finally {
     rmtree(staging)
     scratch.delete(staging)
   }
-
-  let item = set(found, 'dims_cm', dimsCm(w, d, h))
-  if (spzRel !== null) {
-    // every splat.ply has its splat.spz beside it (§1): an item from before v1.1 gains one here
-    const known = ['glb', 'splat', 'spz', 'thumb']
-    item = set(item, 'assets', dict([
-      entry('glb', get(assets, 'glb') ?? NULL),
-      entry('splat', get(assets, 'splat') ?? NULL),
-      entry('spz', str(spzRel)),
-      entry('thumb', get(assets, 'thumb') ?? NULL),
-      ...(assets.kind === 'dict' ? assets.entries.filter((e) => !known.includes(e.key)) : []),
-    ]))
-  }
-  item = set(item, 'fit', fitValue(glbFit, splatFit))
-  await upsert(libDir, data, item)
-  say(`refit '${id}' in ${join(libDir, 'library.json')} ($0, no cost row)`)
-  return { assets, glbSrc, splatSrc, spzDst, glbFit, splatFit }
 }
 
 /** Releases the locks and removes the staging folders (an interrupt). */
@@ -488,23 +527,49 @@ function cleanUp(): void {
   scratch.clear()
 }
 
-/** v1's `main`: the run, its one-line failures and exit codes (1; 130 when interrupted). */
-async function main(argv: readonly string[]): Promise<void> {
-  process.on('SIGINT', () => {
-    cleanUp()
+/** Today's answer to a signal: release everything and leave. SIGINT exits 130 with the one line; SIGTERM dies of the
+ *  signal (v1 did: its flock went with it). */
+function exitNow(signal: StopSignal): void {
+  cleanUp()
+  if (signal === 'SIGINT') {
     err('midstudy-add: interrupted')
     process.exit(130)
-  })
-  process.on('SIGTERM', () => {
-    // v1 died of the signal (its flock went with it): clean up, then die of it too
-    cleanUp()
-    process.removeAllListeners('SIGTERM')
-    process.kill(process.pid, 'SIGTERM')
-  })
+  }
+  process.removeAllListeners('SIGTERM')
+  process.kill(process.pid, 'SIGTERM')
+}
+
+/** The end of the commit section: a signal that waited for it is acted on now. */
+function leaveCommit(): void {
+  inCommit = false
+  if (pendingSignal !== null) exitNow(pendingSignal)
+}
+
+/** One signal policy: in the commit section a first signal waits for the section's end; in a live paid run it unwinds
+ *  so the cost is recorded; anywhere else, and for any second signal, the process leaves at once. */
+function onSignal(signal: StopSignal): void {
+  if (pendingSignal !== null || interruptRequested !== null) {
+    exitNow(signal)
+  } else if (inCommit) {
+    pendingSignal = signal
+  } else if (paidRun) {
+    interruptRequested = signal
+    stop.abort()
+  } else {
+    exitNow(signal)
+  }
+}
+
+/** v1's `main`: the run, its one-line failures and exit codes (1; 130 when interrupted). */
+async function main(argv: readonly string[]): Promise<void> {
+  process.on('SIGINT', () => { onSignal('SIGINT') })
+  process.on('SIGTERM', () => { onSignal('SIGTERM') })
   try {
     await run(argv)
   } catch (e) {
-    if (e instanceof MidstudyError) {
+    if (e instanceof Interrupted) {
+      exitNow(interruptRequested ?? 'SIGINT')
+    } else if (e instanceof MidstudyError) {
       err(`midstudy-add: ${oneLine(e.message)}`)
     } else {
       if ((process.env['MIDSTUDY_DEBUG'] ?? '') !== '') err(e instanceof Error ? e.stack ?? String(e) : String(e))

@@ -157,3 +157,40 @@ void test('SIGTERM: the process dies of the signal (as v1 did), the lock and the
   assert.equal(fs.existsSync(path.join(r.lib, '.lock.d')), false)
   assert.deepEqual(fs.readdirSync(r.tmp), [])
 })
+
+/** A strict mock add of the Idol fixture, sent `SIGINT` after its `lines`-th stdout line (never, for 0); returns the
+ *  library and how many lines it printed. */
+async function addInterrupted(lines: number): Promise<{ readonly lib: string; readonly printed: number }> {
+  const dir = fresh(`commit-window-${String(lines)}`)
+  const lib = path.join(dir, 'lib')
+  const env: NodeJS.ProcessEnv = { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_STRICT: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal') }
+  delete env['FAL_KEY']
+  const p = spawn(process.execPath, [path.join(REPO, 'pipeline/src/cli.ts'), path.join(REPO, 'fixtures/fal/speridlabs-idol/input.jpg'), '--name', 'Chair', '--dims', '80x90x95', '--library', lib], { env, stdio: ['ignore', 'pipe', 'ignore'] })
+  let printed = 0
+  let sent = false
+  p.stdout.on('data', (d: Buffer) => {
+    printed += d.toString().split('\n').length - 1
+    if (lines > 0 && !sent && printed >= lines) {
+      sent = true
+      p.kill('SIGINT')
+    }
+  })
+  await new Promise((resolve) => { p.on('exit', resolve) })
+  return { lib, printed }
+}
+
+void test('interrupted after any line, the add is all there or not there: never a folder without its entry and cost row', async () => {
+  const whole = await addInterrupted(0)
+  assert.ok(whole.printed >= 3)
+  for (let n = 1; n <= whole.printed; n++) {
+    const { lib } = await addInterrupted(n)
+    const folder = fs.existsSync(path.join(lib, 'chair'))
+    const file = path.join(lib, 'library.json')
+    const entry = fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('"chair"')
+    const costs = path.join(lib, 'costs.csv')
+    const row = fs.existsSync(costs) && fs.readFileSync(costs, 'utf8').includes(',chair,')
+    assert.equal(entry, folder, `after line ${String(n)}: folder ${String(folder)}, entry ${String(entry)}`)
+    assert.equal(row, folder, `after line ${String(n)}: folder ${String(folder)}, cost row ${String(row)}`)
+    assert.deepEqual(fs.existsSync(lib) ? fs.readdirSync(lib).filter((x) => x.startsWith('.incoming') || x.startsWith('.replaced')) : [], [])
+  }
+})

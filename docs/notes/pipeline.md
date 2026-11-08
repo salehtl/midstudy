@@ -229,3 +229,42 @@ protocol) and says `(<library>/.lock)` in its waiting line, as v1 did.
   six tests over thousands of splats or pixels are `#[cfg_attr(miri, ignore)]` (the fit's two 9,261-splat grids, the
   263,144-splat SPZ cap, the 800 × 800 rug and mask pictures, the 360 × 480 resample): the first of them was still
   running after 25 minutes.
+
+## State machines, wave 2: the commit (pipeline-commit)
+
+`pipeline/src/commit.ts` and `prepareUpsert`/`writeLibrary` in `library.ts`; `cli.ts` uses them.
+
+- **Prepare, then commit.** library.json is read afresh, merged and validated, and the summary validated, before
+  anything in the library changes. The write order stays v1's: item folder, library.json, costs.csv. A strict
+  violation now refuses the add or rescale with nothing touched.
+- **Swap with rollback.** `swapIn`: staging to `.incoming-<id>-*` (the only cross-volume step), old item to
+  `.replaced-<id>-*`, carry raw/, incoming to the item's name; a failure undoes the steps in reverse. A failed
+  library write undoes the swap too. `--rescale` hard-links backups beside the files (`.<name>.bak-*`) and replaces
+  files and library.json with no await in between.
+- **Paid branch.** Outputs go to `_failed/` first, then the cost row, each in its own try. An item already committed
+  whose cost row failed gets one retry of the row, and the failure says so.
+- **Signals.** Outside a paid run or the commit: as v1. In the commit section (swap to cost row), a first signal
+  waits for the section's end. In a live paid run (from the engine call to the end of the commit), a first signal
+  aborts LiveFal's stop signal and `tick()` throws `Interrupted`, so the cost is recorded and the outputs kept; then
+  exit 130 (SIGTERM: dies of it). A second signal always leaves at once.
+
+**Departures from v1**, kept on purpose:
+
+- v1's KeyboardInterrupt skipped the cost row of a paid run; v2 records it and keeps the outputs. An interrupted paid
+  run also says on stdout where they went, since stderr keeps its one line.
+- fal client (wave 1): `charged` is set by any failure after a successful submit, except an HTTP error answered by
+  the result GET (a job's own refusal). The queue submit is sent once, never retried and never resent to the backup
+  host. The queue deadline is 45 min (below the server's 3600 s kill, with room for downloads and the fit).
+- A stop signal that aborts the submit POST while it is in flight leaves `charged` false, though fal may already have
+  enqueued the job and will bill it. That is the one case where the record can understate.
+
+**Known limits.**
+
+- A SIGKILL inside the swap's rename window can leave a `.replaced-<id>-*` folder (and `.incoming-*`, `.bak-*` beside
+  it); nothing sweeps them. They are dot-named, so nothing reads them as items; delete by hand.
+- The unwind must finish inside the server's 5 s TERM grace. `commit.test.ts` times the keep step on a 64 MB
+  cross-volume copy (under 3 s); a costs lock held by another process could still outlast it, and the SIGKILL would
+  then lose the row.
+- The live path through `cli.ts` is not tested end to end (LiveFal's hosts are constants and a key is off-limits);
+  `fal.test.ts` covers the client and `lock.test.ts` the mock signals.
+- The refit commit has no `inCommit` flag: it is synchronous, so no handler can run inside it.
