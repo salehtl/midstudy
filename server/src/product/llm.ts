@@ -1,7 +1,7 @@
 // Layer 4 (contract §2.11): a small language model on fal (openrouter/router), only when no size was found and llm isn't
 // false. The page is data: the model only locates, the server decides (a size counts only when its quote is on the page
 // and holds every number; the server converts the units). Money: $0.002 reserved against the daily cap while it runs,
-// the cost row written whatever the answer (not for a call fal refused). Mock mode reads fixtures, never the network.
+// the cost row written whatever the answer (not for a call fal refused); a call that may be billed but has no row stays held for the day. Mock mode reads fixtures, never the network.
 import fs from 'node:fs'
 import path from 'node:path'
 import { appendCost } from '../../../common/costs.ts'
@@ -33,6 +33,7 @@ const LLM_PRICE_OUT = 0.5 / 1e6
 const LLM_MAX_DIMS = 8
 /** v1's NOT_ON_PAGE. */
 const NOT_ON_PAGE = "the language model gave a size that isn't on the page, so it was ignored"
+const COST_NOT_RECORDED = "the cost of the language model could not be recorded: it is held against today's cap"
 
 /** v1's SYSTEM_PROMPT, word for word. */
 const SYSTEM_PROMPT =
@@ -166,6 +167,7 @@ export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, de
     ctx.warnings.push(`the language model was skipped: ${refused.error}`)
     return { sizes: [], name: null, cost: 0, mock: false, asked: false }
   }
+  let keep = false // a call that may be billed and has no cost row stays held until the end of the UTC day
   try {
     const text = await sizes.llmTextAsync(lines, deadline.remaining())
     const args = { model: LLM_MODEL, system_prompt: SYSTEM_PROMPT, prompt: `<page>\n${text}\n</page>`, temperature: 0, max_tokens: LLM_MAX_TOKENS }
@@ -183,6 +185,7 @@ export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, de
         answer = await falCall(LLM_ENDPOINT, args, key ?? '', { timeoutMs: LLM_TIMEOUT_MS })
       } catch (e) {
         if (!(e instanceof FalError)) throw e
+        keep = true
         ctx.warnings.push(`the language model didn't answer (${e.message}), so no size was read`)
         return { sizes: [], name: null, cost: 0, mock: false, asked: true }
       }
@@ -201,7 +204,13 @@ export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, de
     const hostSlug = slugify(host !== null && host !== '' ? host : 'page') || 'page'
     const id = cpPrefix(`product-${hostSlug}`, 64).replace(/-+$/, '')
     const input = p === null ? url : publicUrl(urlunsplit({ scheme: p.scheme, netloc: p.netloc, path: p.path, query: '', fragment: '' }))
-    await appendCost(deps.config.costsFile, { date: stamp, id, engine: 'product:llm', costUsd: cost, mock, input }, 'midstudy server')
+    try {
+      await appendCost(deps.config.costsFile, { date: stamp, id, engine: 'product:llm', costUsd: cost, mock, input }, 'midstudy server')
+    } catch (e) {
+      keep = true
+      ctx.warnings.push(COST_NOT_RECORDED)
+      process.stderr.write(`product page reader: ${COST_NOT_RECORDED} (${e instanceof Error ? e.message : String(e)})\n`)
+    }
     const data = llmJson(output)
     if (data === null) {
       ctx.warnings.push("the language model's answer couldn't be read, so no size was taken from it")
@@ -212,6 +221,7 @@ export async function runLlm(url: string, lines: readonly string[], ctx: Ctx, de
     const name = data.get('name')
     return { sizes: got.out, name: isDict(name) ? name : null, cost, mock, asked: true }
   } finally {
-    deps.spend.release(hold)
+    if (keep) deps.spend.holdForToday(hold)
+    else deps.spend.release(hold)
   }
 }

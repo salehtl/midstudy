@@ -35,40 +35,68 @@ export class PageTimeout extends Error {
   }
 }
 
+/** v1's EXTRACT_S: the work after the download. */
+export const EXTRACT_MS = 10 * 1000
+
 /** v1's `_tick`, per read: past the deadline (set once the page is downloaded), the read ends with 422 TOO_LONG.
- *  Each call also lets the event loop answer other requests (v1 ran each request in its own thread). */
+ *  Each call also lets the event loop answer other requests (v1 ran each request in its own thread). Two changes from
+ *  v1: the clock stops while the feeds load (the 20 s Budget bounds them), and it no longer applies once a paid
+ *  model answer has come back (docs/notes/server.md). */
 export class Deadline {
+  readonly #now: () => number
   #at: number | null = null
-  #yielded = performance.now()
+  #settled = false
+  #yielded: number
+
+  constructor(now: () => number = () => performance.now()) {
+    this.#now = now
+    this.#yielded = now()
+  }
 
   /** Starts the 10 s for the work after the download. */
   start(ms: number): void {
-    this.#at = performance.now() + ms
+    this.#at = this.#now() + ms
   }
 
-  /** What is left of the 10 s, in ms (before they start: all of them). */
+  /** What is left of the 10 s, in ms (before they start, and once settled: all of them, still a bound for a worker). */
   remaining(): number {
-    return this.#at === null ? 10_000 : Math.max(0, this.#at - performance.now())
+    if (this.#at === null || this.#settled) return EXTRACT_MS
+    return Math.max(0, this.#at - this.#now())
+  }
+
+  /** Runs `work` with the clock stopped: the deadline moves later by the time it took. */
+  async suspend<T>(work: () => Promise<T>): Promise<T> {
+    const from = this.#now()
+    try {
+      return await work()
+    } finally {
+      if (this.#at !== null) this.#at += this.#now() - from
+    }
+  }
+
+  /** The read has a paid answer to give: from now on check() never throws. */
+  settle(): void {
+    this.#settled = true
   }
 
   /** In a long loop: a turn of the event loop when 20 ms have passed since the last one, then check(). */
   async pause(): Promise<void> {
-    if (performance.now() - this.#yielded > 20) {
+    if (this.#now() - this.#yielded > 20) {
       await new Promise<void>((resolve) => setImmediate(resolve))
-      this.#yielded = performance.now()
+      this.#yielded = this.#now()
     }
     this.check()
   }
 
   /** Throws TOO_LONG past the deadline. */
   check(): void {
-    if (this.#at !== null && performance.now() > this.#at) throw new ProductError(422, TOO_LONG)
+    if (!this.#settled && this.#at !== null && this.#now() > this.#at) throw new ProductError(422, TOO_LONG)
   }
 
   /** check(), after a turn of the event loop. */
   async tick(): Promise<void> {
     await new Promise<void>((resolve) => setImmediate(resolve))
-    this.#yielded = performance.now()
+    this.#yielded = this.#now()
     this.check()
   }
 }

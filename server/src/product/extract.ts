@@ -357,6 +357,7 @@ export async function extract(doc: Doc, warnings: string[], llm: boolean, deps: 
   if (!anyVariant() && sz.cands.length === 0) {
     if (llm) {
       const got = await runLlm(doc.url, allLines, ctx, deps, deadline)
+      if (got.asked) deadline.settle() // a paid answer is never thrown away
       cost = got.cost
       mock = got.mock
       if (got.asked) used.add('llm')

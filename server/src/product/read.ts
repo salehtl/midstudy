@@ -5,16 +5,13 @@ import { pyStrip } from '../../../common/logic/pyfmt.ts'
 import type { ServerDeps } from '../deps.ts'
 import { Budget } from '../fetch.ts'
 import { Doc, unescape } from './doc.ts'
-import { BLOCKED, COULD_NOT_READ, Deadline, PageTimeout, ProductError, TIMEOUT, TOO_LONG } from './errors.ts'
+import { BLOCKED, COULD_NOT_READ, Deadline, EXTRACT_MS, PageTimeout, ProductError, TIMEOUT, TOO_LONG } from './errors.ts'
 import { extract, isRobotCheck, pageText, readFeeds, PY_B, type ProductResult } from './extract.ts'
 import { parsePage } from './html.ts'
 import { cpLength, cpPrefix } from './logic/text.ts'
 import { BUDGET_MS, PAGE_MAX, contentTypeOf, fetchPage } from './pagefetch.ts'
 import { PyRaised, WorkerTimeout } from './sizes.ts'
 import { publicUrl, target } from './urls.ts'
-
-/** v1's EXTRACT_S: the work after the download. */
-const EXTRACT_MS = 10 * 1000
 
 /** A read's answer. */
 export interface ProductAnswer {
@@ -25,7 +22,7 @@ export interface ProductAnswer {
 const OVER_10MB = 'the page is over 10 MB: only its first 10 MB were read'
 
 /** v1's `_read`: a page fetched from its link. */
-async function readFetched(url: string, llm: boolean, deps: ServerDeps, deadline: Deadline): Promise<ProductResult> {
+async function readFetched(url: string, llm: boolean, deps: ServerDeps, deadline: Deadline, extractMs: number): Promise<ProductResult> {
   const budget = new Budget(BUDGET_MS)
   const warnings: string[] = []
   target(url) // the 400s before anything else
@@ -45,10 +42,10 @@ async function readFetched(url: string, llm: boolean, deps: ServerDeps, deadline
   }
   if (r.cut) warnings.push(OVER_10MB)
   const raw = pageText(r.body, r.headers['content-type'] ?? '')
-  deadline.start(EXTRACT_MS) // the work after the download is bounded too
+  deadline.start(extractMs) // the work after the download is bounded too
   const doc = new Doc(await parsePage(raw, publicUrl(r.url), () => deadline.tick()), publicUrl(r.url))
   if (isRobotCheck(doc, raw)) throw new ProductError(422, BLOCKED, true)
-  await readFeeds(doc, raw, budget, warnings)
+  await deadline.suspend(() => readFeeds(doc, raw, budget, warnings)) // the 20 s Budget bounds the feeds
   return extract(doc, warnings, llm, deps, deadline)
 }
 
@@ -77,7 +74,7 @@ function canonical(raw: string): string | null {
 }
 
 /** v1's `_read_pasted`: a page the user's browser already showed them; nothing is fetched, not even the feeds. */
-async function readPasted(urlIn: string | null, rawIn: string, llm: boolean, deps: ServerDeps, deadline: Deadline): Promise<ProductResult> {
+async function readPasted(urlIn: string | null, rawIn: string, llm: boolean, deps: ServerDeps, deadline: Deadline, extractMs: number): Promise<ProductResult> {
   const warnings: string[] = []
   let url = urlIn
   let raw = rawIn
@@ -96,7 +93,7 @@ async function readPasted(urlIn: string | null, rawIn: string, llm: boolean, dep
     raw = cpPrefix(raw, PAGE_MAX)
     warnings.push(OVER_10MB)
   }
-  deadline.start(EXTRACT_MS)
+  deadline.start(extractMs)
   const doc = new Doc(await parsePage(raw, publicUrl(url), () => deadline.tick()), publicUrl(url))
   if (isRobotCheck(doc, raw)) {
     throw new ProductError(422, "that's the shop's robot check, not the product: copy the page once the product shows in your browser")
@@ -105,12 +102,13 @@ async function readPasted(urlIn: string | null, rawIn: string, llm: boolean, dep
 }
 
 /** v1's `read`: POST /api/library/product's answer; never throws. With `html` (Paste the page), nothing is fetched and
- *  `url`, if any, only says where the page came from. */
-export async function readProduct(url: string | null, llm: boolean, html: string | null, deps: ServerDeps): Promise<ProductAnswer> {
-  const deadline = new Deadline()
+ *  `url`, if any, only says where the page came from. `options` is for tests: a driven clock and a shorter deadline. */
+export async function readProduct(url: string | null, llm: boolean, html: string | null, deps: ServerDeps, options: { readonly now?: () => number; readonly extractMs?: number } = {}): Promise<ProductAnswer> {
+  const deadline = new Deadline(options.now)
+  const extractMs = options.extractMs ?? EXTRACT_MS
   try {
-    if (html !== null) return { status: 200, body: await readPasted(url, html, llm, deps, deadline) }
-    return { status: 200, body: await readFetched(url ?? '', llm, deps, deadline) }
+    if (html !== null) return { status: 200, body: await readPasted(url, html, llm, deps, deadline, extractMs) }
+    return { status: 200, body: await readFetched(url ?? '', llm, deps, deadline, extractMs) }
   } catch (e) {
     if (e instanceof ProductError) return { status: e.status, body: e.body() }
     if (e instanceof PageTimeout) return { status: 422, body: { error: TIMEOUT } }

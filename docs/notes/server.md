@@ -56,6 +56,7 @@
 - Open, for the pipeline track or integration: `pipeline/test/lock.test.ts:88` still pins the old rule (a live same-host
   owner reclaimed at 3601 s), so test:pipeline and check:tests fail on that one test. It is outside this package's files
   and the server track. Changing `3601` to `4201` there makes it pass (checked on a throwaway copy).
+
 ## State machines W2: server-domain-calib-runner (worker lifecycle, runner shutdown)
 
 - `scenes/calib.ts`, Worker: the idle close now goes through close() (stdin end, SIGKILL after the grace). kill() and
@@ -88,6 +89,7 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - trash.json left in a live folder after a thrown move or rejoin is ignored and is only for a hand repair; there is no retry.
 - Wont-fix, as planned: camera_source (a comment above `#ended`), align admission counting busy members.
 - Proof: `server/test/scenes/jobs.test.ts` (all ten red before the change), rows in `logic.test.ts`.
+
 ## W3 server-domain-room-align
 
 - align-room's `--out` is now `rooms/.align/<job>/` (`alignStagingName`). Only an ok, non-dropped answer with the room still there has its align.json renamed into `rooms/<room>/`, then applied. The scratch is removed before the job is published as ended, and `rooms/.align/` is swept at startup. `#removeLeftover` is gone. An `align.json` in a room is now always an applied answer, so Reset only re-applies those.
@@ -95,6 +97,7 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - Crash order: `delete()` writes trash.json in the live folder first; `restore()` removes it last.
 - Deviation: an ok answer whose `--out` holds no align.json now fails the job with ALIGN_NO_RESULT (before, it was applied with no file).
 - Known limit, as designed: if moving the layouts fails after the folder moved, the room is listed in the trash but restore answers 409 until `layouts/@<room>/` is cleared.
+
 ## State machines W3: server-domain-children-shutdown (library and render children stopped on shutdown)
 
 - `LibraryService.shutdown()` (registered in `routes/library.ts`): aborts the running midstudy-add through runTool's signal, fails queued jobs without starting them ("the server stopped"), and awaits the queue. An add that still exited 0 stays done.
@@ -102,6 +105,7 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - `#align`: a spawn-error is now "not applied" with the OSError reason, so the render completes. This departs from v1's 500 on purpose: the render is already paid for and in costs.csv.
 - Deviation, `common/tools.ts` (not in the package's file list): `killGroup` sends one SIGTERM per child. At the server's stop killAllTools and the abort both end the same add, and midstudy-add leaves at once on a second signal, which would lose a paid run's cost row. Proof in `server/test/tools.test.ts`.
 - Deviation from the seam note: the done item is still read from library.json, not the summary line. `add-summary.schema.json` has no item, and the fix entry keeps this read (library.json is replaced atomically).
+
 ## State machines W4: server-infra-library (reservation hand-off, fail-closed spend, temp ownership, delete/restore rollback)
 
 - `SpendCap.transfer(from, to)` moves a reservation without checking the cap; `newJob`'s last parameter `adopt` uses it, so a from-URL add can no longer answer 402 after its download.
@@ -111,3 +115,12 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - PATCH queues its rescale inside the lock. `#run` returns unless the job is still queued.
 - Deviations: `adopt` is an optional last parameter (the existing callers and `jobs.test.ts` stay as they are). The scene-create fault replaces the scenes folder with a file instead of making it read-only: `makeDir` only special-cases EEXIST, but a file is deterministic whatever the user's permissions. The 402 path's removeTree is now the shared `finally`. New fixture `server/test/fixtures/record-add.mjs`. Upload's route test is in-process (a throwing SpendCap through ServerDeps); the others use a started server.
 - The PATCH order test can't be made red reliably: today's window between the lock's release and newJob is a few microtasks.
+
+## State machines W5: product-read-clocks (the reader's two clocks, the model's spend hold)
+
+- `Deadline` takes an injectable `now`; `remaining()` before `start()` is the exported `EXTRACT_MS`. `readProduct` has a test-only fifth argument `{now, extractMs}`.
+- `suspend(work)`: the feeds run with the Deadline's clock stopped, since the 20 s Budget bounds them. **This departs from v1 on purpose** (v1 set its deadline before `_feeds`); contract §2.11's "the work after the download is bounded too (10 s)" reads the feeds as download.
+- `settle()`: once the model was asked, `check()` never throws and `remaining()` is `EXTRACT_MS` (still a bound for the worker, so a large rug page doesn't get a 1 ms thickness timeout after a 60 s call). **This also departs from v1**, which ticked after the model inside `_thickness`: a paid, recorded answer is no longer thrown away.
+- `runLlm`: a `FalError` from a live call, or a cost row that can't be written, now calls `holdForToday` instead of `release`. Any FalError holds, because a timeout and a 4xx can't be told apart without changing `common/fal.ts`: over-holding $0.002 is the safe side of the cap, changes only the cap view, and departs from v1's release. A row that can't be written also warns, logs to stderr, and the answer is still used.
+- Left as they are: no cancellation of a running read (no signal in the HTTP ctx; v1 had none), and the reservation held across the worker's wait (v1's order; reserving after `llmTextAsync` would turn a refused 200 into a possible 422 on a large page).
+- Proofs: `server/test/product-read.test.ts`, `server/test/product-llm.test.ts`. The FalError branch can't be reached with fal mocked: checked by review.
