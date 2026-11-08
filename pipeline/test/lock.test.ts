@@ -77,7 +77,7 @@ void test('a lock whose owner died on this host is reclaimed at once (v1\'s floc
   assert.deepEqual(fs.readdirSync(path.dirname(lock)), ['.lock'])
 })
 
-void test('a live owner is waited for (said once), an hour-old lock is reclaimed whoever holds it', async () => {
+void test('a live owner is waited for (said once), a lock past the tool timeout plus the margin (70 min) is reclaimed whoever holds it', async () => {
   const dir = fresh('live')
   const lock = path.join(dir, '.lock.d')
   writeOwner(lock, { pid: process.pid, host: os.hostname(), cmd: 'midstudy-add other', started: new Date().toISOString() })
@@ -86,6 +86,9 @@ void test('a live owner is waited for (said once), an hour-old lock is reclaimed
   assert.equal(waits, 1)
   fs.rmSync(lock, { recursive: true })
   writeOwner(lock, { pid: process.pid, host: os.hostname(), cmd: 'midstudy-add other', started: new Date(Date.now() - 3601 * 1000).toISOString() })
+  await assert.rejects(acquireLock(lock, { waitMs: 200, cmd: CMD }), Busy)
+  fs.rmSync(lock, { recursive: true })
+  writeOwner(lock, { pid: process.pid, host: os.hostname(), cmd: 'midstudy-add other', started: new Date(Date.now() - 4201 * 1000).toISOString() })
   const me = await acquireLock(lock, { waitMs: 2000, cmd: CMD })
   await me.release()
   // another host's owner can't be checked: only its age makes it stale

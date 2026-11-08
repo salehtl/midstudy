@@ -70,3 +70,5 @@
   those were followed. The seam's "re-run only before a 'done' line" is not done: the protocol has no such line, so a
   broken answer still re-runs one-shot (costs time only, contract §4.3 Crash). `#retiring` also holds a worker that broke
   while idle, not only idle ones. `server/test/rooms-calib.ts` logs its pid (needed by the proof).
+
+Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a live same-host owner still waits at 3601 s, reclaimed at 4201 s).
