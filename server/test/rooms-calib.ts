@@ -4,7 +4,7 @@
 // the frame, every other one unplaced); every other command is fixtures/stub_calib.py's (JPEG pass-through ingest and
 // the mock fit). Server: `--calib "node server/test/rooms-calib.ts"`.
 //
-//   ROOMS_CALIB_LOG=<file>          each start is logged as one JSON line {argv} (and each worker request {request})
+//   ROOMS_CALIB_LOG=<file>          each start is logged as one JSON line {argv, pid} (and each worker request {request})
 //   ROOMS_CALIB_DELAY_MS=<n>        run and fit wait this long first (to keep a member calibrating)
 //   ROOMS_CALIB_ALIGN_DELAY_MS=<n>  align-room waits this long first
 //   ROOMS_CALIB_ALIGN_FAIL=1        align-room fails: {"ok": false, "error": "the photos don't overlap"}, exit 1
@@ -142,7 +142,7 @@ function answer(cmd: string, args: readonly string[]): Result {
 }
 
 const [cmd = '', ...args] = process.argv.slice(2)
-note({ argv: [cmd, ...args] })
+note({ argv: [cmd, ...args], pid: process.pid })
 
 if (cmd !== 'serve') {
   const r = answer(cmd, args)
