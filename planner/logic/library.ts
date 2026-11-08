@@ -85,10 +85,30 @@ export function jobBusy(status: unknown): boolean {
   return status === 'queued' || status === 'running'
 }
 
-/** What a job's status change means: done (reload the library), failed, or nothing new. */
+/** What a job's status change means: done (reload the library), failed, or nothing new. Only a busy job can finish. */
 export function jobChange(before: unknown, now: unknown): 'done' | 'failed' | null {
-  if (!before || before === now) return null
+  if (!jobBusy(before) || before === now) return null
   if (now === 'done') return 'done'
   if (now === 'failed') return 'failed'
   return null
+}
+
+/** A job the planner added: `at` is the last jobs request that may have been served before the server had it. */
+export interface TrackedJob {
+  readonly id: string
+  readonly at: number
+}
+
+/** What answer `n` of the jobs poll, listing `next`, means for the jobs it doesn't list. `keep`: tracked jobs the answer
+ * may predate. `lost`: busy jobs it should have listed (the server keeps every job until it restarts). */
+export function mergeJobs(next: readonly string[], n: number, tracked: readonly TrackedJob[], busyIds: readonly string[]): { keep: string[]; lost: string[] } {
+  const absent = (id: string): boolean => !next.includes(id)
+  const keep = tracked.filter((t) => n <= t.at && absent(t.id)).map((t) => t.id)
+  const lost = busyIds.filter((id) => absent(id) && !keep.includes(id))
+  return { keep, lost }
+}
+
+/** The jobs poll's delay after `failures` failures in a row: 1.5 s, and 10 s from the fourth. */
+export function jobsPollMs(failures: number): 1500 | 10000 {
+  return failures > 3 ? 10000 : 1500
 }

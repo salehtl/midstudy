@@ -106,32 +106,54 @@ export function createScenes({ engine }: { engine: Engine }) {
   let list: SceneSummary[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   const seen = new Map<string, unknown>() // name -> last calib_status
+  const announced = new Set<string>() // names whose finish was emitted, until they calibrate again
+  let answers = 0 // 'scenes' events so far: a failed request with a fresher answer behind it says nothing
 
   engine.events.addEventListener('scenes', (e) => {
+    answers++
     list = e.detail.scenes.slice()
     state.loaded = true
     state.offline = false
     for (const s of list) {
       const now = s.calib_status
+      if (sceneLogic.sceneBusy(now)) announced.delete(s.name)
       const fin = sceneLogic.sceneFinished(seen.get(s.name), now)
-      if (fin) events.emit(fin, { scene: s })
+      if (fin && !announced.has(s.name)) { announced.add(s.name); events.emit(fin, { scene: s }) }
       seen.set(s.name, now)
+    }
+    // A listing is authoritative: forget what it no longer has, but for a busy entry (an upload not listed yet).
+    const listed = new Set(list.map((s) => s.name))
+    for (const [name, was] of seen) {
+      if (!listed.has(name) && !sceneLogic.sceneBusy(was)) { seen.delete(name); announced.delete(name) }
     }
     events.emit('scenes', { scenes: list.slice() })
     schedule()
   })
   function schedule(): void {
     clearTimeout(timer)
-    if (list.some((s) => sceneLogic.sceneBusy(s.calib_status))) timer = setTimeout(() => { quiet(refresh()) }, 1500)
+    const delay = sceneLogic.pollDelay(list.some((s) => sceneLogic.sceneBusy(s.calib_status)), state.offline)
+    if (delay !== null) timer = setTimeout(() => { quiet(refresh()) }, delay)
   }
   async function refresh(): Promise<void> {
-    try { await engine.listScenesInternal() } catch (e) {
-      state.offline = true
-      events.emit('scenes', { scenes: list.slice() })
-      clearTimeout(timer)
-      timer = setTimeout(() => { quiet(refresh()) }, 10000)
+    const asked = answers
+    try { await engine.listScenesInternal({ report: !state.offline }) } catch (e) { // only an outage's first failure is reported
+      if (answers === asked) { // else a fresher answer came in meanwhile: the server is up and its poll stands
+        state.offline = true
+        events.emit('scenes', { scenes: list.slice() })
+        schedule()
+      }
       throw e
     }
+  }
+  // The upload's answer can land after a poll already listed the scene: only a scene not seen yet starts as pending,
+  // and one a poll first saw finished has its finish announced here, as nothing else will.
+  function settleUploaded(name: string): void {
+    if (!seen.has(name)) { seen.set(name, 'pending'); return }
+    const was = seen.get(name)
+    const scene = list.find((s) => s.name === name)
+    if (sceneLogic.sceneBusy(was) || announced.has(name) || !scene) return
+    const fin = sceneLogic.sceneFinished('pending', was)
+    if (fin) { announced.add(name); events.emit(fin, { scene }) }
   }
   function upload(file: unknown, opts: { title?: string | null; onProgress?: ((loaded: number, total: number) => void) | null } = {}): Promise<SceneCreated> {
     if (!(file instanceof Blob)) return Promise.reject(engine.reportError('Pick a photo first'))
@@ -146,6 +168,7 @@ export function createScenes({ engine }: { engine: Engine }) {
       xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
       xhr.upload.onprogress = (e) => { opts.onProgress?.(e.loaded, e.total || file.size) }
       xhr.onerror = () => { reject(engine.reportError("Couldn't upload the photo: the server isn't answering")) }
+      xhr.onabort = () => { reject(engine.reportError("Couldn't upload the photo: the upload stopped")) }
       xhr.onload = () => {
         let body: unknown = null
         try { body = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
@@ -156,7 +179,7 @@ export function createScenes({ engine }: { engine: Engine }) {
           reject(engine.reportError(msg.uploadErrorText(xhr.status, why)))
           return
         }
-        seen.set(created.scene, 'pending')
+        settleUploaded(created.scene)
         quiet(refresh())
         resolve(created)
       }
@@ -237,15 +260,33 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
   const state: LibState = { api: custom ? false : null, jobs: [], trash: [], spend: null }
   const status = new Map<string, unknown>() // job id → last status seen
   let timer: ReturnType<typeof setTimeout> | undefined
+  let asked = 0 // jobs requests made; the newest answer applied (an older one landing later is dropped)
+  let applied = 0
+  const trackedAt = new Map<string, number>() // job id -> the last request that may have been served before it existed
+  let failures = 0 // jobs requests failed in a row
+  let startRetries = 0
 
   const reload = (): Promise<void> | undefined => engine?.reloadLibrary()
-  function setJobs(next: LibraryJob[]): void {
-    for (const j of next) {
+  function setJobs(answered: LibraryJob[], n: number): void {
+    for (const j of answered) {
       const change = libLogic.jobChange(status.get(j.id), j.status)
       if (change === 'done') { quiet(reload()); events.emit('job-done', { job: j }); quiet(spend()) }
       if (change === 'failed') { events.emit('job-failed', { job: j }); quiet(spend()) }
       status.set(j.id, j.status)
     }
+    const known = state.jobs
+    const tracked = [...trackedAt].map(([id, at]) => ({ id, at }))
+    const busyIds = [...status].filter(([, st]) => libLogic.jobBusy(st)).map(([id]) => id)
+    const { keep, lost } = libLogic.mergeJobs(answered.map((j) => j.id), n, tracked, busyIds)
+    for (const [id, at] of trackedAt) if (n > at) trackedAt.delete(id)
+    for (const id of lost) {
+      status.delete(id)
+      const job = known.find((j) => j.id === id)
+      if (job) events.emit('job-failed', { job: { ...job, status: 'failed', message: msg.jobLostText() } })
+    }
+    // the child may have committed before it was stopped, and the server settles its reservation on its side
+    if (lost.length) { quiet(reload()); quiet(spend()) }
+    const next = [...known.filter((j) => keep.includes(j.id)), ...answered]
     state.jobs = next
     events.emit('jobs', { jobs: next.slice() })
     schedule()
@@ -253,6 +294,7 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
   function track(job: LibraryJob | null): LibraryJob | null {
     if (!job?.id) return job
     if (!status.has(job.id)) status.set(job.id, job.status)
+    trackedAt.set(job.id, asked)
     state.jobs = [job, ...state.jobs.filter((j) => j.id !== job.id)]
     events.emit('jobs', { jobs: state.jobs.slice() })
     schedule()
@@ -261,13 +303,23 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
   const busy = (): boolean => state.jobs.some((j) => libLogic.jobBusy(j.status))
   function schedule(): void {
     clearTimeout(timer)
-    if (busy()) timer = setTimeout(() => { quiet(jobs()) }, 1500)
+    if (busy()) timer = setTimeout(() => { quiet(jobs()) }, libLogic.jobsPollMs(failures))
   }
 
   async function jobs(): Promise<LibraryJob[]> {
+    const n = ++asked
     let body: unknown
-    try { body = await fetchJson('/api/library/jobs') } catch (e) { schedule(); throw report('Could not list the library jobs', e) }
-    setJobs(libraryJobs(isRecord(body) ? body['jobs'] : null))
+    try { body = await fetchJson('/api/library/jobs') } catch (e) {
+      if (!sceneLogic.freshAnswer(n, applied)) throw e // a newer answer is in: not this outage's
+      failures++
+      schedule()
+      if (failures > 1) throw e // only the first of a run is reported
+      throw report('Could not list the library jobs', e)
+    }
+    failures = 0
+    if (!sceneLogic.freshAnswer(n, applied)) return state.jobs.slice()
+    applied = n
+    setJobs(libraryJobs(isRecord(body) ? body['jobs'] : null), n)
     return state.jobs.slice()
   }
   async function spend(): Promise<Spend | null> {
@@ -303,7 +355,7 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
       events.emit('trash', { trash: state.trash.slice() })
     } catch (e) {
       const st = statusOf(e)
-      if (st === 404 || st === 405 || st === 501) state.api = false
+      if (state.api === null && (st === 404 || st === 405 || st === 501)) state.api = false // only the first probe decides
       events.emit('trash', { trash: state.trash.slice() })
     }
   }
@@ -311,6 +363,7 @@ export function createLibrary({ engine = null }: { engine?: Engine | null } = {}
     if (custom) return
     await refreshTrash()
     if (state.api) await Promise.allSettled([jobs(), spend()])
+    else if (state.api === null && startRetries < 5) { startRetries++; setTimeout(() => { quiet(start()) }, 10000) } // the probe didn't reach it
   }
 
   const jobOf = (body: unknown): LibraryJob | null => {
