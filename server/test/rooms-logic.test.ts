@@ -8,7 +8,7 @@ import {
   type AnswerMember, type Member,
 } from '../src/rooms/logic/members.ts'
 import { clampPose, clampScale, composePose, effectiveCamera, wrapYaw } from '../src/rooms/logic/pose.ts'
-import { alignStatus, checkAlignRequest, checkRoomCreate, checkRoomPut, readAnswer, readRoom, roomBase, waitingMessage } from '../src/rooms/logic/room.ts'
+import { ALIGN_STAGING, alignStagingName, alignStatus, checkAlignRequest, checkRoomCreate, checkRoomPut, readAnswer, readRoom, roomBase, waitingMessage } from '../src/rooms/logic/room.ts'
 
 const turn = (deg: number): { cos: number; sin: number } => ({ cos: Math.cos((deg * Math.PI) / 180), sin: Math.sin((deg * Math.PI) / 180) })
 const near = (a: number, b: number, eps = 1e-6): void => {
@@ -190,4 +190,9 @@ void test('reading room.json and answers back; align_status', () => {
   assert.deepEqual(alignStatus({ status: 'running', message: '' }, true), { status: 'running', error: null })
   assert.deepEqual(alignStatus({ status: 'failed', message: 'boom' }, true), { status: 'failed', error: 'boom' })
   assert.deepEqual(alignStatus({ status: 'done', message: '' }, true), { status: 'done', error: null })
+})
+
+void test('alignStagingName: the job\'s scratch under rooms/, in a dot folder no room name can be', () => {
+  assert.equal(ALIGN_STAGING, '.align')
+  assert.equal(alignStagingName('a-20260101-000000-beef'), '.align/a-20260101-000000-beef')
 })
