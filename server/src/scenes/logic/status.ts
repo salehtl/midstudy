@@ -23,12 +23,19 @@ export interface CalibStatus {
 /** v1's sentence for a scene without calib.json and without a job in this server run. */
 export const LOST_CALIBRATION = "the calibration didn't finish (the server restarted): calibrate it again"
 
+/** A scene with neither photo.jpg nor source.* and no job in this server run: nothing to calibrate again (§4.4). */
+export const LOST_UPLOAD = 'the upload was lost when the server restarted: delete this scene and upload the photo again'
+
 /** v1 `status`: pending or running while the newest calibration job waits or runs; failed with its message when it
- *  failed; else done with calib.json, failed without (a calibration lost to a restart). */
-export function calibStatus(job: JobState | null, hasCalib: boolean): CalibStatus {
+ *  failed; else done with calib.json, failed without (a calibration lost to a restart). With no job of this server run
+ *  (departing from v1, §4.4): no photo and no source (`hasInput` false) is a lost upload, which wins; the `.calibrating`
+ *  marker (`interrupted`) is a lost calibration even with calib.json. */
+export function calibStatus(job: JobState | null, hasCalib: boolean, interrupted: boolean, hasInput: boolean): CalibStatus {
   if (job !== null && job.status === 'queued') return { status: 'pending', error: null }
   if (job !== null && job.status === 'running') return { status: 'running', error: null }
   if (job !== null && job.status === 'failed') return { status: 'failed', error: job.message }
+  if (job === null && !hasInput) return { status: 'failed', error: LOST_UPLOAD }
+  if (job === null && interrupted) return { status: 'failed', error: LOST_CALIBRATION }
   if (hasCalib) return { status: 'done', error: null }
   return { status: 'failed', error: LOST_CALIBRATION }
 }

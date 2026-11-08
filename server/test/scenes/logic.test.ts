@@ -10,15 +10,22 @@ import { LOOK_HELP, mergeLook } from '../../src/scenes/logic/look.ts'
 import { compareTrashed } from '../../src/scenes/logic/names.ts'
 import { DEFAULT_RENDER_PROMPT, REFERENCE_RENDER_PROMPT, alignResult, maskSizeProblem, modelChoice, renderPrice, renderPrompt } from '../../src/scenes/logic/render.ts'
 import { BAD_META, TITLE_TOO_LONG, metaTitle, uploadFilename, storedFilename } from '../../src/scenes/logic/scene.ts'
-import { LOST_CALIBRATION, calibStatus, lightingStatus } from '../../src/scenes/logic/status.ts'
+import { LOST_CALIBRATION, LOST_UPLOAD, calibStatus, lightingStatus } from '../../src/scenes/logic/status.ts'
 import { cmpCodePoints, codePointLength, collapseSpaces, pyStr, pyTruthy, sortedStrings } from '../../src/scenes/logic/values.ts'
 import { readWorkerLine } from '../../src/scenes/logic/worker.ts'
 
 void test('direct cases: statuses, names, values, render choices, worker lines', () => {
-  assert.deepEqual(calibStatus(null, false), { status: 'failed', error: LOST_CALIBRATION })
-  assert.deepEqual(calibStatus({ status: 'done', message: 'x' }, true), { status: 'done', error: null })
-  assert.deepEqual(calibStatus({ status: 'done', message: 'x' }, false), { status: 'failed', error: LOST_CALIBRATION })
-  assert.deepEqual(calibStatus({ status: 'failed', message: 'no' }, true), { status: 'failed', error: 'no' })
+  assert.deepEqual(calibStatus(null, false, false, true), { status: 'failed', error: LOST_CALIBRATION })
+  assert.deepEqual(calibStatus(null, true, false, true), { status: 'done', error: null })
+  assert.deepEqual(calibStatus(null, true, true, true), { status: 'failed', error: LOST_CALIBRATION })
+  assert.deepEqual(calibStatus(null, false, true, false), { status: 'failed', error: LOST_UPLOAD })
+  assert.deepEqual(calibStatus(null, true, false, false), { status: 'failed', error: LOST_UPLOAD })
+  // a job of this run decides, whatever the files say (the marker goes just after the job ends)
+  assert.deepEqual(calibStatus({ status: 'queued', message: 'x' }, false, true, false), { status: 'pending', error: null })
+  assert.deepEqual(calibStatus({ status: 'running', message: 'x' }, true, true, true), { status: 'running', error: null })
+  assert.deepEqual(calibStatus({ status: 'done', message: 'x' }, true, true, true), { status: 'done', error: null })
+  assert.deepEqual(calibStatus({ status: 'done', message: 'x' }, false, false, true), { status: 'failed', error: LOST_CALIBRATION })
+  assert.deepEqual(calibStatus({ status: 'failed', message: 'no' }, true, false, true), { status: 'failed', error: 'no' })
   const light = { status: 'done' as const, message: 'm', lighting: false, dropped: false }
   assert.deepEqual(lightingStatus(false, light, null, false), { status: 'none', error: null })
   assert.deepEqual(lightingStatus(false, { ...light, lighting: true }, null, false), { status: 'missing', error: null })
