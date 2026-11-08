@@ -320,33 +320,49 @@ const LAST_SCENE_KEY = 'midstudy.lastScene'
 const kernelsReady = loadKernels()
 // depth.png's decode goes to a worker (planner/engine.worker.ts); the main thread is the fallback when the worker can't
 // start, dies, or fails (a damaged file then fails again here, with the decoder's own words).
+const DEPTH_WORKER_MS = 20000 // a decode takes milliseconds: a worker silent for this long is treated as dead
 let kernelWorker: KernelWorker | null = null
 let workerDown: Promise<never> | null = null
-function worker(): { k: KernelWorker; down: Promise<never> } | null {
-  if (kernelWorker && workerDown) return { k: kernelWorker, down: workerDown }
-  if (workerDown) return null
+let stopWorker: ((why: string) => void) | null = null
+function worker(): { k: KernelWorker; down: Promise<never>; stop: (why: string) => void } | null {
+  if (kernelWorker && workerDown && stopWorker) return { k: kernelWorker, down: workerDown, stop: stopWorker }
+  if (workerDown) return null // down for the session: one failure moves the decodes to the main thread
   try {
     const w = new Worker(new URL('./engine.worker.js', import.meta.url), { type: 'module' })
-    workerDown = new Promise<never>((_resolve, reject) => {
-      w.addEventListener('error', (e) => { e.preventDefault(); kernelWorker = null; reject(new Error(e.message || 'the kernel worker stopped')) })
-    })
+    const k = new KernelWorker(w)
+    let reject: (e: Error) => void = () => undefined
+    workerDown = new Promise<never>((_resolve, rej) => { reject = rej })
     workerDown.catch(() => undefined)
-    kernelWorker = new KernelWorker(w)
-    return { k: kernelWorker, down: workerDown }
+    const stop = (why: string): void => {
+      if (kernelWorker !== k) return
+      kernelWorker = null
+      stopWorker = null
+      w.terminate()
+      k.close(why)
+      reject(new Error(why))
+    }
+    w.addEventListener('error', (e) => { e.preventDefault(); stop(e.message || 'the kernel worker stopped') })
+    w.addEventListener('messageerror', () => { stop('a kernel worker reply could not be read') })
+    kernelWorker = k
+    stopWorker = stop
+    return { k, down: workerDown, stop }
   } catch {
     workerDown = Promise.reject(new Error('no kernel worker'))
     workerDown.catch(() => undefined)
     return null
   }
 }
-/** A heavy kernel in the worker, or on the main thread when there is none (or it failed). */
+/** A heavy kernel in the worker, or on the main thread when there is none (or it failed, or doesn't answer). */
 async function inWorker<T>(call: (k: KernelWorker) => Promise<T>, here: () => T): Promise<T> {
   const w = worker()
   if (!w) return here()
+  const timer = setTimeout(() => { w.stop('the kernel worker did not answer') }, DEPTH_WORKER_MS)
   try {
     return await Promise.race([call(w.k), w.down])
   } catch {
     return here()
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -798,17 +814,12 @@ function syncPiece(r: ItemRec, l: LibraryEntry): void {
   }
   quiet(rebuildItem(r, l))
 }
-/** Until no capture is queued or running: a child attached during a capture would escape its material swap. The caller
- *  re-checks its token and attaches in the same synchronous step. */
-async function capturesIdle(): Promise<void> {
-  while (captureBusy > 0) await captureChain
-}
 async function rebuildItem(r: ItemRec, l: LibraryEntry): Promise<void> {
   const token = ++r.build
   let built: Built
   try {
     built = await buildChild(l)
-    await capturesIdle()
+    while (captureBusy > 0) await captureChain // a child attached during a capture would escape its material swap: wait, then attach in one synchronous step
   } catch (e) { throw reportError(`Could not reload "${libLogic.libName(libView(l))}"`, e) }
   if (token !== r.build || items.get(r.uid) !== r) { disposeChild(built.obj); return }
   detachBuilt(r)
@@ -1129,7 +1140,7 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   pendingUids.add(uid)
   try {
     built = await buildChild(l) // a splat item: its GLB and its splat have both loaded
-    await capturesIdle()
+    while (captureBusy > 0) await captureChain // as rebuildItem: no attach during a capture
   } catch (e) {
     throw reportError(`Could not load "${libLogic.libName(libView(l))}"`, e)
   } finally { pendingUids.delete(uid) }
@@ -1560,6 +1571,8 @@ let look: LookState = lookLogic.defaultLook()
 let lightingData: JsonObject | null = null // lighting.json (GET /api/scenes/<name> `lighting`), or null: the v1 lights
 let lightingStatus: LightingStatus = { status: 'missing', error: null } // §4.8 backfill: done | missing | pending | running | none | failed
 let lightingToken = 0
+let lightingRun: { name: string; token: number; p: Promise<LightingReport | null> } | null = null // the backfill in flight
+const lightAutostarted = new Set<string>()
 let adjustFloor = false
 let occlusion = true
 let floorNote: string | null = null
@@ -1737,7 +1750,9 @@ function clearPhoto(): void {
   P.depth.pass.setDepth(null)
   syncOcclusion()
 }
-const syncOcclusion = (): void => { P.depth.mesh.visible = occlusion && !!photo.depthTexture }
+// `occlusion` is the user's choice (v1); what is drawn and reported needs a depth map too.
+const occlusionOn = (): boolean => occlusion && !!photo.depthTexture
+const syncOcclusion = (): void => { P.depth.mesh.visible = occlusionOn() }
 
 const nextFrame = (): Promise<void> => new Promise((r) => { requestAnimationFrame(() => { r() }) })
 function floorNoteFor(data: JsonObject | null): string | null {
@@ -1838,12 +1853,12 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
     setLoad(false, null, null, null)
     emit('camera', { camera: cameraLogic.cameraCopy(cam), source: cameraSource })
     emit('adjust', { on: adjustFloor, note: floorNote })
-    emit('occlusion', { on: occlusion })
+    emit('occlusion', { on: occlusionOn() })
     emit('grid', { visible: true })
     emitView()
     emit('scene', { phase: 'opened', name })
     if (room) emit('room', { phase: switching ? 'photo' : 'opened', name: room.name })
-    if (lightingStatus.status === 'missing' && data['calib_status'] === 'done') quiet(inferLighting())
+    if (data['calib_status'] === 'done') resumeLighting(name, data)
     // The scene comes back with its layout (layoutToOpen: what this device had open, or the one saved last on any
     // device), so the furniture isn't lost on a reload or on the other device; then the renders list. The library
     // must be read first, or the pieces would load as missing. A room view: the room's layout, once, on its first photo.
@@ -2029,6 +2044,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
   lightingToken++
   setLightingData(data)
   applyLook()
+  resumeLighting(name, data)
   floorNote = floorNoteFor(data)
   if (!dirty.scene && cameraSource !== 'manual') {
     cam = clampCamera(data['camera'])
@@ -2038,7 +2054,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
     applyCamera()
     emit('camera', { camera: cameraLogic.cameraCopy(cam), source: cameraSource })
   }
-  if (!occlusion && depth) setOcclusion(true)
+  if (occlusion !== !!depth) setOcclusion(!!depth)
   const why = data['calib_status'] === 'failed' ? str(data['calib_error']) ?? jobWhy ?? 'see the server log' : jobWhy
   emit('scene', { phase: why !== null ? 'recalibrate-failed' : 'recalibrated', name })
   emit('adjust', { on: adjustFloor, note: floorNote })
@@ -2095,7 +2111,7 @@ function setAdjustFloor(on: unknown): void {
 function setOcclusion(on: unknown): void {
   occlusion = !!on
   syncOcclusion()
-  emit('occlusion', { on: occlusion })
+  emit('occlusion', { on: occlusionOn() })
 }
 function setGridVisible(on: unknown): void {
   grid.visible = !!on
@@ -2389,7 +2405,7 @@ async function unparkItems(): Promise<void> {
   })
 }
 // One at a time, everything that clears the pieces and adds them again: otherwise a park snapshots a half-landed set
-// and cancels the rest. A failure doesn't break the chain. Nothing in it awaits an open, a layout load or a capture.
+// and cancels the rest. A failure doesn't break the chain. Nothing in it awaits an open or a layout load; its adds wait for captures, which never wait on it.
 let placing: Promise<unknown> = Promise.resolve()
 function placed<T>(fn: () => Promise<T>): Promise<T> {
   const run = placing.then(fn, fn)
@@ -2917,40 +2933,77 @@ function setLightingData(data: JsonObject | null): void {
 function emitLighting(): void { emit('lighting', { status: lightingStatus.status, error: lightingStatus.error }); emitLook() }
 // A scene calibrated before lighting.json existed (§4.8 backfill): POST …/light runs only the lighting step on the
 // server; this polls the scene until it is there (or the server found none), then lights the furniture with it.
-// Opening such a scene starts it; the Look panel's "Infer lighting" starts it again after a failure.
+// Opening such a scene starts it, once per scene per page; the Look panel's "Infer lighting" starts it again after that.
 async function inferLighting(): Promise<LightingReport | null> {
   const name = sceneName
   if (!name) throw reportError('No scene is open')
+  if (lightingRun?.name === name && lightingRun.token === lightingToken) return lightingRun.p
   const token = ++lightingToken
+  return trackLighting(name, token, postLight(name, token))
+}
+// What a status just read from the server (an open, a recalibration) leaves to do, so that no status the panel shows as
+// busy is left without something following it: a job in flight is polled; 'missing' starts the backfill once per scene
+// per page (a 'none' the server forgot reads 'missing' again), and after that ends failed, which offers "Infer lighting".
+function resumeLighting(name: string, data: JsonObject): void {
+  if (lightingStatus.status === 'pending' || lightingStatus.status === 'running') {
+    emitLighting()
+    const token = ++lightingToken
+    quiet(trackLighting(name, token, pollLighting(name, token)))
+  } else if (lightingStatus.status === 'missing' && data['calib_status'] === 'done') {
+    if (lightAutostarted.has(name)) {
+      lightingStatus = { status: 'failed', error: "the last try didn't finish" }
+      emitLighting()
+    } else {
+      lightAutostarted.add(name)
+      quiet(inferLighting())
+    }
+  }
+}
+function trackLighting(name: string, token: number, work: Promise<LightingReport | null>): Promise<LightingReport | null> {
+  const p = work.finally(() => { if (lightingRun?.token === token) lightingRun = null })
+  lightingRun = { name, token, p }
+  return p
+}
+async function postLight(name: string, token: number): Promise<LightingReport | null> {
+  const current = (): boolean => token === lightingToken && name === sceneName
   try {
     await apiJson(`${sceneUrl(name)}/light`, { method: 'POST' })
   } catch (e) {
     const st = statusOf(e)
-    if (name === sceneName) { lightingStatus = { status: 'failed', error: msg.lightWhyText(st) }; emitLighting() }
+    if (current()) { lightingStatus = { status: 'failed', error: msg.lightWhyText(st) }; emitLighting() }
     throw reportError(msg.lightStartText(st), e)
   }
+  if (!current()) return null
   lightingStatus = { status: 'pending', error: null }
   emitLighting()
-  for (let i = 0; i < 600; i++) {
-    await sleep(sceneLogic.lightPollMs(i))
-    if (name !== sceneName || token !== lightingToken) return null
-    let data: JsonObject
-    try { data = await getSceneInternal(name) } catch { continue }
-    if (name !== sceneName || token !== lightingToken) return null
-    const st = lookLogic.lightingStatusOf(data['lighting_status'], !!data['lighting'], null).status
-    if (st === 'pending' || st === 'running') {
-      if (st !== lightingStatus.status) { lightingStatus = { status: st, error: null }; emitLighting() }
+  return pollLighting(name, token)
+}
+const LIGHT_POLLS = 600
+// Follows the light job until it ends. Every exit but a superseded one (a newer run owns the status) sets a status and
+// emits 'lighting'. A poll that doesn't reach the server counts against the limit like one still waiting.
+async function pollLighting(name: string, token: number): Promise<LightingReport | null> {
+  const current = (): boolean => token === lightingToken && name === sceneName
+  for (let polls = 1; ; polls++) {
+    await sleep(sceneLogic.lightPollMs(polls - 1))
+    if (!current()) return null
+    let data: JsonObject | null = null
+    try { data = await getSceneInternal(name) } catch { /* as still waiting, below */ }
+    if (!current()) return null
+    const polled = data ? lookLogic.lightingStatusOf(data['lighting_status'], !!data['lighting'], null).status : lightingStatus.status
+    const step = lookLogic.lightingStep(lightingStatus.status, polled, polls, LIGHT_POLLS)
+    if (!step.terminal) {
+      if (step.status !== lightingStatus.status) { lightingStatus = { status: step.status, error: null }; emitLighting() }
       continue
     }
-    sceneData = { ...sceneData, lighting: data['lighting'] ?? null, lighting_status: st, lighting_error: data['lighting_error'] ?? null }
+    const src = data ?? sceneData
+    sceneData = { ...sceneData, lighting: src?.['lighting'] ?? null, lighting_status: step.status, lighting_error: step.error ?? src?.['lighting_error'] ?? null }
     setLightingData(sceneData)
     applyLook()
     emitLighting()
-    if (st === 'done') toast('Lighting inferred from the photo', 'ok', 3500)
-    else if (st === 'failed') toast(`Couldn't infer the light: ${lightingStatus.error ?? 'see the server log'}`, 'error')
+    if (step.status === 'done') toast('Lighting inferred from the photo', 'ok', 3500)
+    else if (step.status === 'failed') toast(`Couldn't infer the light: ${lightingStatus.error ?? 'see the server log'}`, 'error')
     return getLighting()
   }
-  return null
 }
 
 // --- drawing ------------------------------------------------------------------------------------------------------------
@@ -3279,7 +3332,7 @@ function getSceneState(): SceneState | null {
   if (!sceneName) return null
   return {
     name: sceneName, title: sceneData?.['title'] ?? null, camera: cameraLogic.cameraCopy(cam), camera_source: cameraSource,
-    floor_found: rec(rec(sceneData?.['calib'])?.['floor'])?.['found'] ?? null, hasDepth: !!photo.depthTexture, occlusion, adjustFloor,
+    floor_found: rec(rec(sceneData?.['calib'])?.['floor'])?.['found'] ?? null, hasDepth: !!photo.depthTexture, occlusion: occlusionOn(), adjustFloor,
   }
 }
 /** getState().items[] (§4.6). */
@@ -3425,7 +3478,7 @@ export const engine = {
   getSavedScene: (): SavedScene | null => clone(savedScene),
   getAdjustFloor: (): boolean => adjustFloor,
   getFloorNote: (): string | null => floorNote,
-  getOcclusion: (): boolean => occlusion,
+  getOcclusion: occlusionOn,
   getGridVisible: (): boolean => grid.visible,
   getView, getPhotoRect, getVisiblePhotoRect: visiblePhotoRect,
   getPhotoSize: (): { w: number; h: number; has: boolean } => ({ w: photo.w, h: photo.h, has: photo.has }),
