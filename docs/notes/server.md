@@ -72,3 +72,11 @@
   while idle, not only idle ones. `server/test/rooms-calib.ts` logs its pid (needed by the proof).
 
 Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a live same-host owner still waits at 3601 s, reclaimed at 4201 s).
+
+## W3 server-domain-room-align
+
+- align-room's `--out` is now `rooms/.align/<job>/` (`alignStagingName`). Only an ok, non-dropped answer with the room still there has its align.json renamed into `rooms/<room>/`, then applied. The scratch is removed before the job is published as ended, and `rooms/.align/` is swept at startup. `#removeLeftover` is gone. An `align.json` in a room is now always an applied answer, so Reset only re-applies those.
+- `delete()` also forgets a dropped queued job's `#requests` entry. `align()` redraws a colliding job id.
+- Crash order: `delete()` writes trash.json in the live folder first; `restore()` removes it last.
+- Deviation: an ok answer whose `--out` holds no align.json now fails the job with ALIGN_NO_RESULT (before, it was applied with no file).
+- Known limit, as designed: if moving the layouts fails after the folder moved, the room is listed in the trash but restore answers 409 until `layouts/@<room>/` is cleared.

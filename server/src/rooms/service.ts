@@ -1,6 +1,6 @@
 // Rooms on disk and their align jobs (contract §4.9): rooms/<room>/room.json (written by the server only, atomically,
-// checked against room.schema.json in strict mode), rooms/<room>/align.json (written by midstudy-calib align-room,
-// never by the server), rooms/.trash/<room>-<stamp>/ (the deleted room with its layouts and trash.json) and
+// checked against room.schema.json in strict mode), rooms/<room>/align.json (written by midstudy-calib align-room
+// into rooms/.align/<job>/, the job's scratch, and moved here only when the job is applied), rooms/.trash/<room>-<stamp>/ (the deleted room with its layouts and trash.json) and
 // layouts/@<room>/ (room layouts: server/src/routes/layouts.ts). Align jobs run on the scenes' calibration queue
 // (SceneService.queueTask): one at a time with the calibrations, the warm worker when it answers. A queued align job
 // lets the calibrations of its members pass it, and runs once none is queued or running. Every change to a room folder
@@ -11,7 +11,7 @@ import path from 'node:path'
 import { isSlug } from '../../../common/logic/slug.ts'
 import { isoUtc } from '../../../common/logic/time.ts'
 import { toolError } from '../../../common/tools.ts'
-import { exists, isDir, isFile, move, removeTree, resolvePath } from '../../../common/files.ts'
+import { exists, isDir, isFile, move, removeTree, replace, resolvePath } from '../../../common/files.ts'
 import { compareNames } from '../../../core/js/node.ts'
 import type { Camera, SceneTrashRoom } from '../../../contract/gen/types.ts'
 import { JobStore, newJobId } from '../jobs.ts'
@@ -31,7 +31,7 @@ import {
 } from './logic/members.ts'
 import { effectiveCamera, type Turn } from './logic/pose.ts'
 import {
-  ALIGN_NEEDS_PHOTOS, ALIGN_NO_RESULT, ALIGN_QUEUED, ALIGN_TOO_FEW, alignBusy, alignRunning, RESET_WITHOUT_ALIGN, ROOM_DELETED, alignStatus, alignTimedOut,
+  ALIGN_NEEDS_PHOTOS, ALIGN_NO_RESULT, ALIGN_QUEUED, ALIGN_STAGING, ALIGN_TOO_FEW, alignBusy, alignRunning, alignStagingName, RESET_WITHOUT_ALIGN, ROOM_DELETED, alignStatus, alignTimedOut,
   alignedMessage, inAnotherRoom, noRoom, notAMember, readAnswer, readMember, readRoom, roomBase, waitingMessage, type AlignRequest, type AlignStatus, type RoomData,
   type RoomPut,
 } from './logic/room.ts'
@@ -136,6 +136,8 @@ export class RoomService {
     this.layoutsDir = options.layoutsDir
     this.#scenes = options.scenes
     this.#now = options.now ?? Date.now
+    // A crash or SIGKILL mid-run leaves its scratch behind; no job survives a restart, so all of it is stale.
+    removeTree(path.join(this.dir, ALIGN_STAGING))
     this.#scenes.setRooms({
       index: () => this.index(),
       leave: (scene) => this.leave(scene),
@@ -385,7 +387,10 @@ export class RoomService {
     for (const job of this.#jobs.list()) {
       if (job.room !== name || (job.status !== 'queued' && job.status !== 'running')) continue
       this.#dropped.add(job.id)
-      if (job.status === 'queued') this.#jobs.update(job.id, { status: 'failed', finished: isoUtc(now), message: ROOM_DELETED, waiting_for: [] })
+      if (job.status === 'queued') {
+        this.#jobs.update(job.id, { status: 'failed', finished: isoUtc(now), message: ROOM_DELETED, waiting_for: [] })
+        this.#requests.delete(job.id)
+      }
     }
     const base = trashBase(name, now)
     const trashRoot = path.join(this.dir, '.trash')
@@ -396,10 +401,12 @@ export class RoomService {
       trash = path.join(trashRoot, numbered(base, n))
     }
     makeDirs(trashRoot)
+    // trash.json first: a folder that reached the trash without it could be neither listed nor restored. A stray one in
+    // a live folder is ignored.
+    writeJsonSync(path.join(this.dir, name, TRASH_META), { name, title: r.title, created: r.created === '' ? null : r.created, deleted: isoUtc(now) }, 'midstudy/trash.schema.json#/$defs/room')
     const moved = move(path.join(this.dir, name), trash)
     const layouts = this.layoutsPath(name)
     if (isDir(layouts)) move(layouts, path.join(moved, 'layouts'))
-    writeJsonSync(path.join(moved, TRASH_META), { name, title: r.title, created: r.created === '' ? null : r.created, deleted: isoUtc(now) }, 'midstudy/trash.schema.json#/$defs/room')
     return path.basename(this.dir) + '/.trash/' + path.basename(moved)
   }
 
@@ -441,7 +448,6 @@ export class RoomService {
     if (exists(dest) || exists(this.layoutsPath(name))) return 'exists'
     const others = this.index()
     const moved = move(path.join(this.dir, '.trash', copy.dir), dest)
-    fs.rmSync(path.join(moved, TRASH_META), { force: true })
     if (isDir(path.join(moved, 'layouts'))) {
       makeDirs(this.layoutsDir)
       move(path.join(moved, 'layouts'), this.layoutsPath(name))
@@ -451,6 +457,7 @@ export class RoomService {
       const kept = r.members.filter((m) => this.#scenes.exists(m.scene) && !others.has(m.scene))
       if (kept.length !== r.members.length) this.#write({ ...r, members: kept, saved: isoUtc(this.#now()) })
     }
+    fs.rmSync(path.join(moved, TRASH_META), { force: true }) // last: until here the copy still says what it is
     return { room: this.object(name) }
   }
 
@@ -484,7 +491,8 @@ export class RoomService {
     // asks for the alignment right after the uploads, §4.9 Planner).
     if (r.members.filter((m) => isFile(this.#photo(m.scene)) || this.#scenes.busy(m.scene)).length < 2) return { status: 409, error: ALIGN_NEEDS_PHOTOS }
     const now = this.#now()
-    const id = newJobId('a', now)
+    let id = newJobId('a', now)
+    while (this.#jobs.get(id) !== null) id = newJobId('a', now) // 4 hex digits: two jobs in one second can draw the same
     const job: AlignJobView = { id, kind: 'align', room: name, status: 'queued', created: isoUtc(now), started: null, finished: null, message: ALIGN_QUEUED, waiting_for: [], align: null }
     this.#jobs.add(job)
     this.#requests.set(id, req)
@@ -502,19 +510,14 @@ export class RoomService {
   #end(id: string, ok: boolean, message: string): void {
     const job = this.#jobs.get(id)
     if (job === null) return
-    let m = message
-    if (this.#dropped.has(id)) {
-      this.#removeLeftover(job.room)
-      m = ROOM_DELETED
-    }
-    this.#jobs.update(id, { status: ok ? 'done' : 'failed', finished: isoUtc(this.#now()), message: m, waiting_for: [] })
+    removeTree(this.#staging(id)) // before the job ends: whoever sees it ended sees no scratch
+    this.#jobs.update(id, { status: ok ? 'done' : 'failed', finished: isoUtc(this.#now()), message: this.#dropped.has(id) ? ROOM_DELETED : message, waiting_for: [] })
     this.#requests.delete(id)
   }
 
-  /** The tool may have re-made the room folder (with align.json) after a delete moved it. */
-  #removeLeftover(name: string): void {
-    const left = path.join(this.dir, name)
-    if (isDir(left) && !exists(path.join(left, 'room.json'))) removeTree(left)
+  /** rooms/.align/<job>/: align-room's --out. A failed or dropped run never touches the room. */
+  #staging(id: string): string {
+    return path.join(this.dir, alignStagingName(id))
   }
 
   /** One turn of an align job; false when members still calibrate (it goes to the back of the queue). */
@@ -537,7 +540,7 @@ export class RoomService {
     }
     const order = alignOrder(r.members, hasPhoto, anchorIndex(r.members, hasPhoto, req.overwriteManual))
     this.#jobs.update(id, { status: 'running', started: isoUtc(this.#now()), message: alignRunning(order.length), waiting_for: [] })
-    const args = [...order.map((s) => resolvePath(this.#scenes.path(s))), '--out', resolvePath(path.join(this.dir, job.room))]
+    const args = [...order.map((s) => resolvePath(this.#scenes.path(s))), '--out', resolvePath(this.#staging(id))]
     if (req.solver !== null) args.push('--solver', req.solver)
     const outcome = await this.#scenes.runCalib({ id, cmd: 'align-room', args })
     this.#ended(id, outcome, req)
@@ -579,10 +582,13 @@ export class RoomService {
     const result = Object.fromEntries(Object.entries(out).filter(([k]) => k !== 'ok'))
     const answer = readAnswer(result)
     const r = this.read(job.room)
-    if (answer === null || r === null) {
-      this.#end(id, false, answer === null ? ALIGN_NO_RESULT : ROOM_DELETED)
+    const staged = path.join(this.#staging(id), 'align.json')
+    if (answer === null || r === null || !isFile(staged)) {
+      this.#end(id, false, r === null ? ROOM_DELETED : ALIGN_NO_RESULT)
       return
     }
+    replace(staged, path.join(this.dir, job.room, 'align.json'))
+    removeTree(this.#staging(id))
     const finished = isoUtc(this.#now())
     const members = this.#applied(r.members, answer.members, { kind: 'align', overwriteManual: req.overwriteManual })
     this.#write({ ...r, members, aligned: { solver: answer.solver, finished }, saved: finished })

@@ -13,6 +13,14 @@ export function roomBase(epochMs: number): string {
   return 'room-' + utcStamp(epochMs)
 }
 
+/** rooms/.align/: server scratch for align jobs. A dot folder, so no room name can be it. */
+export const ALIGN_STAGING = '.align'
+
+/** A job's scratch folder, relative to rooms/: align-room's --out (§4.9 Align). */
+export function alignStagingName(id: string): string {
+  return ALIGN_STAGING + '/' + id
+}
+
 /** The longest title (code points, after trimming). */
 const MAX_TITLE = 200
 

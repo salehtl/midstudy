@@ -7,6 +7,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
+import { RoomService } from '../src/rooms/service.ts'
+import { SceneService } from '../src/scenes/service.ts'
 import { REPO, api, errorOf, request, startServer, type Answer, type Running } from './helpers.ts'
 
 const CALIB = 'node server/test/rooms-calib.ts'
@@ -487,3 +489,135 @@ void describe('align jobs: waiting for calibrations, failures, the worker, a del
 function isAlignRequest(v: unknown): boolean {
   return typeof v === 'object' && v !== null && 'cmd' in v && v.cmd === 'align-room'
 }
+
+void describe('align staging (rooms/.align/<job>/, §4.9 Align) and crash-ordered trash moves', () => {
+  const alignOf = async (s: Running, name: string): Promise<string> =>
+    str(rec(rec((await api(s.base, 'POST', '/api/rooms/' + name + '/align')).json)['job'])['id'])
+  const running = async (s: Running, id: string): Promise<void> => {
+    await until('running', async () => (rec((await api(s.base, 'GET', '/api/rooms/jobs/' + id)).json)['status'] === 'running' ? true : null))
+  }
+  const scratch = (s: Running): string[] => {
+    const d = path.join(s.rooms, '.align')
+    return fs.existsSync(d) ? fs.readdirSync(d) : []
+  }
+
+  void test('--out is the job\'s scratch; align.json lands in the room, the scratch is gone when the job is done', async () => {
+    const log = path.join(REPO, 'evals/out/server-core-tests', 'rooms-staging-' + String(process.pid) + '.log')
+    fs.mkdirSync(path.dirname(log), { recursive: true })
+    fs.rmSync(log, { force: true })
+    const s = await server('staging', { ROOMS_CALIB_LOG: log })
+    try {
+      const [a = '', b = ''] = await scenesOf(s, ['living-wide', 'room-1'])
+      const name = str((await create(s, { scenes: [a, b] }))['name'])
+      const id = await alignOf(s, name)
+      assert.equal((await job(s, id))['status'], 'done')
+      const runs = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => rec(JSON.parse(l))).map((l) => list(l['argv'] ?? []).map(str)).filter((v) => v[0] === 'align-room')
+      const argv = runs[runs.length - 1] ?? []
+      assert.equal(argv[argv.indexOf('--out') + 1], path.resolve(s.rooms, '.align', id))
+      assert.ok(fs.existsSync(path.join(s.rooms, name, 'align.json')))
+      assert.deepEqual(scratch(s), [])
+      assert.equal((await room(s, name))['align_status'], 'done')
+      noViolations(s)
+    } finally {
+      await s.stop()
+    }
+  })
+
+  void test('a room deleted and restored while its job runs: the answer is not applied and leaves no file', async () => {
+    const s = await server('restored', { ROOMS_CALIB_ALIGN_DELAY_MS: '1200' })
+    try {
+      const [a = '', b = ''] = await scenesOf(s, ['living-wide', 'room-1'])
+      const name = str((await create(s, { scenes: [a, b] }))['name'])
+      const before = fs.readFileSync(path.join(s.rooms, name, 'room.json'), 'utf8')
+      const id = await alignOf(s, name)
+      await running(s, id)
+      assert.equal((await api(s.base, 'DELETE', '/api/rooms/' + name)).status, 200)
+      assert.equal((await api(s.base, 'POST', '/api/rooms/' + name + '/restore')).status, 200)
+      const done = await job(s, id)
+      assert.equal(done['status'], 'failed')
+      assert.equal(done['message'], 'the room was deleted')
+      assert.ok(!fs.existsSync(path.join(s.rooms, name, 'align.json')), 'the dropped run wrote align.json into the restored room')
+      assert.equal(fs.readFileSync(path.join(s.rooms, name, 'room.json'), 'utf8'), before)
+      assert.notEqual((await room(s, name))['align_status'], 'done')
+      assert.deepEqual(scratch(s), [])
+    } finally {
+      await s.stop()
+    }
+  })
+
+  void test('a room deleted while its job runs stays gone, in rooms/ and in the scratch', async () => {
+    const s = await server('dropped', { ROOMS_CALIB_ALIGN_DELAY_MS: '800' })
+    try {
+      const [a = '', b = ''] = await scenesOf(s, ['living-wide', 'room-1'])
+      const name = str((await create(s, { scenes: [a, b] }))['name'])
+      const id = await alignOf(s, name)
+      await running(s, id)
+      assert.equal((await api(s.base, 'DELETE', '/api/rooms/' + name)).status, 200)
+      assert.equal((await job(s, id))['message'], 'the room was deleted')
+      assert.ok(!fs.existsSync(path.join(s.rooms, name)))
+      assert.deepEqual(scratch(s), [])
+    } finally {
+      await s.stop()
+    }
+  })
+
+  void test('an answer that breaks the contract never reaches the room: no align.json, Reset is refused', async () => {
+    const s = await server('off-contract', { ROOMS_CALIB_ALIGN_OFF_CONTRACT: '1' })
+    try {
+      const [a = '', b = ''] = await scenesOf(s, ['living-wide', 'room-1'])
+      const name = str((await create(s, { scenes: [a, b] }))['name'])
+      assert.equal((await job(s, await alignOf(s, name)))['status'], 'failed')
+      assert.ok(!fs.existsSync(path.join(s.rooms, name, 'align.json')))
+      assert.deepEqual(scratch(s), [])
+      refused(await api(s.base, 'PUT', '/api/rooms/' + name, { reset: [b] }), 409)
+    } finally {
+      await s.stop()
+    }
+  })
+
+  void test('a failed job leaves the previous align.json as it was', async () => {
+    const s = await server('keeps', { ROOMS_CALIB_ALIGN_OFF_CONTRACT: '1' })
+    try {
+      const [a = '', b = ''] = await scenesOf(s, ['living-wide', 'room-1'])
+      const name = str((await create(s, { scenes: [a, b] }))['name'])
+      const file = path.join(s.rooms, name, 'align.json')
+      fs.writeFileSync(file, 'the previous answer\n')
+      assert.equal((await job(s, await alignOf(s, name)))['status'], 'failed')
+      assert.equal(fs.readFileSync(file, 'utf8'), 'the previous answer\n')
+    } finally {
+      await s.stop()
+    }
+  })
+
+  void test('RoomService sweeps rooms/.align/ when it starts (a crash mid-run leaves a folder)', () => {
+    const dir = path.join(REPO, 'evals/out/server-core-tests', 'rooms-sweep-' + String(process.pid))
+    const rooms = path.join(dir, 'rooms')
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.mkdirSync(path.join(rooms, '.align', 'a-crashed'), { recursive: true })
+    fs.writeFileSync(path.join(rooms, '.align', 'a-crashed', 'align.json'), '{}')
+    const scenes = new SceneService({ scenesDir: path.join(dir, 'scenes'), layoutsDir: path.join(dir, 'layouts'), calib: ['python3', 'fixtures/stub_calib.py'], repo: REPO, log: () => undefined })
+    assert.ok(new RoomService({ roomsDir: rooms, layoutsDir: path.join(dir, 'layouts'), scenes }).names().length === 0)
+    assert.ok(!fs.existsSync(path.join(rooms, '.align', 'a-crashed')))
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  void test('DELETE: trash.json goes in first, so a move that fails leaves a room the trash can list', async () => {
+    const s = await server('trash-order')
+    const [a = ''] = await scenesOf(s, ['living-wide'])
+    const name = str((await create(s, { scenes: [a] }))['name'])
+    fs.mkdirSync(path.join(s.layouts, '@' + name))
+    fs.writeFileSync(path.join(s.layouts, '@' + name, 'plan.json'), '{}')
+    fs.chmodSync(s.layouts, 0o500)
+    try {
+      const del = await api(s.base, 'DELETE', '/api/rooms/' + name)
+      assert.ok(del.status >= 500, del.text)
+      const trashed = fs.readdirSync(path.join(s.rooms, '.trash'))
+      assert.equal(trashed.length, 1)
+      assert.ok(fs.existsSync(path.join(s.rooms, '.trash', trashed[0] ?? '', 'trash.json')))
+      assert.deepEqual(list(rec((await api(s.base, 'GET', '/api/rooms')).json)['trash']).map((x) => rec(x)['name']), [name])
+    } finally {
+      fs.chmodSync(s.layouts, 0o700)
+      await s.stop()
+    }
+  })
+})

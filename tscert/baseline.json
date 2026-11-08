@@ -719,6 +719,7 @@
   "server/src/rooms/logic/room.ts#(init)",
   "server/src/rooms/logic/room.ts#alignBusy",
   "server/src/rooms/logic/room.ts#alignRunning",
+  "server/src/rooms/logic/room.ts#alignStagingName",
   "server/src/rooms/logic/room.ts#alignStatus",
   "server/src/rooms/logic/room.ts#alignTimedOut",
   "server/src/rooms/logic/room.ts#alignedMessage",
