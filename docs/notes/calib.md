@@ -442,3 +442,12 @@ fitted camera in cyan, plus the true camera in magenta on golden scenes. `*-dept
 - Unchanged, for evals: `fixtures/stub_calib.py` doesn't mirror the ingest clearing or the mock-miss EXIF; no eval needs it.
 - For kernels: check the Rust walker in `core/crates/media/src/jpeg.rs` for the same stray-SOI gap (`standalone`, and the
   size walker that skips `0xD8`). Not changed here.
+## State machines W6: calib-rooms-scale
+
+- `rooms/solver.py`: pure `_scale_mode(cam_heights, cy, floor_b, ratios)` picks the scale source for `from_views`: floor
+  when its sigma is finite and positive, else depth, else `none`. A degenerate floor (first camera on or under it) now
+  tries depth instead of placing nothing.
+- Depth mode: a member without a usable ratio gets NaN, not 1.0, so `from_views`' degenerate check leaves it unplaced.
+- `none`: `[Candidate(Placement(0, 0, 0, 1), diag={"scale_source": "none"}), None, ...]`, for the solver-selection fix.
+- Beyond the design: a member with a calib height of 0 gets NaN instead of a ZeroDivisionError.
+- Proof: `calib/tests/test_room_scale.py`. `eval:calib` (E20 real) was left to the wave's merge.
