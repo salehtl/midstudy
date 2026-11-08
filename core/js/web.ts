@@ -67,23 +67,35 @@ export interface Plane {
 
 let exports: InitOutput | null = null
 let loading: Promise<void> | null = null
+/** The source of the load in flight (undefined: next to the glue). */
+let loadingSource: InitInput | undefined
+/** Why the last load failed; cleared by a load that succeeds. */
+let lastError: unknown
 
-/** Loads the wasm (once; concurrent calls share the load). `source`: the .wasm's URL, a Response, its bytes or a
- * compiled Module; default: fetched next to the glue module. A failed load can be retried. */
+/** Loads the wasm (once). `source`: the .wasm's URL, a Response, its bytes or a compiled Module; default: fetched next
+ * to the glue module. Once loaded, any call resolves whatever its source. During a load, a call with no source or the
+ * same source (by identity) joins it, and one with another source is refused. A failed load can be retried. */
 export function loadKernels(source?: InitInput): Promise<void> {
-  loading ??= (source === undefined ? init() : init({ module_or_path: source })).then(
-    (e) => { exports = e },
-    (err: unknown) => { loading = null; throw err },
+  if (loading && !exports && source !== undefined && source !== loadingSource) {
+    return Promise.reject(new Error('midstudy kernels: a load from another source is already in progress'))
+  }
+  if (loading) return loading
+  loadingSource = source
+  loading = (source === undefined ? init() : init({ module_or_path: source })).then(
+    (e) => { exports = e; lastError = undefined; loadingSource = undefined },
+    (err: unknown) => { loading = null; lastError = err; loadingSource = undefined; throw err },
   )
   return loading
 }
 
-/** Loads the wasm synchronously from its bytes or a compiled Module (Node, workers that already hold the bytes). */
+/** Loads the wasm synchronously from its bytes or a compiled Module (Node, workers that already hold the bytes).
+ * Throws while an asynchronous load is in flight: it cannot be waited for here, and a second instance would replace
+ * the first under objects already made from it. */
 export function loadKernelsSync(source: SyncInitInput): void {
   if (exports) return
-  // A second instance would replace the first under objects already made from it.
   if (loading) throw new Error('midstudy kernels: an asynchronous load is already in progress')
   exports = wasm.initSync({ module: source })
+  lastError = undefined
   loading = Promise.resolve()
 }
 
@@ -92,8 +104,18 @@ export function kernelsLoaded(): boolean {
 }
 
 function memory(): WebAssembly.Memory {
-  if (!exports) throw new Error('midstudy kernels: call loadKernels() first')
+  if (!exports) {
+    if (lastError === undefined) throw new Error('midstudy kernels: call loadKernels() first')
+    const why = lastError instanceof Error ? lastError.message : typeof lastError === 'string' ? lastError : 'unknown error'
+    throw new Error(`midstudy kernels: the last load failed (${why}); call loadKernels() again`)
+  }
   return exports.memory
+}
+
+/** The glue's functions, once the kernels are loaded (before that they would fail inside the glue). */
+const api = (): typeof wasm => {
+  memory()
+  return wasm
 }
 
 const f64s = (v: Iterable<number>): Float64Array => Float64Array.from(v)
@@ -153,7 +175,9 @@ export class SceneCamera {
     return this.#cam
   }
 
-  /** The scratch view, re-made when wasm memory has grown (growth detaches the old buffer: its views read length 0). */
+  /** The scratch view, re-made when wasm memory has grown (growth detaches the old buffer: its views read length 0).
+   * It is valid only until the next wasm allocation: call the wasm method first, then #s(), and never hold the view
+   * across an allocating call. #putItem writes it and the method reads it, with no allocation between. */
   #s(): Float64Array {
     const v = this.#view
     if (v?.length === 32) return v
@@ -274,7 +298,7 @@ export class SceneCamera {
 /** v1's clampCamera(c, base): each field clamped and rounded to 6 decimals; a non-finite or missing one takes base's. */
 export function clampCamera(c: Readonly<Partial<CameraBlock>>, base: Readonly<CameraBlock> = DEFAULT_CAMERA): CameraBlock {
   const pick = (v: number | undefined): number => (typeof v === 'number' ? v : Number.NaN)
-  const a = wasm.clampCamera(
+  const a = api().clampCamera(
     f64s([pick(c.fov_y_deg), pick(c.height_m), pick(c.pitch_deg), pick(c.roll_deg)]),
     f64s([base.fov_y_deg, base.height_m, base.pitch_deg, base.roll_deg]),
   )
@@ -285,22 +309,22 @@ export const LOOK_KEYS = ['exposure', 'warmth', 'light_azimuth_deg', 'light_elev
 export type LookNumberKey = (typeof LOOK_KEYS)[number]
 /** One Look value clamped as v1 does (the azimuth wrapped first); null means the inferred default. */
 export function clampLook(key: LookNumberKey, v: number): number | null {
-  return wasm.clampLook(LOOK_KEYS.indexOf(key), v) ?? null
+  return api().clampLook(LOOK_KEYS.indexOf(key), v) ?? null
 }
 
-export const wrapDeg = (d: number): number => wasm.wrapDeg(d)
-export const wrapAz = (a: number): number => wasm.wrapAz(a)
+export const wrapDeg = (d: number): number => api().wrapDeg(d)
+export const wrapAz = (a: number): number => api().wrapAz(a)
 /** v1's round(v, n): Math.round(v · 10ⁿ) / 10ⁿ. */
-export const roundTo = (v: number, n: number): number => wasm.roundTo(v, n)
-export const clampElevation = (y: number): number => wasm.clampElevation(y)
+export const roundTo = (v: number, n: number): number => api().roundTo(v, n)
+export const clampElevation = (y: number): number => api().clampElevation(y)
 /** v1's rotateSelected step: round(wrapDeg(rot + deg), 6). */
-export const rotateBy = (rotationYDeg: number, deg: number): number => wasm.rotateBy(rotationYDeg, deg)
+export const rotateBy = (rotationYDeg: number, deg: number): number => api().rotateBy(rotationYDeg, deg)
 /** v1's depthScale: height / calib height with a measured floor, else 1. */
-export const depthScale = (heightM: number, calibHeightM: number, measured: boolean): number => wasm.depthScale(heightM, calibHeightM, measured)
+export const depthScale = (heightM: number, calibHeightM: number, measured: boolean): number => api().depthScale(heightM, calibHeightM, measured)
 /** The horizon drag's gain: the tilt is capped at 0.12° per CSS px on a small photo (contract §4.5). */
-export const horizonDragGain = (fovYDeg: number, rectHCss: number): number => wasm.horizonDragGain(fovYDeg, rectHCss)
+export const horizonDragGain = (fovYDeg: number, rectHCss: number): number => api().horizonDragGain(fovYDeg, rectHCss)
 /** The row a horizon drag asks for: py0 + (dy / s) · gain. */
-export const horizonDragRow = (py0: number, dyCss: number, cssPerPx: number, gain: number): number => wasm.horizonDragRow(py0, dyCss, cssPerPx, gain)
+export const horizonDragRow = (py0: number, dyCss: number, cssPerPx: number, gain: number): number => api().horizonDragRow(py0, dyCss, cssPerPx, gain)
 
 // --- items, hulls, drags ----------------------------------------------------------------------------------------------
 
@@ -308,70 +332,70 @@ const pose = (it: Readonly<ItemBox>): Float64Array => f64s([it.position[0], it.p
 
 /** The 8 world corners, v1's order: bottom then top ring, each back-left, back-right, front-right, front-left. */
 export function boxCorners(item: Readonly<ItemBox>): Vec3[] {
-  return triples(wasm.boxCorners(pose(item), f64s(item.min), f64s(item.max)))
+  return triples(api().boxCorners(pose(item), f64s(item.min), f64s(item.max)))
 }
 /** v1's worldBounds. */
 export function worldBounds(item: Readonly<ItemBox>): { min: Vec3; max: Vec3 } {
-  const a = wasm.worldBounds(pose(item), f64s(item.min), f64s(item.max))
+  const a = api().worldBounds(pose(item), f64s(item.min), f64s(item.max))
   return { min: vec3(a), max: vec3(a, 3) }
 }
 /** v1's getFootprint without the box: corners front-left, front-right, back-right, back-left; centre; height. */
 export function footprint(item: Readonly<ItemBox>): { corners: Vec3[]; center: Vec3; height: number } {
-  const a = wasm.footprint(pose(item), f64s(item.min), f64s(item.max))
+  const a = api().footprint(pose(item), f64s(item.min), f64s(item.max))
   return { corners: triples(a.subarray(0, 12)), center: vec3(a, 12), height: num(a, 15) }
 }
 /** v1's convexHull (finite points). */
 export function convexHull(points: readonly (readonly [number, number])[]): Vec2[] {
-  return pairs(wasm.convexHull(f64s(points.flat())))
+  return pairs(api().convexHull(f64s(points.flat())))
 }
-export const pointInHull = (hull: readonly (readonly [number, number])[], x: number, y: number): boolean => wasm.pointInHull(f64s(hull.flat()), x, y)
-export const distToHull = (hull: readonly (readonly [number, number])[], x: number, y: number): number => wasm.distToHull(f64s(hull.flat()), x, y)
+export const pointInHull = (hull: readonly (readonly [number, number])[], x: number, y: number): boolean => api().pointInHull(f64s(hull.flat()), x, y)
+export const distToHull = (hull: readonly (readonly [number, number])[], x: number, y: number): number => api().distToHull(f64s(hull.flat()), x, y)
 /** v1's dragHeight (grabY null when grabbed beside the piece). */
-export const dragHeight = (grabY: number | null, minY: number, maxY: number, eye: number): number => wasm.dragHeight(grabY, minY, maxY, eye)
+export const dragHeight = (grabY: number | null, minY: number, maxY: number, eye: number): number => api().dragHeight(grabY, minY, maxY, eye)
 /** v1's lift plane through an item's position, facing the camera. */
 export function liftPlane(position: Readonly<Vec3>): Plane {
-  const a = wasm.liftPlane(f64s(position))
+  const a = api().liftPlane(f64s(position))
   return { normal: vec3(a), constant: num(a, 3) }
 }
 /** A move drag's new [x, z]: round(hit + offset, 6). */
 export function dragMove(hit: Readonly<Vec3>, offset: Readonly<Vec3>): Vec2 {
-  const a = wasm.dragMove(f64s(hit), f64s(offset))
+  const a = api().dragMove(f64s(hit), f64s(offset))
   return [num(a, 0), num(a, 1)]
 }
-export const dragLift = (hitY: number, offsetY: number, snap: boolean): number => wasm.dragLift(hitY, offsetY, snap)
-export const gripAngle = (hit: Readonly<Vec3>, center: Readonly<Vec3>): number => wasm.gripAngle(f64s(hit), f64s(center))
-export const dragRotate = (rot0Deg: number, angle: number, angle0: number, snap: boolean): number => wasm.dragRotate(rot0Deg, angle, angle0, snap)
+export const dragLift = (hitY: number, offsetY: number, snap: boolean): number => api().dragLift(hitY, offsetY, snap)
+export const gripAngle = (hit: Readonly<Vec3>, center: Readonly<Vec3>): number => api().gripAngle(f64s(hit), f64s(center))
+export const dragRotate = (rot0Deg: number, angle: number, angle0: number, snap: boolean): number => api().dragRotate(rot0Deg, angle, angle0, snap)
 /** v1's setRulerTrueLength maths: the new height, the scale for the ruler's points, whether it is exact. */
 export function rulerRescale(heightM: number, measuredM: number, trueM: number): { height_m: number; k: number; exact: boolean } | null {
-  const a = wasm.rulerRescale(heightM, measuredM, trueM)
+  const a = api().rulerRescale(heightM, measuredM, trueM)
   return a.length === 3 ? { height_m: num(a, 0), k: num(a, 1), exact: num(a, 2) === 1 } : null
 }
 
 // --- the light ----------------------------------------------------------------------------------------------------------
 
 export function azElOf(d: Readonly<Vec3>): { azimuth_deg: number; elevation_deg: number } {
-  const a = wasm.azElOf(d[0], d[1], d[2])
+  const a = api().azElOf(d[0], d[1], d[2])
   return { azimuth_deg: num(a, 0), elevation_deg: num(a, 1) }
 }
-export const dirOf = (azDeg: number, elDeg: number): Vec3 => vec3(wasm.dirOf(azDeg, elDeg))
+export const dirOf = (azDeg: number, elDeg: number): Vec3 => vec3(api().dirOf(azDeg, elDeg))
 /** v1's turnBetween(a, b): Matrix3.elements. */
-export const turnBetween = (a: Readonly<Vec3>, b: Readonly<Vec3>): number[] => Array.from(wasm.turnBetween(f64s(a), f64s(b)))
+export const turnBetween = (a: Readonly<Vec3>, b: Readonly<Vec3>): number[] => Array.from(api().turnBetween(f64s(a), f64s(b)))
 /** The probe turned by R (camera-to-world): band 1 exactly, band 2 by evaluate-turn-refit as v1. */
-export const rotateSh = (sh: Sh9, r: Mat3Elements): Vec3[] => shOf(wasm.rotateSh(flatSh(sh), f64s(r)))
-export const irradianceAt = (sh: Sh9, d: Readonly<Vec3>): Vec3 => vec3(wasm.irradianceAt(flatSh(sh), d[0], d[1], d[2]))
-export const scaleBands = (sh: Sh9, k: number): Vec3[] => shOf(wasm.scaleBands(flatSh(sh), k))
-export const maxBandScale = (sh: Sh9): number => wasm.maxBandScale(flatSh(sh))
+export const rotateSh = (sh: Sh9, r: Mat3Elements): Vec3[] => shOf(api().rotateSh(flatSh(sh), f64s(r)))
+export const irradianceAt = (sh: Sh9, d: Readonly<Vec3>): Vec3 => vec3(api().irradianceAt(flatSh(sh), d[0], d[1], d[2]))
+export const scaleBands = (sh: Sh9, k: number): Vec3[] => shOf(api().scaleBands(flatSh(sh), k))
+export const maxBandScale = (sh: Sh9): number => api().maxBandScale(flatSh(sh))
 /** v1's splatGain(): `room` null for the v1 lights (no lighting.json). */
 export function splatGain(
   room: { worldSh: Sh9; keyColor: Readonly<Vec3>; keyIntensity: number; whiteBalance: Readonly<Vec3> | null } | null,
   ambient: number,
   strength: number,
 ): Vec3 {
-  if (!room) return vec3(wasm.splatGain(new Float64Array(0), new Float64Array(0), 0, new Float64Array(0), ambient, strength))
-  return vec3(wasm.splatGain(flatSh(room.worldSh), f64s(room.keyColor), room.keyIntensity, f64s(room.whiteBalance ?? [1, 1, 1]), ambient, strength))
+  if (!room) return vec3(api().splatGain(new Float64Array(0), new Float64Array(0), 0, new Float64Array(0), ambient, strength))
+  return vec3(api().splatGain(flatSh(room.worldSh), f64s(room.keyColor), room.keyIntensity, f64s(room.whiteBalance ?? [1, 1, 1]), ambient, strength))
 }
 /** The splat pass multiplier: warmthTint(warmth) · exposure · gain. */
-export const splatMultiplier = (warmth: number, exposure: number, gain: Readonly<Vec3>): Vec3 => vec3(wasm.splatMultiplier(warmth, exposure, f64s(gain)))
+export const splatMultiplier = (warmth: number, exposure: number, gain: Readonly<Vec3>): Vec3 => vec3(api().splatMultiplier(warmth, exposure, f64s(gain)))
 
 // --- the heavy kernels ----------------------------------------------------------------------------------------------------
 
@@ -416,7 +440,7 @@ export interface RgbaImage {
 /** depth.png (contract §4.2) to metres × scale; scale 1 gives v1's values exactly. Throws on anything but an 8- or
  * 16-bit grayscale, non-interlaced, well-formed PNG. */
 export function decodeDepth(png: Uint8Array, scale = 1): DepthMap {
-  const r = wasm.decodeDepth(png, scale)
+  const r = api().decodeDepth(png, scale)
   try {
     return { width: r.width(), height: r.height(), data: new Float32Array(memory().buffer, r.ptr(), r.len()).slice() }
   } finally {
@@ -427,7 +451,7 @@ export function decodeDepth(png: Uint8Array, scale = 1): DepthMap {
 /** The keep-room mask (contract §4.7) from the mask render's RGBA readback (WebGL rows bottom-up by default). */
 export function keepRoomMask(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number, opts: { bottomUp?: boolean; png?: boolean; level?: number } = {}): KeepRoomMask {
   const bytes = rgba instanceof Uint8Array ? rgba : new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength)
-  const r = wasm.keepRoomMask(bytes, width, height, opts.bottomUp ?? true)
+  const r = api().keepRoomMask(bytes, width, height, opts.bottomUp ?? true)
   try {
     const mask = new Uint8Array(memory().buffer, r.ptr(), r.len()).slice()
     const png = opts.png ? r.toPng(width, height, opts.level ?? 6) : null
@@ -439,18 +463,21 @@ export function keepRoomMask(rgba: Uint8Array | Uint8ClampedArray, width: number
 
 /** v1's dilate(src, w, h, left, right, up, down). */
 export const dilate = (src: Uint8Array, width: number, height: number, left: number, right: number, up: number, down: number): Uint8Array =>
-  wasm.dilate(src, width, height, left, right, up, down)
+  api().dilate(src, width, height, left, right, up, down)
 
 /** The environment map from the photo (contract §4.8): `rotation` the scene camera's R (Matrix3.elements). */
 export function envMap(photo: Readonly<RgbaImage>, cam: { rotation: Mat3Elements; fov_y_deg: number }, opts: EnvMapOptions = {}): EnvMap {
   const width = opts.width ?? 512
   const height = opts.height ?? 256
-  const half = opts.half ?? true
   const bytes = photo.data instanceof Uint8Array ? photo.data : new Uint8Array(photo.data.buffer, photo.data.byteOffset, photo.data.byteLength)
-  const r = wasm.envMap(bytes, photo.width, photo.height, f64s(cam.rotation), cam.fov_y_deg, width, height, opts.anisotropy ?? 4, half)
+  const r = api().envMap(bytes, photo.width, photo.height, f64s(cam.rotation), cam.fov_y_deg, width, height, opts.anisotropy ?? 4, opts.half ?? true)
   try {
+    // The result says which of its two vectors it filled.
+    const half = r.f16Len() > 0
+    const n = half ? r.f16Len() : r.f32Len()
+    if (n !== width * height * 4) throw new Error(`midstudy kernels: envMap returned ${String(n)} values, expected ${String(width * height * 4)}`)
     const buf = memory().buffer
-    const data = half ? new Uint16Array(buf, r.f16Ptr(), r.f16Len()).slice() : new Float32Array(buf, r.f32Ptr(), r.f32Len()).slice()
+    const data = half ? new Uint16Array(buf, r.f16Ptr(), n).slice() : new Float32Array(buf, r.f32Ptr(), n).slice()
     return { width, height, data, half }
   } finally {
     r.free()
@@ -462,7 +489,7 @@ export function envMap(photo: Readonly<RgbaImage>, cam: { rotation: Mat3Elements
 /** What a worker scope, a Worker or a MessagePort offers (a MessagePort is started when it has `start`). */
 export interface KernelPort {
   postMessage(message: unknown, transfer: Transferable[]): void
-  addEventListener(type: 'message', listener: (e: MessageEvent<unknown>) => void): void
+  addEventListener(type: 'message' | 'messageerror', listener: (e: MessageEvent<unknown>) => void): void
   start?(): void
 }
 
@@ -548,9 +575,10 @@ async function run(req: Request): Promise<{ reply: Reply; transfer: Transferable
 }
 
 /** Serves the heavy kernels on a worker scope (or a MessagePort): call once in the worker's entry module. The wasm is
- * loaded on the first request (from `source`, or next to the glue). */
+ * loaded on the first request (from `source`, or next to the glue), and a failed load is tried again by the next one. */
 export function serveKernels(port: KernelPort, source?: InitInput | SyncInitInput): void {
-  let ready: Promise<void> | null = null
+  // A request that could not be deserialized has no id: an id-less failure makes the other side fail what is in flight.
+  port.addEventListener('messageerror', () => { port.postMessage({ ok: false, error: 'midstudy kernels: a request could not be read' }, []) })
   port.addEventListener('message', (e) => {
     const req = parseRequest(e.data)
     const id = isObj(e.data) && isNum(e.data['id']) ? e.data['id'] : -1
@@ -558,7 +586,8 @@ export function serveKernels(port: KernelPort, source?: InitInput | SyncInitInpu
       port.postMessage({ id, ok: false, error: 'midstudy kernels: malformed request' }, [])
       return
     }
-    ready ??= loadKernels(source)
+    // Replies may leave out of request order; KernelWorker matches them by id.
+    const ready = exports ? Promise.resolve() : loadKernels(source)
     ready
       .then(() => run(req))
       .then(({ reply, transfer }) => { port.postMessage(reply, transfer) })
@@ -591,26 +620,51 @@ export class KernelWorker {
   #port: KernelPort
   #next = 1
   #pending = new Map<number, { resolve: (r: Reply) => void; reject: (e: Error) => void }>()
+  #closed: Error | null = null
 
   constructor(port: KernelPort) {
     this.#port = port
     port.addEventListener('message', (e) => {
-      const reply = parseReply(e.data)
-      const id = isObj(e.data) && isNum(e.data['id']) ? e.data['id'] : -1
-      const p = this.#pending.get(reply ? reply.id : id)
+      if (!isObj(e.data) || !isNum(e.data['id'])) {
+        // The answer belongs to an unknown request. The worker serves only the kernels, and every caller falls back.
+        this.#failAll(new Error('midstudy kernels: malformed reply'))
+        return
+      }
+      const id = e.data['id']
+      const p = this.#pending.get(id)
       if (!p) return
-      this.#pending.delete(reply ? reply.id : id)
+      this.#pending.delete(id)
+      const reply = parseReply(e.data)
       if (!reply) p.reject(new Error('midstudy kernels: malformed reply'))
       else p.resolve(reply)
     })
+    port.addEventListener('messageerror', () => { this.#failAll(new Error('midstudy kernels: a reply could not be read')) })
     port.start?.()
   }
 
+  #failAll(err: Error): void {
+    const pending = [...this.#pending.values()]
+    this.#pending.clear()
+    for (const p of pending) p.reject(err)
+  }
+
+  /** Rejects everything in flight and every later call (the worker has stopped or is being let go). */
+  close(reason = 'the kernel worker stopped'): void {
+    this.#closed ??= new Error(reason)
+    this.#failAll(this.#closed)
+  }
+
   #call(msg: Record<string, unknown>, transfer: Transferable[]): Promise<Reply> {
+    if (this.#closed) return Promise.reject(this.#closed)
     const id = this.#next++
     return new Promise<Reply>((resolve, reject) => {
       this.#pending.set(id, { resolve, reject })
-      this.#port.postMessage({ ...msg, id }, transfer)
+      try {
+        this.#port.postMessage({ ...msg, id }, transfer)
+      } catch (err) {
+        this.#pending.delete(id)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
     })
   }
 
