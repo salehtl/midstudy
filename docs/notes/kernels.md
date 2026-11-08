@@ -25,3 +25,17 @@
 - `dilate_into`: a vertical reach is clamped below `u32::MAX`, the counters' "unseen" value, so a saturated reach no longer turns on a column with no set pixel (v1 leaves it empty).
 - Tests: `mask::tests::a_saturated_reach_leaves_empty_columns_empty`, `png::tests::v1_parity_interleaved_idat_and_bytes_after_iend`, property `a_vertical_reach_past_the_height_is_the_height`.
 - No deviation. `raster/README.md` never named the feature, so it is unchanged.
+
+## State machines W7: kernels-notes (decisions, no code change)
+
+Five machines stay as they are. Each decision was checked against the code at sm-next.
+
+- **Camera scratch slots** (`wasm-web` `Camera`): won't fix. Inputs and outputs share one 32-f64 buffer with no phase marker, but `SceneCamera` in `core/js/web.ts` is the only caller of the raw `wasm.Camera` and none other is planned. It re-puts the item before `screenRect` and `hitBox` and checks the booleans of `photoToFloor` and `planePointAt`. Covered by `diff.mjs` and `v1-sync.mjs`. A second caller would have to take on the same protocol.
+- **JPEG walkers** (`strip_plan`, `is_clean`, `frame_info`): won't fix, both are v1's (contract §0). There is no "frame seen" state, so `is_clean(FF D8 FF D9)` is true and `passthrough` refuses that input only through `frame_info`'s `NoFrame`. `step` and `frame_info` also read a stray SOI differently, so the frame reported for a file and for its stripped bytes can differ on malformed input. `jpegIsClean` and `jpegPassthrough` have no callers in `server/`, `pipeline/` or `common/`. Anyone adding one needs `frame_info` as well, not `is_clean` alone.
+- **PNG strip walk** (`media::png::walk`): won't fix. The strip removes metadata chunks and does not validate, as in v1. A "PNG" with no IHDR strips to signature + IEND, which carries no metadata, and validity is the decoder's concern. Covered by the Kani harness `png_walk_short`, props and fuzz.
+- **Base64** (`decode_python`): won't fix, deliberate CPython parity (contract §0). Lenient mode decodes across interleaved padding, and neither mode checks the unused low bits. `decodeImageDataUri`'s `Buffer` fast path takes only input that round-trips canonically, where the two decoders agree; everything else goes to the kernel.
+- **glTF `Ctx` and GLB layout**: won't fix. A `Compact` request falls back to `InPlace` when a bufferView has `extensions`, and `Report.layout` says so. `pipeline/src/glb.ts` uses the default and does not read it; either layout is a valid GLB.
+
+Outcomes of the other three packages are in the W2, W5 and W6 entries above. All three landed. The one defer is `SceneCamera`'s handle lifecycle and scratch-view cache: latent, no data loss or hang, and W2 added a comment and a memory-growth regression case for it.
+
+Gate note: W6's "no deviation" holds for the code, but its ownership gate ran with `--base sm-next`, because the default base counts earlier waves' paths since main. The same applies here.
