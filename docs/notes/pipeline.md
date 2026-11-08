@@ -268,3 +268,11 @@ protocol) and says `(<library>/.lock)` in its waiting line, as v1 did.
 - The live path through `cli.ts` is not tested end to end (LiveFal's hosts are constants and a key is off-limits);
   `fal.test.ts` covers the client and `lock.test.ts` the mock signals.
 - The refit commit has no `inCommit` flag: it is synchronous, so no handler can run inside it.
+
+## State machines W6: splat fit (pipeline-splat-fit)
+
+`normalize()` in `core/crates/splat/src/fit.rs` looks up x, y and z again before the self-check read-back. The indices
+computed before `drop_props(f_rest_*)` were stale when `f_rest_*` came before the centers: the self-check read the
+wrong columns (a wrong extent) or indexed past the end (a wasm trap). The written file was never affected. Two tests in
+`fit.rs` pin both orders. `ply.rs` keeps v1's `raw.find(b"end_header")` (contract §0), so an `end_header` inside a
+comment still ends the header there, as in v1.

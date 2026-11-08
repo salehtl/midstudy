@@ -239,7 +239,9 @@ pub fn normalize(bytes: &[u8], p: &FitParams) -> Result<Fit, FitError> {
     };
     let out = ply.to_bytes();
 
-    // The self-check reads the written file back: its centers are the float32 values.
+    // The self-check reads the written file back: its centers are the float32 values. Dropping `f_rest_*` moved any
+    // column after it, so the centers are looked up again.
+    let ix = [col(&ply, "x")?, col(&ply, "y")?, col(&ply, "z")?];
     #[allow(clippy::cast_possible_truncation)]
     let written: [Vec<f64>; 3] = ix.map(|i| {
         ply.columns[i]
@@ -444,5 +446,83 @@ mod tests {
         assert!(fit.rotated && fit.dropped_rest == 0);
         let flat: Vec<[f32; 3]> = (0..50).map(|i| [i as f32, 0.0, (i * 2) as f32]).collect();
         assert_eq!(normalize(&splat(&flat, &[]), &p), Err(FitError::Flat(1)));
+    }
+
+    /// A splat whose properties come in this order: `f_rest_*` are 0.5, the rest as `splat` writes them.
+    fn splat_in_order(points: &[[f32; 3]], order: &[&str]) -> Vec<u8> {
+        let mut h = format!(
+            "ply\nformat binary_little_endian 1.0\nelement vertex {}\n",
+            points.len()
+        );
+        for n in order {
+            h.push_str(&format!("property float {n}\n"));
+        }
+        h.push_str("end_header\n");
+        let mut out = h.into_bytes();
+        for p in points {
+            for n in order {
+                let v = match *n {
+                    "x" => p[0],
+                    "y" => p[1],
+                    "z" => p[2],
+                    "f_dc_0" => 0.1,
+                    "f_dc_1" => 0.2,
+                    "f_dc_2" => 0.3,
+                    "opacity" => 2.0,
+                    "scale_0" => (0.01f32).ln(),
+                    "scale_1" => (0.02f32).ln(),
+                    "scale_2" => (0.03f32).ln(),
+                    "rot_0" => 1.0,
+                    "rot_1" | "rot_2" | "rot_3" => 0.0,
+                    _ => 0.5,
+                };
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    fn assert_self_check_matches_file(order: &[&str]) {
+        // A 90-degree yaw: rotated, so `f_rest_*` is dropped and the columns after it move.
+        let p = FitParams {
+            rotation: [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],
+            dims: [0.8, 0.95, 0.9],
+            lo_pct: 0.0,
+            hi_pct: 100.0,
+        };
+        let fit = normalize(&splat_in_order(&grid(), order), &p).unwrap();
+        assert!(fit.rotated && fit.dropped_rest == 3 && fit.finite);
+        for axis in 0..3 {
+            let got = fit.hi[axis] - fit.lo[axis];
+            assert!((got - p.dims[axis]).abs() < 1e-6, "axis {axis}: {got}");
+        }
+        assert!(fit.lo[1].abs() < 1e-7);
+        // The self-check reported the centers the file holds.
+        let ply = read(&fit.ply).unwrap();
+        for (axis, name) in ["x", "y", "z"].iter().enumerate() {
+            let c = ply.column(name).unwrap();
+            let (lo, hi) = c
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+            assert!((lo - fit.lo[axis]).abs() < 1e-9 && (hi - fit.hi[axis]).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
+    fn self_check_reads_the_centers_when_f_rest_precedes_them() {
+        assert_self_check_matches_file(&[
+            "f_rest_0", "f_rest_1", "f_rest_2", "x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2",
+            "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3", "opacity",
+        ]);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // thousands of splats or pixels: too slow under Miri; the native run covers it
+    fn self_check_does_not_index_past_the_columns_when_the_centers_come_last() {
+        assert_self_check_matches_file(&[
+            "f_rest_0", "f_rest_1", "f_rest_2", "f_dc_0", "f_dc_1", "f_dc_2", "scale_0", "scale_1",
+            "scale_2", "rot_0", "rot_1", "rot_2", "rot_3", "opacity", "x", "y", "z",
+        ]);
     }
 }
