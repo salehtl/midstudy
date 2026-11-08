@@ -11,7 +11,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-midstudy-raster = { path = "..", features = ["fuzzing"] }
+midstudy-raster = { path = ".." }
 
 [[bin]]
 name = "decode_png"
