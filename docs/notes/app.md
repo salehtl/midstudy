@@ -540,3 +540,9 @@ no 'layouts' event; only the hook calls it directly); engine.ts is limited to th
 - **Tests.** `planner/test/gesture.test.mjs`, `planner/ui/test/sections/gesture.mjs`.
 
 Deviations: the browser cases are `sections/gesture.mjs` (smoke.mjs is a runner since W1). CDP's `Input.dispatchTouchEvent` cannot release one finger of several here (a touchMove without it leaves it down), so (b) and (c) use synthetic PointerEvents on the canvas; (a) and (a') use CDP touches and lift all fingers at once, so the canvas finger's lift alone is not driven. A finger that lost or never had the drag is inert (multi = true: no pan, no tap), slightly stricter than the design's 'other', because a tap on the photo would deselect and end the grip's rotate. `tscert-ratchet --files --update` does not write the baseline, so the four names were added by hand. eval:keys E17.11 and E17.26 fail on sm-next's own `input.ts` as well (same run conditions), so they are not from this package.
+## State machines W6: planner-gpu-ply (2026-11-08)
+
+- `planner/gpu/splat-data.ts`. `decodePly` refuses an element declared before `vertex` (the data is read from the end of the
+  header, so it would have decoded the wrong bytes) and a vertex count that is not a safe non-negative integer (NaN used to
+  pass the length check). Elements after `vertex` stay fine. Tests: `planner/gpu/test/splat-data.test.mjs`, under `test:splats`.
+- GpuRadixSort: no change (wont-fix in the plan); both call sites run the key kernel right before the full list.
