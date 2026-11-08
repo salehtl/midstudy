@@ -46,6 +46,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { readOwner, tryClaim } from '../scripts/lib/dirlock.mjs'
 
 const SELF = path.resolve(import.meta.dirname, '..')
 const OUT = path.join(SELF, 'evals/out/perf')
@@ -54,6 +55,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const now = () => performance.now()
 const round = (v, n = 1) => (Number.isFinite(v) ? Math.round(v * 10 ** n) / 10 ** n : v)
 const clip = (s, n = 300) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n)}…` : s }
+// Test-only faults, a comma-separated MIDSTUDY_PERF_FAULT, so that each failure this script must survive can be made on
+// purpose: kill-server-after-run-0 (SIGKILLs the main server after run 0 of the api suite), drag-throw (throws right
+// after a drag's mouse.down, then reports what the page was left with), no-hook (the first loadPlanner opens about:blank).
+const FAULTS = new Set((process.env.MIDSTUDY_PERF_FAULT || '').split(',').filter(Boolean))
+// The contract's in-progress job statuses. A poll ends on a 200 whose status is any other string, so a status added to the
+// server doesn't run the poll to its timeout; a body with no status keeps polling.
+const IN_PROGRESS = ['pending', 'queued', 'running']
+const jobEnded = (r) => r.status === 200 && typeof r.json?.status === 'string' && !IN_PROGRESS.includes(r.json.status)
 
 // --- arguments -------------------------------------------------------------------------------------------------------
 const argv = process.argv.slice(2)
@@ -226,8 +235,20 @@ const IDOL = { id: 'idol-chair', name: 'Idol Chair', dims_cm: { w: 80, d: 90, h:
 
 // The main server: the probe library plus SheenChair and the Idol chair (made through the library API, fal mock), golden
 // living-wide (the browser suites), steep-roll with three layouts (api), and the pages server (product).
+// The cached srv is a copy, so its own `exited` never changes: liveness is read through `raw`, the harness's live object
+// (alive() where the target's harness has it; an older A/B target's has only exited and up). A dead server is replaced,
+// so a crash between runs costs that run only.
+const serverLive = (s) => (typeof s.raw.alive === 'function' ? s.raw.alive() : s.raw.exited == null && s.raw.up)
 async function mainServer(t) {
-  if (t.shared.srv) return t.shared.srv
+  if (aborted) throw new Error(`interrupted: ${aborted}`) // nothing new once the cleanups have run
+  if (t.shared.srv) {
+    if (serverLive(t.shared.srv)) return t.shared.srv
+    const old = t.shared.srv
+    t.shared.srv = null
+    console.error(`perf: ${t.label}: the main server is gone (exit ${JSON.stringify(old.raw.exited)}); starting a new one`)
+    await old.raw.stop?.().catch(() => {})
+    await old.pages.stop().catch(() => {})
+  }
   const { startPagesServer, syntheticPages } = await import(pathToFileURL(path.join(SELF, 'evals/lib/pages_server.mjs')).href)
   const synth = syntheticPages()
   const pages = await startPagesServer({ routes: synth.routes, dir: synth.dir })
@@ -245,7 +266,7 @@ async function mainServer(t) {
   const chairJpg = fs.readFileSync(path.join(t.repo, 'fixtures/fal/speridlabs-idol/input.jpg'))
   const r = await t.H.raw(srv.base, 'POST', '/api/library/items', { headers: { 'X-Midstudy': '1', 'Content-Type': 'application/octet-stream', 'X-Midstudy-Kind': 'image',
     'X-Midstudy-Filename': 'morris-chair.jpg', 'X-Midstudy-Meta': t.H.b64json({ name: IDOL.name, id: IDOL.id, dims_cm: IDOL.dims_cm, category: 'armchair' }) }, body: chairJpg })
-  const job = r.json?.job?.id && await t.H.waitFor(async () => { const j = (await t.H.api.get(srv.base, `/api/library/jobs/${r.json.job.id}`)).json; return ['done', 'failed'].includes(j?.status) ? j : null }, { timeoutMs: 300000, intervalMs: 250 })
+  const job = r.json?.job?.id && await t.H.waitFor(async () => { const j = await t.H.api.get(srv.base, `/api/library/jobs/${r.json.job.id}`); return jobEnded(j) ? j.json : null }, { timeoutMs: 300000, intervalMs: 250 })
   if (job?.status !== 'done') throw new Error(`the Idol fixture item was not made: ${r.status} ${clip(r.text, 120)} ${job?.message || ''}`)
   const scene = {}
   for (const id of [LW, 'steep-roll']) {
@@ -258,11 +279,17 @@ async function mainServer(t) {
     const pr = await t.H.api.send(srv.base, 'PUT', `/api/layouts/${name}?scene=${scene['steep-roll'].name}`, { version: 1, name, items })
     if (pr.status !== 200) throw new Error(`PUT layout ${name}: ${pr.status} ${clip(pr.text, 120)}`)
   }
-  t.shared.srv = { ...srv, pages, synth, scene, photo: { w: scene[LW].scene.w, h: scene[LW].scene.h } }
+  t.shared.srv = { ...srv, raw: srv, pages, synth, scene, photo: { w: scene[LW].scene.w, h: scene[LW].scene.h } }
   t.info.scene_photo = `${scene[LW].scene.w}×${scene[LW].scene.h}`
   return t.shared.srv
 }
 async function browserOf(t) {
+  if (aborted) throw new Error(`interrupted: ${aborted}`)
+  if (t.shared.browser && t.shared.browser.isConnected?.() === false) {
+    console.error(`perf: ${t.label}: the browser is gone; launching a new one`)
+    await t.shared.browser.close().catch(() => {})
+    t.shared.browser = null
+  }
   if (!t.shared.browser) {
     t.shared.browser = await call(t, () => t.H.launchBrowser(t.ev))
     t.info.chrome = t.shared.browser.version()
@@ -287,7 +314,13 @@ function pageInit() {
   }
   let v
   try { Object.defineProperty(window, 'midstudy', { configurable: true, enumerable: true, get: () => v, set: (x) => { v = x; seen(x) } }) } catch { /* poll below */ }
-  const iv = setInterval(() => { seen(window.midstudy); if (P.hooked) clearInterval(iv) }, 5)
+  // gives up with a reason after 120 s; loadPlanner waits a little longer, so that this reason is what it reports
+  const t0 = performance.now()
+  const iv = setInterval(() => {
+    seen(window.midstudy)
+    if (P.hooked) clearInterval(iv)
+    else if (performance.now() - t0 > 120000) { clearInterval(iv); P.marks.error = 'window.midstudy.ready never appeared' }
+  }, 5)
   addEventListener('DOMContentLoaded', () => {
     const s = document.createElement('style')
     s.textContent = '*,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important;animation-delay:0s!important;transition-delay:0s!important}'
@@ -334,8 +367,9 @@ async function perfMetrics(P) {
 // Navigates and waits for the shown mark. → {shown (navigation start → shown, ms), ready, hook, origin (epoch ms of
 // navigation start), lt (long tasks), cpu (the main thread's script/compile/layout/style time over the load, ms)}
 async function loadPlanner(P, url) {
+  if (FAULTS.delete('no-hook')) url = 'about:blank'
   await P.page.goto(url, { waitUntil: 'commit', timeout: 60000 })
-  await P.page.waitForFunction(() => window.__perf?.marks?.shown || window.__perf?.marks?.error, null, { timeout: 120000, polling: 50 })
+  await P.page.waitForFunction(() => window.__perf?.marks?.shown || window.__perf?.marks?.error, null, { timeout: 130000, polling: 50 })
   const m = await P.page.evaluate(() => ({ ...window.__perf.marks, origin: performance.timeOrigin, lt: window.__perf.lt }))
   return { ...m, cpu: cpuDelta({}, await perfMetrics(P)) } // Chrome's counters start again with each document
 }
@@ -564,6 +598,7 @@ im.save(${JSON.stringify(rug)}, quality=92)`], { stdio: 'ignore' })
       await settle(P)
 
       const dr = await drag(t, P, name, uid)
+      if (FAULTS.has('drag-throw')) await reportDragFault(t, P, name, uid)
       rec('drag_frames_p50', dr.p50, { frames: dr.frames, moves: dr.moves, drag_ms: dr.ms, moved_cm: dr.moved_cm, longtask_ms: dr.longtask_ms }, dr.error)
       rec('drag_frames_p95', dr.p95, { max: dr.max }, dr.error)
       await settle(P)
@@ -633,7 +668,7 @@ im.save(${JSON.stringify(rug)}, quality=92)`], { stdio: 'ignore' })
         const t0 = now()
         const r = await t.H.uploadScene(srv.base, bytes, { filename: `${LW}.jpg`, title: n })
         const id = r.json?.job?.id ?? r.json?.job
-        const job = id && await t.H.waitFor(async () => { const j = (await t.H.api.get(srv.base, `/api/scenes/jobs/${id}`)).json; return ['done', 'failed'].includes(j?.status) ? j : null }, { timeoutMs: 900000, intervalMs: 50 })
+        const job = id && await t.H.waitFor(async () => { const j = await t.H.api.get(srv.base, `/api/scenes/jobs/${id}`); return jobEnded(j) ? j.json : null }, { timeoutMs: 900000, intervalMs: 50 })
         const ms = now() - t0
         const sc = job ? (await t.H.api.get(srv.base, `/api/scenes/${r.json.scene}`)).json : null
         // the tool's own timings (calib.json): MoGe's load and inference, the floor fit, and its total
@@ -660,10 +695,20 @@ async function measuredLoad(t, P, m, metric, name) {
 }
 async function settle(P, ms = 250) { await frames(P, 2); await sleep(ms); await frames(P, 2) }
 
+// What a drag that failed part-way leaves behind: the button pressed, the frame recorder running, the piece moved.
+async function undoDrag(P, uid, { pressed, st0 }) {
+  if (pressed) await P.page.mouse.up().catch(() => {})
+  await P.page.evaluate(() => { if (window.__perf) window.__perf.framesOn = false }).catch(() => {})
+  if (st0) await P.page.evaluate(({ uid, p, rot }) => window.midstudy.moveItem(uid, { position: p, rotation_y_deg: rot }), { uid, p: st0.position, rot: st0.rotation_y_deg }).catch(() => {})
+}
+
 // A 2 s mouse drag of the item (press on it, then 15 % of the photo's width to the left), moves dispatched every 16 ms of
 // wall time; the page records every animation frame and long task meanwhile. Chrome aligns pointer moves with animation
 // frames, so the piece's position is read only after the drag has been drawn; then the hook puts the piece back.
+// Recording stops before the mouse is released (dragMoves records through the release): the frame window that
+// evals/perf/baseline.json's drag_frames were measured over.
 async function drag(t, P, sceneName, uid) {
+  const left = { pressed: false, st0: null, finished: false }
   try {
     const r = await photoRect(t, P, sceneName)
     const sr = await P.page.evaluate((uid) => window.midstudy.getScreenRect(uid), uid)
@@ -671,6 +716,7 @@ async function drag(t, P, sceneName, uid) {
     const x0 = r.rect.x + (sr.x + sr.w / 2) * r.scale, y0 = r.rect.y + (sr.y + sr.h * 0.6) * r.scale
     const dx = -0.15 * r.rect.w
     const st0 = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid), uid)
+    left.st0 = st0
     await P.page.evaluate(() => {
       const f = (window.__perf.frames = [])
       window.__perf.framesOn = true
@@ -678,7 +724,9 @@ async function drag(t, P, sceneName, uid) {
       requestAnimationFrame(tick)
     })
     await P.page.mouse.move(x0, y0)
+    left.pressed = true
     await P.page.mouse.down()
+    if (FAULTS.has('drag-throw')) throw new Error('fault: drag-throw')
     const T = 2000, t0 = now()
     let moves = 0
     for (;;) {
@@ -695,23 +743,41 @@ async function drag(t, P, sceneName, uid) {
     await frames(P, 2)
     const pos = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid).position, uid)
     await P.page.mouse.up()
+    left.pressed = false
     await P.page.evaluate(({ uid, p, rot }) => window.midstudy.moveItem(uid, { position: p, rotation_y_deg: rot }), { uid, p: st0.position, rot: st0.rotation_y_deg })
+    left.finished = true
     const iv = f.f.slice(1).map((x, i) => x - f.f[i])
     const moved = Math.hypot(pos[0] - st0.position[0], pos[2] - st0.position[2]) * 100
     return { p50: quantile(iv, 0.5), p95: quantile(iv, 0.95), max: round(Math.max(...iv), 1), frames: iv.length, moves, ms: round(ms, 0), moved_cm: round(moved, 1), longtask_ms: round(f.lt, 1),
       error: iv.length < 2 ? 'fewer than 2 frames' : moved < 5 ? `the drag didn't move the piece (${round(moved, 1)} cm)` : null }
-  } catch (e) { return { error: String(e?.message || e) } }
+  } catch (e) { return { error: String(e?.message || e) } } finally { if (!left.finished) await undoDrag(P, uid, left) }
+}
+
+// After a failed drag (MIDSTUDY_PERF_FAULT=drag-throw): is the recording off, and does a mouse move leave the piece alone?
+async function reportDragFault(t, P, sceneName, uid) {
+  const r = await photoRect(t, P, sceneName)
+  const pos = () => P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid).position, uid)
+  const a = await pos()
+  await P.page.mouse.move(r.rect.x + 0.2 * r.rect.w, r.rect.y + 0.7 * r.rect.h)
+  await frames(P, 3)
+  const b = await pos()
+  const report = { frames_on: await P.page.evaluate(() => window.__perf.framesOn), moved_after_cm: round(Math.hypot(b[0] - a[0], b[2] - a[2]) * 100, 2) }
+  console.error(`perf: fault drag-throw: ${JSON.stringify(report)}`)
+  t.info.fault_drag_throw = report
 }
 
 // A drag of a fixed number of moves (10 % of the photo's width to the left, paced at 16 ms, each awaited), timed from the
 // press until the last move's frame is drawn; the piece goes back where it was afterwards (by the hook).
+// Unlike drag, the frames recorded here run through the mouse release: the window baseline's drag_splat was measured over.
 async function dragMoves(t, P, sceneName, uid, n) {
+  const left = { pressed: false, st0: null, finished: false }
   try {
     const r = await photoRect(t, P, sceneName)
     const sr = await P.page.evaluate((uid) => window.midstudy.getScreenRect(uid), uid)
     if (!sr) return { error: 'getScreenRect is null' }
     const x0 = r.rect.x + (sr.x + sr.w / 2) * r.scale, y0 = r.rect.y + (sr.y + sr.h * 0.6) * r.scale, dx = -0.1 * r.rect.w
     const st0 = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid), uid)
+    left.st0 = st0
     await P.page.evaluate(() => {
       const f = (window.__perf.frames = [])
       window.__perf.framesOn = true
@@ -720,7 +786,9 @@ async function dragMoves(t, P, sceneName, uid, n) {
     })
     await P.page.mouse.move(x0, y0)
     const t0 = now()
+    left.pressed = true
     await P.page.mouse.down()
+    if (FAULTS.has('drag-throw')) throw new Error('fault: drag-throw')
     for (let k = 1; k <= n; k++) {
       await P.page.mouse.move(x0 + (dx * k) / n, y0)
       const next = t0 + k * 16
@@ -730,13 +798,15 @@ async function dragMoves(t, P, sceneName, uid, n) {
     const ms = now() - t0
     const pos = await P.page.evaluate((uid) => window.midstudy.getState().items.find((i) => i.uid === uid).position, uid)
     await P.page.mouse.up()
+    left.pressed = false
     const f = await P.page.evaluate(() => { window.__perf.framesOn = false; const f = window.__perf.frames; const lt = window.__perf.lt.filter(([s, d]) => s + d > f[0] && s < f.at(-1)); return { f, lt: lt.reduce((a, [, d]) => a + d, 0) } })
     await P.page.evaluate(({ uid, p, rot }) => window.midstudy.moveItem(uid, { position: p, rotation_y_deg: rot }), { uid, p: st0.position, rot: st0.rotation_y_deg })
+    left.finished = true
     const iv = f.f.slice(1).map((x, i) => x - f.f[i])
     const moved = Math.hypot(pos[0] - st0.position[0], pos[2] - st0.position[2]) * 100
     return { ms: round(ms, 1), frames: iv.length, p50: round(quantile(iv, 0.5), 1), max: round(Math.max(...iv), 1), moved_cm: round(moved, 1), longtask_ms: round(f.lt, 1),
       error: moved < 5 ? `the drag didn't move the piece (${round(moved, 1)} cm)` : null }
-  } catch (e) { return { error: String(e?.message || e) } }
+  } catch (e) { return { error: String(e?.message || e) } } finally { if (!left.finished) await undoDrag(P, uid, left) }
 }
 
 function timedSpawn(cmd, args, { cwd, env, timeoutMs }) {
@@ -1003,40 +1073,71 @@ if (A.results) {
 }
 
 fs.mkdirSync(OUT, { recursive: true })
+// A run owns evals/out/perf (a sibling lock: the wipes below don't touch it); a crash leaves a dead pid, which is reclaimed.
+const outLock = tryClaim(`${OUT}.lock`)
+if (!outLock) {
+  const o = readOwner(`${OUT}.lock`)
+  console.error(`another run of perf is in progress in this worktree (pid ${o?.pid ?? '?'}, ${o?.cmd ?? 'unknown command'})`)
+  process.exit(75)
+}
+process.on('exit', () => outLock.release())
 const specs = A.targets.length ? A.targets : [A.repo || SELF]
 const targets = []
 for (const [i, spec] of specs.entries()) targets.push(await loadTarget(parseTarget(spec, i)))
 if (new Set(targets.map((t) => t.label)).size !== targets.length) { console.error('perf: target labels must differ (label:path)'); process.exit(2) }
 const res = { eval: 'E17', version: 1, started: new Date().toISOString(), args: process.argv.slice(2), machine: machine(), load: { before: loadavg() }, targets: [] }
-let finished = false
-async function shutdown(code) {
-  if (finished) return
-  finished = true
-  for (const t of targets) await cleanupTarget(t)
-  process.exit(code)
+let aborted = null, closing = null, written = false
+function writeResults(res) {
+  res.finished = new Date().toISOString()
+  res.load.after = loadavg()
+  res.targets = targets.map((t) => ({ label: t.label, repo: t.repo, env: t.env, git: t.git, mode: t.mode, server_cmd: serverCommand(t).join(' '), add_cmd: addCommand(t).join(' '),
+    info: t.info, setup_error: t.setupError, metrics: t.metrics }))
+  finalize(res)
+  fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(res, null, 1))
+  if (A.out) { fs.mkdirSync(path.dirname(path.resolve(A.out)), { recursive: true }); fs.copyFileSync(path.join(OUT, 'results.json'), path.resolve(A.out)) }
+  written = true
 }
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { console.error(`perf: ${sig}`); shutdown(130) })
-const watchdog = setTimeout(() => { console.error('perf: still running after 4 h; stopping'); shutdown(1) }, 4 * 3600 * 1000)
+// `why` is set when the run is cut short: what was measured so far is written first, before the cleanups close what the
+// loop is using, and the loops stop at their next check so nothing is recorded against a closed resource.
+function shutdown(code, why = null) {
+  closing ??= (async () => {
+    if (why) {
+      aborted = why
+      if (!written) {
+        res.error = `interrupted: ${why}`
+        try { writeResults(res) } catch (e) { console.error(`perf: could not write the results: ${e.message}`) }
+      }
+    }
+    for (const t of targets) await cleanupTarget(t)
+    process.exit(code)
+  })()
+  return closing
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { console.error(`perf: ${sig}`); shutdown(130, sig) })
+const watchdog = setTimeout(() => { console.error('perf: still running after 4 h; stopping'); shutdown(1, 'still running after 4 h') }, 4 * 3600 * 1000)
 watchdog.unref()
-process.on('unhandledRejection', (e) => { console.error('perf: unhandled', e); shutdown(1) })
+process.on('unhandledRejection', (e) => { console.error('perf: unhandled', e); shutdown(1, `unhandled rejection: ${clip(e?.message || e, 200)}`) })
 
 console.log(`E17 perf: ${targets.map((t) => `${t.label}=${t.repo}${Object.keys(t.env).length ? ` ${JSON.stringify(t.env)}` : ''}`).join(', ')}; ${A.runs} runs + ${A.warmup} warm-up; load ${loadavg().join(' ')}`)
 try {
   if (A.profile) {
     const prof = {}
-    for (const t of targets) prof[t.label] = await profileTarget(t)
+    for (const t of targets) { if (aborted) break; prof[t.label] = await profileTarget(t) }
     res.profiles = prof
   } else {
     for (const suite of SUITES.filter(wanted)) {
+      if (aborted) break
       const t0 = Date.now()
       for (const t of targets) {
         if (suite !== 'server' && suite !== 'cli' && suite !== 'calib') {
+          delete t.setupError
           try { await call(t, () => mainServer(t)) } catch (e) { console.error(`perf: ${t.label}: ${e.message}`); t.setupError = String(e.message) }
         }
       }
-      for (let i = -A.warmup; i < A.runs; i++) {
+      for (let i = -A.warmup; i < A.runs && !aborted; i++) {
         const order = (i + A.warmup) % 2 === 0 ? targets : targets.slice().reverse() // ABBA: drift cancels
         for (const t of order) {
+          if (aborted) break
           RUN = { i, warmup: i < 0, load: loadavg() }
           const names = Object.keys(METRICS).filter((n) => METRICS[n].suite === suite)
           const count = (n) => t.metrics[n]?.samples.length ?? 0
@@ -1046,10 +1147,12 @@ try {
             try { await call(t, () => suites[suite](t)) } catch (e) { console.error(`perf: ${t.label} ${suite} run ${i}: ${e.stack || e}`); fail(t, names.filter((n) => count(n) === before[n]), e) }
             const missing = names.filter((n) => count(n) === before[n])
             if (missing.length) fail(t, missing, 'not measured in this run')
+            if (FAULTS.has('kill-server-after-run-0') && suite === 'api' && i === 0) { t.shared.srv?.raw.proc?.kill('SIGKILL'); await sleep(300) }
           }
           stampLoadAfter(t, names)
         }
       }
+      if (aborted) break
       const got = targets.map((t) => Object.keys(METRICS).filter((n) => METRICS[n].suite === suite).map((n) => {
         const s = summarize(t.metrics[n]?.samples || [])
         return `${n} ${fmtV(s.median)}${s.failed ? ` (${s.failed} failed)` : ''}`
@@ -1061,15 +1164,8 @@ try {
   console.error(`perf: ${e.stack || e}`)
   res.error = String(e.message || e)
 }
-res.finished = new Date().toISOString()
-res.load.after = loadavg()
-for (const t of targets) {
-  res.targets.push({ label: t.label, repo: t.repo, env: t.env, git: t.git, mode: t.mode, server_cmd: serverCommand(t).join(' '), add_cmd: addCommand(t).join(' '),
-    info: t.info, setup_error: t.setupError, metrics: t.metrics })
-}
-finalize(res)
-fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(res, null, 1))
-if (A.out) { fs.mkdirSync(path.dirname(path.resolve(A.out)), { recursive: true }); fs.copyFileSync(path.join(OUT, 'results.json'), path.resolve(A.out)) }
+if (aborted) await closing // shutdown has written the results and ends the process
+writeResults(res)
 let code = res.error ? 1 : 0
 if (!A.profile) {
   const tab = table(res)
