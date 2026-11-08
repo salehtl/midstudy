@@ -7,7 +7,7 @@ import path from 'node:path'
 import { build } from 'esbuild'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
-const LOGIC = ['jobs']
+const LOGIC = ['jobs', 'camera', 'messages']
 const entry = LOGIC.map((m) => `export * as ${m} from './planner/logic/${m}.ts'`).join('\n')
 const bundled = await build({ stdin: { contents: entry, resolveDir: ROOT, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', write: false, logLevel: 'silent' })
 const L = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`)
@@ -35,4 +35,27 @@ test('jobOutcome: a job poll answers wait, done, failed or lost', () => {
     [200, '', 'wait'],
   ]
   for (const [h, s, want] of rows) assert.equal(L.jobs.jobOutcome(h, s), want, `jobOutcome(${h}, ${JSON.stringify(s)})`)
+})
+
+test('sourceAfterReset: the saved source when the reset lands on the saved camera, else what the calibration says', () => {
+  const a = { fov_y_deg: 50, height_m: 1.4, pitch_deg: -5, roll_deg: 0 }
+  const b = { ...a, height_m: 1.6 }
+  const near = { ...a, height_m: a.height_m + 1e-7 }
+  const rows = [
+    // [cam, hasCalibCamera, saved, savedSource, want]
+    [a, true, a, 'manual', 'manual'],
+    [near, true, a, 'manual', 'manual'],
+    [a, false, a, 'auto', 'auto'],
+    [a, true, b, 'manual', 'auto'],
+    [a, false, b, 'manual', 'default'],
+    [a, true, null, 'manual', 'auto'],
+    [a, false, null, 'manual', 'default'],
+  ]
+  for (const [c, h, s, src, want] of rows) assert.equal(L.camera.sourceAfterReset(c, h, s, src), want)
+})
+
+test('renderLostText says the render may still finish and leaves renderFailText alone', () => {
+  assert.match(L.messages.renderLostText(), /may still finish/)
+  assert.match(L.messages.renderLostText(), /Renders/)
+  assert.equal(L.messages.renderFailText(null), 'Render failed')
 })
