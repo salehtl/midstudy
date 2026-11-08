@@ -3,24 +3,31 @@ failures answered without stopping the worker, end of input exits 0. Runs with M
 are needed; the warm MoGe path is measured by calib/scripts/bench.py (docs/notes/calib.md)."""
 from __future__ import annotations
 
+import io
 import json
+import os
 import queue
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
 from typing import IO, Self, cast
 
 import numpy as np
+import pytest
 from cli_run import clean_env, run_cli
 from PIL import Image
 from synthetic import REPO, jget
 
-from midstudy_calib import validate
+from midstudy_calib import validate, worker
 from midstudy_calib.cli import ArgsError, FitArgs, LightArgs, ServeArgs, parse_request
-from midstudy_calib.worker import MAX_LINE
+from midstudy_calib.records import Result
+from midstudy_calib.worker import MAX_LINE, Interrupted, handle, serve
 
 MOCK = {"MIDSTUDY_CALIB_MOCK": str(REPO / "fixtures/calib")}
 GOLDEN = REPO / "fixtures/scenes"
@@ -211,3 +218,121 @@ def test_serve_flags_reach_the_requests(tmp_path: Path) -> None:
         assert w.close() == 0
     assert any("defaults --model vitb --device cpu" in line for line in w.err)
     assert jget(json.loads((scene / "calib.json").read_text()), "source") == "truth"
+
+
+DEFAULTS = ServeArgs("vitl", "cpu")
+FIT_LINE = b'{"id":"r1","cmd":"fit","args":[]}\n'
+
+
+def _interrupt(*_: object) -> list[str]:
+    raise KeyboardInterrupt
+
+
+def test_sigint_while_a_line_is_parsed_answers_its_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(validate, "problems", _interrupt)
+    with pytest.raises(Interrupted) as caught:
+        handle(FIT_LINE, DEFAULTS)
+    assert caught.value.rid == "r1"
+
+
+def test_sigint_before_the_id_is_known_is_answered_with_a_null_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(json, "loads", _interrupt)
+    with pytest.raises(Interrupted) as caught:
+        handle(FIT_LINE, DEFAULTS)
+    assert caught.value.rid is None
+
+
+class _SignalledOut(io.StringIO):
+    """An output that gets SIGINT in the middle of write, as a Ctrl-C between write and flush would."""
+
+    def __init__(self, send: Callable[[], None]) -> None:
+        super().__init__()
+        self.send = send
+        self.flushed = ""
+
+    def write(self, s: str) -> int:
+        self.send()
+        time.sleep(0.01)  # a signal that isn't held has been delivered by now
+        return super().write(s)
+
+    def flush(self) -> None:
+        self.flushed = self.getvalue()
+
+
+def _to_main() -> None:
+    os.kill(os.getpid(), signal.SIGINT)
+
+
+def _to_another_thread() -> Callable[[], None]:
+    """A signal that lands on another thread, as it can in a worker with torch's threads running. The thread exists
+    before the response starts, so a signal mask set then wouldn't cover it."""
+    go = threading.Event()
+
+    def wait_then_signal() -> None:
+        go.wait(TIMEOUT_S)
+        signal.pthread_kill(threading.get_ident(), signal.SIGINT)
+
+    thread = threading.Thread(target=wait_then_signal, daemon=True)
+    thread.start()
+
+    def send() -> None:
+        go.set()
+        thread.join(TIMEOUT_S)
+
+    return send
+
+
+@pytest.mark.parametrize("target", ["main", "another thread"])
+def test_a_signal_during_the_response_comes_after_the_whole_line(target: str) -> None:
+    before = signal.getsignal(signal.SIGINT)
+    out = _SignalledOut(_to_main if target == "main" else _to_another_thread())
+    with pytest.raises(KeyboardInterrupt):
+        worker._respond(out, "r1", "", {"ok": False, "error": "no"})  # pyright: ignore[reportPrivateUsage]
+    answer: object = json.loads(out.flushed)
+    assert answer == {"id": "r1", "ok": False, "error": "no"}
+    assert signal.getsignal(signal.SIGINT) is before, "the handler is restored"
+
+
+@pytest.fixture
+def sigterm_restored() -> Iterator[None]:
+    """serve() installs its SIGTERM handler for the process: here that process is pytest's."""
+    previous = signal.getsignal(signal.SIGTERM)
+    yield
+    signal.signal(signal.SIGTERM, previous)
+
+
+@pytest.mark.usefixtures("sigterm_restored")
+@pytest.mark.parametrize("failure", [BrokenPipeError(), KeyboardInterrupt(), OSError("closed")])
+def test_a_failing_interrupted_answer_still_exits_1(monkeypatch: pytest.MonkeyPatch, failure: BaseException) -> None:
+    class Out(io.StringIO):
+        def write(self, s: str) -> int:
+            raise failure
+
+    def dispatch_interrupted(_: object) -> Result:
+        raise KeyboardInterrupt
+
+    line = json.dumps({"id": "r1", "cmd": "fit", "args": ["/x"]}).encode() + b"\n"
+    monkeypatch.setattr(worker, "dispatch", dispatch_interrupted)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(line)))
+    def fdopen(*_: object, **__: object) -> Out:
+        return Out()
+
+    def dup(fd: int) -> int:
+        return fd
+
+    def dup2(*_: object) -> None:
+        return None
+
+    fds = SimpleNamespace(fdopen=fdopen, dup=dup, dup2=dup2, getpid=os.getpid)  # only worker's view of os
+    monkeypatch.setattr(worker, "os", fds)
+    assert serve(DEFAULTS) == 1
+
+
+def test_sigterm_while_idle_exits_1() -> None:
+    with Worker(MOCK) as w:
+        deadline = time.monotonic() + TIMEOUT_S
+        while not any("worker ready" in line for line in w.err):
+            assert w.proc.poll() is None and time.monotonic() < deadline, f"no 'worker ready': {w.err}"
+            time.sleep(0.02)
+        w.proc.send_signal(signal.SIGTERM)
+        assert w.proc.wait(timeout=TIMEOUT_S) == 1

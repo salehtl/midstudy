@@ -51,10 +51,16 @@ def worker(scenes: list[str], out: Path, extra: list[str], n: int) -> list[dict[
             proc.stdin.write(json.dumps({"id": f"b-{i}", "cmd": "align-room", "args": [*scenes, "--out", str(out / f"w{i}"), *extra]}) + "\n")
             proc.stdin.flush()
             line = proc.stdout.readline()
+            if not line.strip():
+                raise SystemExit(f"bench_rooms: the worker died (no answer to request b-{i})")
             rows.append(summary(cast(dict[str, object], json.loads(line)), time.monotonic() - t0))
     finally:
         proc.stdin.close()
-        proc.wait(timeout=60)
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
     return rows
 
 

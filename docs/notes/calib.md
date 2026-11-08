@@ -407,3 +407,17 @@ fitted camera in cyan, plus the true camera in magenta on golden scenes. `*-dept
   part of the same fix; this package doesn't touch `fit.py` or `records.py`.
 - Tests: `test_failed_move_forces_a_full_move_on_retry`, `test_pinned_revision_is_recorded`, and
   `test_one_model_at_a_time` / `test_pinned_revision_then_main` updated for the tuple.
+
+## State machines W2: calib-worker-protocol
+
+- `worker.handle`: everything after a line is read is under `except KeyboardInterrupt: raise Interrupted(rid)`, rid None
+  until parsed. `serve` maps SIGTERM to `default_int_handler`, so Python unwinds (write_atomic removes its temp file)
+  within the server's 5 s grace. The `"interrupted"` answer is guarded: a broken pipe or a second interrupt logs and exits 1.
+- `_signals_held()` around the whole of `_respond`. **Deviation from the plan's `pthread_sigmask`:** it swaps the
+  SIGINT and SIGTERM handlers for one that notes the signal, and raises KeyboardInterrupt after the block. A mask only
+  covers the calling thread. A signal to the process can land on another thread (torch's), whose C handler still trips
+  Python's handler on the main thread, in the middle of the response. Seen in the full pytest run, once torch's threads
+  existed; `test_a_signal_during_the_response_comes_after_the_whole_line[another thread]` pins it.
+- Left open: a signal in the few bytecodes between `handle` returning and `_respond` holding exits 1 without answering.
+  The server has settled the request before it signals, so nothing is waiting for that answer.
+- `bench.py`, `bench_rooms.py`: a worker that doesn't exit within 60 s is killed; bench_rooms reports a dead worker in a sentence.
