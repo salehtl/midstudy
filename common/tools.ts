@@ -60,6 +60,9 @@ const live = new Map<ChildProcess, Promise<void>>()
 /** Set by killAllTools: no tool is spawned after it. */
 let stopping = false
 let exitHooked = false
+/** The tools already sent SIGTERM. An abort and killAllTools can both end one, and a second SIGTERM would cut short the
+ *  unwind the first started (a paid midstudy-add recording its cost row leaves at once on a second signal). */
+const termed = new WeakSet<ChildProcess>()
 
 /** `sig` to the tool's whole process group (it was spawned detached), else to the tool alone. */
 function signalGroup(child: ChildProcess, sig: NodeJS.Signals): void {
@@ -78,7 +81,10 @@ function signalGroup(child: ChildProcess, sig: NodeJS.Signals): void {
 
 /** SIGTERM to the group, SIGKILL after `graceMs` unless it has closed; resolves on its 'close', or at `capMs`. */
 function killGroup(child: ChildProcess, closed: Promise<void>, graceMs: number, capMs: number): Promise<void> {
-  signalGroup(child, 'SIGTERM')
+  if (!termed.has(child)) {
+    termed.add(child)
+    signalGroup(child, 'SIGTERM')
+  }
   return new Promise((resolve) => {
     let ended = false
     const end = (): void => {

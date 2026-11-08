@@ -1,6 +1,6 @@
 // The scenes, rooms and renders services one server shares between its route modules (routes/scenes.ts, rooms.ts,
 // layouts.ts, render.ts): main.ts calls each module with the same ServerDeps, so the first call makes them and the others reuse
-// them (v1 had one SceneService per server). The calibration worker is stopped on shutdown.
+// them (v1 had one SceneService per server). The calibration worker and any keep-room align are stopped on shutdown.
 import path from 'node:path'
 import type { ServerDeps } from '../deps.ts'
 import { RoomService } from '../rooms/service.ts'
@@ -31,6 +31,7 @@ export function scenesFor(deps: ServerDeps): Scenes {
   })
   const rooms = new RoomService({ roomsDir: c.roomsDir, layoutsDir: c.layoutsDir, scenes })
   deps.onShutdown(() => scenes.shutdown())
+  deps.onShutdown(() => renders.shutdown())
   const s: Scenes = { scenes, rooms, renders }
   made.set(deps, s)
   return s

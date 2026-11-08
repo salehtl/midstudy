@@ -143,4 +143,33 @@ void describe('runTool: kill sequence and settle', () => {
     for (const pid of pids) assert.ok(await gone(pid), 'pid ' + String(pid) + ' is gone')
     assert.equal(fs.existsSync(after), false, 'the run after killAllTools spawned nothing')
   })
+
+  void test('a tool gets one SIGTERM when an abort and killAllTools both end it: a second would cut midstudy-add\'s paid unwind', async () => {
+    const started = path.join(dir, 'term-started')
+    const terms = path.join(dir, 'term-count')
+    const tool = script('term-counter.mjs', [
+      'import fs from "node:fs"',
+      'process.on("SIGTERM", () => { fs.appendFileSync(' + JSON.stringify(terms) + ', "x"); setTimeout(() => process.exit(0), 300) })',
+      'fs.writeFileSync(' + JSON.stringify(started) + ', "")',
+      'setTimeout(() => {}, 60000)',
+    ].join('\n'))
+    const driver = script('term-driver.mjs', [
+      'import fs from "node:fs"',
+      'const { runTool, killAllTools } = await import(' + JSON.stringify(pathToFileURL(path.join(REPO, 'common/tools.ts')).href) + ')',
+      'const abort = new AbortController()',
+      'const run = runTool([process.execPath, ' + JSON.stringify(tool) + '], { cwd: ' + JSON.stringify(dir) + ', timeoutMs: 60000, signal: abort.signal })',
+      'for (let i = 0; i < 500 && !fs.existsSync(' + JSON.stringify(started) + '); i++) await new Promise((r) => setTimeout(r, 20))',
+      'const gone = killAllTools(2000)',
+      'abort.abort()',
+      'await Promise.all([gone, run])',
+    ].join('\n'))
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn(process.execPath, [driver], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] })
+      p.on('error', reject)
+      p.on('close', () => {
+        resolve()
+      })
+    })
+    assert.equal(fs.readFileSync(terms, 'utf8'), 'x')
+  })
 })

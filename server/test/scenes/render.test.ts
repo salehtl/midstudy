@@ -24,7 +24,7 @@ interface Call {
 
 let count = 0
 
-function rig(options: { readonly cap?: number; readonly key?: string | null; readonly answer?: (endpoint: string) => unknown; readonly download?: (url: string) => Promise<Uint8Array> } = {}): {
+function rig(options: { readonly cap?: number; readonly key?: string | null; readonly answer?: (endpoint: string) => unknown; readonly download?: (url: string) => Promise<Uint8Array>; readonly calib?: readonly string[] } = {}): {
   readonly renders: RenderService; readonly dir: string; readonly costs: string; readonly calls: Call[]; readonly spend: SpendCap
 } {
   count += 1
@@ -48,7 +48,7 @@ function rig(options: { readonly cap?: number; readonly key?: string | null; rea
   }
   const spend = new SpendCap(costs, options.cap ?? 2)
   const renders = new RenderService({
-    rendersDir: path.join(dir, 'renders'), costsFile: costs, repo: REPO, calib: ['false'], spend,
+    rendersDir: path.join(dir, 'renders'), costsFile: costs, repo: REPO, calib: options.calib ?? ['false'], spend,
     scenePhoto: () => path.join(REPO, 'fixtures/scenes/living-wide/photo.jpg'), fal,
   })
   return { renders, dir, costs, calls, spend }
@@ -181,4 +181,38 @@ void test('upscale: an unknown render is a 404; the cap refuses before any call;
   assert.deepEqual(await failing.renders.upscale(made3.meta.name, 2), { kind: 'error', status: 502, error: 'fal clarityai/crystal-upscaler returned HTTP 500: boom' })
   const stored: unknown = JSON.parse(fs.readFileSync(path.join(failing.dir, 'renders', made3.meta.name + '.json'), 'utf8'))
   assert.ok(stored !== null && typeof stored === 'object' && !('upscaled' in stored))
+})
+
+const MASK = new Uint8Array([137, 80, 78, 71])
+
+void test('keep-room whose align cannot be started: the render completes not-applied, with every file', async () => {
+  const tool = path.join(SCRATCH, 'not-executable-' + String(process.pid))
+  fs.mkdirSync(SCRATCH, { recursive: true })
+  fs.writeFileSync(tool, '#!/bin/sh\n', { mode: 0o644 })
+  const r = rig({ calib: [tool] })
+  const out = await r.renders.render(job('nano-banana', { keepRoom: true, mask: MASK }))
+  assert.equal(out.kind, 'done')
+  assert.equal(out.meta.aligned?.applied, false)
+  assert.match(out.meta.aligned.reason, /OSError/)
+  const dir = path.join(r.dir, 'renders')
+  for (const suffix of ['.jpg', '-raw.jpg', '-input.jpg', '.json']) assert.ok(fs.existsSync(path.join(dir, out.meta.name + suffix)), suffix)
+  assert.deepEqual(fs.readFileSync(path.join(dir, out.meta.name + '.jpg')), PORTRAIT, 'the raw result')
+  assert.equal(rows(r.costs).length, 1)
+})
+
+void test('shutdown ends a keep-room align; the render completes not-applied with the raw result', { timeout: 30000 }, async () => {
+  const pidFile = path.join(SCRATCH, 'align-pid-' + String(process.pid))
+  fs.mkdirSync(SCRATCH, { recursive: true })
+  fs.rmSync(pidFile, { force: true })
+  const r = rig({ calib: [process.execPath, '-e', 'require("fs").writeFileSync(' + JSON.stringify(pidFile) + ', String(process.pid)); setTimeout(() => {}, 60000)'] })
+  const pending = r.renders.render(job('nano-banana', { keepRoom: true, mask: MASK }))
+  for (let i = 0; i < 600 && !fs.existsSync(pidFile); i += 1) await new Promise((resolve) => setTimeout(resolve, 25))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+  await r.renders.shutdown()
+  assert.throws(() => process.kill(pid, 0), 'the align is gone once shutdown settles')
+  const out = await pending
+  assert.equal(out.kind, 'done')
+  assert.deepEqual(out.meta.aligned, { applied: false, inliers: null, residual_px: null, reason: 'the server stopped' })
+  assert.deepEqual(fs.readFileSync(path.join(r.dir, 'renders', out.meta.name + '.jpg')), PORTRAIT)
 })

@@ -263,6 +263,7 @@ async function restoreItem(ctx: RequestContext, library: LibraryService, id: str
 
 export const routes: RouteModule = (deps) => {
   const library = new LibraryService(deps)
+  deps.onShutdown(() => library.shutdown())
   return [
     {
       method: 'GET',
