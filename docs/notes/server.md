@@ -129,3 +129,8 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - `SizeWorker` (`product/sizes.ts`) holds `#running` and `#queue` and posts one job at a time, so a queued job that times out is dropped and the worker running another job is left alone. An error or exit fails only the running job; queued jobs go to a new worker. Each job keeps the deadline set at enqueue.
 - Every listener returns unless its worker is still the current one. `spawn` is injectable; proof in `server/test/product-size-worker.test.ts` (fake worker, mocked timers, no wasm).
 - Additions to the design: `#replace` leaves a no-op `error` listener after `removeAllListeners()`, because an `error` still in flight from the stopped thread would otherwise throw as an unhandled event and take the server down. `#pump` catches a failed spawn or post and rejects that job, since it can run from a timer or listener where a throw would be uncaught.
+## State machines W5: server-infra-layouts (layout PUT re-checks its owner)
+
+- `PUT /api/layouts/{layout}` tests the scene or room again after the body arrived, right before the synchronous write, and answers the same 404 as the first check. A scene or room deleted during the upload no longer gets its layouts folder recreated, which blocked its restore. Proof: `server/test/layouts.test.ts`.
+- An invalid body on an owner that has gone still answers 400: the re-test comes after the layout check, as designed.
+- Deferred: versioning or ETag on layout PUT stays last-writer-wins (needs a contract, planner and conflict-UI change). Wont-fix: trash copies are never purged.
