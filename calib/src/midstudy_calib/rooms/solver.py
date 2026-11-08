@@ -10,8 +10,9 @@ How a learned solver's answer becomes a §4.9 pose (docs/notes/rooms-calib.md, P
   3. A rotation takes that up to +Y; each view's yaw is the Y-turn left in A·Rs·Rcᵀ; the first member's is 0.
   4. Scale from the floor: the photos' floor pixels (depth.png 0, clearly below the horizon) give the solver's floor
      height (median); metres per solver unit make the first member's camera height its calib height_m; each member's
-     scale makes its effective camera height (height_m × scale) the solver's. With no floor seen: depth.png against
-     the solver's depth (`scale_source: depth`). Either way each candidate also carries depth.png's own scale against
+     scale makes its effective camera height (height_m × scale) the solver's. With no usable floor: depth.png against
+     the solver's depth (`scale_source: depth`), and a member without depth overlap has no scale, so stays unplaced.
+     With neither on the first member, only it is placed (`scale_source: none`). Either way each candidate also carries depth.png's own scale against
      the solver's depth (`Candidate.depth_scale`, diagnostics `scale_by_depth`): scoring carries depth.png with it,
      since MoGe-2's depth and its height_m can disagree by several per cent (score.py).
   5. Positions: σ·A·(c_i − c_0); x and z are the pose (the floor point under the camera).
@@ -33,6 +34,7 @@ from .score import Candidate, Diag
 
 type SolverName = Literal["mast3r", "manhattan"]
 type SolverChoice = Literal["auto", "mast3r", "manhattan"]
+type ScaleMode = Literal["floor", "depth", "none"]
 SOLVER_CHOICES: tuple[SolverChoice, ...] = ("auto", "mast3r", "manhattan")
 LEARNED: SolverName = "mast3r"  # Gate A (docs/ROOMS.md §2)
 
@@ -106,6 +108,24 @@ def robust_up(ups: list[F64]) -> tuple[F64, list[bool]]:
     return mean(keep), keep
 
 
+def _usable(x: float) -> bool:
+    return math.isfinite(x) and x > 0
+
+
+def _scale_mode(cam_heights: list[float], cy: list[float], floor_b: float | None, ratios: list[float]) -> tuple[ScaleMode, float, list[float]]:
+    """Where the room's scale comes from (step 4 of the module doc): (mode, metres per solver unit, each member's
+    scale, NaN for one that has none). Each input lists the members, the first being the frame: calib camera heights,
+    the solver's camera heights, the solver's floor height (None: no floor seen), depth.png against the solver's depth."""
+    if floor_b is not None and cy[0] - floor_b > 1e-6:
+        sigma = cam_heights[0] / (cy[0] - floor_b)
+        if _usable(sigma):
+            return "floor", sigma, [sigma * (y - floor_b) / h if h > 0 else math.nan for y, h in zip(cy, cam_heights, strict=True)]
+    sigma = ratios[0]
+    if _usable(sigma):
+        return "depth", sigma, [sigma / r if _usable(r) else math.nan for r in ratios]
+    return "none", math.nan, [math.nan] * len(ratios)
+
+
 def from_views(photos: list[RoomPhoto], views: list[View]) -> list[Candidate | None]:
     """Steps 2–5 of the module doc."""
     rs = [v.c2w[:3, :3] for v in views]
@@ -129,19 +149,11 @@ def from_views(photos: list[RoomPhoto], views: list[View]) -> list[Candidate | N
             floor_y.append((v.points()[fl] @ a.T)[:, 1])
     c0 = views[0].c2w[:3, 3]
     cy = [float((a @ v.c2w[:3, 3])[1]) for v in views]
-    mode = "floor"
-    if floor_y:
-        b = float(np.median(np.concatenate(floor_y)))
-        hs = [y - b for y in cy]
-        sigma = photos[0].cam().height / hs[0] if hs[0] > 1e-6 else math.nan
-        scales = [sigma * hs[i] / s.cam().height for i, s in enumerate(photos)]
-    else:
-        mode = "depth"
-        sigma = ratios[0]
-        scales = [sigma / r if math.isfinite(r) and r > 0 else 1.0 for r in ratios]
-    if not math.isfinite(sigma) or sigma <= 0:
+    b = float(np.median(np.concatenate(floor_y))) if floor_y else None
+    mode, sigma, scales = _scale_mode([s.cam().height for s in photos], cy, b, ratios)
+    if mode == "none":
         log("align-room: no floor or depth overlap on the first photo: its scale is unknown, nothing placed")
-        return [Candidate(Placement(0.0, 0.0, 0.0, 1.0)), *([None] * (len(photos) - 1))]
+        return [Candidate(Placement(0.0, 0.0, 0.0, 1.0), diag={"scale_source": "none"}), *([None] * (len(photos) - 1))]
     out: list[Candidate | None] = []
     for i, (s, v) in enumerate(zip(photos, views, strict=True)):
         p = sigma * (a @ (v.c2w[:3, 3] - c0))
