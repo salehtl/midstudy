@@ -120,6 +120,7 @@ export function sunDial({ onChange, label = 'Light direction' }: { readonly onCh
     flush()
   }
   function start(e: PointerEvent): void {
+    if (dragId !== null) return // the first pointer keeps the drag
     dragId = e.pointerId
     try { dial.setPointerCapture(e.pointerId) } catch { /* synthetic pointer */ }
     dial.classList.add('is-dragging')
@@ -128,6 +129,7 @@ export function sunDial({ onChange, label = 'Light direction' }: { readonly onCh
   }
   dial.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (e.pointerType === 'touch' && dragId !== null) return
     if (e.pointerType === 'touch' && !(e.target instanceof Node && grip.contains(e.target))) { touch = { id: e.pointerId, x: e.clientX, y: e.clientY }; return }
     e.preventDefault()
     start(e)
