@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal, SupportsFloat
 
 from .contract_types import CalibExif, IngestResult
 from .records import ExifFacts
-from .util import Fail, log, source_file, write_atomic
+from .util import DERIVED_FILES, SCENE_FILES, Fail, invalidate, log, source_file, sweep_tmp, write_atomic
 
 if TYPE_CHECKING:
     from PIL import Image as PILImage
@@ -88,6 +88,8 @@ def jpeg_walk(data: bytes, app0: list[bytes] | None = None) -> tuple[list[int], 
             return None
         m = data[i]
         i += 1
+        if m == 0xD8:  # a second SOI in the marker stream is broken structure, not a segment whose length to trust
+            return None
         if m == 0xD9:
             return markers, i
         if 0xD0 <= m <= 0xD7 or m == 0x01:
@@ -316,7 +318,23 @@ def _passes_through(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+def _replace_files(out: Path, src_name: str, data: bytes, photo: bytes) -> None:
+    """Write source.<ext> and photo.jpg in the contract §4.3 order: anything derived from a different photo goes first,
+    so every crash window reads as "not calibrated" and never pairs a photo with another upload's source or fit. The
+    same photo.jpg again (the server's own re-`run`, a repeat ingest) leaves it and the fit alone."""
+    others = [p.name for p in out.glob("source.*") if p.name != src_name and p.is_file()]
+    if not ((out / "photo.jpg").is_file() and (out / "photo.jpg").read_bytes() == photo):
+        invalidate(out, (*DERIVED_FILES, "photo.jpg", *others))
+        write_atomic(out / src_name, data)
+        write_atomic(out / "photo.jpg", photo)
+        return
+    invalidate(out, others)
+    if not ((out / src_name).is_file() and (out / src_name).read_bytes() == data):
+        write_atomic(out / src_name, data)
+
+
 def ingest(upload: Path, out: Path) -> IngestResult:
+    sweep_tmp(out, SCENE_FILES)
     if not upload.is_file():
         raise Fail(f"{upload} doesn't exist")
     size = upload.stat().st_size
@@ -339,10 +357,6 @@ def ingest(upload: Path, out: Path) -> IngestResult:
 
     out.mkdir(parents=True, exist_ok=True)
     src_name = SOURCE_NAMES[kind]
-    write_atomic(out / src_name, data)
-    for old in out.glob("source.*"):
-        if old.name != src_name and old.is_file():
-            old.unlink()
-    write_atomic(out / "photo.jpg", photo)
+    _replace_files(out, src_name, data, photo)
     log(f"ingest: {upload.name} ({kind}, {size / 2**20:.1f} MB) -> photo.jpg {w} x {h}" + (f"; {'; '.join(notes)}" if notes else ""))
     return IngestResult(ok=True, photo="photo.jpg", source=src_name, image={"w": w, "h": h})

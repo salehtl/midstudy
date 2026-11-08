@@ -12,7 +12,7 @@ import pytest
 from PIL import Image, ImageCms
 
 from midstudy_calib.contract_types import CalibExif
-from midstudy_calib.ingest import exif_block, fov_from_35mm, ingest, is_clean_jpeg, jpeg_markers, sniff
+from midstudy_calib.ingest import exif_block, fov_from_35mm, ingest, is_clean_jpeg, jpeg_markers, jpeg_walk, sniff
 from midstudy_calib.util import Fail
 
 REPO = Path(__file__).resolve().parents[2]
@@ -134,6 +134,20 @@ def test_no_pass_through_with_hidden_metadata(tmp_path: Path, case: str) -> None
     photo = (tmp_path / "s/photo.jpg").read_bytes()
     assert photo != data and is_clean_jpeg(photo)
     assert b"TestCam" not in photo and b"Exif" not in photo
+
+
+def test_a_stray_soi_cant_hide_a_segment(tmp_path: Path) -> None:
+    """A second SOI read as a length segment would jump over an APP1 and let the file through byte for byte."""
+    payload = b"Exif\x00\x00secret"
+    app1 = b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
+    crafted = b"\xff\xd8\xff\xd8" + struct.pack(">H", len(app1) + 2) + app1 + plain_jpeg()[2:]
+    assert jpeg_walk(crafted) is None and not is_clean_jpeg(crafted)
+    up = tmp_path / "x.jpg"
+    up.write_bytes(crafted)
+    out = tmp_path / "s"
+    with pytest.raises(Fail, match="damaged or truncated"):  # never byte for byte: the walker refuses, then the decoder
+        ingest(up, out)
+    assert not (out / "photo.jpg").exists()
 
 
 def test_exif_rotated_portrait(tmp_path: Path) -> None:
