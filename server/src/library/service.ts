@@ -233,12 +233,17 @@ export class LibraryService {
   }
 
   /** Queues a midstudy-add run (v1 `new_job`): the job as queued, or the 402 body when the cap refuses `reserve`
-   *  (nothing queued then). The job owns `cleanup` and removes it when it ends. */
-  newJob(kind: 'add' | 'rescale', itemId: string, engine: Engine, estimate: number, argv: readonly string[], cleanup: string | null, reserve: number, message: string): { readonly job: LibraryJob } | { readonly refused: SpendRefusal } {
+   *  (nothing queued then). The job owns `cleanup` and removes it when it ends. With `adopt` the job takes over that
+   *  key's reservation instead of reserving, and so is never refused. */
+  newJob(kind: 'add' | 'rescale', itemId: string, engine: Engine, estimate: number, argv: readonly string[], cleanup: string | null, reserve: number, message: string, adopt: string | null = null): { readonly job: LibraryJob } | { readonly refused: SpendRefusal } {
     const now = Date.now()
     const id = newJobId('l', now)
-    const refused = this.#deps.spend.reserve(id, reserve)
-    if (refused !== null) return { refused }
+    if (adopt !== null) {
+      this.#deps.spend.transfer(adopt, id)
+    } else {
+      const refused = this.#deps.spend.reserve(id, reserve)
+      if (refused !== null) return { refused }
+    }
     const job = this.#jobs.add({
       id, kind, item_id: itemId, status: 'queued', engine, cost_usd_estimate: estimate, cost_usd: null, mock: falMock(), created: isoUtc(now),
       started: null, finished: null, message, item: null,
@@ -275,7 +280,7 @@ export class LibraryService {
   async #run(id: string): Promise<void> {
     const job = this.#jobs.get(id)
     const run = this.#runs.get(id)
-    if (job === null || run === undefined) return
+    if (job === null || run === undefined || job.status !== 'queued') return
     if (this.#closing) {
       this.#fail(id, SERVER_STOPPED)
       return
