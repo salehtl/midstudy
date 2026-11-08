@@ -142,7 +142,11 @@ def worker(cli: list[str], photos: list[tuple[str, Path]], out: Path, repeat: in
                 print(f"  worker {name}: {wall:.2f} s", file=sys.stderr, flush=True)
         finally:
             stdin.close()
-            code = proc.wait(timeout=60)
+            try:
+                code = proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                code = proc.wait()
             if code != 0:
                 print(f"bench: the worker exited with {code}", file=sys.stderr)
     return rows
