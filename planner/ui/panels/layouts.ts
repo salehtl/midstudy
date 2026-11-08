@@ -35,29 +35,60 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
   const show = (name: string): string => engine.layoutDisplayName(name)
   const formCheck = (text: string): ReturnType<typeof checkName> => checkName(text, names(), show)
 
-  async function save(name: string, { quietly = false, title = null }: { readonly quietly?: boolean; readonly title?: string | null } = {}): Promise<boolean> {
-    if (busy) return false
+  // The load the Save as new form owes: load() asked with no current layout. The form's Cancel or a scene change forgets it.
+  let pendingLoad: string | null = null
+  let inFlight: Promise<boolean> | null = null
+
+  interface SaveOptions {
+    readonly quietly?: boolean
+    readonly title?: string | null
+    readonly fromForm?: boolean // the Save as new form's own save (or its Retry): it carries out pendingLoad
+  }
+
+  async function loadNow(name: string): Promise<void> {
+    const ep = shell.epoch.now()
+    try { await engine.loadLayoutInternal(name) } catch { return } // reported
+    if (ep === shell.epoch.now()) shell.toast(`Loaded ${show(name)}`, { kind: 'ok', id: 'layout-loaded' })
+  }
+
+  async function runSave(name: string, { quietly = false, title = null, fromForm = false }: SaveOptions): Promise<boolean> {
+    const ep = shell.epoch.now() // an answer after the scene changed says nothing in the new one
     busy = true
     failure = null
     render()
+    let ok = false
+    let owed: string | null = null
     try {
       await engine.saveLayoutInternal(name, { title })
-      asking = false
-      draft = ''
-      if (!quietly) shell.toast(`Layout saved as ${show(name)}`, { kind: 'ok', id: 'layout-saved' })
-      return true
+      if (ep === shell.epoch.now()) {
+        ok = true
+        asking = false
+        draft = ''
+        owed = fromForm ? pendingLoad : null
+        pendingLoad = null // the form has closed
+        if (!quietly) shell.toast(`Layout saved as ${show(name)}`, { kind: 'ok', id: 'layout-saved' })
+      }
     } catch (e) {
-      failure = { message: messageOf(e), offline: isOffline(e), retry: () => { quiet(save(name, { title })) } }
-      return false
+      if (ep === shell.epoch.now()) failure = { message: messageOf(e), offline: isOffline(e), retry: () => { quiet(save(name, { title, fromForm })) } }
     } finally {
       busy = false
       render()
     }
+    if (owed !== null) await loadNow(owed)
+    return ok
+  }
+
+  function save(name: string, opts: SaveOptions = {}): Promise<boolean> {
+    if (busy) return Promise.resolve(false)
+    const run = runSave(name, opts).finally(() => { if (inFlight === run) inFlight = null })
+    inFlight = run
+    return run
   }
 
   async function load(name: string): Promise<void> {
-    const cur = current()
+    const ep = shell.epoch.now()
     if (engine.isLayoutDirty() && engine.getItems().length) {
+      const cur = current()
       const saveFirst: ConfirmAction<'save' | 'discard' | null> = { label: cur ? 'Save, then load' : 'Save as new first', value: 'save', kind: 'primary', default: true }
       const discard: ConfirmAction<'save' | 'discard' | null> = { label: "Load, don't save", value: 'discard', kind: 'secondary' }
       const cancel: ConfirmAction<'save' | 'discard' | null> = { label: 'Cancel', value: null, kind: 'secondary', cancel: true }
@@ -68,12 +99,17 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
       })
       if (v === null) return
       if (v === 'save') {
-        if (!cur) { openForm(); return }
-        if (!(await save(cur, { quietly: true }))) return
+        while (inFlight) await inFlight // a save already running: wait for it rather than drop this load
+        if (ep !== shell.epoch.now()) return
+        if (engine.isLayoutDirty()) {
+          const now = current() // that save may have named the layout
+          if (!now) { pendingLoad = name; openForm(); return }
+          if (!(await save(now, { quietly: true }))) return
+        }
       }
     }
-    try { await engine.loadLayoutInternal(name) } catch { return } // reported
-    shell.toast(`Loaded ${show(name)}`, { kind: 'ok', id: 'layout-loaded' })
+    pendingLoad = null
+    await loadNow(name)
   }
 
   async function del(name: string): Promise<void> {
@@ -130,7 +166,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
         e.preventDefault()
         const c = formCheck(draft)
         if (c.error || !draft.trim()) return
-        quiet(save(c.slug, { title: draft.trim() }))
+        quiet(save(c.slug, { title: draft.trim(), fromForm: true }))
       }
       go.type = 'submit'
       const input: HTMLInputElement = h('input.input', { type: 'text', value: draft, placeholder: 'Evening, lamp by the window', spellcheck: false, autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'New layout name',
@@ -141,10 +177,10 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
           msg.classList.toggle('is-error', !!c.error)
           go.disabled = busy || !!c.error || !draft.trim()
         },
-        onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); asking = false; render() } } })
+        onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); asking = false; pendingLoad = null; render() } } })
       return [...head, h('form.ly-form', { onsubmit: submit },
         h('label.field', h('span.field-label', 'New layout name'), input), msg,
-        h('div.ly-form-actions', button({ label: 'Cancel', kind: 'quiet', onClick: () => { asking = false; render() } }), go))]
+        h('div.ly-form-actions', button({ label: 'Cancel', kind: 'quiet', onClick: () => { asking = false; pendingLoad = null; render() } }), go))]
     }
     const btns = cur
       ? [button({ label: busy ? 'Saving…' : 'Save layout', kind: 'primary', disabled: busy || (!n && !dirty), onClick: () => { quiet(save(cur)) } }),
@@ -197,7 +233,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
   engine.events.addEventListener('layouts', render)
   engine.events.addEventListener('dirty', render)
   engine.events.addEventListener('items', (e) => { if (e.detail.change !== 'move') render() })
-  engine.events.addEventListener('scene', (e) => { if (['opened', 'closed', 'title'].includes(e.detail.phase)) { failure = null; asking = false; render() } })
+  engine.events.addEventListener('scene', (e) => { if (['opened', 'closed', 'title'].includes(e.detail.phase)) { failure = null; asking = false; pendingLoad = null; render() } })
   scenes.events.addEventListener('scenes', render)
   shell.events.addEventListener('mode', render)
   render()

@@ -58,7 +58,7 @@ export function mount(ctx: UiContext): void {
   const { engine, scenes, shell, kit } = ctx
   const { h, button, toggle, slider } = kit
   let saving = false
-  let calibrating = false
+  let calibrating: string | null = null // the scene whose Calibrate again is running: only that scene shows it
   const panel = shell.registerPanel({ id: 'scene', label: 'Scene', icon: 'room', phoneDetent: 'half', mount: () => { /* filled below */ } })
   panel.body.classList.add('sp')
 
@@ -107,12 +107,13 @@ export function mount(ctx: UiContext): void {
     try { await engine.saveScene(); shell.toast('Scene saved', { kind: 'ok', id: 'scene-saved', ms: 2500 }) } catch { /* reported */ } finally { saving = false; render() }
   }
   async function recalibrate(): Promise<void> {
-    calibrating = true
+    const name = engine.getSceneName()
+    calibrating = name
     render()
     try {
       const d = await engine.recalibrate()
-      if (d?.calib_status === 'done') shell.toast(recalibratedText(engine.getCameraSource() === 'manual'), { kind: 'ok', id: 'recal' })
-    } catch { /* reported */ } finally { calibrating = false; render() }
+      if (d?.calib_status === 'done' && engine.getSceneName() === name) shell.toast(recalibratedText(engine.getCameraSource() === 'manual'), { kind: 'ok', id: 'recal' })
+    } catch { /* reported */ } finally { if (calibrating === name) calibrating = null; render() }
   }
 
   function camView(): Node[] {
@@ -123,6 +124,7 @@ export function mount(ctx: UiContext): void {
     const calib = s.calib
     const warn = engine.getFloorNote()
     const cell = (k: string, v: string): HTMLDivElement => h('div.sp-cell', h('span.sp-k', k), h('span.sp-v.tnum', v))
+    const calibratingHere = calibrating !== null && calibrating === engine.getSceneName()
     const nodes: Node[] = [
       h('div.sp-cam-head', h('span.caps', 'Camera'), h(`span.sp-src.is-${source}`, cameraBadge(source))),
       h('p.sp-from', cameraFrom(source, calib?.source ?? null, calib?.device ?? null)),
@@ -132,7 +134,7 @@ export function mount(ctx: UiContext): void {
       h('div.sp-grid', cell('Height', `${String(Math.round(c.height_m * 100))} cm`), cell('Field of view', `${signed1(c.fov_y_deg)}°`), cell('Tilt', `${signed1(c.pitch_deg)}°`), cell('Roll', `${signed1(c.roll_deg)}°`)),
       h('div.sp-actions',
         withIcon(button({ label: engine.getAdjustFloor() ? 'Adjusting…' : 'Adjust floor…', kind: 'primary', disabled: engine.getAdjustFloor(), onClick: () => { ctx.workspace?.setAdjust(true) } }), 'pick-floor'),
-        withIcon(button({ label: calibrating ? 'Calibrating…' : 'Calibrate again', kind: 'secondary', disabled: calibrating, onClick: () => { quiet(recalibrate()) } }), 'retry')),
+        withIcon(button({ label: calibratingHere ? 'Calibrating…' : 'Calibrate again', kind: 'secondary', disabled: calibratingHere, onClick: () => { quiet(recalibrate()) } }), 'retry')),
     )
     return nodes
   }

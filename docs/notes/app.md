@@ -489,3 +489,21 @@ error, so a failure after closing the sheet was never hidden; the planned toast 
 toasts only an error nothing reported yet. The 'spend' listener count wraps `lib.events` (a Bus) directly: it is not an
 EventTarget, so the planned wrap of EventTarget.prototype would see nothing. A paste during a read lets the browser's paste
 happen (no preventDefault), so the page does stay in the box as the design says.
+## State machines W4: planner-ui-panels (2026-11-08)
+
+- **Layouts** (`panels/layouts.ts`). A save captures `shell.epoch.now()`; settling after it moved sets no toast and no
+  failure and returns false. `inFlight`: a "Save, then load" waits for a running save, re-reads the current layout and
+  skips its own PUT if that save cleaned it. `pendingLoad`: "Save as new first" with no current layout now loads after the
+  form saves, Retry included. **Deliberate change from v1**, which dropped this load. Only the form's own save carries it
+  out (a "Save current over it" while the form is open forgets it); Cancel, Esc and a scene change forget it. Failure and
+  asking both true stays: Cancel on a failed Save as new returns to the form with its draft.
+- **Scene panel** (`panels/scene.ts`). `calibrating` holds the scene name; only that scene shows "Calibrating…", and the
+  done toast needs the same scene open.
+- **Sun dial** (`sun-dial.ts`). The first pointer keeps the drag; a touch during a drag is ignored. The pending/`set()`
+  half is wont-fix (one frame, the next 'look' corrects it).
+- **Tests.** `planner/ui/test/sections/panels.mjs`.
+
+Deviations: the dial's guard has a check after all, from synthetic PointerEvents (the brief expected none). W2's engine
+already ends a recalibrate on a scene change at its next poll, so the panel's stale flag only shows while the POST is
+out; the section holds that POST to see it, and the stale-toast guard could not be made red. Found, not changed: while the
+form's input keeps focus (Enter to submit), `render()` skips the card, so a failed Save as new shows no failure row.
