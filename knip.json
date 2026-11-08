@@ -17,6 +17,7 @@
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",
     "scripts/*.mjs",
+    "scripts/test/*.test.mjs",
     "evals/*.mjs",
     "evals/lib/*.mjs",
     "fixtures/*.mjs"
