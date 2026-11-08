@@ -733,12 +733,21 @@ async function fetchBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await res.arrayBuffer())
 }
 
+let libraryGen = 0 // the latest read: an older answer landing after it is dropped
 function loadLibrary(): Promise<void> {
-  libraryLoading = readLibrary()
+  libraryLoading = readLibrary(++libraryGen)
   return libraryLoading
 }
-async function readLibrary(): Promise<void> {
+/** Until no library read is in flight, including one that started while waiting. */
+async function libraryReady(): Promise<void> {
+  for (let p = libraryLoading; ; p = libraryLoading) {
+    await p.catch(() => undefined)
+    if (p === libraryLoading) return
+  }
+}
+async function readLibrary(gen: number): Promise<void> {
   let list: LibraryEntry[] = []
+  let ok = true
   try {
     const res = await fetch(LIBRARY_URL)
     if (res.status !== 404) {
@@ -749,9 +758,11 @@ async function readLibrary(): Promise<void> {
       list = libraryEntries(raw)
     }
   } catch (e) {
+    ok = false
     reportError(`Could not read library ${LIBRARY_URL}`, e)
   }
-  library = list
+  if (gen !== libraryGen) return
+  if (ok) library = list // a failed re-read keeps the list (v1 emptied it, and every piece of the next layout went missing)
   syncPlaced()
   emit('library', { items: library.slice() })
   quiet(makeMissingThumbs())
@@ -767,31 +778,42 @@ function syncPlaced(): void {
   for (const r of items.values()) {
     if (r.missing) continue
     const l = library.find((x) => x.id === r.id)
-    if (!l) continue
-    const sig = libSig(l)
-    if (sig === r.sig) { r.lib = l; continue }
-    const was: unknown = JSON.parse(r.sig)
-    const now: unknown = JSON.parse(sig)
-    const tail = (v: unknown): string => JSON.stringify(Array.isArray(v) ? v.slice(1) : null)
-    if (tail(was) !== tail(now)) {
-      // the files may have been rewritten at the same paths (a rescale or a re-add): read them again
-      const a = libView(r.lib)
-      const b = libView(l)
-      for (const relPath of [a.glb, a.spz, a.splat, b.glb, b.spz, b.splat]) {
-        if (relPath) { glbCache.delete(assetUrl(relPath)); splatFiles.delete(assetUrl(relPath)) }
-      }
-    }
-    r.sig = sig
-    quiet(rebuildItem(r, l))
+    if (l) syncPiece(r, l)
   }
+}
+// r.sig is what the piece draws: written only when a rebuild has attached, so a failed one is tried on the next read.
+function syncPiece(r: ItemRec, l: LibraryEntry): void {
+  const sig = libSig(l)
+  if (sig === r.sig) { r.lib = l; r.build++; return } // a rebuild in flight towards another entry is out of date
+  const was: unknown = JSON.parse(r.sig)
+  const now: unknown = JSON.parse(sig)
+  const tail = (v: unknown): string => JSON.stringify(Array.isArray(v) ? v.slice(1) : null)
+  if (tail(was) !== tail(now)) {
+    // the files may have been rewritten at the same paths (a rescale or a re-add): read them again
+    const a = libView(r.lib)
+    const b = libView(l)
+    for (const relPath of [a.glb, a.spz, a.splat, b.glb, b.spz, b.splat]) {
+      if (relPath) { glbCache.delete(assetUrl(relPath)); splatFiles.delete(assetUrl(relPath)) }
+    }
+  }
+  quiet(rebuildItem(r, l))
+}
+/** Until no capture is queued or running: a child attached during a capture would escape its material swap. The caller
+ *  re-checks its token and attaches in the same synchronous step. */
+async function capturesIdle(): Promise<void> {
+  while (captureBusy > 0) await captureChain
 }
 async function rebuildItem(r: ItemRec, l: LibraryEntry): Promise<void> {
   const token = ++r.build
   let built: Built
-  try { built = await buildChild(l) } catch (e) { throw reportError(`Could not reload "${libLogic.libName(libView(l))}"`, e) }
+  try {
+    built = await buildChild(l)
+    await capturesIdle()
+  } catch (e) { throw reportError(`Could not reload "${libLogic.libName(libView(l))}"`, e) }
   if (token !== r.build || items.get(r.uid) !== r) { disposeChild(built.obj); return }
   detachBuilt(r)
   r.lib = l
+  r.sig = libSig(l)
   attachBuilt(r, built)
   r.group.updateMatrixWorld(true)
   emit('items', { change: 'render', uid: r.uid })
@@ -823,7 +845,12 @@ async function makeMissingThumbs(): Promise<void> {
         const thumb = item?.assets?.thumb
         const cur = library.find((x) => x.id === l.id)
         if (cur && thumb) { cur.assets = { ...(cur.assets ?? {}), thumb }; emit('library', { items: library.slice() }) }
-      } catch (e) { console.warn('[midstudy] could not store the thumbnail of', l.id, e) }
+      } catch (e) {
+        console.warn('[midstudy] could not store the thumbnail of', l.id, e)
+        // the server busy (503: midstudy-add holds the library lock) or out of reach: the next library read tries again
+        const status = statusOf(e)
+        if (status === 503 || status === null) { thumbTried.delete(l.id); break }
+      }
     }
   } finally { thumbsRunning = false }
 }
@@ -901,7 +928,7 @@ function loadGlbTemplate(url: string): Promise<{ scene: THREE.Object3D; box: THR
     return { scene: root, box }
   })()
   glbCache.set(url, p)
-  p.catch(() => glbCache.delete(url))
+  p.catch(() => { if (glbCache.get(url) === p) glbCache.delete(url) })
   return p
 }
 
@@ -926,7 +953,7 @@ function loadSplatFile(url: string): Promise<SplatData> {
   if (cached) return cached
   const p = fetchBytes(url).then(decodeSplat)
   splatFiles.set(url, p)
-  p.catch(() => splatFiles.delete(url))
+  p.catch(() => { if (splatFiles.get(url) === p) splatFiles.delete(url) })
   return p
 }
 async function loadSplat(l: LibView): Promise<SplatData> {
@@ -1060,6 +1087,7 @@ function landingSpot(): Vec3 {
   return kcam().landingSpot({ s: t.s, ox: t.ox, oy: t.oy }, visiblePhotoRect(), taken)
 }
 
+const pendingUids = new Set<string>() // the uids of the adds in flight
 function newUid(id: string): string {
   uidCounter += 1
   return `${id}-${Date.now().toString(36)}${uidCounter.toString(36)}`
@@ -1086,7 +1114,7 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   const rotIn = o['rotation_y_deg']
   const rot = isNum(rotIn) ? rotIn : 0
   const uidIn = o['uid']
-  const uid = typeof uidIn === 'string' && uidIn && !items.has(uidIn) ? uidIn : newUid(l.id)
+  const uid = typeof uidIn === 'string' && uidIn && !items.has(uidIn) && !pendingUids.has(uidIn) ? uidIn : newUid(l.id)
   const gen = itemsGen
   const group = new THREE.Group()
   group.rotation.order = 'YXZ'
@@ -1097,17 +1125,24 @@ async function addItemInternal(id: unknown, opts: unknown = {}): Promise<string>
   group.name = `item:${uid}`
   const r: ItemRec = { uid, id: l.id, lib: l, sig: libSig(l), group, child: null, splat: null, render: 'glb', localBox: null, rotationDeg: rot, shadow: null, caster: null, missing: !!l.missing, noGlb: false, build: 0, roomAt: null }
   syncRoomAt(r)
+  let built: Built
+  pendingUids.add(uid)
   try {
-    attachBuilt(r, await buildChild(l)) // a splat item: its GLB and its splat have both loaded
+    built = await buildChild(l) // a splat item: its GLB and its splat have both loaded
+    await capturesIdle()
   } catch (e) {
     throw reportError(`Could not load "${libLogic.libName(libView(l))}"`, e)
-  }
+  } finally { pendingUids.delete(uid) }
   if (gen !== itemsGen) {
-    detachBuilt(r)
+    disposeChild(built.obj)
     throw new Error(`adding "${l.id}" was cancelled because the items were cleared`)
   }
+  attachBuilt(r, built)
   scene.add(group)
   items.set(uid, r)
+  if (room && r.roomAt) projectToPose(r) // the photo or its pose may have changed during the load
+  const current = r.missing ? undefined : library.find((x) => x.id === r.id)
+  if (current) syncPiece(r, current) // the library changed during the load: this piece may hold the old bytes
   emit('items', { change: 'add', uid })
   measure('item-add', t0)
   return uid
@@ -1189,10 +1224,7 @@ function removeItemInternal(uid: unknown): void {
   const r = typeof uid === 'string' ? items.get(uid) : undefined
   if (!r) return
   if (sel.uids.includes(r.uid)) {
-    sel = selLogic.without(sel, r.uid)
-    selected = sel.primary
-    if (drag.mode && drag.uid === r.uid) endItemDrag()
-    emit('selection', selectionDetail())
+    setSelection(selLogic.without(sel, r.uid))
   }
   scene.remove(r.group)
   r.build++ // a rebuild in flight (reloadLibrary) drops its result
@@ -1239,20 +1271,19 @@ function getScreenRect(uid: unknown): Rect | null {
 
 // --- selection: drag the item itself on the floor, a grip on its footprint rotates it (contract §2.3) -----------------
 type DragMode = 'move' | 'lift' | 'rotate'
-// The selection is a set (logic/selection.ts); `selected` is its primary (picked last), which the label, the grip and
+// The selection is a set (logic/selection.ts); its primary (picked last) is the piece which the label, the grip and
 // the height controls follow. One piece selected is the common case and behaves exactly as before.
 let sel: selLogic.Selection = selLogic.NO_SELECTION
-let selected: string | null = null
+const primary = (): string | null => sel.primary
 let snap = false // Shift on desktop: lift drags, 15° grip
 /** A selected piece as it was when a drag began. */
 interface DragStart { readonly uid: string; readonly pos: Vec3; readonly rot: number }
 // group: the selection when the drag began; centre: what a rotate drag turns around
 const drag: { mode: DragMode | null; uid: string | null; off: Vec3; a0: number; rot0: number; plane: Plane; group: DragStart[]; centre: readonly [number, number] } = { mode: null, uid: null, off: [0, 0, 0], a0: 0, rot0: 0, plane: { normal: [0, 1, 0], constant: 0 }, group: [], centre: [0, 0] }
-const selectionDetail = (): { uid: string | null; uids: string[] } => ({ uid: selected, uids: [...sel.uids] })
+const selectionDetail = (): { uid: string | null; uids: string[] } => ({ uid: primary(), uids: [...sel.uids] })
 const selRecs = (): ItemRec[] => sel.uids.flatMap((u) => { const r = items.get(u); return r ? [r] : [] })
 function setSelection(next: selLogic.Selection): void {
   sel = next
-  selected = next.primary
   if (drag.mode && (drag.uid === null || !sel.uids.includes(drag.uid))) endItemDrag()
   emit('selection', selectionDetail())
 }
@@ -1313,6 +1344,8 @@ function dragHeight(r: ItemRec, clientX: number, clientY: number): number {
 // through that point (its elevation doesn't change), so farther away it shrinks with perspective, closer it grows.
 // With `lift` (Shift) it moves up and down only.
 function beginItemDrag(uid: string, clientX: number, clientY: number, opts: { lift?: boolean } = {}): boolean {
+  if (drag.mode) endItemDrag()
+  if (ruler.active || alignPhotos) return false
   const r = items.get(uid)
   if (!r) return false
   const lift = opts.lift ?? snap
@@ -1322,7 +1355,7 @@ function beginItemDrag(uid: string, clientX: number, clientY: number, opts: { li
   const p = planePointAt(plane, clientX, clientY)
   if (!p) return false
   if (!sel.uids.includes(uid)) select(uid)
-  else if (selected !== uid) select(uid, { add: true }) // grabbing one piece of a group: the group moves, it leads
+  else if (primary() !== uid) select(uid, { add: true }) // grabbing one piece of a group: the group moves, it leads
   drag.mode = mode
   drag.uid = uid
   drag.off = [pos[0] - p[0], pos[1] - p[1], pos[2] - p[2]]
@@ -1332,6 +1365,8 @@ function beginItemDrag(uid: string, clientX: number, clientY: number, opts: { li
   return true
 }
 function beginRotateDrag(uid: string, clientX: number, clientY: number): boolean {
+  if (drag.mode) endItemDrag()
+  if (ruler.active || alignPhotos) return false
   const r = items.get(uid)
   if (!r) return false
   const plane: Plane = { normal: [0, 1, 0], constant: -r.group.position.y }
@@ -1380,12 +1415,20 @@ function dragTo(clientX: number, clientY: number, opts: { snapTo?: boolean } = {
     }
   }
 }
+function resetDrag(): void {
+  drag.mode = null
+  drag.uid = null
+  drag.off = [0, 0, 0]
+  drag.a0 = 0
+  drag.rot0 = 0
+  drag.plane = { normal: [0, 1, 0], constant: 0 }
+  drag.group = []
+  drag.centre = [0, 0]
+}
 function endItemDrag(): void {
   if (!drag.mode || !drag.uid) return
   const d = { mode: drag.mode, uid: drag.uid }
-  drag.mode = null
-  drag.uid = null
-  drag.group = []
+  resetDrag()
   emit('drag', { ...d, phase: 'end' })
 }
 /** What Undo puts back (removeItemWithUndo → restoreItem). */
@@ -1746,6 +1789,7 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
       layoutBaseline = layoutLogic.EMPTY_SIG // before the clear: quietly's recount compares against it
       await quietly(() => { clearItemsInternal() })
       alignPhotos = false
+      floorPlanShown = false // planner/ui/room.ts sets it again from what is on screen
       room = inRoom ? { name: inRoom.name, title: inRoom.title ?? null, members: membersOf(inRoom), info: inRoom } : null
     }
     resetRuler()
@@ -1802,7 +1846,7 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
     // must be read first, or the pieces would load as missing. A room view: the room's layout, once, on its first photo.
     if (!switching) {
       if (room && roomUnplaced()) parkItems() // nothing placed yet: the room layout loads into the parked list
-      await Promise.all([refreshLayouts(), libraryLoading.catch(() => undefined)])
+      await Promise.all([refreshLayouts(), libraryReady()])
       if (token !== sceneToken) return
       const scope = layoutScope()
       const pick = scope ? layoutToOpen(scope) : null
@@ -1864,6 +1908,7 @@ function closeScene(): void {
   room = null
   parked = null
   alignPhotos = false
+  floorPlanShown = false
   syncUrl(null)
   emit('adjust', { on: false })
   emit('scene', { phase: 'closed', name: null })
@@ -1876,7 +1921,7 @@ async function deleteScene(name: unknown): Promise<void> {
   if (store.get(LAST_SCENE_KEY) === name) store.set(LAST_SCENE_KEY, null)
   const inOpenRoom = !!room && room.members.some((m) => m.scene === name)
   if (name === sceneName) closeScene()
-  else if (inOpenRoom && room) { const rn = room.name; quiet(getRoomInternal(rn).then(setRoomInfo).catch(() => undefined)) } // it left its room (§4.9 Membership)
+  else if (inOpenRoom && room) { const rn = room.name; await getRoomInternal(rn).then(setRoomInfo).catch(() => undefined) } // it left its room (§4.9 Membership)
   emit('scene', { phase: 'deleted', name })
   quiet(listScenesInternal())
   if (inOpenRoom || roomsList.some((r) => r.members.some((m) => m.scene === name))) quiet(listRoomsInternal().catch(() => undefined))
@@ -2174,7 +2219,9 @@ async function loadLayoutInternal(name: unknown): Promise<void> {
   const list: unknown[] = docItems
   const lib = doc['library']
   if (lib && lib !== LIBRARY_URL) toast(`Layout "${name}" was made with library ${asText(lib)}`, 'info')
-  await quietly(async () => {
+  await placed(() => quietly(async () => {
+    if (!stillIn(g)) return // the scope changed while this waited its turn
+    if (roomUnplaced()) parkItems() // the pose went while this waited: the piece adds below would be refused
     clearItemsInternal()
     const missing = list.filter((it) => isRecord(it) && typeof it['id'] === 'string' && !library.some((l) => l.id === it['id']))
     const missingOf = (it: unknown): JsonObject | undefined => {
@@ -2206,7 +2253,7 @@ async function loadLayoutInternal(name: unknown): Promise<void> {
     const failed = results.filter((r) => r.status === 'rejected').length
     if (failed) toast(layoutLogic.failedText(name, failed, list.length), 'error')
     if (missing.length) toast(layoutLogic.missingText(name, missing.length), 'info', 9000)
-  })
+  }))
   if (!stillIn(g)) return
   setLayoutName(name, doc['title'])
   rememberLayout(g.scope, name)
@@ -2334,27 +2381,40 @@ async function unparkItems(): Promise<void> {
       if (!x) return
       const uid = await addItemInternal(p.id, { uid: p.uid, position: [x.x, x.y, x.z], rotation_y_deg: x.rot, missing: p.missing })
       const r = items.get(uid)
-      if (r) r.roomAt = p.at
+      if (r) { r.roomAt = p.at; projectToPose(r) } // the pose may have moved while it loaded
     }))
   })
 }
+// One at a time, everything that clears the pieces and adds them again: otherwise a park snapshots a half-landed set
+// and cancels the rest. A failure doesn't break the chain. Nothing in it awaits an open, a layout load or a capture.
+let placing: Promise<unknown> = Promise.resolve()
+function placed<T>(fn: () => Promise<T>): Promise<T> {
+  const run = placing.then(fn, fn)
+  placing = run.catch(() => undefined)
+  return run
+}
+/** A piece put where the current photo sees its room-frame place; false when it has none (or the photo no pose). */
+function projectToPose(r: ItemRec): boolean {
+  const x = r.roomAt ? roomToSceneXf(r.roomAt) : null
+  if (!x) return false
+  r.group.position.set(x.x, x.y, x.z)
+  r.rotationDeg = x.rot
+  r.group.rotation.set(0, x.rot * DEG, 0)
+  r.group.updateMatrixWorld(true)
+  syncShadow(r)
+  return true
+}
 // The pieces put where the current photo sees them (after a switch, or when its pose or scale changed). Placed →
 // placed is a re-projection in place (same uids, selection, splats); placed → unplaced parks them; back unparks them.
-function placeRoomItems(): Promise<void> {
+function placeRoomItems(): Promise<void> { return placed(placeRoomItemsNow) }
+function placeRoomItemsNow(): Promise<void> {
   if (!room) return Promise.resolve()
   if (roomUnplaced()) { parkItems(); return Promise.resolve() }
   if (parked) return unparkItems()
   quietItems++
   try {
     for (const r of items.values()) {
-      const at = r.roomAt
-      const x = at ? roomToSceneXf(at) : null
-      if (!at || !x) { syncRoomAt(r); continue }
-      r.group.position.set(x.x, x.y, x.z)
-      r.rotationDeg = x.rot
-      r.group.rotation.set(0, x.rot * DEG, 0)
-      r.group.updateMatrixWorld(true)
-      syncShadow(r)
+      if (!projectToPose(r)) { syncRoomAt(r); continue }
       emit('items', { change: 'move', uid: r.uid })
     }
   } finally { quietItems-- }
@@ -2385,6 +2445,7 @@ function setRoomInfo(info: RoomInfo): void {
   room.members = membersOf(info)
   const now = curMember()
   if (now && (!was || !roomLogic.samePose(was.pose, now.pose) || was.scale !== now.scale)) {
+    if (drag.mode) endItemDrag() // a drag's start pose is in the old frame
     applyCamera()
     quiet(placeRoomItems())
   }
@@ -2404,6 +2465,7 @@ function previewPose(scene: unknown, pose: unknown, scale?: unknown): void {
   } else if (pose === null) m.pose = null
   if (isNum(scale)) m.scale = roomLogic.clampScale(scale)
   if (scene === sceneName && (!roomLogic.samePose(before.pose, m.pose) || before.scale !== m.scale)) {
+    if (drag.mode) endItemDrag() // a drag's start pose is in the old frame
     applyCamera()
     quiet(placeRoomItems())
   }
@@ -2642,7 +2704,7 @@ async function restoreRoom(name: unknown): Promise<void> {
   quiet(listScenesInternal().catch(() => undefined))
 }
 function setAlignPhotos(on: unknown): void {
-  alignPhotos = !!on && !!room
+  alignPhotos = !!on && !!room && floorPlanShown
   if (alignPhotos) select(null)
   emit('room', { phase: 'align-photos', name: room?.name ?? null })
 }
@@ -3368,7 +3430,7 @@ export const engine = {
   isLayoutDirty: (): boolean => dirty.layout,
   getItems: (): ItemInfo[] => [...items.values()].map(itemInfo),
   getItem: (uid: string | null): ItemInfo | null => { const r = uid === null ? undefined : items.get(uid); return r ? itemInfo(r) : null },
-  getSelected: (): string | null => selected,
+  getSelected: primary,
   /** every selected piece, in the order picked (the primary last) */
   getSelection: (): string[] => [...sel.uids],
   isSelected: (uid: string): boolean => sel.uids.includes(uid),
@@ -3378,6 +3440,7 @@ export const engine = {
   getLayoutDetails: (): LayoutSummary[] => layoutDetails.map((d) => ({ ...d })), getLayoutName: (): string => layoutName,
   layoutDisplayName, getScenesTrash: (): TrashedScene[] => scenesTrash.map((t) => ({ ...t })),
   getRenders: (): RenderMeta[] => renders.slice(), isRenderMock: (): boolean => renderMock,
+  getItemGroupCount: (): number => scene.children.filter((c) => c.name.startsWith('item:')).length, // the pieces really in the three.js scene
   isCapturing: (): boolean => captureBusy > 0, // a capture queued or running (the capture mutex)
   getRuler, getState, getRenderSettings, horizonAt,
   // scenes
