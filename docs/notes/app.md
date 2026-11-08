@@ -409,3 +409,25 @@ Deviations: no 60 s list refresh in the panel. The engine's `followLostRender` (
 so a second timer would only duplicate it; the section checks the engine's GET. `moved()` also removes its own row if it
 is still listed (a run's photo switch keeps the list; the row would otherwise stay "Rendering…" forever). "Not charged"
 on a lost row was false, so the row's line changed too (the brief named only the Retry confirm).
+## State machines W4: planner-engine-resources (2026-11-08)
+
+`planner/engine.ts`, `planner/logic/look.ts`:
+
+- **Lighting backfill.** `inferLighting` is `postLight` plus `pollLighting(name, token)`, driven by the pure `lightingStep`
+  (TScert): a 'missing' after pending/running is failed (lost), and the poll limit is failed (gave up). Every exit but a
+  superseded one sets a status and emits 'lighting'. A POST failing or landing late no longer writes over a newer run.
+  `lightingRun` shares the run in flight. Recalibrate polls when the new status is pending/running.
+- **Autostart** once per scene per page (`lightAutostarted`), so a 'none' the server forgot isn't re-run on every open;
+  "Infer lighting" still starts it by hand.
+- **Kernel worker.** `messageerror`, 'error' and a 20 s silence (`DEPTH_WORKER_MS`) all stop it for the session:
+  `terminate()`, `KernelWorker.close()`, reject `workerDown`; the decode runs on the main thread. No restart (deferred).
+- **Occlusion.** `occlusion` stays the user's choice; state, getter and event report `occlusion && depth`. A recalibrate
+  that loses the depth turns it off. `clearPhoto`'s w/h are left.
+- **Review notes.** The `capturesIdle` loop is inlined at its two attach sites (no microtask gap); the ScenePhase comment
+  and `placed()`'s comment are corrected.
+- **Tests.** `lightingStep` table in `planner/test/states.test.mjs`; 'resources' section of `engine-races.mjs`
+  (`--resources` stops after it).
+
+Deviations: `getOcclusion()` reports the effective value too (the design named getSceneState and the event; the UI
+already and-ed it with hasDepth). The autostart-once rule comes from the plan's seam note, not this fix's design. A scene
+opened with pending/running lighting still isn't polled (only recalibrate was in scope).

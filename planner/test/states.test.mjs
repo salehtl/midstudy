@@ -7,7 +7,7 @@ import path from 'node:path'
 import { build } from 'esbuild'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
-const LOGIC = ['jobs', 'camera', 'messages']
+const LOGIC = ['jobs', 'camera', 'messages', 'look']
 const entry = LOGIC.map((m) => `export * as ${m} from './planner/logic/${m}.ts'`).join('\n')
 const bundled = await build({ stdin: { contents: entry, resolveDir: ROOT, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', write: false, logLevel: 'silent' })
 const L = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`)
@@ -58,4 +58,29 @@ test('renderLostText says the render may still finish and leaves renderFailText 
   assert.match(L.messages.renderLostText(), /may still finish/)
   assert.match(L.messages.renderLostText(), /Renders/)
   assert.equal(L.messages.renderFailText(null), 'Render failed')
+})
+
+test('lightingStep: one poll of the lighting backfill', () => {
+  const LOST = 'the lighting job was lost (the server restarted?)'
+  const GAVE_UP = 'gave up waiting'
+  const rows = [
+    // [prev, polled, polls, status, terminal, error]
+    ['pending', 'pending', 1, 'pending', false, null],
+    ['pending', 'running', 1, 'running', false, null],
+    ['running', 'pending', 5, 'pending', false, null], // back in the queue: still waiting
+    ['pending', 'done', 1, 'done', true, null],
+    ['running', 'none', 1, 'none', true, null],
+    ['running', 'failed', 1, 'failed', true, null], // the server's own error stands
+    ['pending', 'missing', 1, 'failed', true, LOST],
+    ['running', 'missing', 7, 'failed', true, LOST],
+    ['missing', 'missing', 1, 'missing', true, null], // never saw it run: nothing was lost
+    ['done', 'missing', 1, 'missing', true, null],
+    ['pending', 'pending', 600, 'failed', true, GAVE_UP],
+    ['running', 'running', 601, 'failed', true, GAVE_UP],
+    ['pending', 'done', 600, 'done', true, null], // an answer on the last poll is an answer
+    ['pending', 'missing', 600, 'failed', true, LOST],
+  ]
+  for (const [prev, polled, polls, status, terminal, error] of rows) {
+    assert.deepEqual(L.look.lightingStep(prev, polled, polls, 600), { status, terminal, error }, `lightingStep(${prev}, ${polled}, ${polls})`)
+  }
 })

@@ -301,6 +301,18 @@ export function lightingStatusOf(status: unknown, has: boolean, error: unknown):
   }
 }
 
+/** One poll of the lighting backfill (contract §4.8): what the status becomes and whether the poll loop ends. A 'missing'
+ * after a pending or running one means the job is gone (a server restart forgets it), and the polls have a limit. */
+export function lightingStep(prev: string, polled: string, polls: number, maxPolls: number): { status: string; terminal: boolean; error: string | null } {
+  if (polled === 'pending' || polled === 'running') {
+    return polls >= maxPolls ? { status: 'failed', terminal: true, error: 'gave up waiting' } : { status: polled, terminal: false, error: null }
+  }
+  if (polled === 'missing' && (prev === 'pending' || prev === 'running')) {
+    return { status: 'failed', terminal: true, error: 'the lighting job was lost (the server restarted?)' }
+  }
+  return { status: polled, terminal: true, error: null }
+}
+
 /** The floor catcher's tan of the light's angular radius (contract §4.8: 0.006 + 0.6 · softness²). */
 export function penumbraTan(softness: number): number {
   return 0.006 + 0.6 * softness * softness

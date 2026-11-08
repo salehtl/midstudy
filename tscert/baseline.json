@@ -208,6 +208,7 @@
   "planner/logic/look.ts#lightingReport",
   "planner/logic/look.ts#lightingSourceOf",
   "planner/logic/look.ts#lightingStatusOf",
+  "planner/logic/look.ts#lightingStep",
   "planner/logic/look.ts#lookChanged",
   "planner/logic/look.ts#lookCopy",
   "planner/logic/look.ts#lookFrom",

@@ -12,7 +12,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  PROBE, createEval, startServer, seedScene, launchBrowser, openPlanner, ensureScene, hook, fmt, raw, sleep, waitFor, project,
+  PROBE, createEval, startServer, seedScene, uploadScene, unknownPhoto, waitScene, launchBrowser, openPlanner, ensureScene, hook, fmt, raw, sleep, waitFor, project,
 } from '../../../evals/lib/harness.mjs'
 
 const ev = createEval('ENGINE-RACES', 'engine-races', { timeoutS: 600 })
@@ -159,6 +159,137 @@ async function hold(re, { method = 'GET', count = 1, when = () => true, ctx = pa
   return h
 }
 const hit = (h) => waitFor(() => h.hits > 0, { timeoutMs: 20000, intervalMs: 20 })
+
+// --- resources ----------------------------------------------------------------------------------------------------------
+ev.section('resources: the lighting backfill, the kernel worker, the occlusion flag')
+{
+  const json = (status, body) => ({ status, contentType: 'application/json', body: JSON.stringify(body) })
+  const events = (p) => p.evaluate(() => { window.__lit = []; window.midstudyCtx.engine.events.addEventListener('lighting', (x) => window.__lit.push(x.detail)) })
+  const scenePage = async (ctx) => {
+    const p = await ctx.newPage()
+    await p.goto(`${srv.base}/planner/`, { waitUntil: 'load' })
+    await p.waitForFunction(() => !!window.midstudyCtx?.engine, null, { timeout: 30000 })
+    await p.evaluate(() => window.midstudy.ready)
+    return p
+  }
+  // the scene as a page sees it once its lighting is gone: `over` says what lighting_status the polls read
+  const noLighting = (p, name, over) => p.route(sceneRe(name), async (r) => {
+    if (r.request().method() !== 'GET') return r.fallback()
+    const res = await r.fetch()
+    const body = await res.json()
+    return r.fulfill(json(200, { ...body, lighting: null, lighting_error: null, lighting_status: over() }))
+  })
+  {
+    // a light job lost to a restart: POST answers 202 and the scene goes back to 'missing'
+    const ctx = await browser.newContext()
+    const p = await scenePage(ctx)
+    await events(p)
+    let posts = 0
+    await p.route(new RegExp(`/api/scenes/${esc(B.name)}/light$`), (r) => { posts++; return r.fulfill(json(202, { job: { id: 'lost', kind: 'light', scene: B.name, status: 'queued' } })) })
+    await noLighting(p, B.name, () => 'missing')
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
+    await waitFor(() => p.evaluate(() => window.__lit.at(-1)?.status === 'failed'), { timeoutMs: 8000, intervalMs: 100 })
+    const lit = await p.evaluate(() => window.__lit)
+    ev.check("a light job the server forgot ends in 'failed' with a reason", lit.at(-1)?.status === 'failed' && /lost/.test(lit.at(-1)?.error ?? ''), fmt(lit))
+    ev.check('the autostart posted once', posts === 1, `${posts} POST(s)`)
+    // leaving and coming back: the same 'missing' is not posted again (the backfill autostarts once per scene per page)
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, A.name)
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
+    await sleep(1500)
+    ev.check('reopening the scene does not start the backfill again', posts === 1, `${posts} POST(s)`)
+    await ctx.close()
+  }
+  {
+    // two calls while one runs share it; the POST failing after the scene changed leaves the newer status alone
+    const ctx = await browser.newContext()
+    const p = await scenePage(ctx)
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
+    await events(p)
+    let posts = 0
+    let status = 'pending'
+    await p.route(new RegExp(`/api/scenes/${esc(B.name)}/light$`), (r) => { posts++; return r.fulfill(json(202, { job: { id: 'j', kind: 'light', scene: B.name, status: 'queued' } })) })
+    await noLighting(p, B.name, () => status)
+    const both = p.evaluate(async () => { const e = window.midstudyCtx.engine; const a = e.inferLighting(); const b = e.inferLighting(); await Promise.all([a, b]); return true })
+    await sleep(900)
+    status = 'none'
+    await both
+    ev.check('two overlapping inferLighting calls post once', posts === 1, `${posts} POST(s)`)
+    await ctx.close()
+  }
+  {
+    const ctx = await browser.newContext()
+    const p = await scenePage(ctx)
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
+    await events(p)
+    await p.route(new RegExp(`/api/scenes/${esc(B.name)}/light$`), (r) => r.fulfill(json(500, { error: { code: 'INTERNAL', message: 'failed on purpose' } })))
+    const light = await hold(new RegExp(`/api/scenes/${esc(B.name)}/light$`), { method: 'POST', ctx: p }) // on top of the 500
+    await noLighting(p, B.name, () => 'missing')
+    void p.evaluate(() => window.midstudyCtx.engine.inferLighting().catch(() => undefined))
+    await hit(light)
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, A.name)
+    const before = await p.evaluate(() => window.midstudyCtx.engine.getLighting().status ?? null)
+    light.release()
+    await sleep(400)
+    const seen = await p.evaluate(() => ({ lit: window.__lit, status: window.midstudyCtx.engine.getLighting().status ?? null }))
+    ev.check('a POST /light failing after the scene changed leaves the new scene\'s status', !seen.lit.some((x) => x.status === 'failed') && seen.status === before, fmt(seen))
+    await ctx.close()
+  }
+  {
+    // a kernel worker that never answers: depth falls back to the main thread instead of hanging the open
+    const ctx = await browser.newContext()
+    await ctx.route(/engine\.worker\.js(\?.*)?$/, (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: 'self.onmessage = () => undefined' }))
+    const p = await scenePage(ctx)
+    const t0 = Date.now()
+    const r = await Promise.race([
+      p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n); return window.midstudy.getState().scene }, A.name),
+      sleep(40000).then(() => null),
+    ])
+    ev.check('a hung kernel worker: the scene still opens with its depth (main thread, within 20 s + the decode)', r?.hasDepth === true, `${Date.now() - t0} ms; ${fmt(r)}`)
+    if (r !== null) {
+      const t1 = Date.now()
+      const again = await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n); return window.midstudy.getState().scene.hasDepth }, B.name)
+      ev.check('the next depth decode does not wait for the worker again', again === true && Date.now() - t1 < 15000, `${Date.now() - t1} ms`)
+    }
+    await ctx.close()
+  }
+  {
+    // occlusion reports what is drawn
+    const up = await uploadScene(srv.base, unknownPhoto(), { filename: 'no-depth.jpg', title: 'no depth' })
+    const name = up.json?.scene
+    const sN = await waitScene(srv.base, name)
+    ev.check('a scene without depth', sN?.calib_status === 'done' && sN.depth_url === null, fmt({ status: sN?.calib_status, depth_url: sN?.depth_url }))
+    const ctx = await browser.newContext()
+    const p = await scenePage(ctx)
+    const seen = await p.evaluate(async (n) => {
+      const e = window.midstudyCtx.engine
+      await e.openScene(n)
+      const on = []
+      e.events.addEventListener('occlusion', (x) => on.push(x.detail.on))
+      e.setOcclusion(true)
+      return { on, state: window.midstudy.getState().scene.occlusion, get: e.getOcclusion() }
+    }, name)
+    ev.check('setOcclusion(true) without depth reports occlusion off (state, getter, event)', seen.state === false && seen.get === false && seen.on.at(-1) === false, fmt(seen))
+    // recalibrate answers with no depth any more: occlusion goes off
+    const q = await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n); return window.midstudy.getState().scene }, A.name)
+    await p.route(new RegExp(`/api/scenes/${esc(A.name)}/calibrate$`), (r) => r.fulfill(json(202, { job: { id: 'j2', kind: 'calibrate', scene: A.name, status: 'done' } })))
+    await p.route(/\/api\/scenes\/jobs\/j2$/, (r) => r.fulfill(json(200, { id: 'j2', status: 'done' })))
+    await p.route(sceneRe(A.name), async (r) => {
+      if (r.request().method() !== 'GET') return r.fallback()
+      const res = await r.fetch()
+      return r.fulfill(json(200, { ...(await res.json()), depth_url: null }))
+    })
+    const after = await p.evaluate(async () => {
+      const e = window.midstudyCtx.engine
+      const on = []
+      e.events.addEventListener('occlusion', (x) => on.push(x.detail.on))
+      await e.recalibrate()
+      return { on, scene: window.midstudy.getState().scene }
+    })
+    ev.check('a recalibration that loses the depth turns occlusion off', q.occlusion === true && after.scene.hasDepth === false && after.scene.occlusion === false && after.on.at(-1) === false, fmt(after))
+    await ctx.close()
+  }
+  if (process.argv.includes('--resources')) await ev.finish()
+}
 // Serves the scene's own answer with calib_status replaced while `busy()` holds; counts GETs.
 async function busyScene(n, busy) {
   const re = sceneRe(n)
