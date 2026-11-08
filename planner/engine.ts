@@ -227,9 +227,9 @@ function measure(step: string, t0: number): void {
 }
 
 // --- events, errors + toasts ------------------------------------------------
-/** What each engine event carries (engine.events, CustomEvent.detail). */
 /** The 'scene' event's phases. */
 type ScenePhase = 'loading' | 'calibrating' | 'opened' | 'failed' | 'closed' | 'saved' | 'title' | 'deleted' | 'restored' | 'recalibrating' | 'recalibrated' | 'recalibrate-failed'
+/** What each engine event carries (engine.events, CustomEvent.detail). */
 interface EngineEvents {
   scene: { phase: ScenePhase; name: string | null }
   scenes: { scenes: SceneSummary[] }
@@ -3058,12 +3058,13 @@ let renderSeq = 0
 let rendersListGen = 0
 // A dropped request can still finish on the server: list again at 5 s, 30 s and 90 s, until a render from about then shows.
 // (`created` has whole seconds, so a second of slack.)
-function followLostRender(since: number): void {
+function followLostRender(since: number, scn: string | null): void {
   const waits = [5000, 25000, 60000]
   const next = (i: number): void => {
     const ms = waits[i]
     if (ms === undefined) return
     setTimeout(() => {
+      if (sceneName !== scn) return // another scene's list says nothing about it; it shows on coming back
       quiet(listRendersInternal().catch((): RenderMeta[] => []).then((l) => { if (!l.some((r) => Date.parse(r.created) >= since - 1000)) next(i + 1) }))
     }, ms)
   }
@@ -3092,7 +3093,7 @@ async function postRender(shot: Shot, opts: { model?: string; prompt?: string | 
     if (statusOf(e) === null) { // the request never got an answer: the server may have it, and may be paying for it
       const lost = msg.renderLostText()
       emit('render', { id, phase: 'failed', model, error: lost, lost: true })
-      followLostRender(since)
+      followLostRender(since, scn)
       throw reportError(lost, e)
     }
     emit('render', { id, phase: 'failed', model, error: detailOf(e) })
@@ -3295,16 +3296,19 @@ interface SceneInfo extends SceneSummary {
 async function startScene(): Promise<string | null> {
   // §2.2: ?room=<room>[&photo=<scene>] wins over ?scene=; without either, the room last opened on this device (when it
   // was the last thing opened: opening a scene on its own forgets it). An open the user made meanwhile wins (sceneToken).
-  const t0 = sceneToken
+  // The name returned for an open still in flight keeps main.ts from putting the Scenes page over it.
+  let t0 = sceneToken
+  const shown = (): string | null => sceneName ?? sceneLoad.name
   const want = params.get('room')
   const lastRoom = store.get(LAST_ROOM_KEY)
   if (want || (!params.get('scene') && lastRoom)) {
     const target = want ?? lastRoom ?? ''
     const rooms = await listRoomsInternal().catch(() => null)
-    if (sceneToken !== t0) return sceneName
+    if (sceneToken !== t0) return shown()
     if (rooms?.some((r) => r.name === target)) {
       await openRoom(target, params.get('photo') ?? undefined).catch(() => undefined)
-      if (sceneName || sceneToken !== t0) return sceneName
+      if (shown()) return shown() // opened, or another open is under way (a failed open clears sceneLoad)
+      t0 = sceneToken // the room's own open failed and took a token: on to the scenes, as v1
     } else if (want) {
       reportError(`There's no room "${want}"`)
       syncUrl(null)
@@ -3312,10 +3316,10 @@ async function startScene(): Promise<string | null> {
     } else store.set(LAST_ROOM_KEY, null)
   }
   const list = await listScenesInternal().catch(() => null)
-  if (sceneToken !== t0) return sceneName
+  if (sceneToken !== t0) return shown()
   const names = list ? list.map((s) => s.name) : null
   const go = sceneLogic.landing(params.get('scene'), store.get(LAST_SCENE_KEY), names)
-  if (go.kind === 'open') { await openScene(go.name).catch(() => undefined); return sceneName }
+  if (go.kind === 'open') { await openScene(go.name).catch(() => undefined); return shown() }
   if (go.kind === 'missing') {
     reportError(`There's no scene "${go.name}"`)
     syncUrl(null)

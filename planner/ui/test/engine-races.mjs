@@ -497,6 +497,39 @@ ev.section('startup')
   ev.check("the user's open made during startup stays open", s.scene === C.name && s.room === null, fmt(s))
   await ctx.close()
 }
+{
+  // the last room's photo can't be opened: startup goes on to the last scene, as v1 did
+  const ctx = await browser.newContext()
+  const p2 = await ctx.newPage()
+  await p2.addInitScript(({ r, c }) => { localStorage.setItem('midstudy.lastRoom', r); localStorage.setItem('midstudy.lastScene', c) }, { r: ROOM, c: C.name })
+  for (const n of [A.name, B.name]) await p2.route(sceneRe(n), (r) => (r.request().method() === 'GET' ? r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"code":"INTERNAL","message":"failed on purpose"}}' }) : r.fallback()))
+  await p2.goto(`${srv.base}/planner/`, { waitUntil: 'load' })
+  await p2.waitForFunction(() => !!window.midstudyCtx?.engine, null, { timeout: 30000 })
+  await p2.evaluate(() => window.midstudy.ready)
+  const s = await p2.evaluate(() => ({ scene: window.midstudyCtx.engine.getSceneName(), room: window.midstudyCtx.engine.getRoomState()?.name ?? null }))
+  ev.check('a last room whose photo fails to open lands on the last scene', s.scene === C.name && s.room === null, fmt(s))
+  await ctx.close()
+}
+{
+  // the user's open still in flight when startup gives way: no Scenes page over it
+  const ctx = await browser.newContext()
+  const p2 = await ctx.newPage()
+  await p2.addInitScript((r) => { localStorage.setItem('midstudy.lastRoom', r) }, ROOM)
+  const h = await hold(/\/api\/rooms$/, { count: 99, ctx: p2 })
+  const held = await hold(sceneRe(C.name), { count: 99, ctx: p2 })
+  await p2.goto(`${srv.base}/planner/`, { waitUntil: 'load' })
+  await p2.waitForFunction(() => !!window.midstudyCtx?.engine, null, { timeout: 30000 })
+  await p2.evaluate((c) => { void window.midstudyCtx.engine.openScene(c).catch(() => undefined) }, C.name)
+  await hit(held)
+  h.release()
+  await p2.evaluate(() => window.midstudy.ready)
+  const page0 = await p2.evaluate(() => window.midstudyCtx.shell.getOpenPage())
+  held.release()
+  await p2.waitForFunction((c) => window.midstudyCtx.engine.getSceneName() === c, C.name, { timeout: 15000 }).catch(() => undefined)
+  const s = await p2.evaluate(() => window.midstudyCtx.engine.getSceneName())
+  ev.check("startup leaves the user's open in flight alone (no Scenes page over it)", page0 === null && s === C.name, fmt({ page0, s }))
+  await ctx.close()
+}
 
 ev.check('no page errors', P.errors.page.length === 0, P.errors.page.slice(0, 3).join(' | ') || 'none')
 await ev.finish()
