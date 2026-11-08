@@ -322,12 +322,20 @@ r = await C.get('/api/rooms/jobs')
 ev.check('…none of them queued a job (GET /api/rooms/jobs → 200 {jobs: []})', r.status === 200 && r.json?.jobs?.length === 0, st(r))
 
 ev.section('align: the golden pair through the mock')
-const argvOf = (room) => calls().filter((c) => c.argv[0] === 'align-room' && c.argv.some((a) => path.resolve(REPO, a) === path.join(ROOMS, room))).map((c) => c.argv)
 const dirOf = (scene) => path.join(srv.dirs.scenes, scene)
 const abs = (p) => (p ? path.resolve(REPO, p) : p)
+// align-room's --out (§4.9 Align) is the job's scratch, <rooms>/.align/<job>; the older <rooms>/<room> is still accepted.
+const SCRATCH = path.join(ROOMS, '.align')
+const jobRooms = new Map() // job id → its room, to tell whose scratch an --out is
+const noteJob = (job, room) => { if (job?.id) jobRooms.set(job.id, room) }
+const outOf = (argv) => abs(argv[argv.indexOf('--out') + 1])
+const outIsRoom = (out, room) => out === path.join(ROOMS, room) || (path.dirname(out || '') === SCRATCH && jobRooms.get(path.basename(out)) === room)
+const argvOf = (room) => calls().filter((c) => c.argv[0] === 'align-room' && outIsRoom(outOf(c.argv), room)).map((c) => c.argv)
+const staged = (argv) => path.dirname(outOf(argv) || '') === SCRATCH
 const align = async (room, body) => {
   const a = await C.send('POST', `/api/rooms/${room}/align`, body)
   const job = a.json?.job
+  noteJob(job, room)
   const done = job?.id ? await waitJob(B, job.id) : null
   return { a, job, done, detail: await get(room) }
 }
@@ -343,7 +351,8 @@ ev.check('rooms/<room>/align.json (written by align-room) validates, names the s
   aj && !fileViolation('midstudy/align.schema.json', aj) && fmt(aj.members?.map((m) => m.scene)) === fmt([LW, R1]) && aj.members?.[0]?.photo_sha256 === SHA['living-wide'] && aj.members?.[1]?.photo_sha256 === SHA['room-1'] && fmt(d?.align) === fmt(aj) && !('ok' in aj),
   aj ? fileViolation('midstudy/align.schema.json', aj) || fmt(aj.members?.map((m) => [m.scene, m.photo_sha256?.slice(0, 8)])) : 'no align.json')
 let argv = argvOf(A).at(-1) || []
-ev.check('align-room ran on the calibration command: align-room <scenes>/<anchor> <scenes>/<other> --out <rooms>/<room>', argv[0] === 'align-room' && abs(argv[1]) === dirOf(LW) && abs(argv[2]) === dirOf(R1) && abs(argv[argv.indexOf('--out') + 1]) === path.join(ROOMS, A), fmt(argv))
+ev.check('align-room ran on the calibration command: align-room <scenes>/<anchor> <scenes>/<other> --out <rooms>/.align/<job> (or the older <rooms>/<room>)', argv[0] === 'align-room' && abs(argv[1]) === dirOf(LW) && abs(argv[2]) === dirOf(R1) && [path.join(SCRATCH, al.job?.id || '-'), path.join(ROOMS, A)].includes(outOf(argv)), fmt(argv))
+ev.check('after the job align.json is in rooms/<room>/ and the job\'s scratch rooms/.align/<job>/ is gone', fs.existsSync(path.join(ROOMS, A, 'align.json')) && !fs.existsSync(path.join(SCRATCH, al.job?.id || '-')), fmt(fs.existsSync(path.join(ROOMS, A)) ? fs.readdirSync(path.join(ROOMS, A)) : []))
 r = await C.get('/api/rooms/jobs')
 const r3 = await C.get('/api/scenes/jobs')
 ev.check('GET /api/rooms/jobs lists it (newest first); /api/scenes/jobs does not', r.status === 200 && r.json?.jobs?.[0]?.id === al.job?.id && !(r3.json?.jobs || []).some((j) => j.id === al.job?.id), `${r.json?.jobs?.map((j) => j.id)} | scenes: ${(r3.json?.jobs || []).filter((j) => j.id?.startsWith('a-')).length} a- jobs`)
@@ -401,6 +410,7 @@ const G = r.json?.name || 'room-missing-g'
 ev.check('a room may hold a scene that is still calibrating → 201', r.status === 201 && memberOf(r.json, R6)?.scene_object?.calib_status !== 'done', st(r))
 const ga = await C.send('POST', `/api/rooms/${G}/align`)
 const gj = ga.json?.job
+noteJob(gj, G)
 await sleep(600)
 let gjNow = (await C.get(`/api/rooms/jobs/${gj?.id}`)).json
 ev.check('POST …/align → 202; the job stays queued and lists the calibrating member in waiting_for', ga.status === 202 && gjNow?.status === 'queued' && fmt(gjNow?.waiting_for) === fmt([R6]), fmt({ status: gjNow?.status, waiting_for: gjNow?.waiting_for, http: ga.status }))
@@ -471,14 +481,18 @@ d = al.detail
 ev.check('align-room failing (the answer leaves the anchor unplaced) → job failed with its sentence, align_status failed, align_error set', al.done?.status === 'failed' && d?.align_status === 'failed' && typeof d?.align_error === 'string' && d.align_error.length > 5,
   fmt({ status: al.done?.status, message: al.done?.message, align_status: d?.align_status, align_error: d?.align_error }))
 ev.check('…and room.json\'s members are unchanged, aligned still null', fmt(roomJson(Bm)?.members) === bBefore && roomJson(Bm)?.aligned === null, fmt(roomJson(Bm)?.members))
+const noAnswerKept = () => !staged(argvOf(Bm).at(-1) || []) || !fs.existsSync(path.join(ROOMS, Bm, 'align.json')) // only a staged --out can promise this
+ev.check('…and a failed job with a staged --out leaves no align.json in rooms/<room>/', noAnswerKept(), fmt(argvOf(Bm).at(-1)))
 await put(Bm, { members: [{ scene: R2 }, { scene: LWm }] })
 const b2 = fmt(roomJson(Bm)?.members)
 const sa = await C.send('POST', `/api/rooms/${Bm}/align`)
+noteJob(sa.json?.job, Bm)
 const sdone = sa.json?.job?.id ? await waitJob(B, sa.json.job.id) : null
 ev.check('an answer that breaks align.schema.json (confidence 2) fails the job in strict mode ("contract violation"), nothing applied',
   sdone?.status === 'failed' && /contract violation/i.test(sdone?.message || '') && fmt(roomJson(Bm)?.members) === b2 && roomJson(Bm)?.aligned === null, fmt({ http: sa.status, status: sdone?.status, message: sdone?.message }))
-// The stub writes what the mock holds (only the real CLI validates before writing): drop the invalid file, so the
-// room's detail stays readable for the rest of the eval.
+ev.check('…the invalid answer never reaches rooms/<room>/ when --out is staged', noAnswerKept(), fmt(argvOf(Bm).at(-1)))
+// With the older --out the stub writes what the mock holds into the room (only the real CLI validates before writing):
+// drop the invalid file, so the room's detail stays readable for the rest of the eval.
 fs.rmSync(path.join(ROOMS, Bm || '-', 'align.json'), { force: true })
 
 // --- a scene deleted inside a room ---------------------------------------------------------------------------------------------

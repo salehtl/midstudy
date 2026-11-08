@@ -102,3 +102,7 @@ Pitch and roll are excellent (≤ 0.7°). I checked that the depth error isn't a
 - Not automated: pinch zoom and two-finger pan (wheel zoom and Fit are checked), swipe between renders on the phone (the split slider is checked), the two-tap ruler, the grid fading with distance, contact shadows, Look on furniture only, and the live keep-room check (PLAN.md §8, main session).
 - The Compare slider check counts elements with `cursor: ew-resize` / `col-resize`, which children inherit, so the count is inflated (fine for "present").
 - E3's zoom check proves that wheel zoom changed the view and that Fit restores it; it doesn't measure the zoom factor, so the 4× cap is untested.
+
+## State machines W2: E18 and the staged align --out
+
+`evals/rooms_api.mjs` accepts align-room's `--out <rooms>/.align/<job>` (contract §4.9) as well as the older `<rooms>/<room>`, so it can merge before or after server-domain-room-align. `argvOf` maps a scratch folder to its room by the job id. New checks: `align.json` is in `rooms/<room>/` after the job and the scratch is gone; with a staged `--out`, a failed job or an invalid answer leaves no `align.json` in the room. Proved red (4 checks) and then green against a temporary staged patch of `server/src/rooms/service.ts`, not committed. No deviation.
