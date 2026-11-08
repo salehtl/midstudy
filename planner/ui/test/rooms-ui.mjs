@@ -278,6 +278,52 @@ await page.locator(`[data-midstudy="room-add-scene"][data-scene="${names['room-5
 await waitFor(async () => (await api('GET', `/api/rooms/${ROOM}`)).json?.members?.some((m) => m.scene === names['room-5']), { timeoutMs: 10000 })
 ev.check('room-add adds a scene back to the room (unplaced until aligned)', (await api('GET', `/api/rooms/${ROOM}`)).json.members.some((m) => m.scene === names['room-5'] && m.pose_source === 'unplaced'), '')
 await page.evaluate(() => window.midstudyCtx.shell.closePage())
+// Floor plan state machines (planner-ui-room): Align photos turned off during a drag, a grabbed photo that left the room,
+// Align again pressed twice
+const memberOf = async (id) => (await api('GET', `/api/rooms/${ROOM}`)).json.members.find((m) => m.scene === names[id])
+const livePose = (P2, id) => P2.evaluate((s) => window.midstudyCtx.engine.getRoomState()?.members.find((m) => m.scene === s)?.pose ?? null, names[id])
+const samePose = (a, b) => !!a && !!b && Math.max(Math.abs(a.x_m - b.x_m), Math.abs(a.z_m - b.z_m), Math.abs(a.yaw_deg - b.yaw_deg)) < 1e-6
+const alignBtn = page.locator('[data-midstudy="align-photos"]')
+await hook(page, 'setRoomPhoto', [names['room-1']])
+await alignBtn.click()
+const off0 = await memberOf('room-1')
+const offA = (await hook(page, 'floorPlanPoint', [[off0.pose.x_m, off0.pose.z_m]])).value
+const offB = (await hook(page, 'floorPlanPoint', [[off0.pose.x_m + 0.3, off0.pose.z_m]])).value
+await page.mouse.move(offA.x, offA.y); await page.mouse.down(); await page.mouse.move(offB.x, offB.y, { steps: 6 })
+const offMoved = await livePose(page, 'room-1')
+await page.evaluate(() => { window.midstudyCtx.engine.setAlignPhotos(false) })
+await page.mouse.up()
+await sleep(600)
+const off1 = await memberOf('room-1')
+const offLive = await livePose(page, 'room-1')
+ev.check('Align photos turned off during a drag: nothing is saved and the photo goes back', !samePose(offMoved, off0.pose) && samePose(off1.pose, off0.pose) && off1.pose_source === off0.pose_source && samePose(offLive, off0.pose), `dragged ${fmt(offMoved)}; saved ${fmt(off1.pose)} ${off1.pose_source}; shown ${fmt(offLive)}; was ${fmt(off0.pose)}`)
+
+await alignBtn.click()
+const gone = await memberOf('room-2')
+const gonePt = (await hook(page, 'floorPlanPoint', [[gone.pose.x_m, gone.pose.z_m]])).value
+await page.mouse.click(gonePt.x, gonePt.y)
+const labelOf = () => page.locator('.rm-align-label').textContent()
+const grabbed = await labelOf()
+await alignBtn.click()
+await page.evaluate(([r, s]) => window.midstudyCtx.engine.removeSceneFromRoom(r, s), [ROOM, names['room-2']])
+await alignBtn.click()
+const labelAfter = await labelOf()
+const resetOff = await page.locator('[data-midstudy="align-reset"]').isDisabled()
+ev.check('a grabbed photo that left the room: the label names the current photo and Reset follows it', /^Photo 3/.test(grabbed ?? '') && /^Photo 2/.test(labelAfter ?? '') && resetOff === false, `grabbed "${grabbed}", then "${labelAfter}", Reset disabled ${resetOff}`)
+await page.evaluate(([r, s]) => window.midstudyCtx.engine.addSceneToRoom(r, s), [ROOM, names['room-2']])
+
+let alignPosts = 0
+const countAlign = (r) => { if (r.method() === 'POST' && r.url().endsWith(`/api/rooms/${ROOM}/align`)) alignPosts += 1 }
+page.on('request', countAlign)
+await page.route(`**/api/rooms/${ROOM}/align`, async (route) => { await sleep(400); await route.continue() })
+await page.locator('.rm-align-row .rm-btn.is-quiet').dblclick()
+await sleep(900)
+await waitFor(async () => (await api('GET', `/api/rooms/${ROOM}`)).json?.align_status === 'done', { timeoutMs: 30000 })
+page.off('request', countAlign)
+await page.unroute(`**/api/rooms/${ROOM}/align`)
+ev.check('a double click on Align again sends one POST align', alignPosts === 1, `${alignPosts} POSTs`)
+await alignBtn.click()
+
 ev.check('desktop: no page errors or console errors', errsOf(P).length === 0, errsOf(P).slice(0, 3).join(' | ') || 'none')
 await P.context.close()
 
@@ -303,12 +349,55 @@ await shot(pp, 'phone-room')
 await pp.locator(`[data-midstudy="room-photo"][data-scene="${names['room-3']}"]`).tap()
 await waitFor(async () => (await state(pp))?.room?.photo === names['room-3'], { timeoutMs: 15000 })
 ev.check('phone: tapping a photo in the strip switches to it', (await state(pp))?.room?.photo === names['room-3'], (await state(pp))?.room?.photo)
+// a second finger during a photo drag: the photo goes back, nothing is saved, the plan pinches
+await pp.locator('[data-midstudy="align-photos"]').tap()
+const touch0 = (await api('GET', `/api/rooms/${ROOM}`)).json.members.find((m) => m.scene === names['room-1'])
+const tA = (await hook(pp, 'floorPlanPoint', [[touch0.pose.x_m, touch0.pose.z_m]])).value
+const tB = (await hook(pp, 'floorPlanPoint', [[touch0.pose.x_m + 0.3, touch0.pose.z_m]])).value
+const touchBox = await pp.locator('[data-midstudy="floor-plan"]').boundingBox()
+const cdp = await Ph.context.newCDPSession(pp)
+const finger = (x, y, id) => ({ x: Math.round(x), y: Math.round(y), id })
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [finger(tA.x, tA.y, 1)] })
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [finger((tA.x + tB.x) / 2, tA.y, 1)] })
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [finger(tB.x, tB.y, 1)] })
+await sleep(150)
+const touchMoved = await livePose(pp, 'room-1')
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [finger(tB.x, tB.y, 1), finger(touchBox.x + touchBox.width * 0.75, touchBox.y + touchBox.height * 0.8, 2)] })
+await sleep(150)
+const touchLive = await livePose(pp, 'room-1')
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+await sleep(600)
+const touch1 = (await api('GET', `/api/rooms/${ROOM}`)).json.members.find((m) => m.scene === names['room-1'])
+ev.check('phone: a second finger during a photo drag puts the photo back and saves nothing', !samePose(touchMoved, touch0.pose) && samePose(touchLive, touch0.pose) && samePose(touch1.pose, touch0.pose) && touch1.pose_source === touch0.pose_source, `dragged ${fmt(touchMoved)}; shown ${fmt(touchLive)}; saved ${fmt(touch1.pose)} ${touch1.pose_source}`)
+await pp.locator('[data-midstudy="align-photos"]').tap()
+
 await pp.locator('[data-midstudy="floor-plan-toggle"]').tap()
 await sleep(300)
 ev.check('phone: floor-plan-toggle hides the plan again', !(await pp.locator('[data-midstudy="floor-plan"]').isVisible()) && (await state(pp))?.room?.floorPlan === false, '')
 await shot(pp, 'phone-room-noplan')
 ev.check('phone: no page errors or console errors', errsOf(Ph).length === 0, errsOf(Ph).slice(0, 3).join(' | ') || 'none')
 await Ph.context.close()
+
+// a member whose depth can't be fetched is asked for again only after the backoff, however often the plan paints; a
+// recalibration finishing drops what the plan remembers of that scene
+const badScene = names['room-3'], freshScene = names['room-4']
+const badUrl = (await api('GET', `/api/scenes/${badScene}`)).json.depth_url
+const D = await openPlanner(browser, srv.base, { viewport: { width: 1280, height: 800 } })
+let badGets = 0, freshGets = 0
+await D.page.route(`**${badUrl}`, async (route) => { badGets += 1; await route.fulfill({ status: 404, body: 'gone' }) })
+D.page.on('request', (r) => { if (r.method() === 'GET' && new URL(r.url()).pathname === `/api/scenes/${freshScene}`) freshGets += 1 })
+await D.page.goto(`${srv.base}/planner/?room=${ROOM}`, { waitUntil: 'load' })
+await D.page.waitForFunction(() => !!window.midstudy?.getState?.().room, null, { timeout: 60000 }).catch(() => {})
+await waitFor(async () => badGets > 0 && freshGets > 0, { timeoutMs: 15000 })
+const planBox = await D.page.locator('[data-midstudy="floor-plan"]').boundingBox()
+await D.page.mouse.move(planBox.x + planBox.width / 2, planBox.y + planBox.height / 2)
+for (let i = 0; i < 20; i += 1) { await D.page.mouse.wheel(0, i % 2 ? 10 : -10); await sleep(700) }
+ev.check('a depth map that fails is fetched at most twice in 15 s of repaints', badGets >= 1 && badGets <= 2, `${badGets} GETs of ${badUrl}`)
+const freshBefore = freshGets
+await D.page.evaluate((name) => { window.midstudyCtx.scenes.events.emit('ready', { scene: { name } }) }, freshScene)
+await waitFor(() => freshGets > freshBefore, { timeoutMs: 5000 })
+ev.check('a scene finishing calibration is read again by the plan', freshGets === freshBefore + 1, `${freshBefore} then ${freshGets}`)
+await D.context.close()
 
 // --- the WebGL2 fallback (?webgpu=0) ---------------------------------------------------------------------------------------
 const G = await openPlanner(browser, srv.base, { viewport: { width: 1280, height: 800 } })

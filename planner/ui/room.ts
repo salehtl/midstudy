@@ -19,12 +19,13 @@ import { quiet, sceneTitle, type UiContext } from './seam.js'
 import * as R from '../logic/room.js'
 import type { Pose, Xz } from '../logic/room.js'
 import type { Camera } from '../logic/camera.js'
-import { alignHint, photoHue, photoLabel, photoNote } from './logic/rooms.js'
+import { alignHint, alignTarget, photoHue, photoLabel, photoNote, planDown, planEnd } from './logic/rooms.js'
 
 const DESK_PLAN_W = 360
 const PHONE_PLAN_FRACTION = 0.46
 const DENSITY_CELL = 0.05
 const LIFT_STEP = 3
+const LIFT_RETRY_MS = 15000 // a member whose scene or depth failed is asked for again after this long, not on every paint
 const STORE_KEY = 'midstudy.floorPlan'
 
 /** A member's depth points in its own (effective) scene frame, and what they were lifted with. */
@@ -35,7 +36,7 @@ interface Lifted {
 type Drag =
   | { readonly kind: 'pan'; readonly id: number; x: number; y: number; moved: boolean }
   | { readonly kind: 'photo'; readonly id: number; readonly scene: string; readonly from: Xz; readonly pose0: Pose; moved: boolean }
-  | { readonly kind: 'handle'; readonly id: number; readonly scene: string; moved: boolean }
+  | { readonly kind: 'handle'; readonly id: number; readonly scene: string; readonly pose0: Pose; moved: boolean }
   | { readonly kind: 'item'; readonly id: number; readonly uid: string; readonly from: Xz; readonly at0: Xz; moved: boolean }
   | { readonly kind: 'turn'; readonly id: number; readonly uid: string; moved: boolean }
 
@@ -88,6 +89,8 @@ export function mount(ctx: UiContext): void {
   // depth points per member: lifted once per (scene, camera, scale), binned per pose
   const lifted = new Map<string, Lifted>()
   const loading = new Set<string>()
+  const failedAt = new Map<string, number>() // scene|sig → when its lift last failed
+  let liftGen = 0 // moves when the caches are dropped: a lift still running from before writes nothing
   const sceneInfo = new Map<string, { readonly depthUrl: string | null; readonly calib: unknown; readonly w: number; readonly h: number }>()
   let grid: R.DensityGrid | null = null
   const counts = new Map<string, { readonly key: string; readonly cells: readonly number[] }>()
@@ -124,9 +127,14 @@ export function mount(ctx: UiContext): void {
     })
   }
   function wedges(ms: readonly PlanMember[]): R.PlanPhoto[] {
-    return ms.flatMap((m) => (m.pose && m.eff ? [{ scene: m.scene, wedge: R.wedgeOf(m.pose, m.eff, m.aspect, Math.sqrt), current: m.scene === (alignSel ?? currentScene()) }] : []))
+    return ms.flatMap((m) => (m.pose && m.eff ? [{ scene: m.scene, wedge: R.wedgeOf(m.pose, m.eff, m.aspect, Math.sqrt), current: m.scene === alignScene() }] : []))
   }
   const currentScene = (): string | null => engine.getRoomState()?.photo ?? null
+  /** The photo Align photos works on: the grabbed one while it is still a member, else the current one. */
+  function alignScene(): string | null {
+    const st = engine.getRoomState()
+    return st ? alignTarget(alignSel, st.members.map((m) => m.scene), st.photo) : null
+  }
   function pieces(): (R.PlanPiece & { readonly at: Xz; readonly rot: number; readonly front: Xz })[] {
     return engine.getLayoutItems().flatMap((it) => {
       if (!it.box) return []
@@ -160,7 +168,11 @@ export function mount(ctx: UiContext): void {
   }
 
   // --- depth: each member's points lifted through its effective camera, binned through its pose ------------------
-  async function sceneOf(scene: string): Promise<{ depthUrl: string | null; calib: unknown; w: number; h: number }> {
+  function forgetLifts(): void {
+    liftGen += 1
+    loading.clear()
+  }
+  async function sceneOf(scene: string, gen: number): Promise<{ depthUrl: string | null; calib: unknown; w: number; h: number }> {
     const have = sceneInfo.get(scene)
     if (have) return have
     const res = await fetch(`/api/scenes/${encodeURIComponent(scene)}`)
@@ -172,7 +184,7 @@ export function mount(ctx: UiContext): void {
     const hh: unknown = Reflect.get(o, 'h')
     const calib: unknown = Reflect.get(o, 'calib')
     const info = { depthUrl: typeof depthUrl === 'string' ? depthUrl : null, calib, w: typeof w === 'number' ? w : 0, h: typeof hh === 'number' ? hh : 0 }
-    sceneInfo.set(scene, info)
+    if (gen === liftGen) sceneInfo.set(scene, info)
     return info
   }
   const liftSig = (m: PlanMember): string => (m.eff ? [m.eff.fov_y_deg, m.eff.height_m, m.eff.pitch_deg, m.eff.roll_deg].join(',') : '')
@@ -180,20 +192,28 @@ export function mount(ctx: UiContext): void {
     const sig = liftSig(m)
     const have = lifted.get(m.scene)
     if (have?.sig === sig) return have
-    if (!m.eff || loading.has(`${m.scene}|${sig}`)) return have ?? null
-    const eff = m.eff
     const key = `${m.scene}|${sig}`
+    if (!m.eff || loading.has(key)) return have ?? null
+    const failed = failedAt.get(key)
+    if (failed !== undefined && performance.now() - failed < LIFT_RETRY_MS) return have ?? null
+    const eff = m.eff
+    const gen = liftGen
     loading.add(key)
     quiet((async () => {
       try {
-        const info = await sceneOf(m.scene)
+        const info = await sceneOf(m.scene, gen)
+        if (gen !== liftGen) return
         if (!info.depthUrl) { lifted.set(m.scene, { sig, points: [] }); return }
         const depth = await engine.loadDepthMap(info.depthUrl)
+        if (gen !== liftGen) return
         const points = R.liftDepth(depth, eff, engine.depthScaleFor(info.calib, eff.height_m), LIFT_STEP)
         lifted.set(m.scene, { sig, points })
         counts.delete(m.scene)
+        failedAt.delete(key)
         draw()
-      } catch (e) { console.warn('[midstudy] no depth for the floor plan:', m.scene, e) } finally { loading.delete(key) }
+      } catch (e) {
+        if (gen === liftGen) { failedAt.set(key, performance.now()); console.warn('[midstudy] no depth for the floor plan:', m.scene, e) }
+      } finally { if (gen === liftGen) loading.delete(key) }
     })())
     return have ?? null
   }
@@ -321,13 +341,14 @@ export function mount(ctx: UiContext): void {
     // the photos: wedge, dot and number; the current one's turn handle
     const align = !!engine.getRoomState()?.alignPhotos
     const cur = currentScene()
-    const onTop = align ? (alignSel ?? cur) : cur
+    const target = alignScene()
+    const onTop = align ? target : cur
     // the current (selected) photo last, on top of the others: it is also the one a tap on overlapping wedges takes
     for (const m of [...ms.filter((q) => q.scene !== onTop), ...ms.filter((q) => q.scene === onTop)]) {
       if (!m.pose || !m.eff) continue
       const wd = R.wedgeOf(m.pose, m.eff, m.aspect, Math.sqrt)
       const isCur = m.scene === cur
-      const isSel = align && m.scene === (alignSel ?? cur)
+      const isSel = align && m.scene === target
       const hue = photoHue(m.index)
       const col = isCur ? '217,164,65' : hslRgb(hue)
       const [ax, ay] = R.planToCanvas(view, wd.apex)
@@ -371,7 +392,10 @@ export function mount(ctx: UiContext): void {
     canvas.setPointerCapture(e.pointerId)
     const [x, y] = local(e)
     pointers.set(e.pointerId, { x, y })
-    if (pointers.size === 2) {
+    const down = planDown(pointers.size, pinch !== null)
+    if (down === 'ignore') return
+    if (down === 'pinch') {
+      if (drag?.kind === 'photo' || drag?.kind === 'handle') engine.previewPose(drag.scene, drag.pose0) // the pinch drops the drag: unsaved, so not shown
       const [a, b] = [...pointers.values()]
       if (a && b) pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y), s0: view, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }
       drag = null
@@ -388,7 +412,10 @@ export function mount(ctx: UiContext): void {
       if (sp && R.dist2(p, sp.front) <= r * r) { drag = { kind: 'turn', id: e.pointerId, uid: sp.uid, moved: false }; return }
     }
     const hit = R.planHit(p, r, wedges(members()), pieces(), align)
-    if (hit.kind === 'handle') { drag = { kind: 'handle', id: e.pointerId, scene: hit.scene, moved: false }; return }
+    if (hit.kind === 'handle') {
+      const pose0 = st?.members.find((q) => q.scene === hit.scene)?.pose
+      if (pose0) { drag = { kind: 'handle', id: e.pointerId, scene: hit.scene, pose0, moved: false }; return }
+    }
     if (hit.kind === 'photo') {
       const m = st?.members.find((q) => q.scene === hit.scene)
       if (m?.pose) { alignSel = hit.scene; drag = { kind: 'photo', id: e.pointerId, scene: hit.scene, from: p, pose0: m.pose, moved: false }; syncAlign(); draw(); return }
@@ -453,16 +480,18 @@ export function mount(ctx: UiContext): void {
     if (d?.id !== e.pointerId) return
     drag = null
     const st = engine.getRoomState()
-    if ((d.kind === 'photo' || d.kind === 'handle') && d.moved) {
+    const act = planEnd(d.kind, d.moved, !!st?.alignPhotos)
+    if (d.kind === 'photo' || d.kind === 'handle') {
+      if (act === 'revert') engine.previewPose(d.scene, d.pose0)
       const m = st?.members.find((q) => q.scene === d.scene)
-      if (m?.pose) quiet(engine.setPose(d.scene, m.pose))
+      if (act === 'commit' && m?.pose) quiet(engine.setPose(d.scene, m.pose))
       return
     }
-    if (d.kind === 'pan' && !d.moved) {
+    if (act === 'tap') {
       const [x, y] = local(e)
       const p = R.canvasToPlan(view, x, y)
       // Align photos on an unplaced photo: a tap places it there (facing −Z; turn it with its handle)
-      const target = alignSel ?? currentScene()
+      const target = alignScene()
       const m = st?.members.find((q) => q.scene === target)
       if (st?.alignPhotos && m && !m.pose && target) { quiet(engine.setPose(target, { x_m: p[0], z_m: p[1], yaw_deg: 0 })); return }
       if (!st?.alignPhotos) engine.select(null)
@@ -477,27 +506,31 @@ export function mount(ctx: UiContext): void {
     const on = !!st?.alignPhotos
     alignBtn.setAttribute('aria-pressed', String(on))
     alignRow.hidden = !on
-    const target = alignSel ?? st?.photo ?? null
+    if (!on) alignSel = null
+    const target = alignScene()
     const m = st?.members.find((q) => q.scene === target)
     const idx = st && m ? st.members.indexOf(m) : -1
     alignLabel.textContent = m ? photoLabel(idx + 1, sceneTitle(m.scene_object ?? { name: m.scene })) : ''
     const hasAlign = !!st?.info.align
     resetBtn.disabled = !m || !hasAlign || m.pose_source === 'origin'
-    againBtn.disabled = !st || st.members.length < 2 || st.info.align_status === 'pending' || st.info.align_status === 'running'
+    againBtn.disabled = !st || st.members.length < 2 || st.info.align_status === 'pending' || st.info.align_status === 'running' || aligning
     hintEl.textContent = on ? alignHint(!!m?.pose, phone()) : ''
     hintEl.hidden = !on
     const as = st?.info.align_status
     status.replaceChildren(...(as === 'pending' || as === 'running' ? [ring(null, { size: 12 }), document.createTextNode('Aligning…')] : []))
   }
   async function resetSelected(): Promise<void> {
-    const target = alignSel ?? currentScene()
+    const target = alignScene()
     if (!target) return
     try { await engine.resetPose(target) } catch { return }
     shell.toast("Back to the alignment's answer", { kind: 'ok', id: 'align-reset', ms: 2500 })
   }
+  let aligning = false // Align again's POST is on its way: a second press would only be refused
   async function alignAgain(): Promise<void> {
-    try { await engine.alignRoom(null) } catch { return }
+    if (aligning) return
+    aligning = true
     syncAlign()
+    try { await engine.alignRoom(null) } catch { /* reported */ } finally { aligning = false; syncAlign() }
   }
 
   // --- the strip and the note --------------------------------------------------------------------------------------
@@ -528,10 +561,13 @@ export function mount(ctx: UiContext): void {
     note.textContent = text ?? ''
   }
   async function switchTo(scene: string): Promise<void> {
+    const room = engine.getRoomState()?.name
     if (scene === currentScene()) return
     if (engine.isSceneDirty()) {
       const ok = await shell.confirm({ title: 'Leave this photo?', icon: 'warning', body: "Its floor (Adjust floor) isn't saved. Switching photos drops the change.", confirm: 'Switch photos' })
       if (!ok) return
+      const st = engine.getRoomState() // the confirm waited: the room and its photos may have moved on
+      if (!st || st.name !== room || st.photo === scene || !st.members.some((m) => m.scene === scene)) return
     }
     try { await engine.setRoomPhoto(scene) } catch { /* reported */ }
   }
@@ -591,10 +627,21 @@ export function mount(ctx: UiContext): void {
 
   engine.events.addEventListener('room', (e) => {
     const ph = e.detail.phase
-    if (ph === 'opened') { fitted = false; alignSel = null; lifted.clear(); sceneInfo.clear(); counts.clear(); grid = null; density = null; densityKey = '' }
+    if (ph === 'opened') { fitted = false; alignSel = null; forgetLifts(); failedAt.clear(); lifted.clear(); sceneInfo.clear(); counts.clear(); grid = null; density = null; densityKey = '' }
     if (ph === 'photo') alignSel = null
     if (ph === 'floor-plan') return
     sync()
+  })
+  // a recalibration finished: its depth URL and calibration are new, so what the plan holds of that scene is stale
+  ctx.scenes.events.addEventListener('ready', (e) => {
+    const name = e.detail.scene.name
+    if (!engine.getRoomState()?.members.some((m) => m.scene === name)) return
+    forgetLifts()
+    sceneInfo.delete(name)
+    lifted.delete(name)
+    counts.delete(name)
+    for (const k of failedAt.keys()) if (k.startsWith(`${name}|`)) failedAt.delete(k)
+    if (visible()) draw()
   })
   engine.events.addEventListener('scene', sync)
   engine.events.addEventListener('items', () => { if (visible()) draw() })
