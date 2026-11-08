@@ -9,8 +9,10 @@ is the frame (members[0]: pose {0, 0, 0}, scale 1, confidence 1); every other po
 - A photo without calib.json or depth.png (or with no depth at all) is unplaced: the solvers need its floor fit to
   stand it on the floor and its depth to score it. Being unable to place a photo is not a failure.
 - --solver auto: MASt3R when the `rooms` extra is installed, else manhattan; when MASt3R is installed but can't load
-  (its code or weights can't be fetched the first time), manhattan answers and `diagnostics.fallback` says why.
-  --solver mast3r with the extra missing, or failing to load, is a failure.
+  (its code or weights can't be fetched the first time, or the network doesn't fit on the device), manhattan answers
+  and `diagnostics.fallback` says why. So does a MASt3R run with no scale for the first photo (only it placed).
+  --solver mast3r with the extra missing, or failing to load, is a failure; its run with no scale stands, with
+  `diagnostics.degenerate` saying so. A room with too few usable photos answers solver "none" whatever was asked.
 - MIDSTUDY_CALIB_MOCK=<dir>: the recorded answer (mock.py), no solver.
 
 Top-level `diagnostics` (align.schema.json allows other keys) carries, per member, what the scoring saw (overlap,
@@ -64,9 +66,15 @@ def _run(name: solver.SolverName, usable: list[RoomPhoto], want: Device) -> tupl
     return solver.make(name).solve(usable, device), device
 
 
+def _no_scale(found: list[Candidate | None]) -> bool:
+    """Whether a learned solver had no scale for the first photo, so placed only it (solver.from_views, step 4)."""
+    first = found[0]
+    return first is not None and first.diag.get("scale_source") == "none" and all(c is None for c in found[1:])
+
+
 def solve(photos: list[RoomPhoto], choice: solver.SolverChoice, want: Device, created: str, t0: float) -> Align:
     """A solver's answer for these photos (module doc)."""
-    name = solver.resolve(choice)
+    name: solver.SolverName | None = None
     usable_idx = [i for i, p in enumerate(photos) if p.usable]
     skipped = [p.name for p in photos if not p.usable]
     if skipped:
@@ -76,6 +84,7 @@ def solve(photos: list[RoomPhoto], choice: solver.SolverChoice, want: Device, cr
     device: RealDevice | None = None
     cands: list[Candidate | None] = [None] * len(photos)
     if 0 in usable_idx and len(usable_idx) >= 2:
+        name = solver.resolve(choice)
         usable = [photos[i] for i in usable_idx]
         t1 = time.monotonic()
         try:
@@ -87,6 +96,15 @@ def solve(photos: list[RoomPhoto], choice: solver.SolverChoice, want: Device, cr
             diag["fallback"] = f"{name}: {e}"
             name = "manhattan"
             found, device = _run(name, usable, want)
+        if name != "manhattan" and _no_scale(found):
+            why = f"{name}: no floor or depth overlap on the first photo"
+            if choice == "auto":
+                log(f"align-room: {why}: manhattan answers instead")
+                diag["fallback"] = why
+                name = "manhattan"
+                found, device = _run(name, usable, want)
+            else:
+                diag["degenerate"] = why
         timing["solve_s"] = round(time.monotonic() - t1, 2)
         for i, c in zip(usable_idx, found, strict=True):
             cands[i] = c
@@ -113,9 +131,8 @@ def solve(photos: list[RoomPhoto], choice: solver.SolverChoice, want: Device, cr
     diag["members"] = per
     timing["total_s"] = round(time.monotonic() - t0, 2)
     diag["timing"] = timing
-    nothing = "nothing_placed" in diag
-    out = Align(version=1, solver="none" if nothing else name, created=created, elapsed_s=round(time.monotonic() - t0, 2),
-                device=None if nothing else device, loop_residual_cm=loop, members=members,
+    out = Align(version=1, solver=name or "none", created=created, elapsed_s=round(time.monotonic() - t0, 2),
+                device=device, loop_residual_cm=loop, members=members,
                 unplaced=[m["scene"] for m in members if m["pose"] is None])
     full = cast(dict[str, object], out)
     full["diagnostics"] = diag
