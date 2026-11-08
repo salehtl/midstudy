@@ -6,12 +6,13 @@
 //             two overlapping keep-room captures leave the pieces their own colours (not the mask's white)
 //   align     the alignment is followed by its job id: a job the server forgot (404) ends in 'align-failed'
 //   loop      a render failure is reported once per scene opened, not once per session
+//   room view, placed pieces, drag, library   the placement chain, uids, rebuilds, guards, latest wins (--items stops after these)
 //   scene …   open/close tokens, layouts by scope, dirty baselines, ruler, Look autosave, renders, camera, lists, startup
 // Usage (repo root, through the lock): nix develop -c node scripts/eval-lock.mjs -- npm run eval:engine-races
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  PROBE, createEval, startServer, seedScene, launchBrowser, openPlanner, ensureScene, hook, fmt, raw, sleep, waitFor,
+  PROBE, createEval, startServer, seedScene, launchBrowser, openPlanner, ensureScene, hook, fmt, raw, sleep, waitFor, project,
 } from '../../../evals/lib/harness.mjs'
 
 const ev = createEval('ENGINE-RACES', 'engine-races', { timeoutS: 600 })
@@ -175,6 +176,307 @@ async function busyScene(n, busy) {
 const E = (fn, arg) => page.evaluate(fn, arg)
 const openS = (n) => E(async (n) => { await window.midstudyCtx.engine.openScene(n) }, n)
 const clearLog = () => E(() => { const R = window.__races; R.scene.length = 0; R.roomAll.length = 0; R.ruler.length = 0; R.render.length = 0 })
+
+const addProbeHere = (at) => E(async ({ id, at }) => window.midstudyCtx.engine.addItemInternal(id, { position: at, rotation_y_deg: 0 }), { id: PROBE.id, at })
+// --- the pieces and the room view (planner-engine-items); `--items` stops after these ------------------------------------
+{
+  const libFile = path.join(srv.dirs.library, 'library.json')
+  const readLib = () => JSON.parse(fs.readFileSync(libFile, 'utf8'))
+  const writeLib = (l) => fs.writeFileSync(libFile, JSON.stringify(l, null, 2))
+  const baseGlb = path.join(srv.dirs.library, PROBE.id, 'model.glb')
+  // a new library entry (the planner's GLB cache hasn't seen its URL, so a held GET really holds its load)
+  const fresh = (id, { thumb = true } = {}) => {
+    const lib = readLib()
+    const base = lib.items[0]
+    const dir = path.join(srv.dirs.library, id)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.copyFileSync(baseGlb, path.join(dir, 'model.glb'))
+    const assets = { ...base.assets, glb: `${id}/model.glb` }
+    delete assets.thumb
+    if (thumb) { fs.writeFileSync(path.join(dir, 'thumb.jpg'), 'x'); assets.thumb = `${id}/thumb.jpg` }
+    lib.items.push({ ...base, id, name: id, assets })
+    writeLib(lib)
+  }
+  // the entry's GLB moves to model2.glb (a re-add, as far as the planner can tell)
+  const repoint = (id) => {
+    fs.copyFileSync(baseGlb, path.join(srv.dirs.library, id, 'model2.glb'))
+    const lib = readLib()
+    lib.items.find((x) => x.id === id).assets.glb = `${id}/model2.glb`
+    writeLib(lib)
+  }
+  // the server only serves the file names the contract knows: the moved GLB is answered here
+  await page.route(/\/model2\.glb/, (r) => r.fulfill({ path: baseGlb, contentType: 'model/gltf-binary' }))
+  const reload = () => E(async () => { await window.midstudyCtx.engine.reloadLibrary() })
+  const glbOf = (id, file = 'model.glb') => new RegExp(`/${esc(id)}/${esc(file)}`)
+  const trio = async (tag) => { const ids = [0, 1, 2].map((i) => `race-${tag}${i}`); ids.forEach((id) => fresh(id)); await reload(); return { ids, re: new RegExp(`/race-${tag}\\d/model\\.glb`) } }
+  const layoutCount = () => E(() => window.midstudyCtx.engine.getLayoutItems().length)
+  const roomOf = () => E(() => { const s = window.midstudyCtx.engine.getRoomState(); return { photo: s.photo, unplaced: s.unplaced, alignPhotos: s.alignPhotos, floorPlan: s.floorPlan } })
+  const preview = (scene, pose) => E(({ scene, pose }) => window.midstudyCtx.engine.previewPose(scene, pose), { scene, pose })
+  const settled = (n, unplaced) => waitFor(async () => (await layoutCount()) === n && (await roomOf()).unplaced === unplaced, { timeoutMs: 6000, intervalMs: 50 })
+  const clear = () => E(() => { window.midstudyCtx.engine.clearItemsInternal() })
+  await E(() => {
+    const e = window.midstudyCtx.engine, R = window.__races
+    R.drag = []; R.renders = []
+    e.events.addEventListener('drag', (x) => R.drag.push(x.detail.phase))
+    e.events.addEventListener('items', (x) => { if (x.detail.change === 'render') R.renders.push(x.detail.uid) })
+  })
+
+  ev.section('room view: the placement chain')
+  const POSE_A = { x_m: 0, z_m: 0, yaw_deg: 0 }, POSE_B = { x_m: 0.5, z_m: 0, yaw_deg: 10 }
+  await E(async ({ r, a, b, pa, pb }) => {
+    const e = window.midstudyCtx.engine
+    await e.openRoom(r, a)
+    e.clearItemsInternal()
+    await e.setPose(a, { ...pa, scale: 1 })
+    await e.setPose(b, { ...pb, scale: 1 })
+  }, { r: ROOM, a: A.name, b: B.name, pa: POSE_A, pb: POSE_B })
+  await addProbeHere([0, 0, -2.6])
+  await E(async () => { await window.midstudyCtx.engine.saveLayoutInternal('race-tpl') })
+  const tpl = (await api('GET', `/api/layouts/race-tpl?room=${ROOM}`)).json
+  await clear()
+  const putThree = async (name, ids) => {
+    const items = ids.map((id, i) => ({ ...tpl.items[0], uid: `${name}-${i}`, id, position: [i * 0.9 - 0.9, 0, -2.6], rotation_y_deg: 0 }))
+    const res = await api('PUT', `/api/layouts/${name}?room=${ROOM}`, { ...tpl, name, items })
+    if (res.status !== 200) ev.check(`layout ${name} stored`, false, `${res.status} ${fmt(res.json)}`)
+    return items
+  }
+  const load = (name) => E((n) => window.midstudyCtx.engine.loadLayoutInternal(n), name)
+  {
+    const { ids, re } = await trio('a')
+    await putThree('race-a', ids)
+    await preview(A.name, null)
+    await load('race-a')
+    const h = await hold(re, { count: 99 })
+    await preview(A.name, POSE_A)
+    await hit(h)
+    await preview(A.name, null)
+    await sleep(300)
+    h.release()
+    const ok = await settled(3, true)
+    await h.off()
+    ev.check('a park during an unpark loses no piece (3 parked)', !!ok, `layout pieces ${await layoutCount()}; ${fmt(await roomOf())}`)
+    await preview(A.name, POSE_A)
+    await settled(3, false)
+    await clear()
+  }
+  {
+    const { ids, re } = await trio('b')
+    const items = await putThree('race-b', ids)
+    await preview(A.name, null)
+    await load('race-b')
+    const h = await hold(re, { count: 99 })
+    const moved = { x_m: 0.3, z_m: -0.2, yaw_deg: 8 }
+    await preview(A.name, POSE_A)
+    await hit(h)
+    await preview(A.name, moved)
+    await sleep(300)
+    h.release()
+    await settled(3, false)
+    await sleep(300)
+    await h.off()
+    const got = await E((uids) => { const e = window.midstudyCtx.engine; return { cam: e.getCamera(), size: e.getPhotoSize(), rects: uids.map((u) => e.getScreenRect(u)) } }, items.map((x) => x.uid))
+    const a = moved.yaw_deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a)
+    const toScene = (p) => { const x = p[0] - moved.x_m, z = p[2] - moved.z_m; return [c * x - s * z, p[1], s * x + c * z] }
+    const { w: bw, h: bh, d: bd } = PROBE.dims_cm
+    const errs = items.map((it, i) => {
+      const pts = []
+      for (const lx of [-bw / 200, bw / 200]) for (const ly of [0, bh / 100]) for (const lz of [-bd / 200, bd / 200]) pts.push(toScene([it.position[0] + lx, ly, it.position[2] + lz]))
+      const q = pts.map((p) => project(got.cam, got.size.w, got.size.h, p))
+      const xs = q.map((v) => v.px), ys = q.map((v) => v.py)
+      const r = got.rects[i]
+      return r ? Math.max(Math.abs(r.x - Math.min(...xs)), Math.abs(r.y - Math.min(...ys)), Math.abs(r.w - (Math.max(...xs) - Math.min(...xs))), Math.abs(r.h - (Math.max(...ys) - Math.min(...ys)))) : Infinity
+    })
+    ev.check('a pose moved during an unpark: every piece lands where the final pose sees it (3 px)', errs.length === 3 && errs.every((x) => x <= 3), fmt(errs))
+    await preview(A.name, POSE_A)
+    await sleep(100)
+    await clear()
+  }
+  {
+    const { ids, re } = await trio('c')
+    await putThree('race-c', ids)
+    await preview(B.name, null)
+    const h = await hold(re, { count: 99 })
+    await E(() => { window.__races.ld = window.midstudyCtx.engine.loadLayoutInternal('race-c').catch((x) => String(x)) })
+    await hit(h)
+    await E((b) => { window.__races.sw = window.midstudyCtx.engine.setRoomPhoto(b).catch((x) => String(x)) }, B.name)
+    await sleep(300)
+    h.release()
+    await E(() => Promise.all([window.__races.ld, window.__races.sw]))
+    const ok = await settled(3, true)
+    await h.off()
+    ev.check('a switch to an unplaced photo during a room layout load parks every piece', !!ok && (await roomOf()).photo === B.name, `layout pieces ${await layoutCount()}; ${fmt(await roomOf())}`)
+    await E(({ a }) => window.midstudyCtx.engine.setRoomPhoto(a), { a: A.name })
+    await preview(B.name, POSE_B)
+    await settled(3, false)
+    await clear()
+  }
+  {
+    const u = await addProbeHere([0, 0, -2.6])
+    const res = await E(async ({ u, a, pa }) => {
+      const e = window.midstudyCtx.engine
+      const [x, y] = e.floorToPhoto([0, 0, -2.6]); const s = e.getPhotoSize(), r = e.getPhotoRect()
+      const cx = r.x + (x / s.w) * r.w, cy = r.y + (y / s.h) * r.h
+      const at0 = e.getLayoutItems().find((i) => i.uid === u).at
+      const began = e.beginItemDrag(u, cx, cy)
+      await e.setPose(a, { x_m: 0.4, z_m: 0, yaw_deg: 0, scale: 1 })
+      const during = e.getDrag()
+      e.dragTo(cx + 120, cy)
+      const at1 = e.getLayoutItems().find((i) => i.uid === u).at
+      e.endItemDrag()
+      await e.setPose(a, { ...pa, scale: 1 })
+      return { began, during, at0, at1 }
+    }, { u, a: A.name, pa: POSE_A })
+    ev.check('a pose saved during a drag ends the drag; the piece stays put in the room', res.began && res.during === null && Math.abs(res.at0.x - res.at1.x) < 1e-6 && Math.abs(res.at0.z - res.at1.z) < 1e-6, fmt(res))
+    const plan = await E(() => {
+      const e = window.midstudyCtx.engine
+      const toggle = () => document.querySelector('[data-midstudy=floor-plan-toggle]').click()
+      if (!e.getRoomState().floorPlan) toggle()
+      const shown = e.getRoomState().floorPlan
+      e.setAlignPhotos(true)
+      const onShown = e.getRoomState().alignPhotos
+      const uid = e.getItems()[0].uid
+      const rect = e.getPhotoRect()
+      const drag = e.beginItemDrag(uid, rect.x + rect.w / 2, rect.y + rect.h / 2)
+      e.setAlignPhotos(false)
+      toggle()
+      const hidden = e.getRoomState().floorPlan
+      e.setAlignPhotos(true)
+      const onHidden = e.getRoomState().alignPhotos
+      e.setAlignPhotos(false)
+      toggle()
+      return { shown, onShown, drag, hidden, onHidden }
+    })
+    ev.check('Align photos needs the floor plan shown, and refuses piece drags', plan.shown && plan.onShown && !plan.drag && !plan.hidden && !plan.onHidden, fmt(plan))
+    await clear()
+  }
+  for (const n of ['race-tpl', 'race-a', 'race-b', 'race-c']) await E((n) => window.midstudyCtx.engine.deleteLayoutInternal(n).catch(() => undefined), n)
+  await E(() => window.midstudyCtx.engine.closeScene())
+  await openS(A.name)
+
+  ev.section('placed pieces: uids, rebuilds')
+  {
+    fresh('race-dup'); await reload()
+    const h = await hold(glbOf('race-dup'), { count: 99 })
+    await E(() => { window.__races.dup = window.midstudyCtx.engine.restoreItems([0, 1].map(() => ({ uid: 'dup-1', id: 'race-dup', name: 'dup', position: [0, 0, -2.6], rotation_y_deg: 0 }))).catch((x) => String(x)) })
+    await hit(h)
+    await sleep(200)
+    h.release()
+    await E(() => window.__races.dup)
+    await h.off()
+    const s = await E(() => { const e = window.midstudyCtx.engine; return { uids: e.getItems().map((i) => i.uid), groups: e.getItemGroupCount() } })
+    ev.check('two adds with one uid: two pieces, distinct uids, nothing orphaned in the scene', s.uids.length === 2 && new Set(s.uids).size === 2 && s.groups === 2, fmt(s))
+    await clear()
+  }
+  const newest = (id) => E((id) => window.midstudyCtx.engine.getItems().find((i) => i.id === id)?.lib?.assets?.glb ?? null, id)
+  const rendersOf = () => E(() => window.__races.renders.length)
+  {
+    fresh('race-rb'); await reload()
+    await E(() => window.midstudyCtx.engine.addItemInternal('race-rb', { position: [0, 0, -2.6], rotation_y_deg: 0 }))
+    repoint('race-rb')
+    const r0 = await rendersOf()
+    let fails = 0
+    const re = glbOf('race-rb', 'model2.glb')
+    const gone = (r) => { fails++; return r.fulfill({ status: 404, body: 'gone' }) }
+    await page.route(re, gone)
+    await reload()
+    await waitFor(() => fails > 0, { timeoutMs: 6000, intervalMs: 30 })
+    await sleep(300)
+    await page.unroute(re, gone)
+    await reload()
+    await waitFor(async () => (await rendersOf()) > r0, { timeoutMs: 6000, intervalMs: 30 })
+    const g = await newest('race-rb')
+    ev.check('a rebuild that failed is tried again on the next library read', g === 'race-rb/model2.glb' && (await rendersOf()) > r0, `glb ${g}; 404s ${fails}; rebuilds ${(await rendersOf()) - r0}; errors ${fmt(await E(() => window.__races.errors.slice(-3)))}`)
+    await clear()
+  }
+  {
+    fresh('race-late'); await reload()
+    const r0 = await rendersOf()
+    const h = await hold(glbOf('race-late'), { count: 99 })
+    await E(() => { window.__races.add = window.midstudyCtx.engine.addItemInternal('race-late', { position: [0, 0, -2.6], rotation_y_deg: 0 }).catch((x) => String(x)) })
+    await hit(h)
+    repoint('race-late')
+    await reload()
+    h.release()
+    await E(() => window.__races.add)
+    await h.off()
+    await waitFor(async () => (await rendersOf()) > r0, { timeoutMs: 6000, intervalMs: 30 })
+    const g = await newest('race-late')
+    ev.check('a library change during a piece\'s load: the piece ends on the new asset', g === 'race-late/model2.glb', `glb ${g}; rebuilds ${(await rendersOf()) - r0}; errors ${fmt(await E(() => window.__races.errors.slice(-3)))}`)
+    await clear()
+  }
+
+  ev.section('drag: guards')
+  {
+    const u = await addProbeHere([0, 0, -2.6])
+    const s = await E((u) => {
+      const e = window.midstudyCtx.engine, R = window.__races
+      R.drag.length = 0
+      const [x, y] = e.floorToPhoto([0, 0, -2.6]); const z = e.getPhotoSize(), r = e.getPhotoRect()
+      const cx = r.x + (x / z.w) * r.w, cy = r.y + (y / z.h) * r.h
+      e.select(u)
+      const a = e.beginItemDrag(u, cx, cy), b = e.beginItemDrag(u, cx, cy)
+      e.endItemDrag()
+      const log = [...R.drag]
+      e.setAdjustFloor(true); e.setRulerActive(true)
+      const ruler = e.getRuler().active
+      const refused = [e.beginItemDrag(u, cx, cy), e.beginRotateDrag(u, cx, cy)]
+      e.setRulerActive(false); e.setAdjustFloor(false)
+      return { a, b, log, ruler, refused, primary: e.getSelected() }
+    }, u)
+    ev.check('a second begin ends the first drag (start,end,start,end)', s.a && s.b && fmt(s.log) === fmt(['start', 'end', 'start', 'end']), fmt(s))
+    ev.check('the ruler refuses piece drags', s.ruler && s.refused.every((x) => x === false), fmt(s))
+    await clear()
+  }
+
+  ev.section('library: latest wins, a failed read, thumbnails')
+  const libUrl = '**/library/library.json'
+  {
+    const full = readLib().items.length
+    let reads = 0
+    const older = async (route) => {
+      reads++
+      if (reads !== 1) return route.fallback()
+      const res = await route.fetch()
+      const j = await res.json()
+      await sleep(1500)
+      return route.fulfill({ response: res, json: { ...j, items: j.items.slice(0, 1) } })
+    }
+    await page.route(libUrl, older)
+    const n = await E(async () => { const e = window.midstudyCtx.engine; await Promise.all([e.reloadLibrary(), e.reloadLibrary()]); return e.getLibrary().length })
+    await page.unroute(libUrl, older)
+    ev.check('an older library answer landing last doesn\'t replace the newer', n === full && reads === 2, `library ${n} of ${full}; reads ${reads}`)
+  }
+  {
+    await addProbeHere([0, 0, -2.6])
+    await E(async () => { await window.midstudyCtx.engine.saveLayoutInternal('race-kept') })
+    const bad = (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"on purpose"}' })
+    await page.route(libUrl, bad)
+    await reload()
+    await page.unroute(libUrl, bad)
+    await E(() => window.midstudyCtx.engine.loadLayoutInternal('race-kept'))
+    const s = await E(() => { const e = window.midstudyCtx.engine; return { lib: e.getLibrary().length, missing: e.getItems().map((i) => i.missing) } })
+    ev.check('a failed re-read keeps the list: the next layout has no missing pieces', s.lib > 0 && s.missing.length === 1 && s.missing[0] === false, fmt(s))
+    await E(() => window.midstudyCtx.engine.deleteLayoutInternal('race-kept'))
+    await clear()
+  }
+  {
+    fresh('race-thumb', { thumb: false })
+    const re = /\/api\/library\/items\/race-thumb\/thumb$/
+    let puts = 0
+    const busy = (r) => { if (r.request().method() !== 'PUT') return r.fallback(); puts++; return puts === 1 ? r.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"busy"}' }) : r.fallback() }
+    await page.route(re, busy)
+    await reload()
+    await waitFor(() => puts === 1, { timeoutMs: 15000, intervalMs: 50 })
+    await sleep(300)
+    await reload()
+    await waitFor(() => puts >= 2, { timeoutMs: 8000, intervalMs: 50 })
+    const got = await waitFor(() => E(() => window.midstudyCtx.engine.getLibrary().find((x) => x.id === 'race-thumb')?.assets?.thumb ?? null), { timeoutMs: 8000, intervalMs: 50 })
+    await page.unroute(re, busy)
+    ev.check('a thumbnail PUT answered 503 is sent again on the next library read, and the thumb lands', puts === 2 && !!got, `PUTs ${puts}; thumb ${fmt(got)}`)
+  }
+  await E(() => window.midstudyCtx.engine.closeScene())
+  if (process.argv.includes('--items')) { ev.check('no page errors', P.errors.page.length === 0, P.errors.page.slice(0, 3).join(' | ') || 'none'); await ev.finish() }
+}
 
 ev.section('scene: open and close')
 await E(async ({ r, a }) => { await window.midstudyCtx.engine.openRoom(r, a) }, { r: ROOM, a: A.name })

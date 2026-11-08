@@ -328,3 +328,27 @@ Deviations: `recalibrate` resolves null when superseded (it was the scene summar
 carries `lost: true` (the seam text asks for it; the fix's design did not). `followLostRender` allows one second of
 slack, as `created` has whole seconds. The baseline entries were added by hand in sorted order (`--files --update`
 does not write, as W1 noted). planner/bus.ts needed no change: EngineEvents is in engine.ts.
+
+## State machines W3: planner-engine-items (2026-11-08)
+
+Pieces and the room view in `planner/engine.ts`, per docs/notes/state-machines-plan.md:
+
+- **Placement chain.** `placed(fn)`: park, unpark, re-project and a layout load's clear-and-add run one at a time.
+  `projectToPose(r)` re-projects after a load lands. A pose change ends a drag. `floorPlanShown` resets on close and on
+  a non-switching open; Align photos needs the plan shown.
+- **Adds and rebuilds.** `pendingUids` reserves a uid during its add. Adds and rebuilds wait for captures
+  (`capturesIdle`), then attach in one synchronous step. `r.sig` is written only after a rebuild attached, so a failed
+  one is retried. An add that lands after a library change is rebuilt (`syncPiece`).
+- **Drag.** A second begin ends the first; `resetDrag`; begins are refused with the ruler or Align photos on; `selected`
+  is gone (`primary()`), and removal goes through `setSelection`.
+- **Library.** Latest read wins; `libraryReady()` waits out reads that start meanwhile. Thumbnail PUT 503 or no answer:
+  retried on the next read. The file caches evict only their own promise.
+- **Tests.** Sections before `scene: open and close` in `planner/ui/test/engine-races.mjs` (`--items` stops after them).
+
+Differs from v1 (contract §0): a failed library re-read keeps the previous list; v1 emptied it and every piece of the
+next layout went missing. The first read failing still leaves [].
+
+Additions and limits: a load that finds the photo unplaced parks first (its pose can go while it waits in the chain).
+`syncPiece` drops a rebuild in flight when the library goes back to what the piece draws. `getItemGroupCount()` is a new
+probe for the orphan check. A load in the chain waits for an earlier load's GLB fetches, even a cancelled one. The
+capture-wait on attach has no red test (the window is too narrow to hit reliably). The new room saga stays deferred.
