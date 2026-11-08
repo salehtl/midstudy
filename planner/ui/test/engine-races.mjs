@@ -197,6 +197,49 @@ ev.section('resources: the lighting backfill, the kernel worker, the occlusion f
     await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
     await sleep(1500)
     ev.check('reopening the scene does not start the backfill again', posts === 1, `${posts} POST(s)`)
+    const back = await p.evaluate(() => ({ status: window.midstudyCtx.engine.getLighting().status, last: window.__lit.at(-1) }))
+    ev.check("reopening after the autostart reads 'failed', not a busy 'missing' nothing follows (the panel offers Infer lighting)", back.status === 'failed' && back.last?.status === 'failed' && !!back.last.error, fmt(back))
+    await ctx.close()
+  }
+  {
+    // a job in flight is followed when a recalibration or a reopen reads it
+    const ctx = await browser.newContext()
+    const p = await scenePage(ctx)
+    let status = 'none'
+    await noLighting(p, B.name, () => status)
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
+    await events(p)
+    const follows = async (what, act) => {
+      status = 'pending'
+      await p.evaluate(() => { window.__lit.length = 0 })
+      await act()
+      await waitFor(() => p.evaluate(() => window.__lit.at(-1)?.status === 'pending'), { timeoutMs: 20000, intervalMs: 50 })
+      status = 'none'
+      await waitFor(() => p.evaluate(() => window.__lit.at(-1)?.status === 'none'), { timeoutMs: 8000, intervalMs: 100 }).catch(() => undefined)
+      const lit = await p.evaluate(() => window.__lit)
+      ev.check(`${what} reading 'pending' polls until the job ends`, lit.at(-1)?.status === 'none', fmt(lit))
+    }
+    await follows('a recalibration', () => p.evaluate(() => window.midstudyCtx.engine.recalibrate()))
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, A.name)
+    await follows('a reopen', () => p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name))
+    await ctx.close()
+  }
+  {
+    // the POST failing after a newer run of the same scene (left and came back) leaves that run's status
+    const ctx = await browser.newContext()
+    const p = await scenePage(ctx)
+    await p.route(new RegExp(`/api/scenes/${esc(B.name)}/light$`), (r) => r.fulfill(json(500, { error: { code: 'INTERNAL', message: 'failed on purpose' } })))
+    const light = await hold(new RegExp(`/api/scenes/${esc(B.name)}/light$`), { method: 'POST', ctx: p })
+    await noLighting(p, B.name, () => 'none')
+    await p.evaluate(async (n) => { await window.midstudyCtx.engine.openScene(n) }, B.name)
+    await events(p)
+    void p.evaluate(() => window.midstudyCtx.engine.inferLighting().catch(() => undefined))
+    await hit(light)
+    await p.evaluate(async (n) => { const e = window.midstudyCtx.engine; await e.openScene(n[0]); await e.openScene(n[1]) }, [A.name, B.name])
+    light.release()
+    await sleep(400)
+    const seen = await p.evaluate(() => ({ lit: window.__lit, status: window.midstudyCtx.engine.getLighting().status }))
+    ev.check("a POST /light failing after the same scene was reopened leaves the newer status", seen.status === 'none' && !seen.lit.some((x) => x.status === 'failed'), fmt(seen))
     await ctx.close()
   }
   {

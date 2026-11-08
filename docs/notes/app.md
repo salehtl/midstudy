@@ -431,3 +431,5 @@ on a lost row was false, so the row's line changed too (the brief named only the
 Deviations: `getOcclusion()` reports the effective value too (the design named getSceneState and the event; the UI
 already and-ed it with hasDepth). The autostart-once rule comes from the plan's seam note, not this fix's design. A scene
 opened with pending/running lighting still isn't polled (only recalibrate was in scope).
+
+> **W4 planner-engine-resources, review fixes:** `resumeLighting` (open, recalibrate) leaves no status the panel shows as busy without a follower: pending/running is polled (on open only with the calibration done, so a calibrating scene isn't mistaken for a light job), 'missing' autostarts once per scene per page and after that ends `failed`, which shows Infer lighting. The pending to missing wording is now "ended without a result": the server's status also covers a calibration that ended without lighting.json.

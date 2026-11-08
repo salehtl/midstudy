@@ -308,7 +308,7 @@ export function lightingStep(prev: string, polled: string, polls: number, maxPol
     return polls >= maxPolls ? { status: 'failed', terminal: true, error: 'gave up waiting' } : { status: polled, terminal: false, error: null }
   }
   if (polled === 'missing' && (prev === 'pending' || prev === 'running')) {
-    return { status: 'failed', terminal: true, error: 'the lighting job was lost (the server restarted?)' }
+    return { status: 'failed', terminal: true, error: 'the job ended without a result (lost to a server restart?)' }
   }
   return { status: polled, terminal: true, error: null }
 }

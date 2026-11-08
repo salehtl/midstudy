@@ -1858,10 +1858,7 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
     emitView()
     emit('scene', { phase: 'opened', name })
     if (room) emit('room', { phase: switching ? 'photo' : 'opened', name: room.name })
-    if (lightingStatus.status === 'missing' && data['calib_status'] === 'done' && !lightAutostarted.has(name)) {
-      lightAutostarted.add(name) // once per scene per page: a 'none' the server forgot reads 'missing' again
-      quiet(inferLighting())
-    }
+    if (data['calib_status'] === 'done') resumeLighting(name, data)
     // The scene comes back with its layout (layoutToOpen: what this device had open, or the one saved last on any
     // device), so the furniture isn't lost on a reload or on the other device; then the renders list. The library
     // must be read first, or the pieces would load as missing. A room view: the room's layout, once, on its first photo.
@@ -2047,11 +2044,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
   lightingToken++
   setLightingData(data)
   applyLook()
-  if (lightingStatus.status === 'pending' || lightingStatus.status === 'running') {
-    emitLighting()
-    const pollToken = ++lightingToken
-    quiet(trackLighting(name, pollToken, pollLighting(name, pollToken)))
-  }
+  resumeLighting(name, data)
   floorNote = floorNoteFor(data)
   if (!dirty.scene && cameraSource !== 'manual') {
     cam = clampCamera(data['camera'])
@@ -2940,13 +2933,31 @@ function setLightingData(data: JsonObject | null): void {
 function emitLighting(): void { emit('lighting', { status: lightingStatus.status, error: lightingStatus.error }); emitLook() }
 // A scene calibrated before lighting.json existed (§4.8 backfill): POST …/light runs only the lighting step on the
 // server; this polls the scene until it is there (or the server found none), then lights the furniture with it.
-// Opening such a scene starts it; the Look panel's "Infer lighting" starts it again after a failure.
+// Opening such a scene starts it, once per scene per page; the Look panel's "Infer lighting" starts it again after that.
 async function inferLighting(): Promise<LightingReport | null> {
   const name = sceneName
   if (!name) throw reportError('No scene is open')
   if (lightingRun?.name === name && lightingRun.token === lightingToken) return lightingRun.p
   const token = ++lightingToken
   return trackLighting(name, token, postLight(name, token))
+}
+// What a status just read from the server (an open, a recalibration) leaves to do, so that no status the panel shows as
+// busy is left without something following it: a job in flight is polled; 'missing' starts the backfill once per scene
+// per page (a 'none' the server forgot reads 'missing' again), and after that ends failed, which offers "Infer lighting".
+function resumeLighting(name: string, data: JsonObject): void {
+  if (lightingStatus.status === 'pending' || lightingStatus.status === 'running') {
+    emitLighting()
+    const token = ++lightingToken
+    quiet(trackLighting(name, token, pollLighting(name, token)))
+  } else if (lightingStatus.status === 'missing' && data['calib_status'] === 'done') {
+    if (lightAutostarted.has(name)) {
+      lightingStatus = { status: 'failed', error: "the last try didn't finish" }
+      emitLighting()
+    } else {
+      lightAutostarted.add(name)
+      quiet(inferLighting())
+    }
+  }
 }
 function trackLighting(name: string, token: number, work: Promise<LightingReport | null>): Promise<LightingReport | null> {
   const p = work.finally(() => { if (lightingRun?.token === token) lightingRun = null })

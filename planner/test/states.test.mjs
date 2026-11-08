@@ -61,7 +61,7 @@ test('renderLostText says the render may still finish and leaves renderFailText 
 })
 
 test('lightingStep: one poll of the lighting backfill', () => {
-  const LOST = 'the lighting job was lost (the server restarted?)'
+  const LOST = 'the job ended without a result (lost to a server restart?)'
   const GAVE_UP = 'gave up waiting'
   const rows = [
     // [prev, polled, polls, status, terminal, error]
