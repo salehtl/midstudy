@@ -21,6 +21,8 @@ export class SpendCap {
   readonly #settingsFile: string | null
   readonly #now: () => number
   readonly #reserved = new Map<string, number>()
+  /** The read error last logged, so an unreadable ledger writes one line, not one per request. */
+  #unreadable: string | null = null
 
   constructor(costsFile: string, capUsd: number, now: () => number = Date.now, settings: { readonly file: string; readonly locked: boolean } | null = null) {
     this.costsFile = costsFile
@@ -54,14 +56,20 @@ export class SpendCap {
     return utcDay(this.#now())
   }
 
-  /** v1 `spent`: the day's total in costs.csv (0 when it can't be read), rounded to 6 places. */
+  /** The day's total in costs.csv, rounded to 6 places: 0 when there is no file yet. Any other read error answers the
+   *  cap itself, so an unreadable ledger refuses paid calls (v1 read it as 0; docs/notes/server.md). */
   spent(day: string): number {
     let text: string
     try {
       text = fs.readFileSync(this.costsFile, 'utf8')
-    } catch {
-      return 0
+    } catch (e) {
+      const code = e instanceof Error && 'code' in e && typeof e.code === 'string' ? e.code : 'unknown'
+      if (code === 'ENOENT') return 0
+      if (this.#unreadable !== code) process.stderr.write('costs.csv unreadable: ' + code + '; refusing paid calls\n')
+      this.#unreadable = code
+      return this.capUsd
     }
+    this.#unreadable = null
     return pyRound(spentOn(text, day), 6)
   }
 
@@ -99,6 +107,15 @@ export class SpendCap {
   /** Gives back `key`'s reservation (when its call ended, paid or not). */
   release(key: string): void {
     this.#reserved.delete(key)
+  }
+
+  /** Moves `from`'s reservation to `to` without checking the cap again: the money stays held, so a hand-off can't be
+   *  refused. Nothing happens when `from` holds nothing (a mock call reserves nothing). */
+  transfer(from: string, to: string): void {
+    const amount = this.#reserved.get(from)
+    if (amount === undefined) return
+    this.#reserved.delete(from)
+    this.#reserved.set(to, amount)
   }
 
   /** Keeps `key`'s reservation until the end of the UTC day instead of releasing it (a paid job stopped at its timeout

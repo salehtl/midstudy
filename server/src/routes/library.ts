@@ -73,20 +73,16 @@ function metaOf(header: string | undefined): PyValue | null {
   return value?.kind === 'dict' ? value : null
 }
 
-/** v1 `queue_add`: 202 `{job, cost_usd_estimate}`, or 402 when the cap refuses it. The job owns (and removes) `tmp`;
- *  a from-URL add hands over the reservation it held while downloading. */
-async function queueAdd(ctx: RequestContext, library: LibraryService, deps: ServerDeps, src: string, tmp: string, meta: AddMeta, label: string, reservedKey: string | null): Promise<void> {
+/** v1 `queue_add`: 202 `{job, cost_usd_estimate}`, or 402 when the cap refuses it. `handedOff` says a job now owns
+ *  (and will remove) `tmp`; until then the caller does. A from-URL add passes the key of the reservation it held while
+ *  downloading, and the job adopts it. */
+function queueAdd(library: LibraryService, deps: ServerDeps, src: string, tmp: string, meta: AddMeta, label: string, reservedKey: string | null): Answer & { readonly handedOff: boolean } {
   const exists = findItem(itemsOf(library.readPlain()), meta.id) !== null
   const reserve = countsAgainstCap() ? meta.estimate : 0
-  if (reservedKey !== null) deps.spend.release(reservedKey)
   const argv = addArgv(deps.config.midstudyAdd, resolvePath(src), library.libraryArg(), label, meta)
-  const queued = library.newJob('add', meta.id, meta.engine, meta.estimate, argv, tmp, reserve, queuedMessage(exists, meta.id))
-  if ('refused' in queued) {
-    removeTree(tmp)
-    await ctx.send(402, queued.refused)
-    return
-  }
-  await ctx.send(202, { job: queued.job, cost_usd_estimate: meta.estimate })
+  const queued = library.newJob('add', meta.id, meta.engine, meta.estimate, argv, tmp, reserve, queuedMessage(exists, meta.id), reservedKey)
+  if ('refused' in queued) return { status: 402, body: queued.refused, handedOff: false }
+  return { status: 202, body: { job: queued.job, cost_usd_estimate: meta.estimate }, handedOff: true }
 }
 
 /** POST /api/library/items: a raw-body upload (§2.8 Bodies, Limits). */
@@ -125,7 +121,14 @@ async function postUpload(ctx: RequestContext, library: LibraryService, deps: Se
     if (e instanceof UploadRefused) return ctx.error(400, e.message)
     throw e
   }
-  await queueAdd(ctx, library, deps, src, tmp, meta.value, filename, null)
+  let handedOff = false
+  try {
+    const queued = queueAdd(library, deps, src, tmp, meta.value, filename, null)
+    handedOff = queued.handedOff
+    await ctx.send(queued.status, queued.body)
+  } finally {
+    if (!handedOff) removeTree(tmp)
+  }
 }
 
 /** POST /api/library/items/from-url: the server downloads the image itself (§2.9 URL fetches), with the estimate
@@ -142,18 +145,29 @@ async function postFromUrl(ctx: RequestContext, library: LibraryService, deps: S
   const key = 'fetch-' + randomBytes(4).toString('hex')
   const refused = deps.spend.reserve(key, countsAgainstCap() ? meta.value.estimate : 0)
   if (refused !== null) return ctx.send(402, refused)
-  const tmp = await makeTempDir('midstudy-fetch-')
-  let src: string
+  // The request owns the reservation and the temp folder until a job takes them.
+  let handedOff = false
+  let tmp: string | null = null
   try {
-    src = await fetchImage(link, tmp)
-    if (!isPhoto(await head(src))) throw new FetchError(LINK_NOT_IMAGE)
-  } catch (e) {
-    deps.spend.release(key)
-    removeTree(tmp)
-    if (e instanceof FetchError) return ctx.error(400, e.message)
-    throw e
+    tmp = await makeTempDir('midstudy-fetch-')
+    let src: string
+    try {
+      src = await fetchImage(link, tmp)
+      if (!isPhoto(await head(src))) throw new FetchError(LINK_NOT_IMAGE)
+    } catch (e) {
+      if (!(e instanceof FetchError)) throw e
+      await ctx.error(400, e.message)
+      return
+    }
+    const queued = queueAdd(library, deps, src, tmp, meta.value, link, key)
+    handedOff = queued.handedOff
+    await ctx.send(queued.status, queued.body)
+  } finally {
+    if (!handedOff) {
+      deps.spend.release(key)
+      if (tmp !== null) removeTree(tmp)
+    }
   }
-  await queueAdd(ctx, library, deps, src, tmp, meta.value, link, key)
 }
 
 /** PATCH /api/library/items/<id>: name, category, mount, default_render in place (200 the item); new dims_cm or a
@@ -174,17 +188,16 @@ async function patchItem(ctx: RequestContext, library: LibraryService, deps: Ser
       item[set.key] = set.value
     }
     if (changed) await library.write(doc)
-    return { item: plain(item), plan: plan.value }
+    const answered = plain(item)
+    const refit = plan.value.yaw !== 0 || (plan.value.dims !== null && needsRefit(plan.value, currentDims(isRecord(answered) ? answered : {})))
+    if (!refit) return { status: 200, body: answered }
+    // Queued while the lock is held, so rescales run in the order their PATCHes were applied (the job takes the lock later).
+    const argv = rescaleArgv(deps.config.midstudyAdd, id, library.libraryArg(), plan.value.dims, plan.value.yaw)
+    const queued = library.newJob('rescale', id, 'glb', 0, argv, null, 0, QUEUED)
+    if ('refused' in queued) return { status: 402, body: queued.refused } // a $0 rescale is never refused
+    return { status: 202, body: { job: queued.job } }
   })
-  if ('status' in outcome) return ctx.send(outcome.status, outcome.body)
-  const { plan } = outcome
-  const item = isRecord(outcome.item) ? outcome.item : {}
-  const refit = plan.yaw !== 0 || (plan.dims !== null && needsRefit(plan, currentDims(item)))
-  if (!refit) return ctx.send(200, outcome.item)
-  const argv = rescaleArgv(deps.config.midstudyAdd, id, library.libraryArg(), plan.dims, plan.yaw)
-  const queued = library.newJob('rescale', id, 'glb', 0, argv, null, 0, QUEUED)
-  if ('refused' in queued) return ctx.send(402, queued.refused) // a $0 rescale is never refused
-  await ctx.send(202, { job: queued.job })
+  await ctx.send(outcome.status, outcome.body)
 }
 
 /** PUT /api/library/items/<id>/thumb: the planner's picture of a piece made from a 3D file, stored without metadata. */
@@ -228,10 +241,22 @@ async function deleteItem(ctx: RequestContext, library: LibraryService, id: stri
     await fsp.mkdir(root, { recursive: true })
     await fsp.mkdir(trash)
     const folder = path.join(library.dir, id)
-    if (isDir(folder)) move(folder, path.join(trash, id))
-    await library.writeFile(path.join(trash, 'entry.json'), { deleted: isoUtc(now), entry: item }, 'midstudy/trash.schema.json#/$defs/item', 'ascii')
-    doc['items'] = items.filter((i) => !(isRecord(i) && i['id'] === id))
-    await library.write(doc)
+    const moved = path.join(trash, id)
+    let didMove = false
+    // library.json is the commit: anything failing up to and including it puts the folder back and leaves no trash copy.
+    try {
+      await library.writeFile(path.join(trash, 'entry.json'), { deleted: isoUtc(now), entry: item }, 'midstudy/trash.schema.json#/$defs/item', 'ascii')
+      if (isDir(folder)) {
+        move(folder, moved)
+        didMove = true
+      }
+      doc['items'] = items.filter((i) => !(isRecord(i) && i['id'] === id))
+      await library.write(doc)
+    } catch (e) {
+      if (didMove) move(moved, folder) // if this throws the trash copy stays, complete and restorable
+      removeTree(trash)
+      throw e
+    }
     return { status: 200, body: { ok: true, trash: '.trash/' + name } }
   })
   await ctx.send(outcome.status, outcome.body)
@@ -252,9 +277,16 @@ async function restoreItem(ctx: RequestContext, library: LibraryService, id: str
     if (!Object.hasOwn(meta, 'entry')) throw new PyError('KeyError', "'entry'")
     const entry = meta['entry']
     const folder = path.join(copy.dir, id)
-    if (isDir(folder)) move(folder, path.join(library.dir, id))
+    const live = path.join(library.dir, id)
+    const didMove = isDir(folder)
+    if (didMove) move(folder, live)
     doc['items'] = [...items, entry]
-    await library.write(doc)
+    try {
+      await library.write(doc)
+    } catch (e) {
+      if (didMove) move(live, folder) // back in the trash: the copy can be restored again
+      throw e
+    }
     removeTree(copy.dir)
     return { status: 200, body: plain(entry) }
   })

@@ -102,3 +102,12 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - `#align`: a spawn-error is now "not applied" with the OSError reason, so the render completes. This departs from v1's 500 on purpose: the render is already paid for and in costs.csv.
 - Deviation, `common/tools.ts` (not in the package's file list): `killGroup` sends one SIGTERM per child. At the server's stop killAllTools and the abort both end the same add, and midstudy-add leaves at once on a second signal, which would lose a paid run's cost row. Proof in `server/test/tools.test.ts`.
 - Deviation from the seam note: the done item is still read from library.json, not the summary line. `add-summary.schema.json` has no item, and the fix entry keeps this read (library.json is replaced atomically).
+## State machines W4: server-infra-library (reservation hand-off, fail-closed spend, temp ownership, delete/restore rollback)
+
+- `SpendCap.transfer(from, to)` moves a reservation without checking the cap; `newJob`'s last parameter `adopt` uses it, so a from-URL add can no longer answer 402 after its download.
+- `spent()`: only ENOENT reads as 0. Any other read error logs one line and answers the cap, so paid calls are refused and `/api/spend` shows the cap as spent. **This departs from v1 on purpose** (v1 read any error as 0); contract §2.9 doesn't cover it. $0 calls never read the ledger.
+- A request owns its temp folder and reservation until `newJob`/`scenes.create` returns (`handedOff`, try/finally in postUpload, postFromUrl; try/catch in postScene).
+- delete: entry.json first, then the move, then library.json (the commit); a failure puts the folder back and removes the trash copy. restore: a failed library.json write moves the folder back into the trash copy. If the move back itself throws, the trash copy is left as it is.
+- PATCH queues its rescale inside the lock. `#run` returns unless the job is still queued.
+- Deviations: `adopt` is an optional last parameter (the existing callers and `jobs.test.ts` stay as they are). The scene-create fault replaces the scenes folder with a file instead of making it read-only: `makeDir` only special-cases EEXIST, but a file is deterministic whatever the user's permissions. The 402 path's removeTree is now the shared `finally`. New fixture `server/test/fixtures/record-add.mjs`. Upload's route test is in-process (a throwing SpendCap through ServerDeps); the others use a started server.
+- The PATCH order test can't be made red reliably: today's window between the lock's release and newJob is a few microtasks.

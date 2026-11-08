@@ -84,8 +84,14 @@ async function postScene(ctx: RequestContext, scenes: SceneService): Promise<voi
     removeTree(tmp)
     throw e
   }
-  const { name, job } = scenes.create(upload, tmp, storedFilename(filename), ext, length, title)
-  await ctx.send(202, { job, scene: name })
+  let created: ReturnType<SceneService['create']>
+  try {
+    created = scenes.create(upload, tmp, storedFilename(filename), ext, length, title)
+  } catch (e) {
+    removeTree(tmp) // until create returns the folder is this request's; then the job owns it
+    throw e
+  }
+  await ctx.send(202, { job: created.job, scene: created.name })
 }
 
 /** v1 `put_scene`. */
