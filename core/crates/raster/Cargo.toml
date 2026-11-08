@@ -13,11 +13,6 @@ workspace = true
 midstudy-geom = { path = "../geom" }
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 
-[features]
-# For the fuzz targets only (fuzz/Cargo.toml): skip chunk CRC checks so the fuzzer reaches the inflater and the
-# filters instead of spending its time on CRCs. Never enable it anywhere else.
-fuzzing = []
-
 [dev-dependencies]
 proptest = "1"
 sha2 = "0.10"

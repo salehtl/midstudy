@@ -94,7 +94,9 @@ pub fn dilate_into(
     if src.len() != n || row_pass.len() != n || out.len() != n || counters.len() != width {
         return Err(MaskError::WrongLength);
     }
-    let sat = |r: usize| u32::try_from(r).unwrap_or(u32::MAX);
+    // `u32::MAX` is the counters' "no set pixel yet", so a reach must stay below it, or a column with no set pixel would
+    // turn on. A counter that has seen one grows by 1 a row and the height is at most `MAX_PIXELS`: nothing else changes.
+    let sat = |r: usize| u32::try_from(r).unwrap_or(u32::MAX).min(u32::MAX - 1);
     let (up, down) = (sat(reach.up), sat(reach.down));
     for (srow, arow) in src
         .chunks_exact(width)
@@ -366,6 +368,28 @@ mod tests {
                 reach.down as i64,
             );
             assert_eq!(mine, theirs, "trial {trial}");
+        }
+    }
+
+    /// A reach as large as the counter's "unseen" value must not turn on a column with no set pixel. `u32::MAX as usize`
+    /// is the value wasm32 passes through; `usize::MAX` saturates to the same on 64 bits.
+    #[test]
+    fn a_saturated_reach_leaves_empty_columns_empty() {
+        let (w, h) = (3, 4);
+        let mut src = vec![0; w * h];
+        src[w] = 1; // row 1, column 0
+        for r in [usize::MAX, u32::MAX as usize] {
+            let reach = Reach {
+                left: 0,
+                right: 0,
+                up: r,
+                down: r,
+            };
+            assert_eq!(
+                dilate(&src, w, h, reach).unwrap(),
+                [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
+                "reach {r}"
+            );
         }
     }
 

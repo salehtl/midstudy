@@ -17,3 +17,11 @@
 - No envelope layout change. `decodeEnvelope` and `Payload` are exported for the test (`Payload` because the composite build emits declarations).
 - Deviation: `decodeGlbEnvelope` is split out of `stripGlb` and exported, because the GLB check lives in its reader and the test has to feed it a hand-made envelope.
 - Tests: `core/crates/wasm-node/js-test/envelope.test.ts`, run by `npm run test:kernels-node` (so by `check:tests`).
+
+## State machines W6: kernels-raster (`core/crates/raster`)
+
+- `next_chunk` skips the CRC only under `cfg(fuzzing)`, which cargo-fuzz sets itself. The `fuzzing` Cargo feature is gone, so no ordinary build (wasm-web through feature unification included) can turn the check off.
+- The `png` module doc now says what is not stricter than v1: chunks between two IDATs and bytes after IEND. A unit test pins both.
+- `dilate_into`: a vertical reach is clamped below `u32::MAX`, the counters' "unseen" value, so a saturated reach no longer turns on a column with no set pixel (v1 leaves it empty).
+- Tests: `mask::tests::a_saturated_reach_leaves_empty_columns_empty`, `png::tests::v1_parity_interleaved_idat_and_bytes_after_iend`, property `a_vertical_reach_past_the_height_is_the_height`.
+- No deviation. `raster/README.md` never named the feature, so it is unchanged.

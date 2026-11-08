@@ -5,6 +5,12 @@
 //! Stricter than v1 (planner/engine.js `loadDepth`), which never sees such files from midstudy-calib (Pillow writes
 //! valid PNGs): chunk CRCs are checked, a truncated chunk, a missing IEND, a filter type above 4, compression or filter
 //! methods other than 0, or image data of the wrong length are errors (v1 decodes some of these as zeros or Paeth).
+//!
+//! Not stricter, because v1 accepts them too: ancillary (or unknown) chunks between two IDATs, whose data is joined as
+//! if they were adjacent, and anything after IEND, which is not read.
+//!
+//! Only a cargo-fuzz build (`cfg(fuzzing)`, which cargo-fuzz sets itself) skips the CRC check, so that the fuzzer reaches
+//! the inflater and the filters. No feature can turn the check off in an ordinary build.
 #![deny(
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
@@ -230,7 +236,7 @@ pub(crate) fn next_chunk(rest: &[u8]) -> Result<Chunk<'_>, PngError> {
     let (data, rest) = rest.split_at_checked(len).ok_or(PngError::Truncated)?;
     let (crc, rest) = rest.split_at_checked(4).ok_or(PngError::Truncated)?;
     let ty: [u8; 4] = ty.try_into().map_err(|_| PngError::Truncated)?;
-    if !cfg!(feature = "fuzzing") && be_u32(crc) != Some(crc32(&[&ty, data])) {
+    if !cfg!(fuzzing) && be_u32(crc) != Some(crc32(&[&ty, data])) {
         return Err(PngError::BadCrc(ty));
     }
     Ok((ty, data, rest))
@@ -532,5 +538,35 @@ mod tests {
             decode_gray(&rgba),
             Err(PngError::Unsupported { color_type: 6, .. })
         ));
+    }
+
+    /// One whole chunk (length, type, data, CRC).
+    fn push_chunk(out: &mut Vec<u8>, ty: [u8; 4], data: &[u8]) {
+        out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_be_bytes());
+        out.extend_from_slice(&ty);
+        out.extend_from_slice(data);
+        out.extend_from_slice(&crc32(&[&ty, data]).to_be_bytes());
+    }
+
+    /// v1's decoder takes these two, so this one does (the module doc): an ancillary chunk between two IDATs and bytes
+    /// after IEND.
+    #[test]
+    fn v1_parity_interleaved_idat_and_bytes_after_iend() {
+        let zlib = miniz_oxide::deflate::compress_to_vec_zlib(&[0, 1, 2, 0, 3, 4], 6);
+        let (a, b) = zlib.split_at(zlib.len() / 2);
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&2_u32.to_be_bytes());
+        ihdr.extend_from_slice(&2_u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+        let mut png = SIGNATURE.to_vec();
+        push_chunk(&mut png, *b"IHDR", &ihdr);
+        push_chunk(&mut png, *b"IDAT", a);
+        push_chunk(&mut png, *b"tEXt", b"Comment\0between");
+        push_chunk(&mut png, *b"IDAT", b);
+        push_chunk(&mut png, *b"IEND", &[]);
+        png.extend_from_slice(b"bytes after IEND");
+        let got = decode_gray(&png).unwrap();
+        assert_eq!((got.width, got.height), (2, 2));
+        assert_eq!(got.samples, [1, 2, 3, 4]);
     }
 }

@@ -212,6 +212,15 @@ proptest! {
         prop_assert!(src.iter().zip(&got).all(|(a, b)| *a == 0 || *b == 1));
     }
 
+    /// A vertical reach of the height or more is the same as the height, however large (`u32::MAX` included).
+    #[test]
+    fn a_vertical_reach_past_the_height_is_the_height(w in 1_usize..30, h in 1_usize..30, seed: u64, extra in prop_oneof![(0_usize..8).boxed(), Just(u32::MAX as usize).boxed(), Just(usize::MAX - 64).boxed()]) {
+        let mut s = seed | 1;
+        let src: Vec<u8> = (0..w * h).map(|_| { s ^= s << 13; s ^= s >> 7; s ^= s << 17; u8::from(s % 11 == 0) }).collect();
+        let vertical = |r| Reach { left: 0, right: 0, up: r, down: r };
+        prop_assert_eq!(dilate(&src, w, h, vertical(h + extra)).unwrap(), dilate(&src, w, h, vertical(h)).unwrap());
+    }
+
     /// Turning the probe keeps its irradiance in the turned directions; v1's refit agrees.
     #[test]
     fn sh_rotation_keeps_irradiance(sh in sh9(), r in rotation()) {
