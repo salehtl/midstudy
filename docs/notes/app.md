@@ -328,3 +328,23 @@ Deviations: `recalibrate` resolves null when superseded (it was the scene summar
 carries `lost: true` (the seam text asks for it; the fix's design did not). `followLostRender` allows one second of
 slack, as `created` has whole seconds. The baseline entries were added by hand in sorted order (`--files --update`
 does not write, as W1 noted). planner/bus.ts needed no change: EngineEvents is in engine.ts.
+
+## State machines W3: planner-core-stores (2026-11-08)
+
+The scenes and library stores in `planner/data.ts`, per docs/notes/state-machines-plan.md. Tests: `planner/test/stores.test.mjs`.
+
+- **Scenes poll.** A failure with a fresher 'scenes' answer behind it does nothing; otherwise offline and the 10 s retry
+  (`pollDelay`). `listScenesInternal({ report })`: only an outage's first failure is reported.
+- **Calibration shadow.** `announced` gives each finish one event, whichever of the poll or the upload's answer lands
+  first; a listing prunes what it no longer has, except busy entries.
+- **Library jobs.** Answers are sequenced (`freshAnswer`); a job an in-flight answer may predate is kept (`mergeJobs`,
+  `trackedAt`). A busy job missing from a fresh answer gets one 'job-failed' with `jobLostText`, a reload and a spend read.
+  Backoff with `jobsPollMs`; one report per run.
+- **API probe.** An undecided probe retries every 10 s, at most 5 times; only a first probe can set `api` false.
+- **Upload.** `xhr.onabort` rejects and reports. Nothing calls abort today.
+
+Deviations and notes: `jobChange` now needs a busy 'before' (a narrowing from v1; no differential test covers it).
+`listScenesInternal` was already latest-wins inline from W2 (`scenesListGen`), so only `{ report }` was added and
+`freshAnswer` is used by the jobs poll alone. The brief says both "10 s after 3 failures" and "from the fourth": the
+fourth failure in a row is the first followed by 10 s. A jobs failure older than an applied answer is not counted as an
+outage. test:planner already existed (W1). Baseline entries added by hand, sorted.

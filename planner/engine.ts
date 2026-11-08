@@ -1569,10 +1569,13 @@ async function quietly<T>(fn: () => T | Promise<T>): Promise<T> {
   }
 }
 let scenesListGen = 0
-async function listScenesInternal(): Promise<SceneSummary[]> {
+async function listScenesInternal(opts: { report?: boolean } = {}): Promise<SceneSummary[]> {
   const n = ++scenesListGen
   let data: JsonObject | null
-  try { data = rec(await apiJson('/api/scenes')) } catch (e) { throw reportError('Could not list the scenes', e) }
+  try { data = rec(await apiJson('/api/scenes')) } catch (e) {
+    if (opts.report === false && e instanceof Error) throw e // the scenes store reports an outage once
+    throw reportError('Could not list the scenes', e)
+  }
   const list = sceneSummaries(data?.['scenes'])
   if (n === scenesListGen) { // an older answer landing last must not bring back what a newer one no longer has
     scenesList = list

@@ -175,3 +175,8 @@ export function renderSettingsArgs(exposure: unknown, warmth: unknown, contactSh
 export function bothNamed(a: unknown, b: unknown): boolean {
   return typeof a === 'string' && a !== '' && typeof b === 'string' && b !== ''
 }
+
+/** A library job the server no longer lists: it restarted while the job ran (the panel: "Couldn't make X: ..."). */
+export function jobLostText(): string {
+  return "the server restarted before it finished. Check the library, and add it again if it isn't there"
+}

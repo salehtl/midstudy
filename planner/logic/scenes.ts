@@ -37,3 +37,14 @@ export function sceneFinished(was: unknown, now: unknown): 'ready' | 'failed' | 
 export function lightPollMs(i: number): number {
   return i < 4 ? 600 : 1500
 }
+
+/** Answer sequencing: request n is applied only when it is newer than the last applied one. */
+export function freshAnswer(n: number, applied: number): boolean {
+  return n > applied
+}
+
+/** The scenes store's next poll: 10 s while offline, 1.5 s while a scene calibrates, else none. */
+export function pollDelay(busy: boolean, offline: boolean): 1500 | 10000 | null {
+  if (offline) return 10000
+  return busy ? 1500 : null
+}
