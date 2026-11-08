@@ -44,11 +44,14 @@ export interface LockSeen {
 export type LockVerdict = 'held' | 'dead-owner' | 'too-old' | 'no-owner'
 
 /** The protocol's rule: a lock is stale when its owner is a dead process on this host, when it is older than the
- *  longest a holder may run (`staleMs`, the tool timeout: 3600 s), or when it has had no readable owner.json for
- *  longer than `graceMs` (its maker died between the mkdir and the write). */
-export function lockVerdict(seen: LockSeen, staleMs: number, graceMs: number): LockVerdict {
+ *  longest a holder may run (`staleMs`, the tool timeout: 3600 s) and its owner can't be checked, when its owner is a
+ *  live process on this host and it is older than `staleMs + liveMarginMs` (the server has ended every tool by then, so
+ *  that "live" pid is wedged or reused), or when it has had no readable owner.json for longer than `graceMs` (its maker
+ *  died between the mkdir and the write). */
+export function lockVerdict(seen: LockSeen, staleMs: number, graceMs: number, liveMarginMs: number): LockVerdict {
   if (seen.owner === null) return seen.ageMs > graceMs ? 'no-owner' : 'held'
-  if (seen.owner.host === seen.host && seen.ownerAlive === false) return 'dead-owner'
-  if (seen.ageMs > staleMs) return 'too-old'
+  const sameHost = seen.owner.host === seen.host
+  if (sameHost && seen.ownerAlive === false) return 'dead-owner'
+  if (seen.ageMs > (sameHost && seen.ownerAlive === true ? staleMs + liveMarginMs : staleMs)) return 'too-old'
   return 'held'
 }

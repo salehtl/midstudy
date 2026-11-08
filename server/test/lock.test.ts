@@ -1,6 +1,7 @@
 // The v2 library lock (contract §2.8 One writer, v2; common/lock.ts) across processes: mutual exclusion (no lost
 // update over many takes by several processes), a waiter giving up after its time (Busy), a dead holder's lock
-// reclaimed at once, an old one reclaimed after the tool timeout, a lock folder without owner.json reclaimed after the
+// reclaimed at once, an old one reclaimed after the tool timeout (a live owner on this host only past the margin, and
+// never by the process that holds it), a lock folder without owner.json reclaimed after the
 // grace, a release that never removes someone else's lock, and v1's lock file kept beside it.
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -77,7 +78,7 @@ void test('a holder that exited without releasing is reclaimed by the next taker
   await mine.release()
 })
 
-void test('a lock older than the tool timeout is reclaimed even when its owner looks alive; a young one on another host is not', async () => {
+void test('a lock on another host is reclaimed past the tool timeout; a young one is not', async () => {
   const lock = path.join(DIR, 'old.lock.d')
   fs.mkdirSync(lock)
   fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, host: 'elsewhere', cmd: 'x', started: new Date(Date.now() - 2 * 3600 * 1000).toISOString() }))
@@ -87,6 +88,61 @@ void test('a lock older than the tool timeout is reclaimed even when its owner l
   fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: 999999, host: 'elsewhere', cmd: 'x', started: new Date().toISOString() }))
   await assert.rejects(acquireLock(lock, { waitMs: 200, cmd: 'test' }), Busy)
   fs.rmSync(lock, { recursive: true })
+})
+
+/** Rewrites a held lock's owner.json with `started` moved `ageMs` into the past; the new file's text. */
+function backdate(lock: string, ageMs: number): string {
+  const file = path.join(lock, 'owner.json')
+  const owner: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.ok(typeof owner === 'object' && owner !== null)
+  const text = JSON.stringify({ ...owner, started: new Date(Date.now() - ageMs).toISOString() }) + '\n'
+  fs.writeFileSync(file, text)
+  return text
+}
+
+void test('a live holder on this host just past the tool timeout keeps its lock (inside the 10 min margin)', async () => {
+  const lock = path.join(DIR, 'live-margin.lock.d')
+  const holder = child(['hold', lock])
+  await holder.held
+  const text = backdate(lock, 3605 * 1000)
+  await assert.rejects(acquireLock(lock, { waitMs: 300, cmd: 'test' }), Busy)
+  assert.equal(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'), text, 'owner.json untouched')
+  holder.kill()
+  await holder.done
+  fs.rmSync(lock, { recursive: true, force: true })
+})
+
+void test('a live holder on this host past the margin is reclaimed (a crashed holder whose pid was reused)', async () => {
+  const lock = path.join(DIR, 'live-old.lock.d')
+  const holder = child(['hold', lock])
+  await holder.held
+  backdate(lock, 2 * 3600 * 1000)
+  const mine = await acquireLock(lock, { waitMs: 1000, cmd: 'test' })
+  assert.equal(mine.owner.pid, process.pid)
+  await mine.release()
+  holder.kill()
+  await holder.done
+})
+
+void test('a back-dated lock whose pid is dead is reclaimed at once', async () => {
+  const lock = path.join(DIR, 'dead-old.lock.d')
+  const c = child(['crash', lock])
+  assert.equal(await c.done, 0)
+  backdate(lock, 3605 * 1000)
+  const mine = await acquireLock(lock, { waitMs: 0, cmd: 'test' })
+  await mine.release()
+})
+
+void test('a process never reclaims a lock it holds itself, however old', async (t) => {
+  const lock = path.join(DIR, 'self.lock.d')
+  const first = await acquireLock(lock, { waitMs: 1000, cmd: 'test' })
+  t.mock.method(Date, 'now', () => new Date().getTime() + 2 * 3600 * 1000)
+  await assert.rejects(acquireLock(lock, { waitMs: 200, cmd: 'test' }), Busy)
+  t.mock.restoreAll()
+  const owner: unknown = JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'))
+  assert.deepEqual(owner, first.owner)
+  await first.release()
+  assert.equal(fs.existsSync(lock), false, 'still its own to release')
 })
 
 void test('a lock folder with no owner.json is held for the grace period, then reclaimed', async () => {
@@ -127,10 +183,17 @@ void test('the library and costs locks: their folders, v1\'s lock files beside t
 
 void test('the protocol\'s verdicts', () => {
   const owner = { pid: 5, host: 'h', cmd: 'c', started: 'x' }
-  assert.equal(lockVerdict({ owner, ageMs: 10, host: 'h', ownerAlive: true }, 1000, 100), 'held')
-  assert.equal(lockVerdict({ owner, ageMs: 10, host: 'h', ownerAlive: false }, 1000, 100), 'dead-owner')
-  assert.equal(lockVerdict({ owner, ageMs: 10, host: 'other', ownerAlive: null }, 1000, 100), 'held')
-  assert.equal(lockVerdict({ owner, ageMs: 2000, host: 'other', ownerAlive: null }, 1000, 100), 'too-old')
-  assert.equal(lockVerdict({ owner: null, ageMs: 50, host: 'h', ownerAlive: null }, 1000, 100), 'held')
-  assert.equal(lockVerdict({ owner: null, ageMs: 150, host: 'h', ownerAlive: null }, 1000, 100), 'no-owner')
+  assert.equal(lockVerdict({ owner, ageMs: 10, host: 'h', ownerAlive: true }, 1000, 100, 500), 'held')
+  assert.equal(lockVerdict({ owner, ageMs: 10, host: 'h', ownerAlive: false }, 1000, 100, 500), 'dead-owner')
+  assert.equal(lockVerdict({ owner, ageMs: 10, host: 'other', ownerAlive: null }, 1000, 100, 500), 'held')
+  assert.equal(lockVerdict({ owner, ageMs: 2000, host: 'other', ownerAlive: null }, 1000, 100, 500), 'too-old')
+  assert.equal(lockVerdict({ owner: null, ageMs: 50, host: 'h', ownerAlive: null }, 1000, 100, 500), 'held')
+  assert.equal(lockVerdict({ owner: null, ageMs: 150, host: 'h', ownerAlive: null }, 1000, 100, 500), 'no-owner')
+  // a live owner on this host: past staleMs it keeps the lock until the margin is over too
+  assert.equal(lockVerdict({ owner, ageMs: 1200, host: 'h', ownerAlive: true }, 1000, 100, 500), 'held')
+  assert.equal(lockVerdict({ owner, ageMs: 1500, host: 'h', ownerAlive: true }, 1000, 100, 500), 'held')
+  assert.equal(lockVerdict({ owner, ageMs: 1501, host: 'h', ownerAlive: true }, 1000, 100, 500), 'too-old')
+  // unknown liveness has no margin; a dead owner is reclaimed whatever its age
+  assert.equal(lockVerdict({ owner, ageMs: 1200, host: 'h', ownerAlive: null }, 1000, 100, 500), 'too-old')
+  assert.equal(lockVerdict({ owner, ageMs: 1200, host: 'h', ownerAlive: false }, 1000, 100, 500), 'dead-owner')
 })
