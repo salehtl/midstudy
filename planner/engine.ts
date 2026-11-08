@@ -1975,7 +1975,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
   const data = await getSceneInternal(name)
   const depthUrl = str(data['depth_url'])
   const depth = depthUrl ? await loadDepth(depthUrl).catch(() => null) : null
-  if (!alive() || !photo.image) return sceneSummary(data)
+  if (!alive() || !photo.image) return jobWhy !== null ? null : sceneSummary(data)
   setPhoto(photo.image, depth)
   sceneData = data
   lightingToken++
@@ -1995,7 +1995,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
   emit('scene', { phase: why !== null ? 'recalibrate-failed' : 'recalibrated', name })
   emit('adjust', { on: adjustFloor, note: floorNote })
   if (why !== null) toast(`Calibration failed: ${why}`, 'error')
-  return sceneSummary(data)
+  return why !== null ? null : sceneSummary(data) // the scene can read 'done' with its job lost: never a success to the caller
 }
 const RECALIB_LOST = 'the calibration was lost (the server restarted?)'
 // Why a recalibration's job didn't succeed, or null if it did. The scene says finished both after a real run and when
@@ -2545,10 +2545,12 @@ async function waitForRoom(name: unknown): Promise<RoomInfo> {
 }
 /** Opens a room (§4.9 Room view) on a member photo: `photo`, else the one this device last had open there, else the
  *  first placed one. Resolves when the photo (and depth) are shown and the room layout loaded. */
-async function openRoom(name: unknown, photoWanted?: unknown): Promise<void> {
+// stillWanted: startup's, so a user's open made during the room's GET isn't replaced by the room.
+async function openRoom(name: unknown, photoWanted?: unknown, stillWanted?: () => boolean): Promise<void> {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(`"${asText(name)}" isn't a room name`)
   let info: RoomInfo
   try { info = await getRoomInternal(name) } catch (e) { throw reportError(statusOf(e) === 404 ? `There's no room "${name}"` : `Could not open the room "${name}"`, e) }
+  if (stillWanted?.() === false) return
   const lite = info.members.map((m) => ({ scene: m.scene, placed: !!m.pose }))
   const pick = roomLogic.photoToOpen(lite, typeof photoWanted === 'string' ? photoWanted : null, store.get(roomPhotoKey(name)))
   if (!pick) throw reportError(`The room "${info.title ?? name}" has no photos yet: add some on the Scenes page`)
@@ -3306,7 +3308,7 @@ async function startScene(): Promise<string | null> {
     const rooms = await listRoomsInternal().catch(() => null)
     if (sceneToken !== t0) return shown()
     if (rooms?.some((r) => r.name === target)) {
-      await openRoom(target, params.get('photo') ?? undefined).catch(() => undefined)
+      await openRoom(target, params.get('photo') ?? undefined, () => sceneToken === t0).catch(() => undefined)
       if (shown()) return shown() // opened, or another open is under way (a failed open clears sceneLoad)
       t0 = sceneToken // the room's own open failed and took a token: on to the scenes, as v1
     } else if (want) {
