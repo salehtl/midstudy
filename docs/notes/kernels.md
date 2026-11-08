@@ -9,3 +9,11 @@
 - `SceneCamera.#s()`: the scratch-view rule is a comment; a memory-growth regression case guards it.
 - Tests: `core/crates/wasm-web/tests/{load,worker-rpc}.test.ts`, run by `npm run test:kernels-web` (so by `check:tests`).
 - Deviation: the growth case projects 3,999,999 floats, not 4M, because `projectMany` takes whole xyz triples.
+
+## State machines W5: kernels-node-envelope (`core/js/node.ts`)
+
+- A malformed answer from the wasm is now a thrown protocol fault, not a MediaError or a misread value: an unknown or missing tag, an envelope shorter than its fields (`Payload.u32`/`bytes` and the error header are bounds-checked), bytes the reader left over (`rest()` moves the cursor to the end; `done()`), and a `stripGlb` answer that isn't a whole GLB 2 (magic, version, header length equal to the bytes).
+- `zipPlan`'s local `bad-input` reports the entry index, as the Rust side does for its per-entry codes.
+- No envelope layout change. `decodeEnvelope` and `Payload` are exported for the test (`Payload` because the composite build emits declarations).
+- Deviation: `decodeGlbEnvelope` is split out of `stripGlb` and exported, because the GLB check lives in its reader and the test has to feed it a hand-made envelope.
+- Tests: `core/crates/wasm-node/js-test/envelope.test.ts`, run by `npm run test:kernels-node` (so by `check:tests`).

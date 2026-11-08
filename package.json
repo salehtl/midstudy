@@ -60,6 +60,7 @@
     "test:planner": "node --test planner/test/*.test.mjs",
     "test:scripts": "node --test --test-concurrency=1 scripts/test/*.test.mjs",
     "test:kernels-web": "node --test --test-concurrency=1 core/crates/wasm-web/tests/*.test.ts",
+    "test:kernels-node": "node --test --test-concurrency=1 core/crates/wasm-node/js-test/envelope.test.ts",
     "test:ui-machines": "node --test planner/ui/test/machines-*.test.mjs",
     "contract:examples": "node contract/tools/record-examples.mjs"
   },

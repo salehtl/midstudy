@@ -89,12 +89,15 @@ export interface MediaError<C extends string> {
 const NO_OFFSET = 0xffff_ffff
 const utf8 = new TextDecoder('utf-8', { fatal: false })
 
+/** A malformed answer from our own wasm is a protocol fault, thrown; a refused input stays a MediaError. */
+const SHORT_ANSWER = "core/js/node.ts: the media kernel's answer is shorter than its fields (protocol fault)"
+
 function isOneOf<C extends string>(value: string, codes: readonly C[]): value is C {
   return codes.some((c) => c === value)
 }
 
 /** Reads the little-endian u32 fields of an ok envelope's payload, then the rest. */
-class Payload {
+export class Payload {
   readonly #bytes: Uint8Array
   readonly #view: DataView
   #at = 1
@@ -104,7 +107,13 @@ class Payload {
     this.#view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   }
 
+  /** The next `n` bytes must be inside the envelope. */
+  #need(n: number): void {
+    if (this.#at + n > this.#bytes.length) throw new Error(SHORT_ANSWER)
+  }
+
   u32(): number {
+    this.#need(4)
     const v = this.#view.getUint32(this.#at, true)
     this.#at += 4
     return v
@@ -120,13 +129,21 @@ class Payload {
     return this.u32() !== 0
   }
 
-  /** The rest of the envelope (a view: the envelope is never reused). */
+  /** The rest of the envelope (a view: the envelope is never reused); the envelope then counts as fully read. */
   rest(): Uint8Array {
-    return this.#bytes.subarray(this.#at)
+    const v = this.#bytes.subarray(this.#at)
+    this.#at = this.#bytes.length
+    return v
+  }
+
+  /** Every byte has been read. */
+  done(): boolean {
+    return this.#at === this.#bytes.length
   }
 
   /** The next `n` bytes (a view). */
   bytes(n: number): Uint8Array {
+    this.#need(n)
     const v = this.#bytes.subarray(this.#at, this.#at + n)
     this.#at += n
     return v
@@ -165,11 +182,19 @@ function join(pieces: readonly Uint8Array[], length: number): Uint8Array {
   return out
 }
 
-function decode<T, C extends string>(env: Uint8Array, codes: readonly C[], read: (p: Payload) => T): Result<T, MediaError<C>> {
-  if (env[0] === 0) return { ok: true, value: read(new Payload(env)) }
-  const view = new DataView(env.buffer, env.byteOffset, env.byteLength)
-  const offset = view.getUint32(1, true)
-  const codeLength = env[5] ?? 0
+/** An envelope (api.rs): tag 0 and `read`'s fields, or tag 1 and a refusal. Anything else is a protocol fault, thrown:
+ *  an unknown tag, an envelope shorter than its fields, or bytes `read` left over (the writer and reader have drifted). */
+export function decodeEnvelope<T, C extends string>(env: Uint8Array, codes: readonly C[], read: (p: Payload) => T): Result<T, MediaError<C>> {
+  if (env[0] === 0) {
+    const p = new Payload(env)
+    const value = read(p)
+    if (!p.done()) throw new Error("core/js/node.ts: trailing bytes in the media kernel's answer (protocol fault)")
+    return { ok: true, value }
+  }
+  if (env[0] !== 1) throw new Error(`core/js/node.ts: unknown envelope tag ${String(env[0])} from the media kernel (protocol fault)`)
+  const codeLength = env[5]
+  if (codeLength === undefined || env.length < 6 + codeLength) throw new Error(SHORT_ANSWER)
+  const offset = new DataView(env.buffer, env.byteOffset, env.byteLength).getUint32(1, true)
   const code = utf8.decode(env.subarray(6, 6 + codeLength))
   if (!isOneOf(code, codes)) throw new Error(`core/js/node.ts: the media kernel answered an unknown code ${JSON.stringify(code)}`)
   return { ok: false, error: { code, offset: offset === NO_OFFSET ? null : offset, message: utf8.decode(env.subarray(6 + codeLength)) } }
@@ -251,7 +276,7 @@ export function stripJpeg(bytes: Uint8Array): Result<Stripped<JpegRemoved>, Medi
 
 /** stripJpeg's output as pieces of the input: only the plan crosses the wasm boundary, not the bytes. */
 export function stripJpegPieces(bytes: Uint8Array): Result<StrippedPieces<JpegRemoved>, MediaError<JpegErrorCode>> {
-  return decode(raw().jpeg_strip_plan(bytes), JPEG_ERRORS, (p) => {
+  return decodeEnvelope(raw().jpeg_strip_plan(bytes), JPEG_ERRORS, (p) => {
     const removed = jpegRemoved(p)
     const { pieces, length } = p.pieces(bytes)
     return { removed, pieces, length, unchanged: isWhole(pieces, bytes) }
@@ -281,7 +306,7 @@ function frame(p: Payload): JpegFrame {
 
 /** The JPEG's size from its frame header, never guessed (contract §2.6: qwen is priced by it). */
 export function jpegFrame(bytes: Uint8Array): Result<JpegFrame, MediaError<FrameErrorCode>> {
-  return decode(raw().jpeg_frame(bytes), FRAME_ERRORS, frame)
+  return decodeEnvelope(raw().jpeg_frame(bytes), FRAME_ERRORS, frame)
 }
 
 /** No metadata anywhere and well formed (contract §4.3 Pass-through, the structural part). */
@@ -295,7 +320,7 @@ export type PassthroughCode = (typeof PASSTHROUGH_ERRORS)[number]
 /** Whether ingest may copy the JPEG byte for byte (§4.3): clean, 8-bit, 3 components, long side ≤ 2048. The caller
  *  still has to decode it once (v1 refused uploads that didn't decode). */
 export function jpegPassthrough(bytes: Uint8Array): Result<JpegFrame, MediaError<PassthroughCode>> {
-  return decode(raw().jpeg_passthrough(bytes), PASSTHROUGH_ERRORS, frame)
+  return decodeEnvelope(raw().jpeg_passthrough(bytes), PASSTHROUGH_ERRORS, frame)
 }
 
 // --- PNG ---------------------------------------------------------------------------------------------------------
@@ -320,7 +345,7 @@ export function stripPng(bytes: Uint8Array): Result<Stripped<PngRemoved>, MediaE
 
 /** stripPng's output as pieces of the input (every kept chunk is a range of it): only the plan crosses the boundary. */
 export function stripPngPieces(bytes: Uint8Array): Result<StrippedPieces<PngRemoved>, MediaError<PngErrorCode>> {
-  return decode(raw().png_strip_plan(bytes), PNG_ERRORS, (p) => {
+  return decodeEnvelope(raw().png_strip_plan(bytes), PNG_ERRORS, (p) => {
     const removed: PngRemoved = { exif: p.u32(), text: p.u32(), time: p.u32(), trailingBytes: p.u32() }
     const { pieces, length } = p.pieces(bytes)
     return { removed, pieces, length, unchanged: isWhole(pieces, bytes) }
@@ -329,7 +354,7 @@ export function stripPngPieces(bytes: Uint8Array): Result<StrippedPieces<PngRemo
 
 /** Width and height from IHDR, or null (contract §4.7: the keep-room mask is checked against the photo). */
 export function pngSize(bytes: Uint8Array): { readonly width: number; readonly height: number } | null {
-  const r = decode(raw().png_size(bytes), ['no-ihdr'] as const, (p) => ({ width: p.u32(), height: p.u32() }))
+  const r = decodeEnvelope(raw().png_size(bytes), ['no-ihdr'] as const, (p) => ({ width: p.u32(), height: p.u32() }))
   return r.ok ? r.value : null
 }
 
@@ -369,12 +394,27 @@ export interface GlbReport {
   readonly images: readonly GlbImage[]
 }
 
+/** 'glTF', read little-endian. */
+const GLB_MAGIC = 0x4654_6c67
 const IMAGE_SOURCES = ['buffer-view', 'data-uri', 'uri'] as const
 const IMAGE_KINDS = ['jpeg', 'png', 'other', 'external'] as const
 
+/** `glb` if its header says it is a whole GLB 2 (glb::assemble writes every answer that way), else a protocol fault. */
+function wholeGlb(glb: Uint8Array): Uint8Array {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength)
+  const whole = glb.length >= 12 && view.getUint32(0, true) === GLB_MAGIC && view.getUint32(4, true) === 2 && view.getUint32(8, true) === glb.length
+  if (!whole) throw new Error("core/js/node.ts: the media kernel's answer is not a whole GLB (protocol fault)")
+  return glb
+}
+
 /** The GLB with every embedded JPEG and PNG texture stripped of its metadata (contract §2.8 Privacy). */
 export function stripGlb(bytes: Uint8Array, options: { readonly layout?: GlbLayout } = {}): Result<{ readonly bytes: Uint8Array; readonly report: GlbReport }, MediaError<GlbErrorCode>> {
-  return decode(raw().glb_strip(bytes, options.layout === 'in-place'), GLB_ERRORS, (p) => {
+  return decodeGlbEnvelope(raw().glb_strip(bytes, options.layout === 'in-place'))
+}
+
+/** glb_strip's answer. */
+export function decodeGlbEnvelope(env: Uint8Array): Result<{ readonly bytes: Uint8Array; readonly report: GlbReport }, MediaError<GlbErrorCode>> {
+  return decodeEnvelope(env, GLB_ERRORS, (p) => {
     const layout: GlbLayout = p.u32() === 1 ? 'in-place' : 'compact'
     const droppedChunks = p.u32()
     const trailingBytes = p.u32()
@@ -389,7 +429,7 @@ export function stripGlb(bytes: Uint8Array, options: { readonly layout?: GlbLayo
       const kind = IMAGE_KINDS[p.u32()] ?? 'other'
       images.push({ image, source, view: view === NO_OFFSET ? null : view, kind, bytesBefore: p.u32(), bytesAfter: p.u32(), changed: p.flag() })
     }
-    return { bytes: p.rest(), report: { layout, droppedChunks, trailingBytes, slackBytes, changed, images } }
+    return { bytes: wholeGlb(p.rest()), report: { layout, droppedChunks, trailingBytes, slackBytes, changed, images } }
   })
 }
 
@@ -411,7 +451,7 @@ export function decodeImageDataUri(value: string, type: 'jpeg' | 'png'): Result<
     const bytes = Buffer.from(payload, 'base64')
     if (bytes.toString('base64') === payload) return { ok: true, value: new Uint8Array(bytes) }
   }
-  return decode(raw().data_uri_image(value, type === 'png'), DATA_URI_ERRORS, (p) => p.rest())
+  return decodeEnvelope(raw().data_uri_image(value, type === 'png'), DATA_URI_ERRORS, (p) => p.rest())
 }
 
 export const META_ERRORS = ['too-long', 'not-ascii', 'base64', 'not-utf8'] as const
@@ -421,7 +461,7 @@ export const MAX_META_HEADER = 16 * 1024
 
 /** The JSON text inside an X-Midstudy-Meta header (strict base64 of UTF-8); the caller parses the JSON. */
 export function decodeMeta(header: string, maxLength: number = MAX_META_HEADER): Result<string, MediaError<MetaCode>> {
-  return decode(raw().meta_decode(header, Math.max(1, Math.min(maxLength, 0xffff_ffff))), META_ERRORS, (p) => utf8.decode(p.rest()))
+  return decodeEnvelope(raw().meta_decode(header, Math.max(1, Math.min(maxLength, 0xffff_ffff))), META_ERRORS, (p) => utf8.decode(p.rest()))
 }
 
 // --- paths -------------------------------------------------------------------------------------------------------
@@ -452,7 +492,7 @@ const SCENE_FILES = ['photo.jpg', 'depth.png', 'thumb.jpg'] as const
 
 /** The static route for a request target as it arrived (API paths are routed by the server before this). */
 export function staticRoute(target: string): StaticRoute {
-  const r = decode(raw().static_route(target), [] as const, (p) => {
+  const r = decodeEnvelope(raw().static_route(target), [] as const, (p) => {
     const kind = p.u32()
     const sub = p.u32()
     const text = utf8.decode(p.rest())
@@ -508,7 +548,7 @@ export type ContentLengthCode = (typeof CONTENT_LENGTH_ERRORS)[number]
 /** The body length from every Content-Length value the request carried (null without one); more than one, or one
  *  that isn't 1–15 ASCII digits, is an error (a 400, contract §2.9 Framing). */
 export function contentLength(values: readonly string[]): Result<number | null, MediaError<ContentLengthCode>> {
-  return decode(raw().content_length([...values]), CONTENT_LENGTH_ERRORS, (p) => {
+  return decodeEnvelope(raw().content_length([...values]), CONTENT_LENGTH_ERRORS, (p) => {
     const present = p.flag()
     const n = p.u64()
     return present ? n : null
@@ -581,11 +621,11 @@ function sizeWords(size: number | bigint): [number, number] | null {
 /** Which entries of an OBJ zip to extract, or the first rule it breaks (contract §2.8; v1's sentences). */
 export function zipPlan(entries: readonly ZipEntry[]): Result<ZipPlan, MediaError<ZipCode>> {
   const parts: Uint8Array[] = []
-  for (const e of entries) {
+  for (const [k, e] of entries.entries()) {
     const words = sizeWords(e.uncompressedSize)
     const valid = words !== null && Number.isInteger(e.flags) && e.flags >= 0 && e.flags <= 0xffff_ffff
       && Number.isInteger(e.externalAttributes) && e.externalAttributes >= 0 && e.externalAttributes <= 0xffff_ffff
-    if (!valid) return { ok: false, error: { code: 'bad-input', offset: parts.length, message: 'a zip entry has a size, flags or attributes out of range' } }
+    if (!valid) return { ok: false, error: { code: 'bad-input', offset: k, message: 'a zip entry has a size, flags or attributes out of range' } }
     parts.push(u32le(e.name.length), e.name, u32le(e.flags), u32le(words[0]), u32le(words[1]), u32le(e.externalAttributes))
   }
   const packed = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
@@ -594,7 +634,7 @@ export function zipPlan(entries: readonly ZipEntry[]): Result<ZipPlan, MediaErro
     packed.set(p, at)
     at += p.length
   }
-  return decode(raw().zip_plan(packed), ZIP_ERRORS, (p) => {
+  return decodeEnvelope(raw().zip_plan(packed), ZIP_ERRORS, (p) => {
     const obj = p.u32()
     const totalBytes = p.u64()
     const extract = Array.from({ length: p.u32() }, () => p.u32())
