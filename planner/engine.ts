@@ -79,7 +79,7 @@
 //   'scenes' { scenes }   'camera' { camera, source }   'adjust' { on }   'occlusion' { on }   'grid' { visible }
 //   'view' getView()      'dirty' { scene, layout }     'items' { change, uid }   'selection' { uid, uids }   'drag' { mode, uid, phase }
 //   'look' { exposure, warmth, contactShadows }   'library' { items }   'layouts' { names?, details?, name? }   'renders' { renders }
-//   'render' { phase: 'start'|'done'|'failed', model, meta? }   'compare' { a, b }   'ruler' getRuler()
+//   'render' { id, phase: 'start'|'done'|'failed', model, meta?, error?, lost? }   'compare' { a, b }   'ruler' getRuler()
 //   'error' { text }      'toast' { text, kind, ms }   'lighting' { status, error }
 // Performance marks (E17): performance.measure 'midstudy:<step>' for scene-open, photo, depth-decode, envmap (lighting.ts),
 // item-add, render-capture and mask-build.
@@ -228,8 +228,10 @@ function measure(step: string, t0: number): void {
 
 // --- events, errors + toasts ------------------------------------------------
 /** What each engine event carries (engine.events, CustomEvent.detail). */
+/** The 'scene' event's phases. */
+type ScenePhase = 'loading' | 'calibrating' | 'opened' | 'failed' | 'closed' | 'saved' | 'title' | 'deleted' | 'restored' | 'recalibrating' | 'recalibrated' | 'recalibrate-failed'
 interface EngineEvents {
-  scene: { phase: string; name: string | null }
+  scene: { phase: ScenePhase; name: string | null }
   scenes: { scenes: SceneSummary[] }
   camera: { camera: Camera; source: string }
   adjust: { on: boolean; note?: string | null }
@@ -244,7 +246,8 @@ interface EngineEvents {
   library: { items: LibraryEntry[] }
   layouts: { names?: string[]; details?: LayoutSummary[]; name?: string }
   renders: { renders: RenderMeta[] }
-  render: { phase: 'start' | 'done' | 'failed'; model: string; meta?: RenderMeta; error?: string }
+  /** `id` pairs a request's events (two renders may overlap); `lost`: the connection dropped, the render may still finish */
+  render: { id: number; phase: 'start' | 'done' | 'failed'; model: string; meta?: RenderMeta; error?: string; lost?: boolean }
   compare: { a: string; b: string }
   ruler: RulerState
   error: { text: string }
@@ -1433,12 +1436,16 @@ function getRuler(): RulerState {
   return { active: ruler.active, points: ruler.points.map((p): Vec3 => [p[0], p[1], p[2]]), meters: a && b ? Math.hypot(a[0] - b[0], a[2] - b[2]) : null }
 }
 function setRulerActive(on: unknown): void {
-  ruler.active = !!on
-  if (!on) ruler.points = []
+  ruler.active = !!on && adjustFloor && !!sceneName // the Ruler button lives in the Adjust floor card
+  if (!ruler.active) ruler.points = []
   else select(null)
   emit('ruler', getRuler())
 }
-function clearRuler(): void { ruler.points = []; emit('ruler', getRuler()) }
+function resetRuler(): void {
+  ruler.active = false
+  ruler.points = []
+  emit('ruler', getRuler())
+}
 // The ruler measured a known length (a rug, a tile, a sofa's width): scale the camera height so it reads `meters`.
 // Every floor point under a pixel scales with the height (the angles don't change), so this fixes the scene's scale,
 // and with it the size every piece is drawn at, from one length the user knows (MoGe's metric scale is often off by
@@ -1458,7 +1465,7 @@ function setRulerPointAt(i: number, clientX: number, clientY: number): boolean {
   const [px, py] = clientToPhoto(clientX, clientY)
   const p = photoToFloor(px, py)
   if (!p || !ruler.points[i]) return false
-  ruler.points[i] = p
+  ruler.points = ruler.points.map((q, j) => (j === i ? p : q)) // a new array: setRoomScale tells a moved point by it
   emit('ruler', getRuler())
   return true
 }
@@ -1476,8 +1483,7 @@ function tap(clientX: number, clientY: number): void {
     const [px, py] = clientToPhoto(clientX, clientY)
     const p = photoToFloor(px, py)
     if (!p) { toast('That point is above the horizon: tap the floor.', 'info', 3000); return }
-    if (ruler.points.length >= 2) ruler.points = []
-    ruler.points.push(p)
+    ruler.points = ruler.points.length >= 2 ? [p] : [...ruler.points, p]
     emit('ruler', getRuler())
     return
   }
@@ -1545,38 +1551,58 @@ const touchScene = (): void => { setDirty({ ...dirty, scene: !!sceneName && scen
 // The layout is dirty when the placed pieces differ from the ones last saved or loaded (not merely when something
 // happened: Remove then Undo puts back the same layout). Pieces compare by library id, position (to 0.1 mm) and turn.
 // In a room view the pieces compare in the room frame (switching photos changes nothing), parked ones included.
-const layoutSig = (): string => layoutLogic.layoutSig(parked ? parked.map((p) => ({ id: p.id, x: p.at.x, y: p.at.y, z: p.at.z, rotation_y_deg: p.at.rot })) : [...items.values()].map((r) => { const x = layoutXf(r); return { id: r.id, x: x.x, y: x.y, z: x.z, rotation_y_deg: x.rot } }), K)
+const parkedPose = (p: Parked): layoutLogic.PlacedPose => ({ id: p.id, x: p.at.x, y: p.at.y, z: p.at.z, rotation_y_deg: p.at.rot })
+const itemPose = (r: ItemRec): layoutLogic.PlacedPose => { const x = layoutXf(r); return { id: r.id, x: x.x, y: x.y, z: x.z, rotation_y_deg: x.rot } }
+const layoutSig = (): string => layoutLogic.layoutSig(parked ? parked.map(parkedPose) : [...items.values()].map(itemPose), K)
 let layoutBaseline = layoutLogic.EMPTY_SIG
-const markLayoutClean = (): void => { layoutBaseline = layoutSig(); setDirty({ ...dirty, layout: false }) }
+// `sig`: the layout as it was sent or as it landed, so an edit made while the request ran stays unsaved.
+function markLayoutCleanAs(sig: string): void {
+  layoutBaseline = sig
+  setDirty({ ...dirty, layout: layoutSig() !== layoutBaseline })
+}
 events.addEventListener('items', () => { if (!quietItems) setDirty({ ...dirty, layout: layoutSig() !== layoutBaseline }) })
 async function quietly<T>(fn: () => T | Promise<T>): Promise<T> {
   quietItems++
-  try { return await fn() } finally { quietItems-- }
+  try { return await fn() } finally {
+    quietItems--
+    if (!quietItems) setDirty({ ...dirty, layout: layoutSig() !== layoutBaseline }) // an edit swallowed while quiet counts
+  }
 }
+let scenesListGen = 0
 async function listScenesInternal(): Promise<SceneSummary[]> {
+  const n = ++scenesListGen
   let data: JsonObject | null
   try { data = rec(await apiJson('/api/scenes')) } catch (e) { throw reportError('Could not list the scenes', e) }
-  scenesList = sceneSummaries(data?.['scenes'])
-  scenesTrash = trashedScenes(data?.['trash'])
-  emit('scenes', { scenes: scenesList.slice() })
-  return scenesList.slice()
+  const list = sceneSummaries(data?.['scenes'])
+  if (n === scenesListGen) { // an older answer landing last must not bring back what a newer one no longer has
+    scenesList = list
+    scenesTrash = trashedScenes(data?.['trash'])
+    emit('scenes', { scenes: list.slice() })
+  }
+  return list.slice()
 }
 async function getSceneInternal(name: string): Promise<JsonObject> {
   return rec(await apiJson(sceneUrl(name))) ?? {}
 }
+/** What waitForScene throws once its caller's open or recalibrate has been overtaken (opts.alive). */
+class Superseded extends Error {}
 // Resolves with the scene when its calibration is done or failed (§4.6).
-async function waitForScene(name: unknown, opts: { every?: number; onTick?: ((s: JsonObject) => void) | null } = {}): Promise<JsonObject> {
+async function waitForScene(name: unknown, opts: { every?: number; onTick?: ((s: JsonObject) => void) | null; alive?: (() => boolean) | null } = {}): Promise<JsonObject> {
   if (!msg.isSceneName(name)) throw reportError(msg.sceneNameText(asText(name)))
   const every = opts.every ?? 500
   const t0 = performance.now()
+  const live = (): void => { if (opts.alive && !opts.alive()) throw new Superseded() }
   for (;;) {
+    live()
     let s: JsonObject
     try { s = await getSceneInternal(name) } catch (e) {
+      live()
       if (statusOf(e) === 404) throw reportError(`There's no scene "${name}"`, e)
       if (performance.now() - t0 > 15 * 60e3) throw reportError(`Gave up waiting for "${name}"`, e)
       await sleep(2000)
       continue
     }
+    live()
     opts.onTick?.(s)
     if (sceneLogic.calibFinished(s['calib_status'])) return s
     await sleep(every)
@@ -1692,21 +1718,21 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
   if (!switching) { // switching photos is a cut: the last photo stays until the next one is ready
     setLoad(true, 'photo', name, null)
     emit('scene', { phase: 'loading', name })
-  }
+  } else setLoad(sceneLoad.loading, null, name, null) // the photo being opened, though nothing covers the last one
   let data: JsonObject
   try {
     data = await getSceneInternal(name)
     if (sceneLogic.sceneBusy(data['calib_status'])) {
-      setLoad(sceneLoad.loading, 'calibrating', sceneLoad.name, data)
+      setLoad(sceneLoad.loading, 'calibrating', name, data)
       emit('scene', { phase: 'calibrating', name })
-      await waitForScene(name, { onTick: (s) => { if (token === sceneToken) { sceneLoad.scene = sceneSummary(s); emit('scene', { phase: 'calibrating', name }) } } })
+      await waitForScene(name, { alive: () => token === sceneToken, onTick: (s) => { if (token === sceneToken) { sceneLoad.scene = sceneSummary(s); emit('scene', { phase: 'calibrating', name }) } } })
       if (token !== sceneToken) return
       data = await getSceneInternal(name)
     }
     if (token !== sceneToken) return
     const photoUrl = str(data['photo_url'])
     if (!photoUrl) throw new Error(str(data['calib_error']) ?? 'the scene has no photo')
-    setLoad(sceneLoad.loading, 'photo', sceneLoad.name, data)
+    setLoad(sceneLoad.loading, 'photo', name, data)
     const depthUrl = str(data['depth_url'])
     const tPhoto = performance.now()
     const [img, depth] = await Promise.all([
@@ -1715,13 +1741,15 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
     ])
     if (token !== sceneToken) return
     if (!switching) {
-      await quietly(() => { clearItemsInternal() })
+      scopeGen++
       parked = null
+      layoutBaseline = layoutLogic.EMPTY_SIG // before the clear: quietly's recount compares against it
+      await quietly(() => { clearItemsInternal() })
       alignPhotos = false
       room = inRoom ? { name: inRoom.name, title: inRoom.title ?? null, members: membersOf(inRoom), info: inRoom } : null
     }
-    clearRuler()
-    ruler.active = false
+    resetRuler()
+    flushLook() // a Look change made while this photo loaded belongs to the scene still open
     setPhoto(img, depth)
     renderErrorReported = false // a new scene reports its own first render failure
     sceneName = name
@@ -1749,7 +1777,6 @@ async function openSceneAs(name: unknown, inRoom: RoomInfo | null): Promise<void
     } else {
       setLayoutName('')
       layoutDetails = []
-      layoutBaseline = layoutLogic.EMPTY_SIG
       setDirty({ scene: false, layout: false })
     }
     renders = []
@@ -1813,6 +1840,7 @@ function syncUrl(name: string | null): void {
 function closeScene(): void {
   flushLook()
   sceneToken++
+  scopeGen++
   setLoad(false, null, null, null)
   quiet(quietly(() => { clearItemsInternal() }))
   clearPhoto()
@@ -1825,8 +1853,7 @@ function closeScene(): void {
   applyLook()
   adjustFloor = false
   floorNote = null
-  ruler.active = false
-  ruler.points = []
+  resetRuler()
   grid.visible = false
   layoutDetails = []
   renders = []
@@ -1880,12 +1907,17 @@ async function renameScene(name: string, title: unknown): Promise<void> {
 
 // PUT /api/scenes/<name>: the camera (with its source), the Look and the title.
 async function saveScene(): Promise<void> {
-  if (!sceneName) throw reportError('No scene is open')
+  const name = sceneName
+  if (!name) throw reportError('No scene is open')
+  const token = sceneToken
   const body = { title: sceneData?.['title'] ?? null, camera: cameraLogic.cameraCopy(cam), camera_source: cameraSource, look: lookLogic.lookToSave(look) }
+  flushLook()
+  await lookChain // an autosave in flight goes first, so this newer one lands last
   let res: unknown
-  try { res = await apiJson(sceneUrl(sceneName), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) } catch (e) {
+  try { res = await apiJson(sceneUrl(name), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) } catch (e) {
     throw reportError(msg.saveSceneText(statusOf(e)), e)
   }
+  if (token !== sceneToken) { quiet(listScenesInternal()); return } // another scene (or a new open of this one) by now
   const r = rec(res)
   if (r) {
     sceneData = { ...sceneData, ...r, lighting: sceneData?.['lighting'] ?? null, lighting_status: sceneData?.['lighting_status'], lighting_error: sceneData?.['lighting_error'] }
@@ -1897,7 +1929,7 @@ async function saveScene(): Promise<void> {
   savedScene = { title: typeof title === 'string' ? title : null, camera: cameraLogic.cameraCopy(cam), camera_source: cameraSource, look: lookLogic.lookCopy(look) }
   sceneBaseline = sceneSig()
   touchScene()
-  emit('scene', { phase: 'saved', name: sceneName })
+  emit('scene', { phase: 'saved', name })
   quiet(listScenesInternal())
 }
 
@@ -1926,14 +1958,24 @@ async function saveThumbnail(): Promise<string | null> {
 async function recalibrate(): Promise<SceneSummary | null> {
   const name = sceneName
   if (!name) throw reportError('No scene is open')
-  try { await apiJson(`${sceneUrl(name)}/calibrate`, { method: 'POST' }) } catch (e) { throw reportError(msg.recalibrateText(statusOf(e)), e) }
+  const token = sceneToken
+  const alive = (): boolean => token === sceneToken && name === sceneName
+  let accepted: unknown
+  try { accepted = await apiJson(`${sceneUrl(name)}/calibrate`, { method: 'POST' }) } catch (e) { throw reportError(msg.recalibrateText(statusOf(e)), e) }
+  if (!alive()) return null
   emit('scene', { phase: 'recalibrating', name })
-  const done = await waitForScene(name)
-  if (name !== sceneName) return sceneSummary(done)
+  let jobWhy: string | null
+  try {
+    await waitForScene(name, { alive })
+    jobWhy = await recalibrateJobWhy(str(rec(rec(accepted)?.['job'])?.['id']), alive)
+  } catch (e) {
+    if (e instanceof Superseded) return null
+    throw e
+  }
   const data = await getSceneInternal(name)
   const depthUrl = str(data['depth_url'])
   const depth = depthUrl ? await loadDepth(depthUrl).catch(() => null) : null
-  if (name !== sceneName || !photo.image) return sceneSummary(data)
+  if (!alive() || !photo.image) return sceneSummary(data)
   setPhoto(photo.image, depth)
   sceneData = data
   lightingToken++
@@ -1949,11 +1991,30 @@ async function recalibrate(): Promise<SceneSummary | null> {
     emit('camera', { camera: cameraLogic.cameraCopy(cam), source: cameraSource })
   }
   if (!occlusion && depth) setOcclusion(true)
-  const failed = data['calib_status'] === 'failed'
-  emit('scene', { phase: failed ? 'recalibrate-failed' : 'recalibrated', name })
+  const why = data['calib_status'] === 'failed' ? str(data['calib_error']) ?? jobWhy ?? 'see the server log' : jobWhy
+  emit('scene', { phase: why !== null ? 'recalibrate-failed' : 'recalibrated', name })
   emit('adjust', { on: adjustFloor, note: floorNote })
-  if (failed) toast(`Calibration failed: ${str(data['calib_error']) ?? 'see the server log'}`, 'error')
+  if (why !== null) toast(`Calibration failed: ${why}`, 'error')
   return sceneSummary(data)
+}
+const RECALIB_LOST = 'the calibration was lost (the server restarted?)'
+// Why a recalibration's job didn't succeed, or null if it did. The scene says finished both after a real run and when
+// the job vanished, so the job (GET /api/scenes/jobs/<id>) is what tells them apart. A job still settling is waited for
+// briefly; after that the scene's own status stands.
+async function recalibrateJobWhy(id: string | null, alive: () => boolean): Promise<string | null> {
+  if (id === null) return null
+  for (let i = 0; i < 20; i++) {
+    let http: number | null = 200
+    let job: JsonObject | null = null
+    try { job = rec(await apiJson(`/api/scenes/jobs/${encodeURIComponent(id)}`)) } catch (e) { http = statusOf(e) }
+    if (!alive()) throw new Superseded()
+    const out = jobs.jobOutcome(http, job?.['status'])
+    if (out === 'done') return null
+    if (out === 'lost') return RECALIB_LOST
+    if (out === 'failed') return str(job?.['message']) ?? 'see the server log'
+    await sleep(250)
+  }
+  return null
 }
 
 // --- the camera: Adjust floor (§4.5) ----------------------------------------------------------------------------------
@@ -1971,7 +2032,7 @@ function setCamera(partial: unknown = {}): void {
 function resetCamera(): void {
   const c = rec(rec(sceneData?.['calib'])?.['camera'])
   cam = clampCamera(c)
-  cameraSource = c ? 'auto' : 'default'
+  cameraSource = cameraLogic.sourceAfterReset(cam, !!c, savedScene ? savedScene.camera : null, savedScene ? savedScene.camera_source : 'manual')
   applyCamera()
   touchScene()
   emit('camera', { camera: cameraLogic.cameraCopy(cam), source: cameraSource })
@@ -2022,9 +2083,7 @@ const layoutKey = (s: string): string => `midstudy.layout.${s}`
 function layoutScope(): string | null {
   return room ? `@${room.name}` : sceneName
 }
-function rememberLayout(name: string | null, at: unknown = null): void {
-  const scope = layoutScope()
-  if (!scope) return
+function rememberLayout(scope: string, name: string | null, at: unknown = null): void {
   const parsed = Date.parse(typeof at === 'string' ? at : '')
   const t = parsed || Date.now()
   store.set(layoutKey(scope), JSON.stringify({ name: str(name), at: new Date(t).toISOString() }))
@@ -2044,6 +2103,19 @@ function layoutToOpen(s: string): string | null { // s: the scene, or @<room>
   return layoutLogic.layoutToOpen(recalledLayout(s), details())
 }
 const layoutQuery = (): string => (room ? `?room=${encodeURIComponent(room.name)}` : `?scene=${encodeURIComponent(sceneName ?? '')}`)
+/** Whose layouts a request was made for. sceneToken is per photo; this survives a room's photo switch (the room layout
+ *  stays valid) and ends when another scene or room opens, or this one closes and reopens. */
+interface ScopeGuard {
+  readonly scope: string
+  readonly query: string
+  readonly gen: number
+}
+let scopeGen = 0
+function scopeGuard(): ScopeGuard | null {
+  const scope = layoutScope()
+  return scope === null ? null : { scope, query: layoutQuery(), gen: scopeGen }
+}
+const stillIn = (g: ScopeGuard): boolean => g.gen === scopeGen && layoutScope() === g.scope
 type DocItem = LayoutDocItem | (LayoutDocItem & { dims_cm: JsonObject })
 interface LayoutDoc {
   version: 1
@@ -2069,28 +2141,34 @@ function layoutDoc(name: string, title: string | null = null): LayoutDoc {
 // opts.title: the name as the user typed it; saving over a layout keeps its title unless a new one is given.
 async function saveLayoutInternal(name: unknown, opts: unknown = {}): Promise<void> {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(msg.saveLayoutNameText(asText(name)))
-  if (!sceneName) throw reportError('Open a scene first, then save a layout')
+  const g = scopeGuard()
+  if (!g) throw reportError('Open a scene first, then save a layout')
   const kept = name === layoutName ? layoutTitle : layoutDetails.find((d) => d.name === name)?.title
   const title = layoutLogic.layoutTitle(rec(opts)?.['title'], kept)
+  const doc = layoutDoc(name, title)
+  const sentSig = layoutSig() // what the file will hold: an edit made during the PUT stays unsaved
   let stored: JsonObject | null
   try {
-    stored = rec(await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(layoutDoc(name, title)) }))
+    stored = rec(await apiJson(`/api/layouts/${name}${g.query}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(doc) }))
   } catch (e) {
     throw reportError(msg.saveLayoutText(name, statusOf(e)), e)
   }
+  rememberLayout(g.scope, name, stored?.['updated']) // the server's clock, as other devices compare against it
+  if (!stillIn(g)) return
   setLayoutName(name, title)
-  rememberLayout(name, stored?.['updated']) // the server's clock, as other devices compare against it
-  markLayoutClean()
+  markLayoutCleanAs(sentSig)
   emit('layouts', { name })
   await refreshLayouts()
 }
 async function loadLayoutInternal(name: unknown): Promise<void> {
   if (typeof name !== 'string' || !SLUG.test(name)) throw reportError(msg.loadLayoutNameText(asText(name)))
-  if (!sceneName) throw reportError('Open a scene first, then load a layout')
+  const g = scopeGuard()
+  if (!g) throw reportError('Open a scene first, then load a layout')
   let doc: JsonObject | null
-  try { doc = rec(await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`)) } catch (e) {
+  try { doc = rec(await apiJson(`/api/layouts/${encodeURIComponent(name)}${g.query}`)) } catch (e) {
     throw reportError(msg.loadLayoutText(name, statusOf(e)), e)
   }
+  if (!stillIn(g)) return
   const docItems = doc?.['items']
   if (!doc || !Array.isArray(docItems)) throw reportError(`Layout "${name}" has no items array`)
   const list: unknown[] = docItems
@@ -2106,8 +2184,10 @@ async function loadLayoutInternal(name: unknown): Promise<void> {
     if (room && parked) {
       // an unplaced photo is open (§4.9): the room layout waits, in the room frame, until a placed photo shows it
       parked = list.flatMap((it) => { const pk = parkedOf(it, missingOf(it)); return pk ? [pk] : [] })
+      markLayoutCleanAs(layoutLogic.layoutSig(parked.map(parkedPose), K))
       return
     }
+    const landed: layoutLogic.PlacedPose[] = [] // each piece as it landed, before anyone could move it
     const results = await Promise.allSettled(list.map(async (it) => {
       const o = rec(it)
       const at = room ? roomXfOf(o) : null
@@ -2118,26 +2198,31 @@ async function loadLayoutInternal(name: unknown): Promise<void> {
       })
       const r = items.get(uid)
       if (r && at && x) r.roomAt = { ...at, y: r.group.position.y } // exactly as saved (the elevation as clamped)
+      if (r) landed.push(itemPose(r))
       return uid
     }))
+    if (!stillIn(g)) return
+    markLayoutCleanAs(layoutLogic.layoutSig(landed, K))
     const failed = results.filter((r) => r.status === 'rejected').length
     if (failed) toast(layoutLogic.failedText(name, failed, list.length), 'error')
     if (missing.length) toast(layoutLogic.missingText(name, missing.length), 'info', 9000)
   })
+  if (!stillIn(g)) return
   setLayoutName(name, doc['title'])
-  rememberLayout(name)
-  markLayoutClean()
+  rememberLayout(g.scope, name)
   emit('layouts', { name })
 }
 /** A deleted layout as it was, plus whether it was the current one: what restoreLayoutInternal puts back (Undo). */
 export type DeletedLayout = JsonObject
 // Deletes a layout (the server keeps it in layouts/<scene>/.trash). Resolves with the layout as it was, for Undo.
 async function deleteLayoutInternal(name: string): Promise<DeletedLayout | null> {
+  const g = scopeGuard()
+  if (!g) throw reportError(`Could not delete layout "${name}"`, new Error('no scene is open'))
   let doc: JsonObject | null = null
-  try { doc = rec(await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`)) } catch { /* deleted below anyway */ }
-  try { await apiJson(`/api/layouts/${encodeURIComponent(name)}${layoutQuery()}`, { method: 'DELETE' }) } catch (e) { throw reportError(`Could not delete layout "${name}"`, e) }
-  const wasCurrent = layoutName === name
-  if (wasCurrent) { setLayoutName(''); rememberLayout(null) }
+  try { doc = rec(await apiJson(`/api/layouts/${encodeURIComponent(name)}${g.query}`)) } catch { /* deleted below anyway */ }
+  try { await apiJson(`/api/layouts/${encodeURIComponent(name)}${g.query}`, { method: 'DELETE' }) } catch (e) { throw reportError(`Could not delete layout "${name}"`, e) }
+  const wasCurrent = stillIn(g) && layoutName === name
+  if (wasCurrent) { setLayoutName(''); rememberLayout(g.scope, null) }
   await refreshLayouts()
   return doc ? { ...doc, wasCurrent } : null
 }
@@ -2150,29 +2235,38 @@ async function restoreLayoutInternal(docIn: unknown): Promise<void> {
   const scn = doc['scene_name']
   const rn = doc['room_name']
   if (room ? (rn && rn !== room.name) || (!rn && scn) : !sceneName || (scn && scn !== sceneName) || rn) throw reportError(room ? 'That layout belongs to another room' : 'That layout belongs to another scene')
+  const g = scopeGuard()
+  if (!g) throw reportError('Nothing to restore')
   const notes = doc['notes']
   const owner = room ? { room_name: room.name } : { scene_name: sceneName }
   const body = { version: 1, name, title: doc['title'] ?? null, ...owner, library: doc['library'] ?? LIBRARY_URL, items: doc['items'], ...(typeof notes === 'string' ? { notes } : {}) }
   let stored: JsonObject | null
   try {
-    stored = rec(await apiJson(`/api/layouts/${name}${layoutQuery()}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
+    stored = rec(await apiJson(`/api/layouts/${name}${g.query}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
   } catch (e) { throw reportError(`Could not restore layout "${name}"`, e) }
-  if (doc['wasCurrent'] && !layoutName) { setLayoutName(name, doc['title']); rememberLayout(name, stored?.['updated']); emit('layouts', { name }) }
+  if (doc['wasCurrent'] && !layoutName && stillIn(g)) { setLayoutName(name, doc['title']); rememberLayout(g.scope, name, stored?.['updated']); emit('layouts', { name }) }
   await refreshLayouts()
 }
+let layoutsListGen = 0
 async function listLayoutsInternal(): Promise<string[]> {
-  if (!sceneName && !room) return []
-  const data = rec(await apiJson(`/api/layouts${layoutQuery()}`))
+  const g = scopeGuard()
+  if (!g) return []
+  const n = ++layoutsListGen
+  const data = rec(await apiJson(`/api/layouts${g.query}`))
   const raw = data?.['layouts']
   const all: unknown[] = Array.isArray(raw) ? raw : []
   const names = all.filter((n): n is string => typeof n === 'string')
   const det = data?.['details']
-  layoutDetails = Array.isArray(det) ? layoutSummaries(det) : names.map((n) => ({ name: n }))
+  if (stillIn(g) && n === layoutsListGen) layoutDetails = Array.isArray(det) ? layoutSummaries(det) : names.map((x) => ({ name: x }))
   return names
 }
 async function refreshLayouts(): Promise<void> {
+  const g = scopeGuard()
   let names: string[] = []
-  try { names = await listLayoutsInternal() } catch (e) { reportError('Could not list layouts', e); return }
+  const asked = listLayoutsInternal()
+  const n = layoutsListGen
+  try { names = await asked } catch (e) { reportError('Could not list layouts', e); return }
+  if (g && (!stillIn(g) || n !== layoutsListGen)) return // the names would go out with another list's details
   emit('layouts', { names: names.slice(), details: layoutDetails.slice() })
 }
 
@@ -2321,13 +2415,18 @@ function previewPose(scene: unknown, pose: unknown, scale?: unknown): void {
 function serverHasRooms(): boolean {
   return room !== null || roomsList.length > 0 || scenesList.some((s) => 'room' in s)
 }
+let roomsListGen = 0
 async function listRoomsInternal(): Promise<RoomInfo[]> {
+  const n = ++roomsListGen
   let data: JsonObject | null
   try { data = rec(await apiJson('/api/rooms')) } catch (e) { throw reportError('Could not list the rooms', e) }
-  roomsList = roomInfos(data?.['rooms'])
-  roomsTrash = trashedRooms(data?.['trash'])
-  emit('rooms', { rooms: roomsList.slice() })
-  return roomsList.slice()
+  const list = roomInfos(data?.['rooms'])
+  if (n === roomsListGen) {
+    roomsList = list
+    roomsTrash = trashedRooms(data?.['trash'])
+    emit('rooms', { rooms: list.slice() })
+  }
+  return list.slice()
 }
 async function getRoomInternal(name: string): Promise<RoomInfo> {
   const info = roomInfo(await apiJson(roomUrl(name)))
@@ -2459,7 +2558,7 @@ async function openRoom(name: unknown, photoWanted?: unknown): Promise<void> {
 async function setRoomPhoto(scene: unknown): Promise<void> {
   if (!room) throw reportError('No room is open')
   if (typeof scene !== 'string' || !room.members.some((m) => m.scene === scene)) throw reportError(`"${asText(scene)}" isn't a photo of this room`)
-  if (scene === sceneName && !sceneLoad.loading) return
+  if (scene === (sceneLoad.name ?? sceneName)) return // the photo being opened, or the one open
   await openSceneAs(scene, room.info)
 }
 /** Align photos and setPose (§4.9): a member's new pose (and scale), saved (PUT members: pose_source manual). */
@@ -2489,7 +2588,9 @@ async function setRoomScale(meters: unknown): Promise<number | null> {
   const k = r.meters !== null && isNum(meters) ? roomLogic.rescaleFactor(r.meters, meters) : null
   if (k === null) return null
   const before = ruler.points
+  const g = scopeGuard()
   await putRoom(room.name, { rescale: k }, 'set the room\'s scale')
+  if (ruler.points !== before || !g || !stillIn(g)) return k // moved or reset meanwhile: those points are the user's
   // the ruler's points stay on the same photo pixels: the floor under them scaled with the effective camera
   ruler.points = before.map((p): Vec3 => [p[0] * k, 0, p[2] * k])
   emit('ruler', getRuler())
@@ -2693,25 +2794,28 @@ function getLighting(): LightingReport {
 // setLighting(partial) (hook, §4.8): live. A direction or softness turns Auto lighting off unless auto_light is given.
 // The Look saves itself: PUT /api/scenes/<name> {look} 0.7 s after the last change (and at once when the scene is
 // closed or another opens, or the page hides), so a lighting tweak is never lost and never waits for Save scene.
-let lookTimer: ReturnType<typeof setTimeout> | null = null
+let lookPending: { name: string; timer: ReturnType<typeof setTimeout> } | null = null // the scene the change was made in
+let lookChain: Promise<void> = Promise.resolve() // one PUT at a time, so an older Look can't land after a newer one
 function saveLookSoon(): void {
   if (!sceneName) return
-  if (lookTimer !== null) clearTimeout(lookTimer)
-  lookTimer = setTimeout(flushLook, 700)
+  if (lookPending) clearTimeout(lookPending.timer)
+  lookPending = { name: sceneName, timer: setTimeout(() => { flushLook() }, 700) }
 }
-function flushLook(): void {
-  if (lookTimer === null) return
-  clearTimeout(lookTimer)
-  lookTimer = null
-  const name = sceneName
-  if (!name) return
+// `now`: the page is going away and a chained PUT would never run (a rare reorder against one in flight is accepted).
+function flushLook(now = false): void {
+  if (!lookPending) return
+  clearTimeout(lookPending.timer)
+  const name = lookPending.name
+  lookPending = null
   const saved = lookLogic.lookCopy(look)
-  quiet(apiJson(sceneUrl(name), { method: 'PUT', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ look: lookLogic.lookToSave(look) }) })
-    .then(() => { if (name === sceneName && savedScene) savedScene.look = saved })
-    .catch((e: unknown) => { throw reportError(msg.lookSaveText(statusOf(e)), e) }))
+  const body = JSON.stringify({ look: lookLogic.lookToSave(look) })
+  const send = (): Promise<void> => apiJson(sceneUrl(name), { method: 'PUT', keepalive: true, headers: { 'content-type': 'application/json' }, body })
+    .then(() => { if (name === sceneName && savedScene) savedScene.look = saved }, (e: unknown) => { reportError(msg.lookSaveText(statusOf(e)), e) })
+  if (now) quiet(send())
+  else lookChain = lookChain.then(send)
 }
-addEventListener('pagehide', flushLook)
-addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushLook() })
+addEventListener('pagehide', () => { flushLook(true) })
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushLook(true) })
 function setLighting(p: unknown = {}): void {
   const o = rec(p)
   if (!o) { reportError('setLighting needs an object like { light_strength: 1.2 }'); return }
@@ -2950,13 +3054,30 @@ export function renderPrice(model: string, shot: { width: number; height: number
 }
 let renders: RenderMeta[] = []
 let renderMock = false
+let renderSeq = 0
+let rendersListGen = 0
+// A dropped request can still finish on the server: list again at 5 s, 30 s and 90 s, until a render from about then shows.
+// (`created` has whole seconds, so a second of slack.)
+function followLostRender(since: number): void {
+  const waits = [5000, 25000, 60000]
+  const next = (i: number): void => {
+    const ms = waits[i]
+    if (ms === undefined) return
+    setTimeout(() => {
+      quiet(listRendersInternal().catch((): RenderMeta[] => []).then((l) => { if (!l.some((r) => Date.parse(r.created) >= since - 1000)) next(i + 1) }))
+    }, ms)
+  }
+  next(0)
+}
 // opts: { model, prompt, keepRoom, mask (from captureMask, when keepRoom) }
 async function postRender(shot: Shot, opts: { model?: string; prompt?: string | null | undefined; keepRoom?: boolean; mask?: MaskShot | null } = {}): Promise<RenderMeta> {
   const model = str(opts.model) ?? 'nano-banana'
   const layout = layoutName.trim()
   const scn = sceneName
   let answer: unknown
-  emit('render', { phase: 'start', model })
+  const id = ++renderSeq
+  const since = Date.now()
+  emit('render', { id, phase: 'start', model })
   try {
     answer = await apiJson('/api/render', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -2968,15 +3089,21 @@ async function postRender(shot: Shot, opts: { model?: string; prompt?: string | 
       }),
     })
   } catch (e) {
-    emit('render', { phase: 'failed', model, error: detailOf(e) })
+    if (statusOf(e) === null) { // the request never got an answer: the server may have it, and may be paying for it
+      const lost = msg.renderLostText()
+      emit('render', { id, phase: 'failed', model, error: lost, lost: true })
+      followLostRender(since)
+      throw reportError(lost, e)
+    }
+    emit('render', { id, phase: 'failed', model, error: detailOf(e) })
     throw reportError(msg.renderFailText(statusOf(e)), e)
   }
   const meta = renderMeta(answer)
   if (!meta) {
-    emit('render', { phase: 'failed', model, error: 'not a render' })
+    emit('render', { id, phase: 'failed', model, error: 'not a render' })
     throw reportError(msg.renderFailText(null), new Error("the server's answer isn't a render"))
   }
-  emit('render', { phase: 'done', model, meta })
+  emit('render', { id, phase: 'done', model, meta })
   if (room ? meta.room === room.name : meta.scene === sceneName) {
     renders = [meta, ...renders.filter((r) => r.name !== meta.name)]
     emit('renders', { renders: renders.slice() })
@@ -3017,12 +3144,17 @@ async function upscaleRender(name: string, scale = 2): Promise<RenderMeta> {
 async function listRendersInternal(): Promise<RenderMeta[]> {
   let data: JsonObject | null
   // a room view lists the room's renders (every photo, §4.7 Room); a scene its own
-  const q = room ? `?room=${encodeURIComponent(room.name)}` : sceneName ? `?scene=${encodeURIComponent(sceneName)}` : ''
+  const query = (): string => (room ? `?room=${encodeURIComponent(room.name)}` : sceneName ? `?scene=${encodeURIComponent(sceneName)}` : '')
+  const q = query()
+  const n = ++rendersListGen
   try { data = rec(await apiJson(`/api/renders${q}`)) } catch (e) { throw reportError('Could not list renders', e) }
-  renders = renderMetas(data?.['renders'])
-  renderMock = data?.['mock'] === true
-  emit('renders', { renders: renders.slice() })
-  return renders.slice()
+  const list = renderMetas(data?.['renders'])
+  if (q === query() && n === rendersListGen) {
+    renders = list
+    renderMock = data?.['mock'] === true
+    emit('renders', { renders: list.slice() })
+  }
+  return list.slice()
 }
 function compare(a: unknown, b: unknown): void {
   const nameOf = (x: unknown): unknown => (typeof x === 'string' ? x : rec(x)?.['name'])
@@ -3162,15 +3294,17 @@ interface SceneInfo extends SceneSummary {
 // (the UI shows the Scenes page). → the scene name opened, or null
 async function startScene(): Promise<string | null> {
   // §2.2: ?room=<room>[&photo=<scene>] wins over ?scene=; without either, the room last opened on this device (when it
-  // was the last thing opened: opening a scene on its own forgets it)
+  // was the last thing opened: opening a scene on its own forgets it). An open the user made meanwhile wins (sceneToken).
+  const t0 = sceneToken
   const want = params.get('room')
   const lastRoom = store.get(LAST_ROOM_KEY)
   if (want || (!params.get('scene') && lastRoom)) {
     const target = want ?? lastRoom ?? ''
     const rooms = await listRoomsInternal().catch(() => null)
+    if (sceneToken !== t0) return sceneName
     if (rooms?.some((r) => r.name === target)) {
       await openRoom(target, params.get('photo') ?? undefined).catch(() => undefined)
-      if (sceneName) return sceneName
+      if (sceneName || sceneToken !== t0) return sceneName
     } else if (want) {
       reportError(`There's no room "${want}"`)
       syncUrl(null)
@@ -3178,6 +3312,7 @@ async function startScene(): Promise<string | null> {
     } else store.set(LAST_ROOM_KEY, null)
   }
   const list = await listScenesInternal().catch(() => null)
+  if (sceneToken !== t0) return sceneName
   const names = list ? list.map((s) => s.name) : null
   const go = sceneLogic.landing(params.get('scene'), store.get(LAST_SCENE_KEY), names)
   if (go.kind === 'open') { await openScene(go.name).catch(() => undefined); return sceneName }

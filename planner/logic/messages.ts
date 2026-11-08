@@ -96,6 +96,11 @@ export function renderFailText(status: number | null): string {
   return status === 402 ? "Not rendered: today's fal budget is used up" : 'Render failed'
 }
 
+/** The error line when the request for a render got no answer at all: the server may well finish it, and bill it. */
+export function renderLostText(): string {
+  return 'The connection dropped; the render may still finish and will appear in Renders. Check there before rendering again.'
+}
+
 /** The error line when an upscale fails (§4.7 Upscale). */
 export function upscaleFailText(status: number | null): string {
   return status === 402 ? "Not upscaled: today's fal budget is used up" : status === 409 ? 'That render is already being upscaled' : 'Upscale failed'

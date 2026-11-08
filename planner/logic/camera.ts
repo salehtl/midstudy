@@ -35,6 +35,13 @@ export function sourceAfterChange(cam: Camera, saved: Camera | null, savedSource
   return saved !== null && sameCamera(cam, saved) ? savedSource : 'manual'
 }
 
+/** The camera_source after Reset: the saved one when the reset lands on the saved camera, else the calibration's (auto), or
+ * default when it has no camera. */
+export function sourceAfterReset(cam: Camera, hasCalibCamera: boolean, saved: Camera | null, savedSource: string): string {
+  if (saved !== null && sameCamera(cam, saved)) return savedSource
+  return hasCalibCamera ? 'auto' : 'default'
+}
+
 /** What calib.json says about the floor, as the floor note needs it (v1's floorNoteFor reads these). */
 export interface CalibFacts {
   /** calib.json is there (the scene's `calib` is truthy). */

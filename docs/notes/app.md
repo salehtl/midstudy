@@ -302,3 +302,29 @@ The splat layer's CPU sort (the WebGL2 fallback) and its settle(), per docs/note
 - Tests: `npm run test:splats` (planner/gpu/test/*.test.mjs, in knip's entries).
 - Deviation: the worker gets a 'set' as a structured-clone copy (the layer keeps its own), as designed; a fatal
   'error' marks the worker down whatever its id (any fatal answer means it cannot sort), not only for the pending id.
+
+## State machines W2: planner-engine-scene (2026-11-08)
+
+Scene-scoped async work in `planner/engine.ts`, per docs/notes/state-machines-plan.md:
+
+- **Open/close.** The open records its target even on a room switch (`getSceneLoad().name`, `loading` stays false). A
+  press on the photo being opened is dropped. `waitForScene` takes `alive`, and a superseded open or recalibrate stops
+  polling. `saveScene` and `recalibrate` check `sceneToken` after their awaits. `ScenePhase` types the 'scene' event.
+- **Layouts by scope.** `scopeGuard()` / `stillIn(g)` (`scopeGen` bumps on a non-switching open and on close, not on a
+  room photo switch) guard load, save, delete, restore, list and `setRoomScale`. `rememberLayout` takes the scope.
+- **Dirty.** Explicit baselines: `markLayoutCleanAs(sig)`, from the layout as sent (save) or as landed (load);
+  `quietly` recounts at zero, so an edit made while quiet counts.
+- **Ruler.** `resetRuler()` (one event, inactive); the ruler needs Adjust floor; every point change makes a new array,
+  which is how `setRoomScale` sees a point moved during its PUT.
+- **Look.** `lookPending` remembers the scene the change was made in; PUTs chain (`lookChain`); `saveScene` waits for
+  the chain. pagehide and hidden still send at once.
+- **Renders.** `id` on every 'render' event; a request with no answer reports `renderLostText()` with `lost: true` and
+  refreshes the list at 5, 30 and 90 s. `listRendersInternal` is query-scoped and latest-wins.
+- **Lists, startup, camera, recalibrate.** Latest-wins scene and room lists; `startScene` yields to an open the user
+  made during startup; `sourceAfterReset` (camera.ts); `recalibrate` follows its job by id (404 = 'recalibrate-failed').
+- **Tests.** Sections after `align` in `planner/ui/test/engine-races.mjs`; two tables in `planner/test/states.test.mjs`.
+
+Deviations: `recalibrate` resolves null when superseded (it was the scene summary). A `'failed'` render event also
+carries `lost: true` (the seam text asks for it; the fix's design did not). `followLostRender` allows one second of
+slack, as `created` has whole seconds. The baseline entries were added by hand in sorted order (`--files --update`
+does not write, as W1 noted). planner/bus.ts needed no change: EngineEvents is in engine.ts.
