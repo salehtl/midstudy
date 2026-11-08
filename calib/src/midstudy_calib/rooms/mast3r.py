@@ -10,8 +10,12 @@ commit, and its weights a Hugging Face snapshot at a pinned revision, both cache
     weights  the Hugging Face cache (~/.cache/huggingface, or HF_HUB_CACHE), naver/MASt3R_ViTLarge_BaseDecoder_512_
              catmlpdpt_metric at REVISION (2.6 GB), downloaded once
 
-After that it runs offline: the checkout is used as it is when its HEAD is the pinned commit, and the weights load
-from the local snapshot (local_files_only) without asking the Hub. The photos never leave this machine.
+After that it runs offline: the checkout is used as it is when its HEAD is the pinned commit and its stamp
+(.midstudy-ready, written once the submodules are in) says so, and the weights load from the local snapshot
+(local_files_only) without asking the Hub. The photos never leave this machine.
+
+The checkout is calib's cache, provisioned under a lock beside it: a checkout that isn't ready is forced to the pinned
+commit, so hand edits in a MIDSTUDY_MAST3R_DIR that lacks the stamp are lost.
 
 Licence: CC BY-NC-SA 4.0 (non-commercial), the checkpoint also bound by its training sets' terms (Gate A: accepted for
 this personal tool). Phase A measured ~1 min for 7 photos and ~2.3 min for 11 on MPS (M3 Max), ~11.5 GB peak.
@@ -24,6 +28,7 @@ demo runs it; the dense depth maps and per-view camera-to-world poses come back 
 """
 from __future__ import annotations
 
+import fcntl
 import importlib
 import importlib.util
 import os
@@ -37,7 +42,7 @@ from typing import Any, Final
 import numpy as np
 
 from ..records import RealDevice
-from ..util import Fail, log
+from ..util import Fail, log, write_atomic
 from .geometry import F64
 from .photos import RoomPhoto
 from .score import Candidate
@@ -54,6 +59,8 @@ COMPLETE_MAX: Final = 12  # photos up to which every pair is matched (Phase A me
 PAIR_BUDGET: Final = 130
 # The extra's modules MASt3R imports beyond calib's own dependencies (pyproject.toml [project.optional-dependencies] rooms)
 MODULES: Final = ("roma", "einops", "safetensors", "tqdm")
+
+STAMP: Final = ".midstudy-ready"  # in the checkout: holds COMMIT once the submodules are in
 
 _LOADED: dict[str, Any] = {}  # device -> the network, kept for the worker
 
@@ -74,27 +81,44 @@ def _git(*args: str, cwd: Path | None = None) -> str:
     return p.stdout.strip()
 
 
-def ensure_code() -> Path:
-    """The pinned checkout of MASt3R (with its submodules), cloned on first use; no network once it is there."""
-    root = code_dir()
-    ready = (root / "dust3r/croco/models").is_dir() and (root / "mast3r/model.py").is_file()
-    if ready:
-        try:
-            head = _git("rev-parse", "HEAD", cwd=root)
-        except SolverUnavailable:
-            head = ""
-        if head == COMMIT:
-            return root
+def _ready(root: Path) -> bool:
+    """Whether the checkout is whole: the stamp written after its submodules, for the commit HEAD is at."""
+    stamp = root / STAMP
+    if not stamp.is_file() or stamp.read_text() != COMMIT:
+        return False
+    try:
+        return _git("rev-parse", "HEAD", cwd=root) == COMMIT
+    except SolverUnavailable:
+        return False
+
+
+def _provision(root: Path) -> None:
+    """Bring the checkout to the pinned commit and stamp it. The stamp goes first, so a kill anywhere reads as not ready."""
+    (root / STAMP).unlink(missing_ok=True)
     log(f"align-room: fetching MASt3R's code at {COMMIT[:7]} into {root} (once)")
     if not (root / ".git").exists():
-        root.parent.mkdir(parents=True, exist_ok=True)
         _git("clone", "--quiet", REPO_URL, str(root))
     try:
-        _git("checkout", "--quiet", COMMIT, cwd=root)
+        _git("checkout", "--quiet", "--force", COMMIT, cwd=root)
     except SolverUnavailable:
         _git("fetch", "--quiet", "origin", COMMIT, cwd=root)
-        _git("checkout", "--quiet", COMMIT, cwd=root)
-    _git("submodule", "update", "--quiet", "--init", "--recursive", cwd=root)
+        _git("checkout", "--quiet", "--force", COMMIT, cwd=root)
+    _git("submodule", "update", "--quiet", "--init", "--recursive", "--force", cwd=root)
+    write_atomic(root / STAMP, COMMIT.encode())
+
+
+def ensure_code() -> Path:
+    """The pinned checkout of MASt3R (with its submodules), cloned on first use; no network once it is there. One
+    process at a time: the others wait on the lock and find it ready."""
+    root = code_dir()
+    root.parent.mkdir(parents=True, exist_ok=True)
+    with (root.parent / ".mast3r.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            if not _ready(root):
+                _provision(root)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
     return root
 
 
@@ -121,20 +145,27 @@ def _import(root: Path) -> None:
         setattr(hierarchy, "distance", importlib.import_module("scipy.spatial.distance"))  # noqa: B010
 
 
+def _cant_load(e: Exception) -> SolverUnavailable:
+    return SolverUnavailable(f"MASt3R couldn't load ({type(e).__name__}: {' '.join(str(e).split())[:160]})")
+
+
 def load(device: RealDevice) -> Any:
-    """The network on `device`, loaded once per process (the worker keeps it)."""
+    """The network on `device`, loaded once per process (the worker keeps it). Any failure here is SolverUnavailable,
+    so --solver auto falls back (a missing module, a bad snapshot, no git, out of memory on the device)."""
     if device in _LOADED:
         return _LOADED[device]
     t0 = time.monotonic()
     os.environ.setdefault("TQDM_DISABLE", "1")  # MASt3R's progress bars would flood stderr, the server's job progress
-    root = ensure_code()
-    weights = ensure_weights()
-    _import(root)
     try:
+        root = ensure_code()
+        weights = ensure_weights()
+        _import(root)
         model_cls: Any = getattr(importlib.import_module("mast3r.model"), "AsymmetricMASt3R")  # noqa: B009
         net = model_cls.from_pretrained(str(weights)).to(device)
-    except ImportError as e:  # a module the checkout needs that the extra doesn't bring
-        raise SolverUnavailable(f"MASt3R couldn't load ({type(e).__name__}: {' '.join(str(e).split())[:160]})") from None
+    except Fail:
+        raise
+    except Exception as e:
+        raise _cant_load(e) from None
     net.eval()
     _LOADED.clear()  # one device at a time
     _LOADED[device] = net
@@ -166,9 +197,12 @@ class Mast3r:
         import torch
 
         net = load(device)
-        make_pairs: Any = getattr(importlib.import_module("dust3r.image_pairs"), "make_pairs")  # noqa: B009
-        load_images: Any = getattr(importlib.import_module("dust3r.utils.image"), "load_images")  # noqa: B009
-        sparse_ga: Any = getattr(importlib.import_module("mast3r.cloud_opt.sparse_ga"), "sparse_global_alignment")  # noqa: B009
+        try:
+            make_pairs: Any = getattr(importlib.import_module("dust3r.image_pairs"), "make_pairs")  # noqa: B009
+            load_images: Any = getattr(importlib.import_module("dust3r.utils.image"), "load_images")  # noqa: B009
+            sparse_ga: Any = getattr(importlib.import_module("mast3r.cloud_opt.sparse_ga"), "sparse_global_alignment")  # noqa: B009
+        except ImportError as e:
+            raise _cant_load(e) from None
         seed: Any = getattr(torch, "manual_seed")  # noqa: B009 - torch's stub leaves the argument untyped
         seed(0)
         t0 = time.monotonic()

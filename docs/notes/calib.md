@@ -451,3 +451,9 @@ fitted camera in cyan, plus the true camera in magenta on golden scenes. `*-dept
 - `none`: `[Candidate(Placement(0, 0, 0, 1), diag={"scale_source": "none"}), None, ...]`, for the solver-selection fix.
 - Beyond the design: a member with a calib height of 0 gets NaN instead of a ZeroDivisionError.
 - Proof: `calib/tests/test_room_scale.py`. `eval:calib` (E20 real) was left to the wave's merge.
+## State machines W7: calib-rooms-solver-select
+
+- `rooms/mast3r.py`: `ensure_code` runs under `flock` on `<parent>/.mast3r.lock`. Ready means the stamp `.midstudy-ready` holds `COMMIT` and HEAD is `COMMIT`. The stamp is removed before any clone or checkout and written after the submodules; checkout and submodule update use `--force`. An existing checkout without the stamp re-runs once, offline.
+- `load` turns every non-`Fail` exception into `SolverUnavailable`, including `ensure_code` and `ensure_weights` (wider than the design: a missing git binary or an unwritable cache also falls back). `Mast3r.solve` does the same for `ImportError` from its three imports.
+- `rooms/command.py`: `solver.resolve` runs only for a room with usable photos. A learned run with `scale_source: none` that placed only the first photo re-runs manhattan under auto (`diagnostics.fallback`); under `--solver mast3r` it stands with `diagnostics.degenerate`.
+- Proof: `calib/tests/test_mast3r_provision.py`, `test_align_room_fallback.py`. `eval:calib` (E20 real) is left to the wave's merge.
