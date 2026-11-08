@@ -42,3 +42,17 @@
   v1's in-memory jobs are kept (a restart forgets them). The library `#run` status guard ships in server-infra-library.
 - Deviation: none in the design. `tscert-ratchet --files … --update` writes no baseline (`--files` mode never does), so
   the `jobStep` line was added to `tscert/baseline.json` by hand (append only), and check:tscert confirms it certifies.
+
+## State machines W2: server-infra-lock (live same-host holders, no self-reclaim)
+
+- `common/logic/lock.ts` `lockVerdict(seen, staleMs, graceMs, liveMarginMs)` (TScert, still certifies): a live owner on this
+  host is 'too-old' only past `staleMs + liveMarginMs`. Unknown liveness (another host) keeps `ageMs > staleMs`; a dead
+  owner on this host is reclaimed at once. `common/lock.ts` passes 10 min, so a live holder is safe to 4200 s while the
+  server ends every tool by 3605 s. The margin, not "never reclaim a live pid", so a reused pid recovers after 70 min.
+- `acquireLock` never reclaims a lock its own process holds (`heldHere` has the folder and the owner matches): it waits.
+- Proof: `server/test/lock.test.ts`: live child back-dated 3605 s keeps the lock and owner.json; 2 h is reclaimed; dead pid
+  reclaimed at once with waitMs 0; own lock with the clock moved 2 h gives Busy; pure verdict cases. Contract §2.8 already says this.
+- Deviation: `server/test/lock-child.ts` is unchanged; the test back-dates owner.json after the child's `hold`.
+- Open, for the pipeline track or integration: `pipeline/test/lock.test.ts:88` still pins the old rule (a live same-host
+  owner reclaimed at 3601 s), so test:pipeline and check:tests fail on that one test. It is outside this package's files
+  and the server track. Changing `3601` to `4201` there makes it pass (checked on a throwaway copy).

@@ -5,7 +5,10 @@
 //            into it (atomically: a temp file and a rename). mkdir either makes the folder or fails: one taker wins.
 //   wait     on EEXIST, read owner.json and poll every 50 ms until the folder is gone, or until the wait is over
 //            (Busy). A lock is stale when its owner is a dead pid on this host, when it is older than the tool
-//            timeout (3600 s), or when it has had no readable owner.json for 10 s (its maker died in between).
+//            timeout (3600 s) and its owner can't be checked, when its owner is a live pid on this host and it is
+//            older than the tool timeout plus 10 minutes (the server ends every tool by then; a pid still "alive" is
+//            wedged or reused), or when it has had no readable owner.json for 10 s (its maker died in between). A
+//            process never reclaims a lock it holds itself: it waits, as for any held lock.
 //   reclaim  rename the stale folder aside (<lock>.d.stale-<pid>-<random>): one reclaimer wins the rename, the others
 //            get ENOENT and try again. The winner checks that what it moved is the owner it judged stale (else it
 //            moves it back) and removes it.
@@ -37,6 +40,8 @@ export class Busy extends Error {
 const LOCK_POLL_MS = 50
 /** The tool timeout: no holder may hold longer (midstudy-add's 3600 s). */
 const LOCK_STALE_MS = 3600 * 1000
+/** How much longer a live process on this host keeps its lock (past the server's end of every tool at 3600 s + 5 s). */
+const LOCK_LIVE_MARGIN_MS = 10 * 60 * 1000
 /** How long a lock folder may have no owner.json before it counts as abandoned. */
 const LOCK_GRACE_MS = 10 * 1000
 
@@ -123,7 +128,7 @@ function judge(dir: string, staleMs: number, graceMs: number): { readonly verdic
   const started = owner === null ? NaN : Date.parse(owner.started)
   const ageMs = Date.now() - (Number.isFinite(started) ? started : dirMtime)
   const ownerAlive = owner !== null && owner.host === host ? alive(owner.pid) : null
-  return { verdict: lockVerdict({ owner, ageMs, host, ownerAlive }, staleMs, graceMs), owner }
+  return { verdict: lockVerdict({ owner, ageMs, host, ownerAlive }, staleMs, graceMs, LOCK_LIVE_MARGIN_MS), owner }
 }
 
 /** Moves a stale lock folder aside and removes it; false when another reclaimer (or the holder) got there first. */
@@ -182,7 +187,9 @@ export async function acquireLock(dir: string, options: LockOptions): Promise<He
     }
     const seen = judge(dir, staleMs, graceMs)
     if (seen === null) continue
-    if (seen.verdict !== 'held') {
+    const mine = heldHere.get(dir)
+    const ownHolding = mine !== undefined && seen.owner !== null && sameOwner(mine, seen.owner)
+    if (seen.verdict !== 'held' && !ownHolding) {
       if (await reclaim(dir, seen.owner)) continue
     }
     if (!waited) {
