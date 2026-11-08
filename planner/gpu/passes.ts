@@ -37,8 +37,13 @@ const OCCLUSION_TOLERANCE = 0.03 // m (§4.5)
 /** The letterbox bars: 0x0e0f11, written as the Color's linear components (a v1 quirk kept on purpose: (1, 1, 1)). */
 export const BAR = new Color(0x0e0f11)
 
-/** Whether three.js picked its WebGPU backend (else the WebGL2 fallback). */
-export const isWebGPU = (r: WebGPURenderer): boolean => Reflect.get(r.backend, 'isWebGPUBackend') === true
+/** Whether three.js picked its WebGPU backend (else the WebGL2 fallback); call after init(), which can swap the backend.
+ * Reads three's own flags: if neither is there three has moved them, and guessing would silently pick the wrong path. */
+export function isWebGPU(r: WebGPURenderer): boolean {
+  if (Reflect.get(r.backend, 'isWebGPUBackend') === true) return true
+  if (Reflect.get(r.backend, 'isWebGLBackend') === true) return false
+  throw new Error('unknown three.js backend (three upgraded?)')
+}
 
 /** renderer.render(): it returns a Promise only when called before init(), which the planner always awaits first. */
 export function render(r: WebGPURenderer, scene: Object3D, camera: Camera): void {
@@ -369,6 +374,8 @@ export function createCatcher(frame: Frame, photo: T, shadow: Texture, shadowSiz
 
 // --- clears ------------------------------------------------------------------------------------------------------------------
 
+let clearWorkaroundOffReported = false
+
 /** renderer.clear() that clears what it should on both backends. three.js 0.180's WebGL2 backend has two bugs here
  * (WebGPU clears with load ops and has neither), found with a GL call trace (planner/gpu/demo/gltrace.mjs):
  *  - it forces the depth mask on before a clear but not the colour mask, so a colour clear right after a
@@ -377,16 +384,23 @@ export function createCatcher(frame: Frame, photo: T, shadow: Texture, shadowSiz
  *  - clearing the canvas (no render target) doesn't bind the default framebuffer, so the clear hit whatever was bound
  *    last (the furniture target's resolve framebuffer after its MSAA blit): the composite then painted the clear colour
  *    over the whole photo (a black view at Fit).
- * So: the colour mask on, and the default framebuffer bound when the target is the canvas. */
+ * So: the colour mask on, and the default framebuffer bound when the target is the canvas.
+ * These are three's private pieces, so three stays pinned exactly in package.json: on an upgrade, rerun
+ * planner/gpu/demo/check.mjs and gltrace.mjs. If a piece has moved the workaround is off: that says so once on the console
+ * (never on WebGPU, whose backend has no `state`), which fails check.mjs's "no page or console errors". */
 export function clearTarget(renderer: WebGPURenderer, color = true, depth = true, stencil = true): void {
-  const state: unknown = Reflect.get(renderer.backend, 'state')
-  const gl: unknown = Reflect.get(renderer.backend, 'gl')
-  if (state && typeof state === 'object') {
-    const setMask: unknown = Reflect.get(state, 'setColorMask')
-    if (color && typeof setMask === 'function') Reflect.apply(setMask, state, [true])
-    const bind: unknown = Reflect.get(state, 'bindFramebuffer')
-    if (renderer.getRenderTarget() === null && typeof bind === 'function' && typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext) {
-      Reflect.apply(bind, state, [gl.FRAMEBUFFER, null])
+  const backend = renderer.backend
+  if (Reflect.get(backend, 'isWebGLBackend') === true) {
+    const state: unknown = Reflect.get(backend, 'state')
+    const gl: unknown = Reflect.get(backend, 'gl')
+    const setMask: unknown = state && typeof state === 'object' ? Reflect.get(state, 'setColorMask') : undefined
+    const bind: unknown = state && typeof state === 'object' ? Reflect.get(state, 'bindFramebuffer') : undefined
+    if (typeof setMask === 'function' && typeof bind === 'function' && typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext) {
+      if (color) Reflect.apply(setMask, state, [true])
+      if (renderer.getRenderTarget() === null) Reflect.apply(bind, state, [gl.FRAMEBUFFER, null])
+    } else if (!clearWorkaroundOffReported) {
+      clearWorkaroundOffReported = true
+      console.error('three.js WebGL2 internals moved: the clear workaround is off')
     }
   }
   void renderer.clear(color, depth, stencil) // a Promise only before init()

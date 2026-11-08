@@ -521,3 +521,11 @@ Deviation: the browser check went in `sections/startup.mjs`, not `smoke.mjs`, wh
 for the earlier reviews: `startScene` returns the name of an open in flight, so main.ts doesn't put the Scenes page over
 it. Left: `refreshLayouts` can drop its event when the hook's direct `listLayouts` overtakes it (`layoutDetails` updates,
 no 'layouts' event; only the hook calls it directly); engine.ts is limited to the errors initialiser in this package.
+## State machines W5: planner-gpu-backend-guards (2026-11-08)
+
+- `planner/gpu/passes.ts`. `isWebGPU` reads both of three's backend flags and throws `unknown three.js backend (three
+  upgraded?)` when neither is there. `clearTarget`'s workaround is gated on `isWebGLBackend`; if `state`, `setColorMask`,
+  `bindFramebuffer` or `gl` has moved it logs one console.error, which fails check.mjs. The upgrade note (rerun check.mjs and
+  gltrace.mjs) is the comment above `clearTarget`.
+- Deviation: the guard also covers a missing `gl`, which the brief did not list: without it the framebuffer bind would be off
+  silently. The workaround is now all or nothing: with any piece missing, neither half runs.
