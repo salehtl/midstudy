@@ -19,3 +19,10 @@ Beyond common/lock.ts, deliberately: a claimer that loses its owner.json write t
 Beyond the design: the wasm stamp check also sees files it never recorded (a new file under `core/crates` is stale), the input walk moved inside the lock, and `scriptKey` hashes stamps.mjs too.
 
 Tests: `scripts/test/build-lock.test.mjs` runs a copy of build.mjs in a temp tree (`--lock-selftest` plus `MIDSTUDY_BUILD_STEP_SLEEP_MS` makes the wasm step a sleep under its lock). Open for packaging: `nix/wasm.nix` and `nix/midstudy-app.nix` list `scripts/build.mjs` by file, and now also need `scripts/lib/` (wasm.nix also `common/logic/lock.ts`), outside this track's paths.
+## State machines W4: tooling-gates
+
+`scripts/check.mjs`: `check:py` always runs `uv sync --project calib --frozen --inexact --quiet` (a partial venv from an interrupted sync gets repaired; `--inexact` keeps the `rooms` extra). `check:proofs` fetches Mathlib's cache unless `build/check/mathlib-cache.json {rev}` matches `proofs/lake-manifest.json` and the build folder is there; the marker is written only after `lake exe cache get` exits 0. Requiring the folder too goes a little past the plan: a wiped `proofs/.lake` with a surviving marker would otherwise build Mathlib from source. `check:gen` runs `gen-contract.mjs --check`, which also compares `core/crates/contract/schema.json`, so the gate writes nothing.
+
+`scripts/tscert-ratchet.mjs`: the dirlock `build/locks/tscert.lock` (wait up to 60 min) is held from before `build/tscert/jobs.json` is written to the end of the run, the `--update` baseline rewrite included. A full run whose result lacks a job's file exits 1 with "the jobs file changed under this run", and never rewrites the baseline. The waiting line goes to stdout because `check:tscert` reports the last line of stdout+stderr. `scripts/tscert.mjs` is unchanged: it is an input of the sandboxed run.
+
+Tests (`npm run test:scripts`): `check-gen.test.mjs`, `tscert-lock.test.mjs`. They run copies of the scripts in temp trees with PATH shims; the two check:gen tests use a detached `git worktree add` under the temp dir and remove it afterwards.

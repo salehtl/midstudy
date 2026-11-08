@@ -7,7 +7,8 @@
 //   types      tsc -b over every tsconfig area that has .ts files (tsconfig.json lists the areas)
 //   lint       eslint (eslint.config.js: strict-type-checked, no any / ! / casts / ts-comments) over the .ts files
 //   dead       knip (knip.json): no unused files, exports or dependencies
-//   gen        scripts/gen-contract.mjs (when it exists), then contract/gen/ must equal what is committed
+//   gen        scripts/gen-contract.mjs --check (when it exists; writes nothing), then contract/gen/ must equal what is
+//              committed
 //   tscert     scripts/tscert-ratchet.mjs: TScert over the logic/ modules, tscert/baseline.json still certifies
 //   planner    the planner's own tests, no browser: its logic against v1 (npm run test:engine, test:ui) and the typed bus
 //              against an EventTarget (they load the wasm kernels)
@@ -69,8 +70,9 @@ const checks = {
 
   gen() {
     if (!exists('scripts/gen-contract.mjs')) return { ok: true, line: 'nothing to check (no scripts/gen-contract.mjs yet)' }
-    const g = sh('node', ['scripts/gen-contract.mjs'])
-    if (g.code !== 0) return { ok: false, line: `scripts/gen-contract.mjs exited ${g.code}`, out: g.out }
+    // --check compares in memory: this gate never writes into the working tree.
+    const g = sh('node', ['scripts/gen-contract.mjs', '--check'])
+    if (g.code !== 0) return { ok: false, line: /out of date/.test(g.out) ? 'contract/gen or core/crates/contract/schema.json is out of date (run node scripts/gen-contract.mjs and commit the result)' : `scripts/gen-contract.mjs --check exited ${g.code}`, out: g.out }
     // Everything the generator writes: contract/gen/ and the bundle the Rust contract crate reads (gate-1).
     const outs = ['contract/gen', 'core/crates/contract/schema.json']
     const diff = sh('git', ['diff', '--stat', '--exit-code', '--', ...outs])
@@ -161,10 +163,10 @@ const checks = {
     if (!exists('calib/pyproject.toml')) return { ok: true, line: 'nothing to check (no calib/)' }
     // pyright reads calib's own [tool.pyright] when calib has one; otherwise scripts/pyright/pyrightconfig.json (strict).
     const own = fs.readFileSync(path.join(ROOT, 'calib/pyproject.toml'), 'utf8').includes('[tool.pyright]') || exists('calib/pyrightconfig.json')
-    if (!exists('calib/.venv')) {
-      const s = sh('uv', ['sync', '--project', 'calib', '--frozen', '--quiet'])
-      if (s.code !== 0) return { ok: false, line: 'uv sync --project calib failed (pyright needs its packages)', out: s.out }
-    }
+    // Every time, since a venv on disk may be a partial one from an interrupted sync: under a second when it is current.
+    // --inexact keeps the optional `rooms` extra, which an exact sync would remove (CLAUDE.md).
+    const s = sh('uv', ['sync', '--project', 'calib', '--frozen', '--inexact', '--quiet'])
+    if (s.code !== 0) return { ok: false, line: 'uv sync --project calib failed (pyright needs its packages)', out: s.out }
     const p = sh('pyright', ['--project', own ? 'calib' : 'scripts/pyright/pyrightconfig.json', '--pythonpath', path.join(ROOT, 'calib/.venv/bin/python')])
     const pm = /(\d+) errors?, (\d+) warnings?/.exec(p.out)
     const r = sh('ruff', ['check', '--no-cache', '--output-format', 'concise', 'calib'], { env: { NO_COLOR: '1' } })
@@ -244,12 +246,15 @@ const checks = {
     if (!exists('proofs/lakefile.lean') && !exists('proofs/lakefile.toml')) return { ok: true, line: 'nothing to check (no proofs/ Lean project yet)' }
     // The proofs track's own gate: the pinned Lean (nix/lean.nix) and Mathlib's cache kept in proofs/.lake, never ~/.cache.
     // A worktree without Mathlib's compiled files fetches them first (about 2 minutes): a plain `lake build` would build
-    // Mathlib from source (hours).
+    // Mathlib from source (hours). The marker is written only after a fetch that finished, for the rev it fetched: a
+    // build folder alone may be what an interrupted fetch left.
     if (exists('proofs/check.sh') && exists('proofs/run.sh')) {
       const dir = path.join(ROOT, 'proofs')
-      if (!exists('proofs/.lake/packages/mathlib/.lake/build')) {
+      const rev = mathlibRev()
+      if (rev === null || fetchedMathlibRev() !== rev || !exists('proofs/.lake/packages/mathlib/.lake/build')) {
         const g = sh(path.join(dir, 'run.sh'), ['lake', 'exe', 'cache', 'get'], { cwd: dir })
         if (g.code !== 0) return { ok: false, line: "Mathlib's cache get failed", out: g.out }
+        if (rev !== null) recordMathlibFetch(rev)
       }
       const c = sh(path.join(dir, 'check.sh'), [], { cwd: dir })
       const last = c.out.trim().split('\n').filter((l) => /check:proofs/.test(l)).at(-1) ?? c.out.trim().split('\n').at(-1) ?? ''
@@ -269,6 +274,30 @@ const checks = {
     if (/declaration uses 'sorry'/.test(b.out)) bad.push("lake build: declaration uses 'sorry'")
     return { ok: bad.length === 0, line: bad.length ? `${bad.length} problem(s): ${bad.slice(0, 3).join('; ')}` : `lake build ok, ${files.length} .lean file(s), no sorry/admit, ${allowed.length} allowed axiom(s)`, out: bad.join('\n') }
   },
+}
+
+// Mathlib's rev in proofs/lake-manifest.json; null when it can't be read.
+function mathlibRev() {
+  try {
+    const { packages } = JSON.parse(fs.readFileSync(path.join(ROOT, 'proofs/lake-manifest.json'), 'utf8'))
+    return packages.find((p) => p.name === 'mathlib')?.rev ?? null
+  } catch {
+    return null
+  }
+}
+const MATHLIB_MARKER = path.join(ROOT, 'build/check/mathlib-cache.json')
+function fetchedMathlibRev() {
+  try {
+    return JSON.parse(fs.readFileSync(MATHLIB_MARKER, 'utf8')).rev
+  } catch {
+    return null
+  }
+}
+function recordMathlibFetch(rev) {
+  fs.mkdirSync(path.dirname(MATHLIB_MARKER), { recursive: true })
+  const tmp = `${MATHLIB_MARKER}.tmp-${process.pid}`
+  fs.writeFileSync(tmp, `${JSON.stringify({ rev })}\n`)
+  fs.renameSync(tmp, MATHLIB_MARKER)
 }
 
 // A tsconfig as TypeScript reads it (comments, trailing commas), without following `extends`.

@@ -15,6 +15,8 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
+import { releaseAllSync, readOwner, tryClaim } from './lib/dirlock.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const argv = process.argv.slice(2)
@@ -96,7 +98,26 @@ for (const j of jobs) {
 
 // TScert, once for every file, inside the Nix sandbox (nix/tscert.nix runUnits): a copy of the inputs is checked by
 // the built TScert as the Nix build user, never as you, and the result is a store path, so an unchanged tree is read
-// back at once. Paths in the jobs are relative to the repository.
+// back at once. Paths in the jobs are relative to the repository. nix/tscert.nix reads the jobs from a fixed path, so one
+// run at a time holds it: from before the jobs are written to the end of the run, the --update rewrite included, or two
+// --update runs could read and write the baseline over each other.
+const LOCK = path.join(ROOT, 'build/locks/tscert.lock')
+const LOCK_WAIT_MS = 60 * 60_000
+const waitStart = Date.now()
+let waiting = false
+while (tryClaim(LOCK, { cmd: `tscert-ratchet ${argv.join(' ')}` }) === null) {
+  if (Date.now() - waitStart > LOCK_WAIT_MS) {
+    console.error(`tscert: the tscert lock is still held after 60 min (${readOwner(LOCK)?.cmd ?? 'unknown holder'}): ${rel(LOCK)}`)
+    process.exit(1)
+  }
+  if (!waiting) {
+    waiting = true
+    // On stdout, ahead of the summary: check.mjs reads the last line of the output as the result.
+    console.log(`tscert: waiting for the tscert lock (held by ${readOwner(LOCK)?.cmd ?? 'another run'})`)
+  }
+  await sleep(500)
+}
+process.on('exit', releaseAllSync)
 const jobsFile = path.join(ROOT, 'build/tscert/jobs.json')
 fs.mkdirSync(path.dirname(jobsFile), { recursive: true })
 fs.writeFileSync(jobsFile, JSON.stringify(jobs.map((j) => ({ ...j, file: rel(j.file), project: rel(j.project) }))))
@@ -143,6 +164,11 @@ if (r.error || r.status !== 0) {
 }
 let byFile
 try { byFile = JSON.parse(fs.readFileSync(r.stdout.trim().split('\n').at(-1), 'utf8')) } catch (e) { console.error(`tscert: unreadable result: ${e.message}`); process.exit(1) }
+const missing = jobs.filter((j) => byFile[rel(j.file)] === undefined)
+if (!only && missing.length) {
+  console.error(`tscert: the jobs file changed under this run: no result for ${missing.length} of ${jobs.length} files (${missing.slice(0, 3).map((j) => rel(j.file)).join(', ')}); run it again`)
+  process.exit(1)
+}
 for (const j of jobs) byFile[j.file] = byFile[rel(j.file)]
 const secs = ((performance.now() - t0) / 1000).toFixed(0)
 
