@@ -12,10 +12,10 @@ import { isoUtc, isoUtcMs } from '../../../common/logic/time.ts'
 import { isRenderName, jpegFrame } from '../../../core/js/node.ts'
 import type { SpendCap, SpendRefusal } from '../spend.ts'
 import { conformance } from '../strict.ts'
-import { lastJsonLine, runTool, toolError } from '../../../common/tools.ts'
+import { lastJsonLine, runTool, toolError, type ToolRun } from '../../../common/tools.ts'
 import { listDir, readJson, writeBytesSync, writeJsonSync } from './files.ts'
 import { exists, isFile, removeTree, replace, resolvePath } from '../../../common/files.ts'
-import { notInstalled } from './logic/jobs.ts'
+import { notInstalled, serverFailed } from './logic/jobs.ts'
 import { compareRenders, numbered, renderBase } from './logic/names.ts'
 import {
   UPSCALE_ENDPOINT, UPSCALE_NO_SIZE, alignFailed, alignResult, alignTimedOut, alreadyUpscaling, downloadFailed, modelSpec, noImage, noRender,
@@ -26,6 +26,8 @@ import { calibResultSchema } from './logic/worker.ts'
 
 /** v1 ALIGN_TIMEOUT: one keep-room align, 180 s. */
 const ALIGN_TIMEOUT_SECONDS = 180
+/** A keep-room align the server's stop ended: the render keeps its raw result. */
+const ALIGN_STOPPED = 'the server stopped'
 
 /** A render request that passed v1's checks. */
 export interface RenderJob {
@@ -105,6 +107,10 @@ export class RenderService {
   readonly #reserved = new Set<string>()
   /** Renders being upscaled now (one upscale per render at a time). */
   readonly #upscaling = new Set<string>()
+  /** The keep-room aligns running now, each with its way out. */
+  readonly #aligns = new Map<AbortController, Promise<ToolRun>>()
+  /** Set by shutdown(): no align starts after it. */
+  #closing = false
 
   constructor(options: RenderServiceOptions) {
     this.dir = options.rendersDir
@@ -269,9 +275,18 @@ export class RenderService {
     }
   }
 
+  /** The server's stop: every running align ended (each render completes not-applied, with its raw result); resolves
+   *  when they have. */
+  async shutdown(): Promise<void> {
+    this.#closing = true
+    for (const abort of this.#aligns.keys()) abort.abort()
+    await Promise.allSettled(this.#aligns.values())
+  }
+
   /** v1 `align` (keep room exact, §4.7): `<calib> align <scene photo.jpg> <name>-raw.jpg <mask.png> --out <tmp name>`;
    *  the tool's output is renamed to <name>.jpg only when it applied. Any failure is "not applied", with the reason. */
   async #align(scene: string, name: string, mask: Uint8Array): Promise<AlignResult> {
+    if (this.#closing) return alignFailed(ALIGN_STOPPED)
     const photo = resolvePath(this.#options.scenePhoto(scene))
     const raw = resolvePath(path.join(this.dir, name + '-raw.jpg'))
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'midstudy-align-'))
@@ -279,10 +294,15 @@ export class RenderService {
     try {
       fs.writeFileSync(path.join(tmp, 'mask.png'), mask)
       const argv = [...this.#options.calib, 'align', photo, raw, path.join(tmp, 'mask.png'), '--out', resolvePath(out)]
-      const run = await runTool(argv, { cwd: this.#options.repo, timeoutMs: ALIGN_TIMEOUT_SECONDS * 1000 })
+      const abort = new AbortController()
+      const running = runTool(argv, { cwd: this.#options.repo, timeoutMs: ALIGN_TIMEOUT_SECONDS * 1000, signal: abort.signal })
+      this.#aligns.set(abort, running)
+      const run = await running
+      this.#aligns.delete(abort)
+      if (abort.signal.aborted) return alignFailed(ALIGN_STOPPED)
       if (run.kind === 'not-found') return alignFailed(notInstalled(run.command))
       if (run.kind === 'timeout') return alignFailed(alignTimedOut(ALIGN_TIMEOUT_SECONDS))
-      if (run.kind === 'spawn-error') throw new Error(run.message)
+      if (run.kind === 'spawn-error') return alignFailed(serverFailed('OSError', run.message))
       const res = lastJsonLine(run.stdout)
       if (isRecord(res)) {
         const v = conformance(calibResultSchema('align', res['ok'] === true), res, 'midstudy-calib align result (' + name + ')')

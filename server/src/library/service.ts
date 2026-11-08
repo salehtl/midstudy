@@ -26,6 +26,8 @@ import type { ItemFacts } from './logic/patch.ts'
 const ADD_TIMEOUT_S = 3600
 /** v1 LOCK_WAIT: a library edit waits this long for a running midstudy-add, then answers 503. */
 const LOCK_WAIT_MS = 60 * 1000
+/** How a job the server's stop ended, or never started, reads. */
+const SERVER_STOPPED = 'the server stopped'
 
 /** A library job (contract §2.8 Jobs; api/library-job.schema.json), in v1's key order. `cost_usd` and `item` are what
  *  midstudy-add's summary and library.json say, passed on as they are. */
@@ -157,6 +159,10 @@ export class LibraryService {
   readonly #jobs = new JobStore<LibraryJob>()
   readonly #runs = new Map<string, { readonly argv: readonly string[]; readonly cleanup: string | null }>()
   readonly #queue: SerialQueue
+  /** The running job's way out (one job runs at a time). */
+  #running: AbortController | null = null
+  /** Set by shutdown(): no job starts after it. */
+  #closing = false
 
   constructor(deps: ServerDeps) {
     this.#deps = deps
@@ -252,6 +258,15 @@ export class LibraryService {
     return this.#jobs.get(id)
   }
 
+  /** The server's stop: the running midstudy-add ended (SIGTERM to its group: it releases the lock and cleans its
+   *  scratch, and a paid run records its cost first), the queued jobs failed without starting; resolves when the
+   *  queue has settled. */
+  async shutdown(): Promise<void> {
+    this.#closing = true
+    this.#running?.abort()
+    await this.#queue.drained()
+  }
+
   #fail(id: string, message: string): void {
     this.#jobs.update(id, { status: 'failed', finished: isoUtc(Date.now()), message })
   }
@@ -261,8 +276,19 @@ export class LibraryService {
     const job = this.#jobs.get(id)
     const run = this.#runs.get(id)
     if (job === null || run === undefined) return
+    if (this.#closing) {
+      this.#fail(id, SERVER_STOPPED)
+      return
+    }
     this.#jobs.update(id, { status: 'running', started: isoUtc(Date.now()), message: runningMessage(job.kind, job.item_id, job.engine) })
-    const out = await runTool(run.argv, { cwd: this.#deps.config.repo, timeoutMs: ADD_TIMEOUT_S * 1000 })
+    const abort = new AbortController()
+    this.#running = abort
+    const out = await runTool(run.argv, { cwd: this.#deps.config.repo, timeoutMs: ADD_TIMEOUT_S * 1000, signal: abort.signal })
+    this.#running = null
+    if (abort.signal.aborted && !(out.kind === 'exited' && out.returnCode === 0)) {
+      this.#fail(id, SERVER_STOPPED)
+      return
+    }
     switch (out.kind) {
       case 'not-found':
         this.#fail(id, notInstalled(out.command))

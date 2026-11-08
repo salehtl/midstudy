@@ -72,3 +72,11 @@
   while idle, not only idle ones. `server/test/rooms-calib.ts` logs its pid (needed by the proof).
 
 Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a live same-host owner still waits at 3601 s, reclaimed at 4201 s).
+
+## State machines W3: server-domain-children-shutdown (library and render children stopped on shutdown)
+
+- `LibraryService.shutdown()` (registered in `routes/library.ts`): aborts the running midstudy-add through runTool's signal, fails queued jobs without starting them ("the server stopped"), and awaits the queue. An add that still exited 0 stays done.
+- `RenderService.shutdown()` (registered in `scenes/shared.ts`): aborts running keep-room aligns and awaits them. The render completes not-applied with "the server stopped" and the raw result as `<name>.jpg`.
+- `#align`: a spawn-error is now "not applied" with the OSError reason, so the render completes. This departs from v1's 500 on purpose: the render is already paid for and in costs.csv.
+- Deviation, `common/tools.ts` (not in the package's file list): `killGroup` sends one SIGTERM per child. At the server's stop killAllTools and the abort both end the same add, and midstudy-add leaves at once on a second signal, which would lose a paid run's cost row. Proof in `server/test/tools.test.ts`.
+- Deviation from the seam note: the done item is still read from library.json, not the summary line. `add-summary.schema.json` has no item, and the fix entry keeps this read (library.json is replaced atomically).
