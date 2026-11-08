@@ -190,7 +190,7 @@ const joinLines = (lines: readonly string[]): string => lines.join('\n')
 // A page's lines can hold megabytes; each read over them is linear, but a 9 MB line still takes a second or two, and the
 // server must keep answering meanwhile (contract §2.11: no page can hold the server). Above WORKER_CHARS they run in a
 // worker thread (its own instance of the same wasm, so the same answers), bounded by the read's deadline: a worker
-// still busy when the deadline passes is stopped, and the jobs queued behind it start again on a new one.
+// still busy with a job when that job's deadline passes is stopped, and the jobs queued behind it go to a new one.
 
 const WORKER_CHARS = 200_000
 const WORKER_URL = new URL('./size-worker.ts', import.meta.url)
@@ -206,48 +206,84 @@ interface Job {
   readonly reject: (e: Error) => void
 }
 
-class SizeWorker {
-  #worker: Worker | null = null
-  #jobs: Job[] = []
-  #next = 0
+/** What SizeWorker needs of a worker thread. */
+export interface WorkerLike {
+  on(event: 'message', listener: (m: unknown) => void): unknown
+  on(event: 'error', listener: (e: Error) => void): unknown
+  on(event: 'exit', listener: (code: number) => void): unknown
+  postMessage(m: unknown): void
+  terminate(): Promise<number>
+  unref(): void
+  removeAllListeners(): unknown
+}
 
-  #start(): Worker {
+export class SizeWorker {
+  #worker: WorkerLike | null = null
+  // Posted one at a time, so the job the worker is executing is always exactly #running.
+  #running: Job | null = null
+  #queue: Job[] = []
+  #next = 0
+  readonly #spawn: () => WorkerLike
+
+  constructor(spawn: () => WorkerLike = () => new Worker(WORKER_URL)) {
+    this.#spawn = spawn
+  }
+
+  #start(): WorkerLike {
     if (this.#worker !== null) return this.#worker
-    const w = new Worker(WORKER_URL)
+    const w = this.#spawn()
     w.unref()
     w.on('message', (m: unknown) => {
-      const id = field(m, 'id')
+      if (w !== this.#worker) return
+      const job = this.#running
       const out = field(m, 'out')
-      const at = this.#jobs.findIndex((j) => j.id === id)
-      const job = this.#jobs[at]
-      if (job === undefined || typeof out !== 'string') return
-      this.#jobs.splice(at, 1)
+      if (job === null || field(m, 'id') !== job.id || typeof out !== 'string') return
+      this.#running = null
       job.resolve(out)
+      this.#pump()
     })
     w.on('error', (e: Error) => {
-      this.#restart(e)
+      if (w === this.#worker) this.#failRunning(e)
+    })
+    w.on('exit', (code: number) => {
+      if (w === this.#worker) this.#failRunning(new Error(`the size reader stopped (exit ${String(code)})`))
     })
     this.#worker = w
     return w
   }
 
-  /** Stops the worker; `failed` (the job that ran out of time, if any) fails, the others start again. */
-  #restart(e: Error, failed?: Job): void {
+  /** Posts the queue's head when the worker is free. */
+  #pump(): void {
+    if (this.#running !== null) return
+    const job = this.#queue.shift()
+    if (job === undefined) return
+    this.#running = job
+    try {
+      this.#start().postMessage({ id: job.id, op: job.op, input: job.input })
+    } catch (e) {
+      this.#running = null
+      job.reject(e instanceof Error ? e : new Error(String(e)))
+      this.#pump()
+    }
+  }
+
+  /** The running job fails and the worker goes; the queued jobs didn't cause it and go to a new one. */
+  #failRunning(e: Error): void {
+    const job = this.#running
+    this.#running = null
+    this.#replace()
+    job?.reject(e)
+    this.#pump()
+  }
+
+  #replace(): void {
     const w = this.#worker
     this.#worker = null
-    void w?.terminate()
-    if (failed !== undefined) {
-      this.#jobs = this.#jobs.filter((j) => j !== failed)
-      failed.reject(e)
-    }
-    const again = this.#jobs
-    if (failed === undefined) {
-      this.#jobs = []
-      for (const j of again) j.reject(e)
-      return
-    }
-    const fresh = this.#start()
-    for (const j of again) fresh.postMessage({ id: j.id, op: j.op, input: j.input })
+    if (w === null) return
+    w.removeAllListeners()
+    // An 'error' already on its way from the stopped thread must not throw as an unhandled event.
+    w.on('error', () => undefined)
+    void w.terminate()
   }
 
   run(op: string, input: string, timeoutMs: number): Promise<string> {
@@ -264,11 +300,19 @@ class SizeWorker {
           reject(e)
         },
       }
+      // Set now and never re-armed: this is the request's own deadline, so time spent queued or on a replaced worker
+      // counts, and a fresh worker grants no more.
       const timer = setTimeout(() => {
-        this.#restart(new WorkerTimeout('the size reader ran out of time'), job)
+        const e = new WorkerTimeout('the size reader ran out of time')
+        if (job === this.#running) {
+          this.#failRunning(e)
+          return
+        }
+        this.#queue = this.#queue.filter((j) => j !== job)
+        job.reject(e)
       }, Math.max(1, timeoutMs))
-      this.#jobs.push(job)
-      this.#start().postMessage({ id, op, input })
+      this.#queue.push(job)
+      this.#pump()
     })
   }
 }
