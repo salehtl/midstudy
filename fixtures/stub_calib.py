@@ -12,9 +12,12 @@
   upload to source.jpg and writes photo.jpg with every metadata segment removed (APP1-APP15, COM: EXIF, GPS, XMP, ICC),
   so a clean JPEG (JFIF only, like the golden scenes) is copied byte for byte. It can't rotate, resize or convert
   colour: a photo with an EXIF orientation other than 1 is refused; a larger photo or an ICC profile only warns.
+  Contract §4.3 Order: when photo.jpg would change, calib.json, depth.png, lighting.json, the old photo.jpg and any other
+  source.* go first; the same photo.jpg again leaves the fit alone.
 - fit: with MIDSTUDY_CALIB_MOCK=<dir> (e.g. fixtures/calib), copies <dir>/<sha256 of photo.jpg>/calib.json,
-  depth.png and lighting.json (falling back to the SHA-256 of source.<ext>); otherwise writes the "default" fallback (FOV 55,
-  height 1.40, pitch -10, no depth, floor not found). EXIF facts are read from source.<ext>.
+  depth.png and lighting.json (falling back to the SHA-256 of source.<ext>); otherwise writes the §4.3 fallback: source
+  "exif" with the EXIF FOV, or "default" with FOV 55; height 1.40, pitch -10, no depth, floor not found, a fallback_reason.
+  EXIF facts are read from source.<ext>. calib.json is removed first and written last.
 - light (contract §4.8, lighting.json alone for a scene calibrated before it existed): with MIDSTUDY_CALIB_MOCK, copies
   <dir>/<sha256 of photo.jpg, then of source.<ext>>/lighting.json (lighting: true); otherwise, or with no match, writes
   nothing, leaves an existing lighting.json alone and answers lighting: false. Never touches calib.json, depth.png,
@@ -39,7 +42,6 @@ import hashlib
 import json
 import math
 import os
-import shutil
 import struct
 import sys
 import tempfile
@@ -49,6 +51,8 @@ from pathlib import Path
 MAX_BYTES = 25 * 1024 * 1024
 DEFAULT_CAMERA = {"fov_y_deg": 55.0, "height_m": 1.40, "pitch_deg": -10.0, "roll_deg": 0.0}
 SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+SCENE_FILES = ("photo.jpg", "source.*", "calib.json", "depth.png", "lighting.json")  # what the tool writes in a scene folder
+DERIVED_FILES = ("calib.json", "depth.png", "lighting.json")  # calib.json first: it commits the rest
 
 
 class Fail(Exception):
@@ -220,10 +224,31 @@ def fov_from_35mm(f35: float, w: int, h: int) -> float:
 
 
 def write_atomic(path: Path, data: bytes) -> None:
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def sweep_tmp(folder: Path) -> None:
+    """Remove the `.<name>.<random>.tmp` a killed run left, for this tool's names only: the server writes scene.json
+    and thumb.jpg in the same folder with the same pattern."""
+    for name in SCENE_FILES:
+        for tmp in folder.glob(f".{name}.*.tmp"):
+            tmp.unlink(missing_ok=True)
+
+
+def invalidate(folder: Path, names) -> None:
+    """Remove these files in order (contract §4.3 Order: calib.json, the commit marker, goes first)."""
+    for name in names:
+        (folder / name).unlink(missing_ok=True)
 
 
 def source_file(scene: Path) -> Path | None:
@@ -232,7 +257,22 @@ def source_file(scene: Path) -> Path | None:
 
 
 # --- commands ------------------------------------------------------------------------------------------------------
+def replace_files(out: Path, data: bytes, photo: bytes) -> None:
+    """source.jpg and photo.jpg in the contract §4.3 order: anything derived from a different photo goes first; the
+    same photo.jpg again (the server's own re-`run`, a repeat ingest) leaves it and the fit alone."""
+    others = [p.name for p in out.glob("source.*") if p.name != "source.jpg" and p.is_file()]
+    if not ((out / "photo.jpg").is_file() and (out / "photo.jpg").read_bytes() == photo):
+        invalidate(out, (*DERIVED_FILES, "photo.jpg", *others))
+        write_atomic(out / "source.jpg", data)
+        write_atomic(out / "photo.jpg", photo)
+        return
+    invalidate(out, others)
+    if not ((out / "source.jpg").is_file() and (out / "source.jpg").read_bytes() == data):
+        write_atomic(out / "source.jpg", data)
+
+
 def ingest(upload: Path, out: Path) -> dict:
+    sweep_tmp(out)
     if not upload.is_file():
         raise Fail(f"{upload} doesn't exist")
     if upload.stat().st_size > MAX_BYTES:
@@ -249,10 +289,7 @@ def ingest(upload: Path, out: Path) -> dict:
     w, h = jpeg_size(data)
     photo, dropped = strip_metadata(data)
     out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob("source.*"):
-        old.unlink()
-    write_atomic(out / "source.jpg", data)
-    write_atomic(out / "photo.jpg", photo)
+    replace_files(out, data, photo)
     if dropped:
         log(f"removed from photo.jpg: {', '.join(dropped)}" + (" (colours not converted to sRGB: stub)" if "ICC" in dropped else ""))
     if max(w, h) > 2048:
@@ -278,8 +315,11 @@ def fit(scene: Path, no_depth: bool) -> dict:
 
     mock = os.environ.get("MIDSTUDY_CALIB_MOCK")
     calib = None
+    depth = None
     light = None
+    why = "the stub has no MoGe and MIDSTUDY_CALIB_MOCK isn't set"
     if mock:
+        why = "MIDSTUDY_CALIB_MOCK has no calibration for this photo"
         keys = [hashlib.sha256(data).hexdigest()] + ([hashlib.sha256(src.read_bytes()).hexdigest()] if src else [])
         for key in keys:
             d = Path(mock) / key
@@ -288,28 +328,34 @@ def fit(scene: Path, no_depth: bool) -> dict:
                 log(f"fit: MIDSTUDY_CALIB_MOCK hit {d}")
                 if (calib.get("image") or {}) != {"w": w, "h": h}:
                     log(f"warning: the mock's image size {calib.get('image')} isn't photo.jpg's {w} x {h}")
-                has_depth = (d / "depth.png").is_file() and calib.get("depth") and not no_depth
-                if has_depth:
-                    shutil.copyfile(d / "depth.png", scene / ".depth.png.tmp")
-                    os.replace(scene / ".depth.png.tmp", scene / "depth.png")
+                if (d / "depth.png").is_file() and calib.get("depth") and not no_depth:
+                    depth = (d / "depth.png").read_bytes()
                 else:
                     calib["depth"] = None
                 if (d / "lighting.json").is_file():
                     light = (d / "lighting.json").read_bytes()
                 break
         else:
-            log(f"fit: no mock for photo.jpg in {mock}: writing the default fallback")
+            log(f"fit: no mock for photo.jpg in {mock}: writing the fallback")
     if calib is None:
-        calib = {"version": 1, "source": "default", "model": None, "image": {"w": w, "h": h}, "camera": dict(DEFAULT_CAMERA),
+        fov = exif.get("fov_y_deg") if exif else None
+        calib = {"version": 1, "source": "exif" if fov else "default", "model": None, "image": {"w": w, "h": h},
+                 "camera": {**DEFAULT_CAMERA, "fov_y_deg": round(clamp(fov, 20.0, 110.0), 2)} if fov else dict(DEFAULT_CAMERA),
                  "principal": [0.5, 0.5], "floor": {"found": False, "inlier_ratio": None, "rmse_m": None},
-                 "depth": None, "exif": exif, "device": None, "elapsed_s": 0}
-    if calib.get("depth") is None and (scene / "depth.png").exists():
-        (scene / "depth.png").unlink()
+                 "depth": None, "exif": exif, "device": None, "elapsed_s": 0, "fallback_reason": why}
+        log(f"fallback ({calib['source']}): {why}")
+    calib["elapsed_s"] = round(time.monotonic() - t0, 3)
+    # contract §4.3 Order: calib.json goes first and comes back last, so a fit that dies halfway reads as "not fitted"
+    sweep_tmp(scene)
+    invalidate(scene, ("calib.json",))
+    if depth is not None:
+        write_atomic(scene / "depth.png", depth)
+    else:
+        (scene / "depth.png").unlink(missing_ok=True)
     if light is not None:  # contract §4.8: the mock's lighting.json, else none
         write_atomic(scene / "lighting.json", light)
-    elif (scene / "lighting.json").exists():
-        (scene / "lighting.json").unlink()
-    calib["elapsed_s"] = round(time.monotonic() - t0, 3)
+    else:
+        (scene / "lighting.json").unlink(missing_ok=True)
     write_atomic(scene / "calib.json", (json.dumps(calib, indent=2) + "\n").encode())
     return {**calib, "ok": True}
 
