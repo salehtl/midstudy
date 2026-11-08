@@ -7,12 +7,16 @@
 // eval:real-room; evals/lib/rooms.mjs, evals/lib/room_images.py): the calib mock's key against the fixture folders, the
 // §4.9 maps against the golden room's truth, the anchor and re-expression formulas against each other, the oriented-box
 // occlusion and id-mask judges on composites drawn here, and eval:real-room's measurements through the true poses.
+// The harness's own state machines: startServer (the server's own port, up cleared on a crash, a clean stop), createEval's
+// bounded cleanups and signal debounce, the build memo, the job polls, the out-folder lock.
 // Usage: node evals/harness_selftest.mjs   (or npm run eval:selftest)
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
-  REPO, GOLDEN, createEval, golden, project, photoToFloor, projectBox, expectedDrop, writeProbeLibrary, maskPng, pyHelper, unknownPhoto, fmt,
+  REPO, GOLDEN, createEval, golden, project, photoToFloor, projectBox, expectedDrop, writeProbeLibrary, maskPng, pyHelper, unknownPhoto, fmt, startServer, waitScene, api, sleep,
 } from './lib/harness.mjs'
 import {
   ROOM_IDS, goldenRoom, roomSofa, mockKey, roomToScene, sceneToRoom, rotRoomToScene, boxCornersOriented, applyAnchor, reexpress, poseErr, normYaw,
@@ -143,4 +147,135 @@ const gm = goldenMeasurements(path.join(ev.out, 'real-room-golden'))
 const ms = measureSpots(gm.meas, gm.truthMembers)
 ev.check('eval:real-room --golden: its measurements, read through the true poses, give every spot within 1 mm in every photo, and the scale its length', ms.spots.length === 4 && ms.spots.every((sp) => sp.rows.length >= 4 && sp.rows.every((x) => x.err_cm < 0.1)) && Math.abs(ms.scale_measured_m - gm.meas.scale.length_m) < 1e-3,
   fmt(ms.spots.map((sp) => [sp.name, sp.rows.length, Math.max(...sp.rows.map((x) => x.err_cm))])))
+
+ev.section('startServer: the server\'s own port, up cleared on a crash, a clean stop')
+const decoy = http.createServer((_q, a) => { a.statusCode = 418; a.end('a foreign server') })
+await new Promise((res) => { decoy.listen(0, '127.0.0.1', res) })
+ev.onCleanup(() => decoy.close())
+const srvA = await startServer(ev)
+const printed = /midstudy planner: http:\/\/127\.0\.0\.1:(\d+)\/planner\//.exec(srvA.log())?.[1]
+const scenesA = await api.get(srvA.base, '/api/scenes')
+ev.check('the server is told --port 0, and srv.port is the port in its own stdout line', /--port 0 /.test(srvA.log()) && srvA.up && String(srvA.port) === printed && srvA.base === `http://127.0.0.1:${printed}`, `srv.port ${srvA.port}, printed ${printed}`)
+ev.check('srv.base answers as the server (GET /api/scenes 200 JSON), not a foreign listener', scenesA.status === 200 && scenesA.json !== null, `status ${scenesA.status}`)
+const t0Stop = Date.now()
+await srvA.stop()
+const stopMs = Date.now() - t0Stop
+ev.check('srv.stop() on an idle server ends it under 8 s, without SIGKILL, and is not recorded as a crash', stopMs < 8000 && srvA.exited !== null && srvA.exited.sig !== 'SIGKILL' && srvA.why === '', `${stopMs} ms, ${fmt(srvA.exited)}, why '${srvA.why}'`)
+const srvB = await startServer(ev)
+const copyB = { ...srvB }
+const aliveBefore = typeof srvB.alive === 'function' && srvB.alive()
+srvB.proc.kill('SIGKILL')
+for (let i = 0; i < 100 && srvB.exited == null; i++) await sleep(50)
+ev.check('a server killed after start: up false, alive() false (also on a spread copy), why names the exit', aliveBefore && srvB.up === false && srvB.alive() === false && copyB.alive() === false && /exited after start/.test(srvB.why), `up ${srvB.up}, why '${srvB.why}'`)
+
+ev.section('createEval, ensureBuilt and the out-folder lock, in child evals')
+const HARNESS = pathToFileURL(path.join(REPO, 'evals/lib/harness.mjs')).href
+const scratch = path.join(ev.out, 'children')
+fs.mkdirSync(scratch, { recursive: true })
+const childSlugs = new Set()
+// A child eval that gets `limitMs` to exit, then SIGKILL (its result has killed: true).
+function childEval(slug, body, { env: extra = {}, limitMs = 60000 } = {}) {
+  childSlugs.add(slug)
+  const src = `import fs from 'node:fs'\nimport { createEval, ensureBuilt, startServer, sleep, raw } from ${JSON.stringify(HARNESS)}\nconst ev = createEval('C', ${JSON.stringify(slug)}, { timeoutS: 120 })\n${body}`
+  const p = spawn(process.execPath, ['--input-type=module', '-e', src], { cwd: REPO, env: { ...process.env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] })
+  const c = { p, out: '', err: '', t0: Date.now(), killed: false, done: null, secs: () => ((Date.now() - c.t0) / 1000).toFixed(1) }
+  p.stdout.on('data', (d) => { c.out += d })
+  p.stderr.on('data', (d) => { c.err += d })
+  const limit = setTimeout(() => { c.killed = true; p.kill('SIGKILL') }, limitMs)
+  c.done = new Promise((res) => { p.on('close', (code, sig) => { clearTimeout(limit); c.ms = Date.now() - c.t0; res({ code, sig, killed: c.killed }) }) })
+  c.saw = async (text, ms = 20000) => { const end = Date.now() + ms; while (!c.out.includes(text) && Date.now() < end) await sleep(20); return c.out.includes(text) }
+  return c
+}
+const HOLD = 'setInterval(() => {}, 1000)'
+const HUNG = `ev.onCleanup(() => new Promise(() => { ${HOLD} }))`
+async function hungCleanup() {
+  const c = childEval('h0-child-hung', `${HUNG}\nawait ev.finish()`)
+  const r = await c.done
+  ev.check('a cleanup that never resolves: the eval exits 1 in about 15–20 s with a failing "cleanup 1 finished"', r.code === 1 && c.ms < 30000 && /FAIL \S+ cleanup 1 finished/.test(c.out), `${fmt(r)} in ${c.secs()} s`)
+}
+async function secondSignal() {
+  const c = childEval('h0-child-signal', `${HUNG}\nconsole.log('IN CLEANUP')\nawait ev.finish()`)
+  await c.saw('IN CLEANUP'); await sleep(300)
+  c.p.kill('SIGTERM'); await sleep(3000)
+  const t = Date.now()
+  c.p.kill('SIGTERM')
+  const r = await c.done
+  ev.check('hung in cleanup: a SIGTERM 3 s after the first exits 130 at once', r.code === 130 && Date.now() - t < 2000, `${fmt(r)}, ${Date.now() - t} ms after the second`)
+}
+async function signalBurst() {
+  const marker = path.join(scratch, 'burst-cleaned')
+  const c = childEval('h0-child-burst', `ev.onCleanup(async () => { await sleep(300); fs.writeFileSync(${JSON.stringify(marker)}, 'x') })\nconsole.log('READY')\n${HOLD}`)
+  await c.saw('READY'); await sleep(300)
+  c.p.kill('SIGTERM'); await sleep(50); c.p.kill('SIGTERM')
+  const r = await c.done
+  ev.check('two SIGTERMs 50 ms apart count as one: the cleanups still run, exit 1', r.code === 1 && fs.existsSync(marker), `${fmt(r)}, cleaned ${fs.existsSync(marker)}`)
+}
+async function buildRetry() {
+  const marker = path.join(scratch, 'build-marker')
+  const cmd = ['node', '-e', "const fs=require('fs');const m=process.argv[1];if(!fs.existsSync(m)){fs.writeFileSync(m,'');console.error('no marker');process.exit(3)}", marker]
+  const c = childEval('h0-child-build', `console.log('MEMO ' + JSON.stringify([ensureBuilt(ev).ok, ensureBuilt(ev).ok, ensureBuilt(ev).ok]))\nprocess.exit(0)`, { env: { MIDSTUDY_EVAL_BUILD_CMD: JSON.stringify(cmd) } })
+  await c.done
+  const builds = (c.out.match(/^(PASS|FAIL) \S+ .*builds the planner/gm) || []).map((l) => l.slice(0, 4))
+  ev.check('ensureBuilt: a failed build is retried, a success is memoized, and each attempt is its own check', c.out.includes('MEMO [false,true,true]') && fmt(builds) === '["FAIL","PASS"]', `${/MEMO .*/.exec(c.out)?.[0]}; ${fmt(builds)}`)
+}
+async function buildBroken() {
+  const count = path.join(scratch, 'build-count')
+  const cmd = ['node', '-e', "require('fs').appendFileSync(process.argv[1],'x\\n');console.error('the build is broken');process.exit(3)", count]
+  const c = childEval('h0-child-nobuild', `ensureBuilt(ev); ensureBuilt(ev)\nconst s = await startServer(ev)\nconsole.log('SRV ' + JSON.stringify({ up: s.up, why: s.why, proc: s.proc ?? null, alive: s.alive() }))\nawait s.stop()\nprocess.exit(0)`, { env: { MIDSTUDY_EVAL_BUILD_CMD: JSON.stringify(cmd) } })
+  await c.done
+  const j = JSON.parse(/SRV (.*)/.exec(c.out)?.[1] ?? '{}')
+  const n = fs.existsSync(count) ? fs.readFileSync(count, 'utf8').trim().split('\n').length : 0
+  ev.check('a build that always fails: two attempts per process, then startServer is up:false "the build failed" and spawns nothing', n === 2 && j.up === false && /^the build failed/.test(j.why ?? '') && j.proc === null && j.alive === false, `${n} attempts, ${fmt(j)}`)
+}
+async function outDirLock() {
+  const go = path.join(scratch, 'lock-go')
+  const first = childEval('h0-child-lock', `fs.writeFileSync(ev.out + '/mine', 'x')\nconsole.log('HOLDING')\nwhile (!fs.existsSync(${JSON.stringify(go)})) await sleep(50)\nconsole.log('STILL ' + fs.existsSync(ev.out + '/mine'))\nawait ev.finish()`)
+  await first.saw('HOLDING')
+  const second = childEval('h0-child-lock', `console.log('RAN')\nawait ev.finish()`, { limitMs: 30000 })
+  const r2 = await second.done
+  const dir = path.join(REPO, 'evals/out/h0-child-lock')
+  const intact = fs.existsSync(path.join(dir, 'mine'))
+  fs.writeFileSync(go, 'x')
+  const r1 = await first.done
+  ev.check('a second run of the same eval exits 75 and says who holds it, leaving the first\'s folder alone', r2.code === 75 && /another run of h0-child-lock is in progress in this worktree \(pid \d+/.test(second.err) && !second.out.includes('RAN') && intact, `${fmt(r2)}, intact ${intact}, ${second.err.trim().slice(0, 160)}`)
+  ev.check('…and the first finishes with its results.json', r1.code === 0 && first.out.includes('STILL true') && fs.existsSync(path.join(dir, 'results.json')), fmt(r1))
+  const third = childEval('h0-child-lock', `process.exit(0)`, { limitMs: 30000 })
+  const r3 = await third.done
+  ev.check('…and the lock is free afterwards', r3.code === 0, fmt(r3))
+}
+async function recordFiles() {
+  const dir = path.join(scratch, 'record')
+  const stub = http.createServer((_q, a) => { a.setHeader('Content-Type', 'application/json'); a.end('{}') })
+  await new Promise((res) => { stub.listen(0, '127.0.0.1', res) })
+  const b = `http://127.0.0.1:${stub.address().port}`
+  childSlugs.add('h0-child-rec2')
+  const c = childEval('h0-child-rec1', `await raw(${JSON.stringify(b)}, 'GET', '/api/a')\ncreateEval('D', 'h0-child-rec2', { timeoutS: 120 })\nawait raw(${JSON.stringify(b)}, 'GET', '/api/b')\nprocess.exit(0)`, { env: { MIDSTUDY_RECORD_API: dir } })
+  await c.done
+  stub.close()
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).map((f) => f.replace(/-\d+\.jsonl$/, '')).sort() : []
+  ev.check('MIDSTUDY_RECORD_API: a second createEval in a process records to its own file', fmt(files) === '["h0-child-rec1","h0-child-rec2"]', fmt(files))
+}
+await Promise.all([hungCleanup(), secondSignal(), signalBurst(), buildRetry(), buildBroken(), outDirLock(), recordFiles()])
+for (const s of childSlugs) { fs.rmSync(path.join(REPO, 'evals/out', s), { recursive: true, force: true }); fs.rmSync(path.join(REPO, 'evals/out', `${s}.lock`), { recursive: true, force: true }) }
+
+ev.section('job polls: end on any status outside the contract\'s in-progress values')
+const jobs = http.createServer((q, a) => {
+  const name = q.url.split('/').pop()
+  a.setHeader('Content-Type', 'application/json')
+  if (name === 'boom') { a.statusCode = 500; a.end('{"error":"boom"}'); return }
+  a.end(JSON.stringify(name === 'weird' ? { calib_status: 'weird' } : name === 'running' ? { calib_status: 'running' } : {}))
+})
+await new Promise((res) => { jobs.listen(0, '127.0.0.1', res) })
+ev.onCleanup(() => jobs.close())
+const jb = `http://127.0.0.1:${jobs.address().port}`
+const timed = async (name, ms) => { const t = Date.now(); const v = await waitScene(jb, name, ms); return { v, ms: Date.now() - t } }
+const w1 = await timed('weird', 3000)
+ev.check('waitScene returns at once on a status it doesn\'t know', w1.v?.calib_status === 'weird' && w1.ms < 1000, `${w1.ms} ms`)
+const [w2, w3] = await Promise.all([timed('nofield', 800), timed('running', 800)])
+ev.check('a body without calib_status, and "running", keep waitScene polling to its timeout', w2.v === null && w2.ms >= 750 && w3.v === null && w3.ms >= 750, `${w2.ms} ms, ${w3.ms} ms`)
+const stderrWrite = process.stderr.write
+let captured = ''
+process.stderr.write = (chunk) => { captured += chunk; return true }
+const w4 = await timed('boom', 600).finally(() => { process.stderr.write = stderrWrite })
+ev.check('waitFor returns null on a timeout and its stderr line names the last answer (500)', w4.v === null && /waitFor timed out after 600 ms; last: .*500/.test(captured), captured.trim().slice(0, 200))
 await ev.finish()
