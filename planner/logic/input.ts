@@ -29,6 +29,32 @@ export function pans(moved: boolean, multi: boolean, kind: GestureKind, zoom: nu
   return moved && !multi && (kind === 'pan' || (kind === 'other' && zoom > 1.001))
 }
 
+/** The engine's drag is still the one the canvas began (same piece, same mode): only then may the canvas drive or end it. */
+export function sameDrag(mine: { uid: string; mode: string } | null, current: { uid: string; mode: string } | null): boolean {
+  return mine !== null && current !== null && mine.uid === current.uid && mine.mode === current.mode
+}
+
+/** The two fingers (oldest first) a pinch goes on with once `lifted` is up, or null when fewer than two are left. */
+export function nextPinchPair(ids: readonly number[], lifted: number): { a: number; b: number } | null {
+  let a: number | null = null
+  for (const id of ids) {
+    if (id === lifted) continue
+    if (a === null) a = id
+    else return { a, b: id }
+  }
+  return null
+}
+
+/** What the finger left over from a pinch does: pans a zoomed view, otherwise nothing. */
+export function residualKind(zoom: number): GestureKind {
+  return zoom > 1.001 ? 'pan' : 'other'
+}
+
+/** pans() for the finger left over from a pinch: that gesture stays multi (so it never taps), which pans() refuses. */
+export function residualPans(moved: boolean, kind: GestureKind, zoom: number): boolean {
+  return moved && (kind === 'pan' || (kind === 'other' && zoom > 1.001))
+}
+
 /** The wheel's zoom factor (a trackpad pinch is a wheel with ctrlKey): lines are 16 px, pages 400. */
 export function wheelFactor(deltaY: number, deltaMode: number, ctrlKey: boolean, exp: (x: number) => number): number {
   const k = deltaMode === 1 ? 16 : deltaMode === 2 ? 400 : 1
