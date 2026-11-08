@@ -328,3 +328,21 @@ Deviations: `recalibrate` resolves null when superseded (it was the scene summar
 carries `lost: true` (the seam text asks for it; the fix's design did not). `followLostRender` allows one second of
 slack, as `created` has whole seconds. The baseline entries were added by hand in sorted order (`--files --update`
 does not write, as W1 noted). planner/bus.ts needed no change: EngineEvents is in engine.ts.
+
+## State machines W3: planner-ui-renders (2026-11-08)
+
+`planner/ui/panels/renders.ts`, `planner/ui/logic/renders.ts`:
+
+- **run().** Captures `shell.epoch.now()`. Settling after the epoch moved drops only its own row; a failure is one toast
+  "A render of <title> failed", a success (and its not-aligned toast) shows nothing.
+- **A request with no answer.** `failureReason` names 'the connection dropped'; the row reads "May still finish" rather
+  than "Not charged", and Retry's confirm says the first may have finished.
+- **Viewer** by name (`viewerIndex`). **openConfirm** rechecks the epoch after the capture and the past-picture load.
+  **Picks** pruned on 'renders' (`prunePicks`). **The modal** is a shell 'modal' layer; Esc comes through the stack, the
+  filter keeps the arrows, gated on `topLayer() === 'modal'`.
+- **Tests.** `machines-renders.test.mjs`; `sections/renders.mjs` (holds POST /api/render).
+
+Deviations: no 60 s list refresh in the panel. The engine's `followLostRender` (W2) already asks again at 5, 30 and 90 s,
+so a second timer would only duplicate it; the section checks the engine's GET. `moved()` also removes its own row if it
+is still listed (a run's photo switch keeps the list; the row would otherwise stay "Rendering…" forever). "Not charged"
+on a lost row was false, so the row's line changed too (the brief named only the Retry confirm).

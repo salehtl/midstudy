@@ -66,12 +66,30 @@ export function failedTitle(reason: string): string {
   return `Failed${reason ? ` · ${reason}` : ''}`
 }
 
+const CONNECTION_DROPPED = 'the connection dropped'
+
+/** Whether a failure reason means no answer came: the server may have the request, and may finish and bill it. */
+export function mayStillFinish(reason: string | undefined): boolean {
+  return reason === CONNECTION_DROPPED || reason === "the server isn't answering"
+}
+
+/** A failed row's line under its title; "Not charged" only when the server said so. */
+export function failedMeta(reason: string | undefined, at: string): string {
+  return `${mayStillFinish(reason) ? 'May still finish' : 'Not charged'} · ${at}`
+}
+
+/** The Retry confirm's line when the first request got no answer. */
+export function lostRetrySub(): string {
+  return 'The first one may have finished: check the list before paying again'
+}
+
 /** Why a render failed, in a few words, from the error's message ("" when it says nothing known). */
 export function failureReason(msg: string): string {
-  return /timed? ?out/i.test(msg) ? 'timed out'
-    : msg.includes('FAL_KEY') ? 'no fal key'
-      : /budget/i.test(msg) ? "today's budget is used up"
-        : /isn't answering|could not reach/i.test(msg) ? "the server isn't answering" : ''
+  return msg.includes('connection dropped') ? CONNECTION_DROPPED
+    : /timed? ?out/i.test(msg) ? 'timed out'
+      : msg.includes('FAL_KEY') ? 'no fal key'
+        : /budget/i.test(msg) ? "today's budget is used up"
+          : /isn't answering|could not reach/i.test(msg) ? "the server isn't answering" : ''
 }
 
 /** Compare's hint while picking. */
@@ -138,6 +156,17 @@ export function ofText(i: number, n: number): string {
 /** The next index after a step of k, going round. */
 export function stepIndex(i: number, k: number, n: number): number {
   return (i + k + n) % n
+}
+
+/** Where the viewer's render is in the list: the index of its name, else the old index clamped to the list, else 0. */
+export function viewerIndex(names: readonly string[], name: string, idx: number): number {
+  const i = names.indexOf(name)
+  return i >= 0 ? i : Math.max(0, Math.min(idx, names.length - 1))
+}
+
+/** Compare's picks that still exist; null (not picking) stays null. */
+export function prunePicks(picks: readonly string[] | null, names: readonly string[]): string[] | null {
+  return picks === null ? null : picks.filter((n) => names.includes(n))
 }
 
 /** The viewer's line under the render when no prompt was given. */
