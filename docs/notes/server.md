@@ -111,3 +111,8 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - PATCH queues its rescale inside the lock. `#run` returns unless the job is still queued.
 - Deviations: `adopt` is an optional last parameter (the existing callers and `jobs.test.ts` stay as they are). The scene-create fault replaces the scenes folder with a file instead of making it read-only: `makeDir` only special-cases EEXIST, but a file is deterministic whatever the user's permissions. The 402 path's removeTree is now the shared `finally`. New fixture `server/test/fixtures/record-add.mjs`. Upload's route test is in-process (a throwing SpendCap through ServerDeps); the others use a started server.
 - The PATCH order test can't be made red reliably: today's window between the lock's release and newJob is a few microtasks.
+## State machines W5: product-size-worker (one running job, queued timeouts, stale workers)
+
+- `SizeWorker` (`product/sizes.ts`) holds `#running` and `#queue` and posts one job at a time, so a queued job that times out is dropped and the worker running another job is left alone. An error or exit fails only the running job; queued jobs go to a new worker. Each job keeps the deadline set at enqueue.
+- Every listener returns unless its worker is still the current one. `spawn` is injectable; proof in `server/test/product-size-worker.test.ts` (fake worker, mocked timers, no wasm).
+- Additions to the design: `#replace` leaves a no-op `error` listener after `removeAllListeners()`, because an `error` still in flight from the stopped thread would otherwise throw as an unhandled event and take the server down. `#pump` catches a failed spawn or post and rejects that job, since it can run from a timer or listener where a throw would be uncaught.
