@@ -7,13 +7,13 @@
 // The workspace's Render button sends shell event 'render-request' and its "Render ready · View" toast 'open-render'
 // { meta }; this panel takes both (preventDefault). engine.compare(a, b) (the hook) opens Compare.
 // The words: logic/renders.ts.
-import { RENDER_MODELS, clock, isRenderModel, relDate, renderPrice, upscalePrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
+import { RENDER_MODELS, clock, isRenderModel, relDate, renderPrice, sceneTitle, upscalePrice, quiet, type RenderMeta, type Shot, type UiContext } from '../seam.js'
 import type { SegOption } from '../kit.js'
 import { pic, withIcon, emptyState, money, modelShort, imageShot, messageOf } from './common.js'
 import { dots } from '../logic/text.js'
 import {
-  ABOUT_S, alignNote, confirmSub, confirmTitle, defaultPromptText, failedTitle, failureReason, goText, modelNote, notAlignedText, ofText, ownPrompt,
-  goRoomText, pickHint, renderCost, renderMeta, roomRowTitle, runningMeta, sentCaption, sentSize, sentWhat, spentOn, stepIndex,
+  ABOUT_S, alignNote, confirmSub, confirmTitle, defaultPromptText, failedMeta, failedTitle, failureReason, goText, lostRetrySub, mayStillFinish, modelNote, notAlignedText, ofText, ownPrompt,
+  goRoomText, pickHint, prunePicks, renderCost, renderMeta, roomRowTitle, runningMeta, sentCaption, sentSize, sentWhat, spentOn, stepIndex, viewerIndex,
 } from '../logic/renders.js'
 
 /** A capture with the photo's size it is sent at (the price and the "what gets sent" line use it). */
@@ -55,6 +55,7 @@ type CompareMode = 'side' | 'split' | 'swipe'
 /** @public planner/main.ts mounts every area: mod.mount(ctx) (knip does not follow the areas list). */
 export function mount(ctx: UiContext): void {
   const { engine, shell, kit } = ctx
+  const epoch = shell.epoch
   const { h, button, segmented, toggle } = kit
   let pending: Pending[] = []
   let seq = 0
@@ -120,7 +121,7 @@ export function mount(ctx: UiContext): void {
         h(`span.rn-thumb.is-${going ? 'rendering' : 'failed'}`, going ? h('span', waiting ? pic('render', { size: 18 }) : ctx.icons.ring(null, { size: 18 })) : pic('warning', { size: 18 })),
         h('span.rn-text',
           h('span.rn-title', going ? (inRun ? roomRowTitle(p.roomIndex ?? 0, p.roomCount ?? 1, waiting) : 'Rendering…') : failedTitle(p.reason ?? '')),
-          h('span.rn-meta.tnum', waiting ? modelShort(p.model) : going ? runningMeta(modelShort(p.model), p.keepRoom, (Date.now() - p.started) / 1000) : `Not charged · ${clock(p.at)}`)),
+          h('span.rn-meta.tnum', waiting ? modelShort(p.model) : going ? runningMeta(modelShort(p.model), p.keepRoom, (Date.now() - p.started) / 1000) : failedMeta(p.reason, clock(p.at)))),
         going
           ? h('span.rn-cost.is-pending.tnum', engine.isRenderMock() ? '$0' : money(renderPrice(p.model, p.shot)))
           : h('button.rn-retry', { type: 'button', onclick: () => { quiet(retryRow(p)) } }, 'Retry…'),
@@ -149,8 +150,10 @@ export function mount(ctx: UiContext): void {
   function openModal(kind: ModalKind, build: (o: { readonly phone: boolean; readonly close: () => void }) => ModalContent): Modal {
     modal?.close()
     const els: Element[] = []
-    const close = (): void => {
+    const layer = shell.pushLayer('modal', () => { close() }) // Esc comes through the shell's stack
+    function close(): void {
       if (modal?.els !== els) return
+      layer.remove()
       for (const e of els) e.remove()
       modal = null
     }
@@ -170,11 +173,9 @@ export function mount(ctx: UiContext): void {
     return m
   }
   shell.addKeyFilter((e) => {
-    if (!modal) return false
-    if (e.key === 'Escape') { e.preventDefault(); modal.close() } else if ((modal.kind === 'viewer' || modal.kind === 'compare') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !(e.target instanceof Element && e.target.closest('input, textarea'))) {
-      e.preventDefault()
-      modal.step?.(e.key === 'ArrowRight' ? 1 : -1)
-    }
+    if (!modal || shell.topLayer() !== 'modal' || modal.kind === 'confirm' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || (e.target instanceof Element && e.target.closest('input, textarea'))) return false
+    e.preventDefault()
+    modal.step?.(e.key === 'ArrowRight' ? 1 : -1)
     return true
   })
   shell.events.addEventListener('mode', () => { render(); modal?.rerender() })
@@ -194,16 +195,18 @@ export function mount(ctx: UiContext): void {
     const placed = current && rs ? rs.members.filter((x) => x.pose !== null).map((x) => x.scene) : []
     let every = false
     let loadError: string | null = null
+    const ep = epoch.now()
     if (!shot && !from) {
       try {
         const captured = await engine.captureComposite({ maxPx: 1024, quality: 0.85 })
         const ph = engine.getPhotoSize()
         shot = { ...captured, sentW: ph.w, sentH: ph.h }
       } catch (e) { engine.reportError('Could not capture the scene', e); return }
+      if (epoch.now() !== ep) return // that picture is of a scene no longer shown
     }
     const m = openModal('confirm', ({ phone, close }) => {
       const title = confirmTitle(!!from, !!retry)
-      const sub = confirmSub(from ? relDate(from.created) : null, !!retry)
+      const sub = retry && mayStillFinish(retry.reason) ? lostRetrySub() : confirmSub(from ? relDate(from.created) : null, !!retry)
       const sizeShot = shot ? { width: (shot.sentW ?? 0) || shot.width, height: (shot.sentH ?? 0) || shot.height } : null
       const price = (): number => (engine.isRenderMock() ? 0 : renderPrice(model, sizeShot))
       const goLabel = (): string => (every ? goRoomText(engine.isRenderMock(), price(), placed.length) : goText(engine.isRenderMock(), price()))
@@ -267,7 +270,9 @@ export function mount(ctx: UiContext): void {
     })
     if (from && !shot) {
       try { shot = await imageShot(from.input_url) } catch (e) { loadError = messageOf(e) }
-      if (modal === m) m.rerender()
+      if (modal !== m) return
+      if (epoch.now() !== ep) { m.close(); return }
+      m.rerender()
     }
   }
 
@@ -276,12 +281,23 @@ export function mount(ctx: UiContext): void {
     const p: Pending = { id: `r${String(++seq)}`, model, prompt, shot: preview, started: Date.now(), state: 'rendering', keepRoom, fromPast: !!shot, at: undefined, error: undefined, reason: undefined }
     pending.unshift(p)
     changed()
+    const ep = epoch.now()
+    const scn = sceneTitle(engine.getScene())
+    // A scene change took the row and the view with it: leave the new scene's alone, and say so only if this one failed.
+    const moved = (): boolean => {
+      if (epoch.now() === ep) return false
+      pending = pending.filter((x) => x !== p)
+      changed()
+      return true
+    }
     try {
       const meta = shot ? await engine.postRender(shot, { model, prompt: prompt || undefined }) : await engine.renderViewInternal({ model, prompt: prompt || undefined, keepRoom })
+      if (moved()) return
       pending = pending.filter((x) => x !== p)
       changed()
       if (meta.keep_room && meta.aligned && !meta.aligned.applied) shell.toast(notAlignedText(meta.aligned.reason), { id: `align-${meta.name}`, ms: 9000 })
     } catch (e) {
+      if (moved()) { shell.toast(`A render of ${scn} failed`, { id: `render-failed-${p.id}`, ms: 9000 }); return }
       const msg = messageOf(e)
       p.state = 'failed'
       p.at = Date.now()
@@ -346,13 +362,26 @@ export function mount(ctx: UiContext): void {
   function openViewer(which: string | RenderMeta | null | undefined): void {
     const all = (): readonly RenderMeta[] => engine.getRenders()
     const wanted = typeof which === 'string' ? which : which?.name
-    let idx = Math.max(0, all().findIndex((r) => r.name === wanted))
+    let name = wanted ?? '' // the shown render: a new one arriving, or one deleted, must not change what this is
+    let idx = 0
+    const place = (rs: readonly RenderMeta[]): void => {
+      idx = viewerIndex(rs.map((r) => r.name), name, idx)
+      name = rs[idx]?.name ?? name
+    }
+    const step = (k: number): void => {
+      const rs = all()
+      if (rs.length < 2) return
+      place(rs)
+      idx = stepIndex(idx, k, rs.length)
+      name = rs[idx]?.name ?? name
+      m.rerender()
+    }
     let side = 'render'
     const m = openModal('viewer', ({ phone, close }) => {
       const rs = all()
+      place(rs)
       const r = rs[idx] ?? (typeof which === 'object' ? which : null)
       if (!r) return { label: 'Render', el: h('p.p-note', 'That render is gone.') }
-      const step = (k: number): void => { if (rs.length < 2) return; idx = stepIndex(idx, k, rs.length); m.rerender() }
       const of = ofText(idx, rs.length)
       const again = withIcon(button({ label: 'Render again…', kind: 'secondary', onClick: () => { quiet(openConfirm({ from: r })) } }), 'render')
       const cmp = rs.length > 1 ? button({ label: 'Compare…', kind: 'secondary', onClick: () => { close(); picking = [r.name]; shell.openPanel('renders'); render() } }) : null
@@ -419,7 +448,7 @@ export function mount(ctx: UiContext): void {
         if (modal === m) m.rerender()
       }
     }
-    m.step = (k: number) => { const n = all().length; if (n < 2) return; idx = stepIndex(idx, k, n); m.rerender() }
+    m.step = step
   }
 
   // --- compare (§4.5): side by side (desktop), a draggable split (both), swipe (phone) -----------------------------
@@ -496,7 +525,7 @@ export function mount(ctx: UiContext): void {
     m.step = () => { if (mode === 'swipe') { shown = shown ? 0 : 1; m.rerender() } }
   }
 
-  engine.events.addEventListener('renders', () => { render(); if (modal?.kind === 'viewer') modal.rerender() })
+  engine.events.addEventListener('renders', () => { picking = prunePicks(picking, engine.getRenders().map((r) => r.name)); render(); if (modal?.kind === 'viewer') modal.rerender() })
   engine.events.addEventListener('scene', (e) => {
     const sameRoom = roomRun !== null && engine.getRoomState()?.name === roomRun
     if (sameRoom && e.detail.phase === 'opened') return // a room run switching photos (§4.7 Render every photo)
