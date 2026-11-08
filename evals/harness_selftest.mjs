@@ -103,6 +103,59 @@ const u = spawnSync('python3', [path.join(REPO, 'fixtures/stub_calib.py'), 'run'
 const uj = JSON.parse(u.stdout.trim().split('\n').at(-1) || '{}')
 ev.check('unknownPhoto(): same pixels, a SHA the calib mock lacks → default fallback, no depth', u.status === 0 && uj.source === 'default' && uj.depth === null, `${uj.source} ${fmt(uj.camera)}`)
 
+ev.section('fixtures/stub_calib.py follows the real tool\'s §4.3 order and fallback')
+const stub = (args, e = env) => {
+  const r = spawnSync('python3', [path.join(REPO, 'fixtures/stub_calib.py'), ...args], { env: e, encoding: 'utf8' })
+  return { status: r.status, json: JSON.parse(r.stdout.trim().split('\n').at(-1) || '{}') }
+}
+const stubFolder = (name) => { const d = path.join(ev.out, 'stub-' + name); fs.mkdirSync(d, { recursive: true }); return d }
+const inFolder = (d) => fs.readdirSync(d).sort()
+const DERIVED = ['calib.json', 'depth.png', 'lighting.json']
+const replaced = stubFolder('replaced')
+stub(['run', lw.photo, '--out', replaced])
+const fitted = DERIVED.every((f) => fs.existsSync(path.join(replaced, f)))
+const fitBytes = () => DERIVED.map((f) => fs.readFileSync(path.join(replaced, f)).toString('latin1')).join('|')
+const beforeRepeat = fitted ? fitBytes() : ''
+const again = stub(['ingest', lw.photo, '--out', replaced])
+ev.check('stub ingest of the same photo again leaves calib.json, depth.png and lighting.json', fitted && again.status === 0 && fitBytes() === beforeRepeat, inFolder(replaced).join(' '))
+stub(['ingest', unk, '--out', replaced])
+ev.check('stub ingest of a different photo removes the old calibration', DERIVED.every((f) => !fs.existsSync(path.join(replaced, f))) && fs.readFileSync(path.join(replaced, 'photo.jpg')).equals(unknownPhoto()), inFolder(replaced).join(' '))
+const otherSource = stubFolder('other-source')
+fs.writeFileSync(path.join(otherSource, 'source.png'), 'an earlier upload')
+fs.writeFileSync(path.join(otherSource, '.photo.jpg.abc123.tmp'), 'a killed run')
+fs.writeFileSync(path.join(otherSource, '.scene.json.abc123.tmp'), 'the server\'s')
+stub(['ingest', unk, '--out', otherSource])
+ev.check('stub ingest removes another source.*, sweeps its own temp files and leaves the server\'s', inFolder(otherSource).join(' ') === '.scene.json.abc123.tmp photo.jpg source.jpg', inFolder(otherSource).join(' '))
+const swept = stubFolder('swept')
+stub(['ingest', unk, '--out', swept])
+fs.writeFileSync(path.join(swept, '.calib.json.abc123.tmp'), 'a killed run')
+fs.writeFileSync(path.join(swept, '.scene.json.abc123.tmp'), 'the server\'s')
+stub(['fit', swept])
+ev.check('stub fit sweeps its own temp files and leaves the server\'s', !fs.existsSync(path.join(swept, '.calib.json.abc123.tmp')) && fs.existsSync(path.join(swept, '.scene.json.abc123.tmp')), inFolder(swept).join(' '))
+const torn = stubFolder('torn')
+stub(['run', lw.photo, '--out', torn])
+fs.rmSync(path.join(torn, 'source.jpg')) // its SHA is the mock's second key: without it, the photo below misses
+fs.writeFileSync(path.join(torn, 'photo.jpg'), unknownPhoto())
+fs.rmSync(path.join(torn, 'depth.png'))
+fs.mkdirSync(path.join(torn, 'depth.png')) // a miss has to remove depth.png, and this makes that fail halfway
+const tornFit = spawnSync('python3', [path.join(REPO, 'fixtures/stub_calib.py'), 'fit', torn], { env, encoding: 'utf8' })
+ev.check('a stub fit that dies halfway leaves no calib.json (it goes first, and is written last)', tornFit.status !== 0 && !fs.existsSync(path.join(torn, 'calib.json')), `exit ${tornFit.status}; ${inFolder(torn).join(' ')}`)
+// unknownPhoto() with an APP1 EXIF after SOI: little-endian TIFF, IFD0 -> the Exif IFD, FocalLengthIn35mmFilm 26 (SHORT)
+const tiff = Buffer.alloc(44)
+tiff.write('II*\0', 0, 'latin1'); tiff.writeUInt32LE(8, 4)
+tiff.writeUInt16LE(1, 8); tiff.writeUInt16LE(0x8769, 10); tiff.writeUInt16LE(4, 12); tiff.writeUInt32LE(1, 14); tiff.writeUInt32LE(26, 18)
+tiff.writeUInt16LE(1, 26); tiff.writeUInt16LE(0xa405, 28); tiff.writeUInt16LE(3, 30); tiff.writeUInt32LE(1, 32); tiff.writeUInt16LE(26, 36)
+const app1Body = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]), app1Head = Buffer.from([0xff, 0xe1, 0, 0]); app1Head.writeUInt16BE(app1Body.length + 2, 2)
+const plainJpeg = unknownPhoto(), exifJpeg = path.join(ev.out, 'exif.jpg')
+fs.writeFileSync(exifJpeg, Buffer.concat([plainJpeg.subarray(0, 2), app1Head, app1Body, plainJpeg.subarray(2)]))
+const noMockEnv = { ...env }
+delete noMockEnv.MIDSTUDY_CALIB_MOCK
+for (const [label, e] of [['a mock miss', env], ['no mock', noMockEnv]]) {
+  const { status, json: c } = stub(['run', exifJpeg, '--out', stubFolder('exif-' + label.replace(' ', '-'))], e)
+  ev.check(`stub, ${label}, a photo with an EXIF FOV: the §4.3 fallback is source exif, with that FOV and a reason`, status === 0 && c.source === 'exif' && c.exif?.focal_35mm === 26 && c.camera?.fov_y_deg === c.exif?.fov_y_deg && c.camera?.fov_y_deg !== 55 && c.camera?.height_m === 1.4 && c.camera?.pitch_deg === -10 && typeof c.fallback_reason === 'string' && c.depth === null, `${c.source} ${fmt(c.camera)} ${c.fallback_reason}`)
+}
+ev.check('stub, a mock miss without EXIF keeps FOV 55, with a reason', typeof uj.fallback_reason === 'string' && uj.camera?.fov_y_deg === 55, `${uj.source} ${uj.fallback_reason}`)
+
 ev.section('rooms (evals/lib/rooms.mjs, evals/lib/room_images.py)')
 const GR = goldenRoom()
 const keyRoom = mockKey(GR.map((m) => m.sha)), keyPair = mockKey(GR.slice(0, 2).map((m) => m.sha))
