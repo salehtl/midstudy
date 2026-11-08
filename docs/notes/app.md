@@ -433,3 +433,23 @@ already and-ed it with hasDepth). The autostart-once rule comes from the plan's 
 opened with pending/running lighting still isn't polled (only recalibrate was in scope).
 
 > **W4 planner-engine-resources, review fixes:** `resumeLighting` (open, recalibrate) leaves no status the panel shows as busy without a follower: pending/running is polled (on open only with the calibration done, so a calibrating scene isn't mistaken for a light job), 'missing' autostarts once per scene per page and after that ends `failed`, which shows Infer lighting. The pending to missing wording is now "ended without a result": the server's status also covers a calibration that ended without lighting.json.
+## State machines W4: planner-ui-room (2026-11-08)
+
+`planner/ui/room.ts`, `planner/ui/logic/rooms.ts`:
+
+- **Gestures.** `planDown` / `planEnd` (TScert) decide a pointer down and a drag's end. A second finger during a photo or
+  handle drag puts the pose back (`previewPose(scene, pose0)`; the handle now stores `pose0` too), a further pointer is only
+  recorded, and a moved drag commits only if Align photos is still on, else reverts.
+- **Align target.** `alignTarget` gives every use the grabbed photo only while it is a member; `syncAlign` clears
+  `alignSel` with Align photos off. `switchTo` rechecks the room, the membership and the current photo after its confirm.
+  Align again has an `aligning` latch.
+- **Depth.** A failed lift waits 15 s (`failedAt`). The scenes store's 'ready' drops what the plan holds of that scene.
+  `liftGen` moves on room 'opened' and on 'ready': a lift from before it writes nothing.
+- **Wont-fix.** The two floorPlan values (local `shown`, the engine's `floorPlanShown`) stay: the UI is the only writer and
+  the engine's flag mirrors it for the hook.
+- **Tests.** `machines-room.test.mjs`; `rooms-ui.mjs` gains the Align-off drag, the removed grabbed photo, the double Align
+  again, a CDP two-finger drag on the phone, the depth backoff and a 'ready' re-read.
+
+Deviations: the design's `roomGen` is `liftGen`, since 'ready' moves it as well as 'opened' (a lift running through a
+recalibration must not write the old depth back). A 'ready' therefore also restarts other members' in-flight lifts, a few
+repeat fetches. The backoff check repaints with the wheel over the plan rather than camera events; both reach `paint()`.

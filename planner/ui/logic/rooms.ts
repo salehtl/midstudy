@@ -89,3 +89,22 @@ export function photoHue(index: number): number {
   const hues = [205, 150, 280, 20, 330, 95, 250, 175, 50]
   return hues[index % hues.length] ?? 205
 }
+
+/** What a pointer going down on the plan starts, counting it: one drags, the second pinches, any more are only recorded. */
+export function planDown(pointers: number, pinching: boolean): 'pinch' | 'ignore' | 'start' {
+  if (pinching || pointers > 2) return 'ignore'
+  return pointers === 2 ? 'pinch' : 'start'
+}
+
+/** What the end of a plan gesture does: a moved photo or handle is saved only while Align photos is on, else put back;
+ *  a pan that never moved is a tap; pieces were saved as they moved. */
+export function planEnd(kind: 'pan' | 'photo' | 'handle' | 'item' | 'turn', moved: boolean, alignOn: boolean): 'commit' | 'revert' | 'tap' | 'none' {
+  if (kind === 'pan') return moved ? 'none' : 'tap'
+  if (kind === 'item' || kind === 'turn' || !moved) return 'none'
+  return alignOn ? 'commit' : 'revert'
+}
+
+/** The photo Align photos works on: the one grabbed while it is still in the room, else the current one. */
+export function alignTarget(alignSel: string | null, members: readonly string[], photo: string | null): string | null {
+  return alignSel !== null && members.includes(alignSel) ? alignSel : photo
+}
