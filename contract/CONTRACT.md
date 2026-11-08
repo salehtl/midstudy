@@ -456,7 +456,7 @@ A failure exits **1** with `{"ok": false, "error": "<one sentence>"}` as the las
 
 **Mock of `align-room`** (§4.9 Mock): with `MIDSTUDY_CALIB_MOCK=<dir>` it looks up `<dir>/rooms/<key>/align.json` instead of solving; the key and what it writes are in §4.9.
 
-**Stub:** `fixtures/stub_calib.py` (stdlib only) has the same CLI and output contract for development and fast evals: JPEG only, strips metadata without re-encoding (can't rotate, resize or convert colour), mock (including `lighting.json`) or `default` fit, and `align` answers `applied: false`. Run the server with `--calib "python3 fixtures/stub_calib.py"`.
+**Stub:** `fixtures/stub_calib.py` (stdlib only) has the same CLI and output contract for development and fast evals: JPEG only, strips metadata without re-encoding (can't rotate, resize or convert colour), mock (including `lighting.json`), `exif` or `default` fit, and `align` answers `applied: false`. Run the server with `--calib "python3 fixtures/stub_calib.py"`.
 
 **Lighting** (§4.8): after the floor fit, `fit` infers the room's light from the photo's pixels and MoGe's normals and writes `lighting.json`. It runs on MoGe's output at depth size, needs no other model, costs nothing and adds about a second.
 

@@ -28,6 +28,7 @@ let
     ../package.json
     ../tsconfig.json
     ../scripts/build.mjs
+    ../scripts/lib
     ../planner
     ../core/js
     ../server/src

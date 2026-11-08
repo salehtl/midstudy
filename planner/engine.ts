@@ -2025,7 +2025,7 @@ async function recalibrate(): Promise<SceneSummary | null> {
   const token = sceneToken
   const alive = (): boolean => token === sceneToken && name === sceneName
   let accepted: unknown
-  try { accepted = await apiJson(`${sceneUrl(name)}/calibrate`, { method: 'POST' }) } catch (e) { throw reportError(msg.recalibrateText(statusOf(e)), e) }
+  try { accepted = await apiJson(`${sceneUrl(name)}/calibrate`, { method: 'POST' }) } catch (e) { throw reportError(msg.recalibrateText(statusOf(e), e instanceof RequestError ? str(rec(e.body)?.['error']) : null), e) }
   if (!alive()) return null
   emit('scene', { phase: 'recalibrating', name })
   let jobWhy: string | null

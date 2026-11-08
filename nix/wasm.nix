@@ -31,6 +31,8 @@ stdenv.mkDerivation {
     root = ../.;
     fileset = lib.fileset.unions [
       ../scripts/build.mjs
+      ../scripts/lib
+      ../common/logic/lock.ts
       ../core/Cargo.toml
       ../core/Cargo.lock
       ../core/.cargo

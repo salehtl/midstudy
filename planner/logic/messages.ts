@@ -66,7 +66,8 @@ export function saveSceneText(status: number | null): string {
   return status !== null && status !== 0 ? 'Could not save the scene' : "Not saved: the server isn't answering"
 }
 
-export function recalibrateText(status: number | null): string {
+export function recalibrateText(status: number | null, serverError: string | null): string {
+  if (status === 409 && serverError?.includes('no photo') === true) return 'This scene has no photo to calibrate: make a new scene from the photo'
   return status === 409 ? 'This scene is already calibrating' : 'Could not start the calibration'
 }
 
