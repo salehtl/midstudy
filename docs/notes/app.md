@@ -453,3 +453,21 @@ opened with pending/running lighting still isn't polled (only recalibrate was in
 Deviations: the design's `roomGen` is `liftGen`, since 'ready' moves it as well as 'opened' (a lift running through a
 recalibration must not write the old depth back). A 'ready' therefore also restarts other members' in-flight lifts, a few
 repeat fetches. The backoff check repaints with the wheel over the plan rather than camera events; both reach `paint()`.
+## State machines W4: planner-ui-scenes (2026-11-08)
+
+`planner/ui/scenes.ts`, `planner/ui/logic/scenes.ts`:
+
+- **Uploads.** One card per upload (`uploads` map); `openTicket` lets only the upload started last open its scene. The
+  epoch captured before the confirm is checked after the upload: moved, and the scene stays but doesn't open (its 'ready'
+  toast offers Open).
+- **New room.** One run at a time (`roomBusy`, held from before the confirm; resumes take it too). A failed upload or
+  create toasts the step and offers "Make the room from N photos" with no re-upload; a failed align says the room is
+  made and offers "Align the photos", never a second room. Nothing is deleted. `roomTitle` is kept until a room exists.
+- **Room poll.** A failed read reschedules with `nextPollMs` (1.5 s doubling to 30 s), reset on success.
+- **open / openRoom** return without acting if the epoch moved during the confirm. **Rename** scene and room: a `saving`
+  latch, Save disabled meanwhile.
+- **Tests.** `machines-scenes.test.mjs`; `sections/scenes.mjs` (route holds and 500s).
+
+Deviations: the upload's epoch check runs after the upload as well as across the confirm, so opening another scene while
+one uploads isn't replaced either. The latch is a separate `roomBusy` rather than `roomMaking`, which is only set after
+the confirm. The page's first room read shares the poll's failure path.

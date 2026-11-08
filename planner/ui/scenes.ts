@@ -12,12 +12,13 @@ import { fmtBytes, friendlyDate, quiet, relDate, sceneTitle, type RoomInfo, type
 import { newRoomHelp, newRoomStep, photoLabel, roomBusyText, roomFlag, roomMeta, roomTitleText, type RoomFacts } from './logic/rooms.js'
 import { openSheet } from './sheet.js'
 import type { Child } from './kit.js'
-import { busyText, deleteBody, isPhotoFile, sceneFlags, sceneMeta, scenesHint, uploadProgress } from './logic/scenes.js'
+import { busyText, deleteBody, isPhotoFile, nextPollMs, roomAlignStoppedText, roomResumeLabel, roomStoppedText, sceneFlags, sceneMeta, scenesHint, uploadProgress } from './logic/scenes.js'
 import { sceneBusy } from '../logic/scenes.js'
 import { uniqueBy } from './logic/lists.js'
 import * as textLogic from './logic/text.js'
 
 interface Uploading {
+  readonly el: HTMLDivElement
   readonly name: string
   readonly loaded: number
   readonly total: number
@@ -28,7 +29,10 @@ export function mount(ctx: UiContext): void {
   const { engine, scenes, shell, kit } = ctx
   const { h, button } = kit
   const { dots } = textLogic
-  let uploading: Uploading | null = null
+  const epoch = shell.epoch
+  const uploads = new Map<number, Uploading>() // each upload in flight, one card each
+  let uploadSeq = 0
+  let openTicket = 0 // only the upload started last opens its scene
   const root = h('div.sc-root')
   const page = shell.registerPage({ id: 'scenes', label: 'Scenes', width: 940, mount: (body) => { body.append(root) }, onOpen: () => { quiet(scenes.refresh()); refreshRooms(); render() } })
   // the rooms (§4.9), from a server that has them (engine.serverHasRooms: its scene objects carry `room`)
@@ -36,7 +40,7 @@ export function mount(ctx: UiContext): void {
   function refreshRooms(): void {
     if (!engine.serverHasRooms()) return
     roomsAsked = true
-    quiet(engine.listRoomsInternal().then(() => { render(); schedulePoll() }).catch(() => undefined))
+    pollRooms()
   }
 
   // The file picker: accept="image/*" lets iOS offer the camera roll (and the camera); HEIC is listed for desktops.
@@ -54,33 +58,41 @@ export function mount(ctx: UiContext): void {
   page.actions.append(settingsBtn, roomBtn, newBtn)
   let roomTitle = ''
   let roomMaking: { readonly text: string; readonly n: number } | null = null
+  let roomBusy = false // one New room at a time, from before its confirm to its end (resumes too)
   let roomSheet: ReturnType<typeof openSheet> | null = null
   const roomUploads = new Set<string>() // photos uploaded for a room (no "is ready" toast each)
 
   function pick(): void { file.click() }
 
   async function upload(f: File): Promise<void> {
+    const ep = epoch.now()
     if (engine.isLayoutDirty() && engine.getItems().length) {
       const ok = await shell.confirm({ title: 'Leave this layout?', icon: 'warning', body: "The furniture here isn't saved as a layout. The new scene opens when it's ready, without it.", confirm: 'Make the new scene' })
       if (!ok) return
     }
-    uploading = { name: f.name || 'photo', loaded: 0, total: f.size }
+    const id = ++uploadSeq
+    const ticket = ++openTicket
+    uploads.set(id, { el: h('div.sc-card.is-uploading'), name: f.name || 'photo', loaded: 0, total: f.size })
     render()
     let res: { readonly scene: string }
     try {
-      res = await scenes.upload(f, { onProgress: (loaded, total) => { uploading = { ...(uploading ?? { name: '' }), loaded, total }; renderUpload() } })
-    } catch { uploading = null; render(); return } // reported
-    uploading = null
+      res = await scenes.upload(f, { onProgress: (loaded, total) => { const u = uploads.get(id); if (u) { uploads.set(id, { ...u, loaded, total }); renderUpload() } } })
+    } catch { uploads.delete(id); render(); return } // reported
+    uploads.delete(id)
     render()
+    // The user asked for the scene, so it stays; but it opens only if nothing newer was asked for (a later upload, or
+    // another scene opened meanwhile). Otherwise its 'ready' toast offers Open.
+    if (ticket !== openTicket || ep !== epoch.now()) return
     shell.closePage()
     try { await engine.openScene(res.scene) } catch { shell.openPage('scenes') }
   }
 
   async function open(s: SceneSummary): Promise<void> {
     if (s.name === engine.getSceneName()) { shell.closePage(); return }
+    const ep = epoch.now()
     if (engine.isLayoutDirty() && engine.getItems().length) {
       const v = await shell.confirm({ title: `Open ${sceneTitle(s)}?`, icon: 'warning', body: "The furniture here isn't saved as a layout. Opening another scene clears it.", confirm: 'Open anyway' })
-      if (!v) return
+      if (!v || ep !== epoch.now()) return // the answer was about a scene no longer shown: the user clicks again
     }
     shell.closePage()
     try { await engine.openScene(s.name) } catch { shell.openPage('scenes') }
@@ -88,15 +100,20 @@ export function mount(ctx: UiContext): void {
 
   function rename(s: SceneSummary): void {
     const input = h('input.input', { type: 'text', value: s.title ?? '', placeholder: sceneTitle({ created: s.created ?? null, name: s.name }), maxLength: 200, spellcheck: false, autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Scene title' })
+    let saving = false
     const save = async (): Promise<void> => {
-      try { await scenes.rename(s.name, input.value) } catch { return }
+      if (saving) return
+      saving = true
+      saveBtn.disabled = true
+      try { await scenes.rename(s.name, input.value) } catch { return } finally { saving = false; saveBtn.disabled = false }
       sheet.close()
     }
+    const saveBtn = button({ label: 'Save', kind: 'primary', onClick: () => { quiet(save()) } })
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); quiet(save()) } })
     const sheet = openSheet(shell, {
       title: 'Rename scene', sub: s.name, cls: 'sc-rename',
       body: h('label.field', h('span.field-label', 'Title'), input),
-      actions: [button({ label: 'Cancel', kind: 'quiet', onClick: () => { sheet.close() } }), button({ label: 'Save', kind: 'primary', onClick: () => { quiet(save()) } })],
+      actions: [button({ label: 'Cancel', kind: 'quiet', onClick: () => { sheet.close() } }), saveBtn],
     })
     requestAnimationFrame(() => { input.focus(); input.select() })
   }
@@ -129,13 +146,12 @@ export function mount(ctx: UiContext): void {
       h('button.sc-act.is-danger', { type: 'button', 'aria-label': `Delete ${sceneTitle(s)}`, dataset: { midstudy: 'scene-delete', tip: 'Delete' }, onclick: () => { quiet(remove(s)) } }, icon('trash', { size: 18 })))
     return h(`div.sc-card${isOpen ? '.is-open' : ''}${busy ? '.is-busy' : ''}`, { role: 'listitem', dataset: { midstudy: 'scene-card', scene: s.name } }, main, acts)
   }
-  const upEl = h('div.sc-card.is-uploading', { hidden: true })
   function renderUpload(): void {
-    if (!uploading) { upEl.hidden = true; return }
-    const p = uploadProgress(uploading.loaded, uploading.total)
-    upEl.hidden = false
-    upEl.replaceChildren(h('span.sc-thumb', h('span.sc-busy', ring(p.progress, { size: 28 }), h('span', p.text))),
-      h('span.sc-text', h('span.sc-title', uploading.name), h('span.sc-meta.tnum', dots([fmtBytes(uploading.total), 'new scene']))))
+    for (const u of uploads.values()) {
+      const p = uploadProgress(u.loaded, u.total)
+      u.el.replaceChildren(h('span.sc-thumb', h('span.sc-busy', ring(p.progress, { size: 28 }), h('span', p.text))),
+        h('span.sc-text', h('span.sc-title', u.name), h('span.sc-meta.tnum', dots([fmtBytes(u.total), 'new scene']))))
+    }
   }
   // --- rooms (§4.9) ---------------------------------------------------------------------------------------------
   function newRoom(): void {
@@ -148,40 +164,61 @@ export function mount(ctx: UiContext): void {
       onClose: () => { roomSheet = null },
     })
   }
+  function making(step: 'upload' | 'room' | 'align', i: number, n: number): void {
+    roomMaking = { text: newRoomStep(step, i, n), n }
+    render()
+  }
+  // Holds the New room latch around a run; the card goes when it ends, however it ends.
+  async function roomRun(run: () => Promise<void>): Promise<void> {
+    if (roomBusy) { shell.toast('A room is already being made', { id: 'room-busy' }); return }
+    roomBusy = true
+    try { await run() } finally { roomBusy = false; roomMaking = null; render() }
+  }
+  // A New room that stopped: says which step, and resumes from it. Nothing is deleted (the uploaded photos are scenes).
+  function roomStopped(step: 'upload' | 'room', names: readonly string[], title: string | null): void {
+    shell.toast(roomStoppedText(step, names.length), { kind: 'error', id: 'room-stopped',
+      action: names.length ? { label: roomResumeLabel(names.length), onClick: () => { quiet(roomRun(() => makeFrom(names, title))) } } : undefined })
+  }
   async function makeRoom(files: readonly File[]): Promise<void> {
-    roomSheet?.close()
-    if (engine.isLayoutDirty() && engine.getItems().length) {
-      const ok = await shell.confirm({ title: 'Leave this layout?', icon: 'warning', body: "The furniture here isn't saved as a layout. The new room opens when it's ready, without it.", confirm: 'Make the room' })
-      if (!ok) return
-    }
-    const title = roomTitle.trim() || null
-    const names: string[] = []
-    try {
+    await roomRun(async () => {
+      roomSheet?.close()
+      if (engine.isLayoutDirty() && engine.getItems().length) {
+        const ok = await shell.confirm({ title: 'Leave this layout?', icon: 'warning', body: "The furniture here isn't saved as a layout. The new room opens when it's ready, without it.", confirm: 'Make the room' })
+        if (!ok) return
+      }
+      const title = roomTitle.trim() || null
+      const names: string[] = []
       for (const [i, f] of files.entries()) {
-        roomMaking = { text: newRoomStep('upload', i + 1, files.length), n: files.length }
-        render()
-        const made = (await scenes.upload(f, {})).scene
+        making('upload', i + 1, files.length)
+        let made: string
+        try { made = (await scenes.upload(f, {})).scene } catch { roomStopped('upload', names, title); return } // the cause is reported
         names.push(made)
         roomUploads.add(made)
       }
-      roomMaking = { text: newRoomStep('room', 0, files.length), n: files.length }
-      render()
-      const info = await engine.createRoomFromScenes(names, title)
-      roomTitle = ''
-      if (names.length >= 2) {
-        roomMaking = { text: newRoomStep('align', 0, files.length), n: files.length }
-        render()
-        try { await engine.alignRoom(info.name) } catch { /* reported; the room is there, align it later */ }
-      }
-      shell.toast(`${roomTitleText(info.title, friendlyDate(info.created ?? null), info.name)}: ${String(names.length)} photos uploaded. It opens when they're ready.`, { kind: 'ok', id: `room-made:${info.name}` })
-      roomMaking = null
-      await engine.listRoomsInternal().catch(() => undefined)
-      render()
-      schedulePoll()
-    } catch {
-      roomMaking = null
-      render()
-    }
+      await makeFrom(names, title)
+    })
+  }
+  // The room from uploaded photos, then its alignment: a failed alignment leaves the room, and never makes a second.
+  async function makeFrom(names: readonly string[], title: string | null): Promise<void> {
+    making('room', 0, names.length)
+    let info: RoomInfo
+    try { info = await engine.createRoomFromScenes(names, title) } catch { roomStopped('room', names, title); return }
+    roomTitle = ''
+    if (names.length >= 2 && !await align(info, names.length)) { await roomsRead(); return }
+    shell.toast(`${roomTitleText(info.title, friendlyDate(info.created ?? null), info.name)}: ${String(names.length)} photos uploaded. It opens when they're ready.`, { kind: 'ok', id: `room-made:${info.name}` })
+    await roomsRead()
+  }
+  async function align(info: RoomInfo, n: number): Promise<boolean> {
+    making('align', 0, n)
+    try { await engine.alignRoom(info.name); return true } catch { /* the cause is reported */ }
+    shell.toast(roomAlignStoppedText(roomTitleText(info.title, friendlyDate(info.created ?? null), info.name)), { kind: 'error', id: `room-align-stopped:${info.name}`,
+      action: { label: 'Align the photos', onClick: () => { quiet(roomRun(async () => { await align(info, n); await roomsRead() })) } } })
+    return false
+  }
+  async function roomsRead(): Promise<void> {
+    await engine.listRoomsInternal().catch(() => undefined)
+    render()
+    schedulePoll()
   }
   const roomTitleOf = (r: RoomInfo | TrashedRoom): string => roomTitleText(r.title, friendlyDate(r.created ?? null), r.name)
   function factsOf(r: RoomInfo): RoomFacts {
@@ -190,25 +227,31 @@ export function mount(ctx: UiContext): void {
   }
   async function openRoom(r: RoomInfo): Promise<void> {
     if (engine.getRoomState()?.name === r.name) { shell.closePage(); return }
+    const ep = epoch.now()
     if (engine.isLayoutDirty() && engine.getItems().length) {
       const v = await shell.confirm({ title: `Open ${roomTitleOf(r)}?`, icon: 'warning', body: "The furniture here isn't saved as a layout. Opening the room clears it.", confirm: 'Open anyway' })
-      if (!v) return
+      if (!v || ep !== epoch.now()) return // as open()
     }
     shell.closePage()
     try { await engine.openRoom(r.name) } catch { shell.openPage('scenes') }
   }
   function renameRoom(r: RoomInfo): void {
     const input = h('input.input', { type: 'text', value: r.title ?? '', placeholder: roomTitleOf({ ...r, title: null }), maxLength: 200, spellcheck: false, autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Room title' })
+    let saving = false
     const save = async (): Promise<void> => {
-      try { await engine.renameRoom(r.name, input.value) } catch { return }
+      if (saving) return
+      saving = true
+      saveBtn.disabled = true
+      try { await engine.renameRoom(r.name, input.value) } catch { return } finally { saving = false; saveBtn.disabled = false }
       sheet.close()
       quiet(engine.listRoomsInternal().then(render).catch(() => undefined))
     }
+    const saveBtn = button({ label: 'Save', kind: 'primary', onClick: () => { quiet(save()) } })
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); quiet(save()) } })
     const sheet = openSheet(shell, {
       title: 'Rename room', sub: r.name, cls: 'sc-rename',
       body: h('label.field', h('span.field-label', 'Title'), input),
-      actions: [button({ label: 'Cancel', kind: 'quiet', onClick: () => { sheet.close() } }), button({ label: 'Save', kind: 'primary', onClick: () => { quiet(save()) } })],
+      actions: [button({ label: 'Cancel', kind: 'quiet', onClick: () => { sheet.close() } }), saveBtn],
     })
     requestAnimationFrame(() => { input.focus(); input.select() })
   }
@@ -281,13 +324,18 @@ export function mount(ctx: UiContext): void {
     makingEl.replaceChildren(h('span.sc-thumb', h('span.sc-busy', ring(null, { size: 28 }), h('span', roomMaking.text))),
       h('span.sc-text', h('span.sc-title', roomTitle.trim() || 'New room'), h('span.sc-meta.tnum', dots([`${String(roomMaking.n)} photos`, 'new room']))))
   }
-  // While a room's photos calibrate or it aligns, the list is read again every 1.5 s (the page open).
+  // While a room's photos calibrate or it aligns, the list is read again every 1.5 s (the page open), backing off to
+  // 30 s while the server doesn't answer (the rooms already known stay busy, so the chain goes on).
+  let pollFailures = 0
+  function pollRooms(): void {
+    quiet(engine.listRoomsInternal().then(() => { pollFailures = 0; render(); schedulePoll() }).catch(() => { pollFailures++; schedulePoll() }))
+  }
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   function schedulePoll(): void {
     clearTimeout(pollTimer)
     const busy = engine.getRooms().some((r) => { const f = factsOf(r); return f.calibrating > 0 || f.alignStatus === 'pending' || f.alignStatus === 'running' })
     if (!busy || !page.isOpen()) return
-    pollTimer = setTimeout(() => { quiet(engine.listRoomsInternal().then(() => { render(); schedulePoll() }).catch(() => undefined)) }, 1500)
+    pollTimer = setTimeout(pollRooms, nextPollMs(pollFailures))
   }
   function roomTrashView(): HTMLElement | null {
     const trash = engine.getRoomsTrash()
@@ -309,7 +357,7 @@ export function mount(ctx: UiContext): void {
     const rooms = engine.getRooms()
     const inRooms = new Set(rooms.flatMap((r) => r.members.map((m) => m.scene)))
     const alone = list.filter((s) => !s.room && !inRooms.has(s.name))
-    if (!list.length && !uploading && !rooms.length && !roomMaking) {
+    if (!list.length && !uploads.size && !rooms.length && !roomMaking) {
       fill(st.loaded ? h('div.sc-empty',
         h('span.sc-empty-ic', icon('image', { size: 32 })),
         h('h3', 'No scenes yet'),
@@ -321,7 +369,7 @@ export function mount(ctx: UiContext): void {
     }
     fill(
       h('p.sc-hint', scenesHint(shell.isPhone())),
-      h('div.sc-grid', { role: 'list' }, makingEl, upEl, rooms.map((r) => roomCard(r)), alone.map((s) => card(s))),
+      h('div.sc-grid', { role: 'list' }, makingEl, [...uploads.values()].map((u) => u.el), rooms.map((r) => roomCard(r)), alone.map((s) => card(s))),
       trashView(), roomTrashView())
   }
   // replaceChildren() turns null into the text "null" (h() drops it; this doesn't): no Recently deleted, no node.

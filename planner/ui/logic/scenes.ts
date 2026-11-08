@@ -71,3 +71,26 @@ export function isPhotoFile(type: string, name: string): boolean {
 export function scenesHint(phone: boolean): string {
   return phone ? 'Tap a scene to open it.' : 'Click a scene to open it. Each scene keeps its own layouts and renders.'
 }
+
+/** The wait before the next read of the rooms, after this many failed reads in a row: 1.5 s, doubling to 30 s. */
+export function nextPollMs(failures: number): number {
+  return failures >= 5 ? 30000 : 1500 * 2 ** failures
+}
+
+/** A New room's resume, from the photos it already uploaded. */
+export function roomResumeLabel(photos: number): string {
+  return `Make the room from ${plural(photos, 'photo')}`
+}
+
+/** What a New room that stopped says: the step that failed and what is left. */
+export function roomStoppedText(step: 'upload' | 'room', photos: number): string {
+  const left = photos === 1 ? 'stays a scene' : 'stay as scenes'
+  if (step === 'room') return `The room wasn't made. Its ${plural(photos, 'photo')} ${photos === 1 ? 'is' : 'are'} uploaded and ${left}.`
+  if (photos === 0) return "No photo uploaded, so the room wasn't made."
+  return `A photo didn't upload, so the room wasn't made. ${plural(photos, 'photo')} uploaded and ${left}.`
+}
+
+/** A New room whose only failed step is the alignment: the room is there. */
+export function roomAlignStoppedText(title: string): string {
+  return `${title} is made, but aligning its photos didn't start.`
+}
