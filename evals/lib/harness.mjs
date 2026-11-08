@@ -3,7 +3,10 @@
 //
 // What it gives every eval:
 // - createEval(): one "PASS|FAIL <id> <name> — <measured>" line per check, a summary, exit code 1 on any FAIL, a
-//   watchdog, and cleanup (servers and browsers are always stopped, also on a crash or Ctrl-C).
+//   watchdog, and cleanup (servers and browsers are always stopped, also on a crash or Ctrl-C). One timing ladder: srv.stop
+//   8 s < one cleanup 15 s < finish 40 s < all.mjs's step wait 50 s < eval-lock's group grace 60 s. Signals of one burst
+//   (eval-lock's group signal and all.mjs's forward) count once; a signal more than 2 s after the first ends a stuck
+//   finish with exit 130. A run owns evals/out/<slug>: while one is live, another run of that eval in the worktree exits 75.
 // - startServer(): the server on a free port with its own scenes/layouts/renders/library/rooms dirs and costs file under
 //   evals/out/<eval>/, fal mocked (MIDSTUDY_FAL_MOCK=fixtures/fal, MIDSTUDY_NO_DOTENV=1, no FAL_KEY,
 //   --daily-spend-usd 0 unless an eval tests the cap with mock costs) and the calib stub with MIDSTUDY_CALIB_MOCK.
@@ -23,6 +26,7 @@ import http from 'node:http'
 import net from 'node:net'
 import path from 'node:path'
 import zlib from 'node:zlib'
+import { readOwner, tryClaim } from '../../scripts/lib/dirlock.mjs'
 
 export const REPO = path.resolve(import.meta.dirname, '../..')
 // Headless Chrome from the user's flake (PUPPETEER_EXECUTABLE_PATH, chrome-headless-shell); MIDSTUDY_BROWSER overrides.
@@ -66,17 +70,33 @@ export const golden = (id) => ({
 })
 
 // --- results ---------------------------------------------------------------------------------------------------------------
+const CLEANUP_LIMIT_MS = 15000, FINISH_LIMIT_MS = 40000, SIGNAL_BURST_MS = 2000
 export function createEval(id, slug, { timeoutS = 600 } = {}) {
   console.log(`${id} ${slug}: server ${SERVER_CMD.join(' ')}, furniture CLI ${ADD_CMD}, MIDSTUDY_STRICT=1${RECORD_DIR ? `, recording /api calls to ${path.relative(REPO, RECORD_DIR) || '.'}` : ''}`)
   recordTag = slug
   const out = path.join(REPO, 'evals/out', slug)
+  // A sibling of the folder (so the wipe doesn't touch it), released at exit; dead-pid reclaim drops it after a crash.
+  const outLock = tryClaim(`${out}.lock`)
+  if (!outLock) {
+    const o = readOwner(`${out}.lock`)
+    console.error(`another run of ${slug} is in progress in this worktree (pid ${o?.pid ?? '?'}, ${o?.cmd ?? 'unknown command'})`)
+    process.exit(75)
+  }
+  process.on('exit', () => outLock.release())
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(out, { recursive: true })
   const t0 = Date.now()
   const results = []
   const cleanups = []
   let finishing = false
+  let firstSignalAt = 0
   const guard = repoGuard()
+  const report = () => {
+    const failed = results.filter((r) => !r.ok)
+    console.log(`\n${id}: ${results.length - failed.length}/${results.length} checks passed in ${ev.secs()} s` + (failed.length ? ` (failed: ${failed.map((f) => f.n).join(' ')})` : ''))
+    fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify({ id, results }, null, 2))
+    return failed.length
+  }
   const ev = {
     id, slug, out, results,
     secs: () => ((Date.now() - t0) / 1000).toFixed(1),
@@ -95,19 +115,37 @@ export function createEval(id, slug, { timeoutS = 600 } = {}) {
       if (finishing) return
       finishing = true
       clearTimeout(watchdog)
-      for (const fn of cleanups.reverse()) { try { await fn() } catch { /* best effort */ } }
+      setTimeout(() => { ev.check('the cleanups finished within the finish limit', false, `still running after ${FINISH_LIMIT_MS / 1000} s`); report(); process.exit(1) }, FINISH_LIMIT_MS).unref()
+      for (let i = cleanups.length; i >= 1; i--) {
+        const fn = cleanups[i - 1]
+        let timer
+        const outcome = await Promise.race([
+          Promise.resolve().then(fn).catch(() => { /* best effort */ }),
+          new Promise((resolve) => { timer = setTimeout(() => resolve('timed out'), CLEANUP_LIMIT_MS) }),
+        ])
+        clearTimeout(timer)
+        if (outcome === 'timed out') ev.check(`cleanup ${i} finished`, false, `no answer in ${CLEANUP_LIMIT_MS / 1000} s`)
+      }
       const touched = guard()
       ev.check("the repo's own scenes/, layouts/, renders/, library/ and rooms/ were not touched", touched.length === 0, touched.length ? touched.slice(0, 8).join(', ') : 'unchanged')
-      const failed = results.filter((r) => !r.ok)
-      console.log(`\n${id}: ${results.length - failed.length}/${results.length} checks passed in ${ev.secs()} s` + (failed.length ? ` (failed: ${failed.map((f) => f.n).join(' ')})` : ''))
-      fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify({ id, results }, null, 2))
-      process.exit(failed.length || extraCode ? 1 : 0)
+      process.exit(report() || extraCode ? 1 : 0)
     },
   }
   const watchdog = setTimeout(() => { ev.check('the eval finishes within its time limit', false, `still running after ${timeoutS} s`); ev.finish(1) }, timeoutS * 1000)
   process.on('unhandledRejection', (e) => { ev.check('no harness exception', false, e?.stack || String(e)); ev.finish(1) })
   process.on('uncaughtException', (e) => { ev.check('no harness exception', false, e?.stack || String(e)); ev.finish(1) })
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { ev.check('not interrupted', false, sig); ev.finish(1) })
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      const now = Date.now()
+      firstSignalAt ||= now
+      if (finishing) {
+        if (now - firstSignalAt > SIGNAL_BURST_MS) process.exit(130)
+        return
+      }
+      ev.check('not interrupted', false, sig)
+      ev.finish(1)
+    })
+  }
   return ev
 }
 
@@ -174,10 +212,12 @@ export function raw(base, method, p, { headers = {}, body = null, chunked = fals
 // MIDSTUDY_RECORD_API: one JSON line per /api call, {eval, method, path, status, request: {meta?, body?}, response:
 // {contentType, body}}. Long request strings (data URIs) are cut to 200 characters; raw uploads are recorded by size.
 let recordFile = ''
+let recordFileTag = ''
 function record(method, p, headers, buf, res, json, text) {
   if (!String(p).startsWith('/api')) return
   try {
-    if (!recordFile) {
+    if (recordFileTag !== recordTag) {
+      recordFileTag = recordTag
       fs.mkdirSync(RECORD_DIR, { recursive: true })
       recordFile = path.join(RECORD_DIR, `${recordTag}-${process.pid}.jsonl`)
     }
@@ -217,27 +257,38 @@ export async function waitFor(fn, { timeoutMs = 30000, intervalMs = 200 } = {}) 
     try { last = await fn(); if (last) return last } catch (e) { last = { error: String(e) } }
     await sleep(intervalMs)
   }
+  process.stderr.write(`harness: waitFor timed out after ${timeoutMs} ms; last: ${clip(fmt(last))}\n`)
   return null
 }
+// The server's job states that mean "not finished yet". A poll ends on a 200 whose status is any other string, so a status
+// added later ends it instead of running it to its timeout; a body without one keeps it polling.
+const IN_PROGRESS = ['pending', 'queued', 'running']
 // Waits until a scene's calibration job ends; returns the scene object (or null on timeout).
 export async function waitScene(base, name, timeoutMs = 60000) {
   return waitFor(async () => {
     const r = await api.get(base, `/api/scenes/${name}`)
-    return r.status === 200 && ['done', 'failed'].includes(r.json?.calib_status) ? r.json : null
+    if (r.status !== 200) throw new Error(`GET /api/scenes/${name} answered ${r.status} ${r.error ?? ''}`)
+    const status = r.json?.calib_status
+    return typeof status === 'string' && !IN_PROGRESS.includes(status) ? r.json : null
   }, { timeoutMs, intervalMs: 250 })
 }
 
 // --- the server ---------------------------------------------------------------------------------------------------------------
 let serverCount = 0
 // scripts/build.mjs builds the planner (planner/dist/) and the wasm kernels once per eval process, before the first
-// server starts. Reported as a check, so a broken build is a FAIL, not a mystery.
+// server starts. Reported as a check, so a broken build is a FAIL, not a mystery. A success is kept; a failure is tried once
+// more in this process (an eval with several servers must not pay up to 900 s for each). MIDSTUDY_EVAL_BUILD_CMD (a JSON
+// argv) replaces the build, for the self-test.
 let built = null
+let buildAttempts = 0
+const MAX_BUILD_ATTEMPTS = 2
 export function ensureBuilt(ev) {
-  const script = path.join(REPO, 'scripts/build.mjs')
-  if (built) return built
+  if (built?.ok || buildAttempts >= MAX_BUILD_ATTEMPTS) return built
+  buildAttempts += 1
+  const [buildFile, ...buildArgs] = process.env.MIDSTUDY_EVAL_BUILD_CMD ? JSON.parse(process.env.MIDSTUDY_EVAL_BUILD_CMD) : [process.execPath, path.join(REPO, 'scripts/build.mjs')]
   const t0 = Date.now()
   try {
-    execFileSync(process.execPath, [script], { cwd: REPO, encoding: 'utf8', timeout: 900000, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
+    execFileSync(buildFile, buildArgs, { cwd: REPO, encoding: 'utf8', timeout: 900000, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
     built = { ok: true, secs: ((Date.now() - t0) / 1000).toFixed(1) }
   } catch (e) {
     built = { ok: false, why: clip(`${e.stderr || ''}${e.stdout || ''}${e.message || e}`.trim().split('\n').slice(-6).join(' | '), 500) }
@@ -249,11 +300,15 @@ export function ensureBuilt(ev) {
   else if (!built.ok) console.error(`harness: ${what}: FAILED: ${built.why}`)
   return built
 }
-// Starts the server (node server/src/main.ts, strict mode) with scratch dirs. Returns {base,
-// port, dirs, log(), stop(), exited}. Never throws: when the server doesn't come up, `up` is false and `why` says what
-// happened (e.g. an unknown flag before the feature exists).
+// Starts the server (node server/src/main.ts, strict mode) with scratch dirs. Returns {base, port, dirs, log(), stop(),
+// exited, up, why, alive()}. Never throws: when the server doesn't come up, `up` is false and `why` says what happened
+// (e.g. an unknown flag before the feature exists, or a build that failed: then nothing is spawned). The server binds
+// --port 0 and says which port it got on stdout, so another eval's server can never answer for this one. `up` goes false
+// when the server dies later; alive() is a function so that a copy of srv still reads the live state.
+const liveServers = new Set()
+process.on('exit', () => { for (const p of liveServers) p.kill('SIGTERM') })
+const PORT_LINE_MS = 60000, STOP_GRACE_MS = 8000
 export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, spendUsd = '0', appBudget = false, mockCost = false, env = {}, args = [], library = 'probe' } = {}) {
-  ensureBuilt(ev)
   const n = ++serverCount
   const data = path.join(ev.out, `server-${n}`)
   const dirs = { data, scenes: path.join(data, 'scenes'), layouts: path.join(data, 'layouts'), renders: path.join(data, 'renders'), library: path.join(data, 'library'), rooms: path.join(data, 'rooms') }
@@ -261,8 +316,11 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   dirs.costs = path.join(dirs.library, 'costs.csv')
   fs.writeFileSync(dirs.costs, 'date,id,engine,cost_usd,mock,input\n')
   if (library === 'probe') writeProbeLibrary(dirs.library)
-  const port = await freePort()
-  const base = `http://127.0.0.1:${port}`
+  const build = ensureBuilt(ev)
+  if (!build.ok) {
+    const why = `the build failed: ${build.why}`
+    return { n, base: 'http://127.0.0.1:0', port: 0, dirs, proc: null, logPath: path.join(data, 'server.log'), up: false, why, exited: null, log: () => why, stop: async () => {}, alive: () => false }
+  }
   const childEnv = { ...process.env, MIDSTUDY_NO_DOTENV: '1', NOOK_NO_DOTENV: '1', MIDSTUDY_FAL_MOCK: path.join(REPO, 'fixtures/fal'), NOOK_FAL_MOCK: path.join(REPO, 'fixtures/fal'), ...env }
   if (calibMock) childEnv.MIDSTUDY_CALIB_MOCK = path.join(REPO, 'fixtures/calib')
   else delete childEnv.MIDSTUDY_CALIB_MOCK
@@ -273,34 +331,52 @@ export async function startServer(ev, { calib = STUB_CALIB, calibMock = true, sp
   // Hard limits (CLAUDE.md): never without the fal mock, never without a spend cap flag.
   // appBudget: no --daily-spend-usd, so the budget is the app's Settings (§2.9); allowed only with the mock, in a temp library.
   if (!childEnv.MIDSTUDY_FAL_MOCK || (spendUsd == null && !appBudget)) throw new Error(`refusing to start ${SERVER_NAME} without the fal mock and a spend cap`)
-  const { cmd, args: argv } = serverCommand(['--port', String(port), '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
+  const { cmd, args: argv } = serverCommand(['--port', '0', '--host', '127.0.0.1', '--scenes-dir', dirs.scenes, '--layouts-dir', dirs.layouts,
     '--renders-dir', dirs.renders, '--library-dir', dirs.library, '--costs-file', dirs.costs, '--calib', calib, '--midstudy-add', ADD_CMD,
     ...(appBudget ? [] : ['--daily-spend-usd', String(spendUsd)]), ...(args.includes('--rooms-dir') ? [] : ['--rooms-dir', dirs.rooms]), ...args])
   const logPath = path.join(data, 'server.log')
   let log = `$ ${cmd} ${argv.join(' ')}\n`
   const proc = spawn(cmd, argv, { cwd: REPO, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
-  const srv = { n, base, port, dirs, proc, logPath, up: false, why: '', exited: null, log: () => log }
-  proc.stdout.on('data', (d) => { log += d })
+  liveServers.add(proc)
+  const srv = { n, base: 'http://127.0.0.1:0', port: 0, dirs, proc, logPath, up: false, why: '', exited: null, log: () => log, alive: () => srv.up && srv.exited == null }
+  let stdout = '', stopping = false
+  proc.stdout.on('data', (d) => { log += d; stdout += d })
   proc.stderr.on('data', (d) => { log += d })
-  proc.on('exit', (code, sig) => { srv.exited = { code, sig } })
+  proc.on('exit', (code, sig) => {
+    liveServers.delete(proc)
+    srv.exited = { code, sig }
+    if (srv.up && !stopping) {
+      srv.up = false
+      srv.why = `exited after start (${code ?? sig})`
+      console.error(`harness: ${SERVER_NAME} on port ${srv.port} ${srv.why}`)
+    }
+  })
   srv.stop = async () => {
+    stopping = true
     if (srv.exited == null) {
       proc.kill('SIGTERM')
-      for (let i = 0; i < 25 && srv.exited == null; i++) await sleep(100)
+      for (let i = 0; i < STOP_GRACE_MS / 100 && srv.exited == null; i++) await sleep(100)
       if (srv.exited == null) proc.kill('SIGKILL')
     }
     fs.writeFileSync(logPath, log)
   }
   ev.onCleanup(srv.stop)
-  for (let i = 0; i < 100 && srv.exited == null; i++) {
-    const r = await raw(base, 'GET', '/planner/', { timeoutMs: 2000 })
-    if (r.status) { srv.up = true; break }
-    await sleep(150)
+  const portLine = () => /midstudy planner: http:\/\/[^:/]+:(\d+)\/planner\//.exec(stdout)
+  for (const end = Date.now() + PORT_LINE_MS; !portLine() && srv.exited == null && Date.now() < end;) await sleep(25)
+  const seen = portLine()
+  if (seen) {
+    srv.port = Number(seen[1])
+    srv.base = `http://127.0.0.1:${srv.port}`
+    for (let i = 0; i < 100 && srv.exited == null; i++) {
+      const r = await raw(srv.base, 'GET', '/planner/', { timeoutMs: 2000 })
+      if (r.status) { srv.up = true; break }
+      await sleep(150)
+    }
   }
   if (!srv.up) {
     await sleep(200)
     const tail = log.trim().split('\n').slice(-4).join(' | ')
-    srv.why = srv.exited ? `${SERVER_NAME} exited (${srv.exited.code ?? srv.exited.sig}): ${tail}` : `${SERVER_NAME} did not answer on ${base}: ${tail}`
+    srv.why = srv.exited ? `${SERVER_NAME} exited (${srv.exited.code ?? srv.exited.sig}): ${tail}` : `${SERVER_NAME} did not answer${seen ? ` on ${srv.base}` : ' with its port'}: ${tail}`
   }
   return srv
 }
@@ -474,8 +550,8 @@ export async function launchBrowser(ev) {
 }
 // Opens the planner in a fresh context and waits for window.midstudy.ready. Returns {page, context, errors, hook}.
 // `hook` is null when window.midstudy never appeared (then every hook call fails with "hook missing: window.midstudy").
-export async function openPlanner(browser, base, { device = 'desktop', scene = null, viewport = null, recordRefusals = true } = {}) {
-  const context = await browser.newContext(device === 'phone' ? PHONE : { ...DESKTOP, ...(viewport ? { viewport } : {}) })
+export async function openPlanner(browser, base, { device = 'desktop', scene = null, viewport = null, recordRefusals = true, query = '', readyMs = 60000 } = {}) {
+  const context = await browser.newContext({ ...(device === 'phone' ? PHONE : DESKTOP), ...(viewport ? { viewport } : {}) })
   const page = await context.newPage()
   page.setDefaultTimeout(20000)
   const errors = { page: [], console: [], refused: [] }
@@ -488,13 +564,14 @@ export async function openPlanner(browser, base, { device = 'desktop', scene = n
     s.textContent = '*,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important;animation-delay:0s!important;transition-delay:0s!important}'
     document.head.append(s)
   }))
-  const url = `${base}/planner/${scene ? `?scene=${encodeURIComponent(scene)}` : ''}`
+  const qs = [scene ? `scene=${encodeURIComponent(scene)}` : '', query].filter(Boolean).join('&')
+  const url = `${base}/planner/${qs ? `?${qs}` : ''}`
   let why = ''
   try { await page.goto(url, { waitUntil: 'load', timeout: 30000 }) } catch (e) { why = `page load failed: ${String(e).split('\n')[0]}` }
   const ok = !why && await page.waitForFunction(() => !!window.midstudy, null, { timeout: 30000 }).then(() => true, () => false)
   if (!ok && !why) why = `hook missing: window.midstudy${errors.page.length || errors.console.length ? ` (page errors: ${clip([...errors.page, ...errors.console].slice(0, 3).join(' | '), 400)})` : ''}`
   let ready = ''
-  if (ok) ready = await page.evaluate(() => Promise.race([Promise.resolve(window.midstudy.ready).then(() => ''), new Promise((r) => setTimeout(() => r('window.midstudy.ready did not resolve in 60 s'), 60000))]).catch((e) => `window.midstudy.ready rejected: ${e}`))
+  if (ok) ready = await page.evaluate((ms) => Promise.race([Promise.resolve(window.midstudy.ready).then(() => ''), new Promise((r) => setTimeout(() => r(`window.midstudy.ready did not resolve in ${ms / 1000} s`), ms))]).catch((e) => `window.midstudy.ready rejected: ${e}`), readyMs)
   return { page, context, errors, hookOk: ok && !ready, why: why || ready, url }
 }
 // Calls window.midstudy[method](...args) with a timeout. Returns {value} or {error: 'hook missing: <method>' | ...}.
