@@ -14,6 +14,7 @@
     "server/test/rooms-calib.ts",
     "pipeline/src/cli.ts",
     "pipeline/test/*.test.ts",
+    "pipeline/test/paid-standin.ts",
     "core/js/{web,node}.ts",
     "core/js/**/*.worker.ts",
     "scripts/*.mjs",
