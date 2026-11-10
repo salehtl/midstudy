@@ -140,3 +140,12 @@ Closed at the W2 merge: `pipeline/test/lock.test.ts` now pins the new rule (a li
 - `shopifySizes` returns early when `sz.variants` is already set, before any parse, as `wooSizes` does. Shopify runs first today, so the output is identical; v1 had no guard.
 - The other parser risks stay v1's `_Page` (contract §0), listed in a comment on `Page`. `<script>` inside a non-self-closing `<svg>` is still foreign content, v2's documented tokenizer choice.
 - Deviation: the brief's parity case `<svg><svg/><title>x</title></svg>` is pinned as `title === null`, since `Page` ignores a `<title>` inside an svg.
+
+## Library add job: the done-path item read (state-machine audit, 2026-11-10)
+
+Closed as won't-fix, which settles the plan's contradiction (its cross-area entry said "closed by the summary line";
+its server design said "not changed"). `#run` reads the item from `library.json` after `midstudy-add` exits, without
+the library lock. The add summary line (contract §3, add-summary.schema.json) carries no item, so reading it from the
+child would be a contract change. The read stays: if a delete lands between the child's commit and this read, the
+job's `item` is null, which is true of the library by then; if another add of the same id lands, the job shows the
+entry the library now holds. The planner reloads the library on done either way, so neither case shows a wrong item.

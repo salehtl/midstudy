@@ -1,6 +1,6 @@
 // E10 eval:all — runs E1 and E3–E9 one after another (PLAN.md §6.2), then E11 and E12 (the verify round 1 and 2 UX regressions), E13 (v1.1 splats), E14 and E15 (product page reader and form),
 // E16 (lighting inferred from the photo), E17 (shortcuts, multi-select, Export), E18–E20 (rooms: the API, the room
-// planner, align-room's mock through the stub), and E2 (real MoGe and E20's real solver, then --mock) only with --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
+// planner, align-room's mock through the stub), the planner's race cases (engine-races) and UI smoke flows (ui-smoke), and E2 (real MoGe and E20's real solver, then --mock) only with --with-calib. Each eval starts and stops its own server on a free port. Prints a summary; exits 1 if any failed.
 // SIGINT, SIGTERM or SIGHUP stops the run: the running step is told and waited for (SIGKILL after 50 s), later steps don't start, the summary so far is printed, exit 130.
 // Usage: node evals/all.mjs [--with-calib] [--only E3,E4]   (or npm run eval:all [-- --with-calib])
 import { spawn } from 'node:child_process'
@@ -31,6 +31,8 @@ const allSteps = [
   ['E18', 'rooms-api', 'node', ['evals/rooms_api.mjs']],
   ['E19', 'room-planner', 'node', ['evals/room_planner.mjs']],
   ['E20', 'align --mock', 'node', ['evals/align_eval.mjs', '--mock']],
+  ['RACES', 'engine-races', 'node', ['planner/ui/test/engine-races.mjs']],
+  ['SMOKE', 'ui-smoke', 'node', ['planner/ui/test/smoke.mjs']],
 ]
 // Test-only: a JSON list of [id, name, cmd, argv] replaces the steps (evals/runner_selftest.mjs).
 const steps = (process.env.MIDSTUDY_ALL_STEPS ? JSON.parse(process.env.MIDSTUDY_ALL_STEPS) : allSteps).filter(([id]) => !only || only.includes(id))

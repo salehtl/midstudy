@@ -219,7 +219,7 @@ export function mount({ engine, scenes, shell, kit, icons }: UiContext): void {
     panel.setCount(String(details.length))
     card.classList.toggle('is-failed', !!failure)
     const active = document.activeElement
-    const typing = asking && card.contains(active) && active?.tagName === 'INPUT'
+    const typing = asking && !failure && card.contains(active) && active?.tagName === 'INPUT'
     if (!typing) card.replaceChildren(...cardView())
     const name = engine.getSceneName()
     const title = name ? sceneTitle(scenes.getScene(name) ?? engine.getScene()) : null
