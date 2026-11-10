@@ -6,13 +6,14 @@
 //             two overlapping keep-room captures leave the pieces their own colours (not the mask's white)
 //   align     the alignment is followed by its job id: a job the server forgot (404) ends in 'align-failed'
 //   loop      a render failure is reported once per scene opened, not once per session
-//   room view, placed pieces, drag, library   the placement chain, uids, rebuilds, guards, latest wins (--items stops after these)
+//   room view, placed pieces, captures, drag, library   the placement chain, uids, rebuilds, no attach or thumbnail
+//             render inside a capture, guards, latest wins (--items stops after these)
 //   scene …   open/close tokens, layouts by scope, dirty baselines, ruler, Look autosave, renders, camera, lists, startup
 // Usage (repo root, through the lock): nix develop -c node scripts/eval-lock.mjs -- npm run eval:engine-races
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  PROBE, createEval, startServer, seedScene, uploadScene, unknownPhoto, waitScene, launchBrowser, openPlanner, ensureScene, hook, fmt, raw, sleep, waitFor, project,
+  PROBE, boxGlb, createEval, startServer, seedScene, uploadScene, unknownPhoto, waitScene, launchBrowser, openPlanner, ensureScene, hook, fmt, raw, sleep, waitFor, project,
 } from '../../../evals/lib/harness.mjs'
 
 const ev = createEval('ENGINE-RACES', 'engine-races', { timeoutS: 600 })
@@ -523,6 +524,26 @@ const addProbeHere = (at) => E(async ({ id, at }) => window.midstudyCtx.engine.a
     ev.check('Align photos needs the floor plan shown, and refuses piece drags', plan.shown && plan.onShown && !plan.drag && !plan.hidden && !plan.onHidden, fmt(plan))
     await clear()
   }
+  {
+    // an add started on photo A whose model lands after a switch to photo B (both placed): the piece keeps the room place
+    // it was given on A, so B draws it where B sees that place, not at A's scene position
+    fresh('race-sw'); await reload()
+    const at = [0.3, 0, -2.4]
+    const want = await E(({ at, a, b }) => { const e = window.midstudyCtx.engine; return e.roomToSceneHook(e.sceneToRoomHook(at, a), b) }, { at, a: A.name, b: B.name })
+    const h = await hold(glbOf('race-sw'), { count: 99 })
+    await E((at) => { window.__races.swAdd = window.midstudyCtx.engine.addItemInternal('race-sw', { position: at, rotation_y_deg: 0 }).catch((x) => String(x)) }, at)
+    await hit(h)
+    await E((b) => window.midstudyCtx.engine.setRoomPhoto(b), B.name)
+    h.release()
+    const u = await E(() => window.__races.swAdd)
+    await h.off()
+    const s = await E((u) => { const e = window.midstudyCtx.engine; return { photo: e.getRoomState().photo, pos: e.getItem(u)?.position ?? null } }, u)
+    const off = (p, q) => Math.max(...p.map((v, i) => Math.abs(v - q[i])))
+    ev.check('an add started before a room photo switch lands where the new photo sees its room place, not at the old scene position',
+      s.photo === B.name && !!s.pos && !!want && off(s.pos, want) < 1e-4 && off(s.pos, at) > 0.05, `${fmt(s)}; want ${fmt(want)}; started at ${fmt(at)}`)
+    await E((a) => window.midstudyCtx.engine.setRoomPhoto(a), A.name)
+    await clear()
+  }
   for (const n of ['race-tpl', 'race-a', 'race-b', 'race-c']) await E((n) => window.midstudyCtx.engine.deleteLayoutInternal(n).catch(() => undefined), n)
   await E(() => window.midstudyCtx.engine.closeScene())
   await openS(A.name)
@@ -576,6 +597,151 @@ const addProbeHere = (at) => E(async ({ id, at }) => window.midstudyCtx.engine.a
     await waitFor(async () => (await rendersOf()) > r0, { timeoutMs: 6000, intervalMs: 30 })
     const g = await newest('race-late')
     ev.check('a library change during a piece\'s load: the piece ends on the new asset', g === 'race-late/model2.glb', `glb ${g}; rebuilds ${(await rendersOf()) - r0}; errors ${fmt(await E(() => window.__races.errors.slice(-3)))}`)
+    await clear()
+  }
+  {
+    // an add whose model lands after another scene opened is cancelled (itemsGen): nothing of it in the new scene
+    fresh('race-gone'); await reload()
+    const h = await hold(glbOf('race-gone'), { count: 99 })
+    await E(() => { window.__races.gone = window.midstudyCtx.engine.addItemInternal('race-gone', { position: [0, 0, -2.6], rotation_y_deg: 0 }).then((u) => u, (x) => `rejected: ${String(x?.message ?? x)}`) })
+    await hit(h)
+    await openS(C.name)
+    h.release()
+    const r = await E(() => window.__races.gone)
+    await h.off()
+    const s = await E(() => { const e = window.midstudyCtx.engine; return { scene: e.getSceneName(), ids: e.getItems().map((i) => i.id), groups: e.getItemGroupCount() } })
+    ev.check('an add started before another scene opened does not land in it (rejected, nothing in the new scene)', r.startsWith('rejected') && s.scene === C.name && !s.ids.includes('race-gone') && s.groups === s.ids.length, `${r}; ${fmt(s)}`)
+    await openS(A.name)
+    await clear()
+  }
+
+  ev.section('captures: nothing attaches, and no thumbnail renders, while one runs')
+  await E(() => {
+    const e = window.midstudyCtx.engine, R = window.__races
+    R.att = [] // every attach (an add, a rebuild), and whether a capture was queued or running at that moment
+    e.events.addEventListener('items', (x) => { if (x.detail.change === 'add' || x.detail.change === 'render') R.att.push({ change: x.detail.change, uid: x.detail.uid, capturing: e.isCapturing() }) })
+    R.digest = (c) => { const k = document.createElement('canvas'); k.width = 32; k.height = 18; const g = k.getContext('2d'); g.drawImage(c, 0, 0, 32, 18); return Array.from(g.getImageData(0, 0, 32, 18).data) }
+    // captures kept queued back to back (the next one always waiting behind the running one), until R.stop or `ms`: the
+    // capture mutex never empties meanwhile. R.pumped: every capture's result.
+    R.pump = (make, ms) => {
+      R.stop = false
+      R.pumped = (async () => {
+        const out = [], until = performance.now() + ms
+        let prev = make()
+        while (!R.stop && performance.now() < until) { const next = make(); out.push(await prev); prev = next }
+        out.push(await prev)
+        return out
+      })()
+    }
+  })
+  const exportPump = (ms) => E((ms) => { const e = window.midstudyCtx.engine, R = window.__races; R.pump(() => e.exportImage({ encode: false, longEdge: 480 }).then((s) => R.digest(s.canvas)), ms) }, ms)
+  const shot = () => E(async () => window.__races.digest((await window.midstudyCtx.engine.exportImage({ encode: false, longEdge: 480 })).canvas))
+  const pxDiff = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])))
+  const attOf = (u, change) => E(({ u, change }) => window.__races.att.filter((x) => x.uid === u && x.change === change), { u, change })
+  {
+    await clear()
+    fresh('race-cap'); await reload()
+    const base = await shot()
+    const h = await hold(glbOf('race-cap'), { count: 99 })
+    await E(() => { window.__races.capAdd = window.midstudyCtx.engine.addItemInternal('race-cap', { position: [0, 0, -2.6], rotation_y_deg: 0 }).catch((x) => String(x)) })
+    await hit(h)
+    await exportPump(2500)
+    h.release()
+    const shots = await E(() => window.__races.pumped)
+    const u = await E(() => window.__races.capAdd)
+    await h.off()
+    const att = await attOf(u, 'add')
+    const drawn = await shot()
+    const worst = Math.max(...shots.map((s) => pxDiff(s, base)))
+    ev.check('an add whose model loads during a run of captures: in none of them, attached once they end (and drawn then)',
+      typeof u === 'string' && shots.length >= 3 && worst <= 2 && att.length === 1 && att[0].capturing === false && pxDiff(drawn, base) > 40,
+      `${shots.length} captures, max |Δ| from before the add ${worst}; attach ${fmt(att)}; after the run |Δ| ${pxDiff(drawn, base)}`)
+    await clear()
+  }
+  {
+    // a rebuild (the entry re-pointed to a bigger green box) whose model loads during a run of captures
+    fresh('race-capr'); await reload()
+    const u = await E(() => window.midstudyCtx.engine.addItemInternal('race-capr', { position: [0, 0, -2.6], rotation_y_deg: 0 }))
+    const base = await shot()
+    const re = glbOf('race-capr', 'model2.glb')
+    const green = (r) => r.fulfill({ body: boxGlb(1.6, 1.4, 0.6, [0, 1, 0, 1]), contentType: 'model/gltf-binary' })
+    await page.route(re, green)
+    const h = await hold(re, { count: 99 })
+    repoint('race-capr')
+    await reload()
+    await hit(h)
+    await exportPump(2500)
+    h.release()
+    const shots = await E(() => window.__races.pumped)
+    await h.off()
+    await waitFor(async () => (await attOf(u, 'render')).length > 0, { timeoutMs: 6000, intervalMs: 30 })
+    const att = await attOf(u, 'render')
+    const drawn = await shot()
+    await page.unroute(re, green)
+    const worst = Math.max(...shots.map((s) => pxDiff(s, base)))
+    const g = await newest('race-capr')
+    ev.check('a rebuild whose model loads during a run of captures: in none of them, attached once they end (and drawn then)',
+      g === 'race-capr/model2.glb' && shots.length >= 3 && worst <= 2 && att.length === 1 && att[0].capturing === false && pxDiff(drawn, base) > 40,
+      `glb ${g}; ${shots.length} captures, max |Δ| from before the rebuild ${worst}; attach ${fmt(att)}; after the run |Δ| ${pxDiff(drawn, base)}`)
+    await clear()
+  }
+  {
+    // A thumbnail (a GLB add's, made by the planner) whose model loads during a run of keep-room renders (composite, then
+    // mask). The GPU read-backs are logged (WebGPU: copyTextureToBuffer → mapAsync; WebGL2: readPixels into a pack
+    // buffer → getBufferSubData) and a capture's read is held 200 ms longer (WebGPU): a 256 × 256 read is the
+    // thumbnail's, `busy` how many capture reads were in flight when it started (the capture mutex: none).
+    await addProbeHere([0, 0, -2.6]) // a piece for the masks to draw
+    await E(() => {
+      const S = window.__gpuSpy = { on: false, busy: 0, log: [], q: [] }
+      const thumb = (w, h) => w === 256 && h === 256
+      if (window.GPUCommandEncoder) {
+        const copy = GPUCommandEncoder.prototype.copyTextureToBuffer
+        GPUCommandEncoder.prototype.copyTextureToBuffer = function (src, dst, size) {
+          const w = size.width ?? size[0], h = size.height ?? size[1] ?? 1
+          if (S.on) { S.log.push({ w, h, busy: S.busy }); if (!thumb(w, h)) { S.busy++; dst.buffer.__cap = true } }
+          return copy.call(this, src, dst, size)
+        }
+        const map = GPUBuffer.prototype.mapAsync
+        GPUBuffer.prototype.mapAsync = async function (...a) {
+          const r = await map.apply(this, a)
+          if (this.__cap) { this.__cap = false; await new Promise((ok) => setTimeout(ok, 200)); S.busy-- }
+          return r
+        }
+      }
+      const gl = window.WebGL2RenderingContext?.prototype
+      if (gl) {
+        const rp = gl.readPixels, sub = gl.getBufferSubData
+        gl.readPixels = function (...a) {
+          if (S.on && this.getParameter(this.PIXEL_PACK_BUFFER_BINDING)) { const [, , w, h] = a; S.log.push({ w, h, busy: S.busy }); S.q.push(!thumb(w, h)); if (!thumb(w, h)) S.busy++ }
+          return rp.apply(this, a)
+        }
+        gl.getBufferSubData = function (...a) {
+          if (a[0] === this.PIXEL_PACK_BUFFER && S.q.length && S.q.shift()) S.busy--
+          return sub.apply(this, a)
+        }
+      }
+    })
+    fresh('race-thm', { thumb: false })
+    let puts = 0
+    const thmRe = /\/api\/library\/items\/race-thm\/thumb$/
+    const countPut = (r) => { if (r.request().method() === 'PUT') puts++; return r.fallback() }
+    await page.route(thmRe, countPut)
+    const refuse = (r) => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'held by the race eval' }) })
+    await page.route('**/api/render', refuse)
+    const h = await hold(glbOf('race-thm'), { count: 99 })
+    await reload()
+    await hit(h)
+    await E(() => { const e = window.midstudyCtx.engine, R = window.__races; window.__gpuSpy.on = true; R.pump(() => e.renderViewInternal({ keepRoom: true }).then(() => 0, () => 0), 8000) })
+    await sleep(300)
+    h.release()
+    await waitFor(() => puts > 0, { timeoutMs: 8000, intervalMs: 50 })
+    await E(() => { window.__races.stop = true })
+    const renders = (await E(() => window.__races.pumped)).length
+    const spy = await E(() => { const S = window.__gpuSpy; S.on = false; return { reads: S.log.length, thumbs: S.log.filter((x) => x.w === 256 && x.h === 256) } })
+    await h.off(); await page.unroute('**/api/render', refuse); await page.unroute(thmRe, countPut)
+    ev.check('a thumbnail made during a run of keep-room renders renders between their captures, never inside one',
+      puts === 1 && spy.thumbs.length >= 1 && spy.thumbs.every((x) => x.busy === 0),
+      `thumb PUTs ${puts}; ${renders} renders; ${spy.reads} read-backs; the thumbnail's ${fmt(spy.thumbs)}`)
     await clear()
   }
 
@@ -773,6 +939,62 @@ await saveL('pick')
   await h.off()
   const [a, b] = [await namesIn(A.name), await namesIn(B.name)]
   ev.check("a delete started in A deletes A's layout, even with B open by then", a.includes('same') === false && b.includes('same'), `A ${fmt(a)}; B ${fmt(b)}`)
+}
+{
+  // a save started in A whose PUT answers after B opened: stored in A (and A's memory names it), but B's current layout,
+  // its unsaved edit and its memory stay B's
+  await openS(A.name)
+  await addProbe([0.3, 0, -2.6])
+  const h = await hold(layoutRe('late-save', A.name), { method: 'PUT' })
+  await E(() => { window.__races.ls = window.midstudyCtx.engine.saveLayoutInternal('late-save').catch((x) => String(x)) })
+  await hit(h)
+  await openS(B.name)
+  await addProbe([-0.3, 0, -2.6])
+  const st = () => E(() => { const e = window.midstudyCtx.engine; return { scene: e.getSceneName(), name: e.getLayoutName(), dirty: e.isLayoutDirty() } })
+  const before = await st()
+  const lsB = await ls(`midstudy.layout.${B.name}`)
+  h.release()
+  await E(() => window.__races.ls)
+  await h.off()
+  await sleep(300)
+  const after = await st()
+  const lsB2 = await ls(`midstudy.layout.${B.name}`)
+  const lsA = await ls(`midstudy.layout.${A.name}`)
+  const inA = await namesIn(A.name)
+  ev.check("a layout PUT answering after B opened: saved in A, B's layout name, unsaved edit and memory unchanged",
+    after.scene === B.name && before.dirty && after.dirty && after.name === before.name && lsB2 === lsB && inA.includes('late-save') && !!lsA?.includes('late-save'),
+    `before ${fmt(before)}; after ${fmt(after)}; B ${lsB} → ${lsB2}; A ${lsA}; A's layouts ${fmt(inA)}`)
+}
+{
+  // a layouts list asked in A answering after B opened (and after B's own list): B keeps its list
+  await openS(A.name)
+  const listRe = new RegExp(`/api/layouts\\?scene=${esc(A.name)}$`)
+  const names = () => E(() => window.midstudyCtx.engine.getLayoutDetails().map((d) => d.name).sort())
+  const h = await hold(listRe)
+  await E(() => { window.__races.ll = window.midstudyCtx.engine.listLayoutsInternal().catch((x) => String(x)) })
+  await hit(h)
+  await openS(B.name)
+  const before = await names()
+  h.release()
+  const got = await E(() => window.__races.ll)
+  await h.off()
+  await sleep(200)
+  const after = await names()
+  const inA = await namesIn(A.name), inB = (await namesIn(B.name)).slice().sort()
+  ev.check("A's late layouts list does not replace B's", fmt(after) === fmt(before) && fmt(after) === fmt(inB) && inA.some((n) => !inB.includes(n)),
+    `B's list ${fmt(before)} → ${fmt(after)}; A's answer ${fmt(got)}; on the server A ${fmt(inA)}, B ${fmt(inB)}`)
+  // the same, the scene closed instead (no newer list is asked for: only the scope guard stands between)
+  await openS(A.name)
+  const h2 = await hold(listRe)
+  await E(() => { window.__races.ll = window.midstudyCtx.engine.listLayoutsInternal().catch((x) => String(x)) })
+  await hit(h2)
+  await E(() => window.midstudyCtx.engine.closeScene())
+  h2.release()
+  await E(() => window.__races.ll)
+  await h2.off()
+  await sleep(200)
+  const closed = await names()
+  ev.check("A's late layouts list after the scene closed leaves the list empty", closed.length === 0, `list ${fmt(closed)}`)
 }
 
 ev.section('dirty: explicit baselines')
