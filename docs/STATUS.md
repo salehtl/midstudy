@@ -10,8 +10,8 @@ tests with Miri and Kani, 14 fuzz targets, 574 Lean theorems); `eval:engine-race
 `eval:selftest-runner` 18/18, `eval:ui-smoke` 189/189. `eval:all` is the wave merge's to run, and is not counted here.
 **`eval:perf --compare` fails** (exit 1, twice). Five of its regressions were already there at 3a25cc6, before the first
 wave, at the same size: `planner_load_desktop_warm`, `drag_frames_p50`, `render_keep_room` and its client part, and
-`splat_first_frame` (13 to 14 s against v1's 0.3 s). `api_scenes_p95` is new in both runs (0.77 ms before, 1.8 to 1.9 ms
-after), not investigated. Details: [notes/integration.md](notes/integration.md).
+`splat_first_frame` (13 to 14 s against v1's 0.3 s). `api_scenes_p95` read 1.8 to 1.9 ms in those runs; an A/B on a quiet machine (2026-11-10)
+shows no regression from the waves on any metric. Details: [notes/integration.md](notes/integration.md).
 
 ## Rooms (docs/ROOMS.md; integrated 2026-11-07 on `rooms-integrate`)
 

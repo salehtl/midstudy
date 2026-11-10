@@ -27,4 +27,13 @@ Gates on `sm-next` at c7ba919, run with `MIDSTUDY_TRACK=integration`: `npm run c
 
 The first four rows (and `render_keep_room_client`) are not from the state-machine waves. `api_scenes_p95` is new in both runs, about 1 ms, cause not looked for. The last three rows failed in one run of two. One run at the earlier commit is thin evidence for anything but the large rows.
 
+**A/B, 2026-11-10** (`eval:perf --target pre:<3a25cc6> --target now:<1cf66ed>`, interleaved, exclusive lock, started at
+5-minute load below 8): no metric is worse after the waves, on WebGPU or on WebGL2 (`MIDSTUDY_WEBGPU=0`).
+`api_scenes_p95` 0.84 → 0.87 ms; the 1.8 to 1.9 ms above was load (14 to 30), and the extra `.calibrating` and input
+checks per scene cost about 0.03 ms. On WebGL2 every edit and render metric matches within 2 %. `splat_first_frame` on
+WebGPU, 9 runs each: 11.97 s → 12.01 s (one 35 s outlier on each side across the runs). `planner_load_phone` is
+bimodal on both commits (about 1.25 s, or 2.1 s when a ~950 ms script task lands), so a 5-run median can land on
+either. What still fails `--compare` against v1 (splat first frame, drags, keep-room render, warm load) predates
+wave 1: v2 against v1, not the state-machine work.
+
 Deviation: `docs/notes/state-machines.md` is listed in this package but isn't tracked on `sm-next` and sits in the main checkout, outside this worktree; its close-out is here and in STATUS.md instead.
