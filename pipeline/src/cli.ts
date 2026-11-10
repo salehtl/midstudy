@@ -31,6 +31,7 @@ import { join, name as pathName, normalize as pathNormalize, parent, suffix, wit
 import * as objzip from './objzip.ts'
 import * as rug from './rug.ts'
 import * as splat from './splat.ts'
+import { falStandIn } from './standin.ts'
 
 /** The midstudy checkout (this file is pipeline/src/cli.ts). */
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -184,7 +185,8 @@ async function run(argv: readonly string[]): Promise<void> {
     if (!isFile(local)) throw new MidstudyError(MESSAGES.notFound(rawInput))
     if (imageInput) checkImage(local)
   }
-  const falKey = imageEngine && mockDir === null ? loadFalKey(REPO) : null
+  // a test's stand-in for fal (pipeline/src/standin.ts) brings its own key: neither FAL_KEY nor .env is read then
+  const falKey = imageEngine && mockDir === null ? falStandIn()?.key ?? loadFalKey(REPO) : null
   if (imageEngine && mockDir === null && falKey === null) throw new MidstudyError(MESSAGES.noKey(join(REPO, '.env')))
   // a bad zip is refused before the lock is taken or anything is written
   if (ext === '.zip' && local !== null) objzip.check(local)
@@ -269,7 +271,7 @@ async function add(p: AddPlan): Promise<void> {
       for (const n of await rug.build(local, w, d, h, modelSrc, thumbSrc)) say(`note: ${n}`)
       await tick()
     } else if (isFalEngine(engine)) {
-      fal = mock ? new MockFal(p.mockDir) : new LiveFal(p.falKey ?? '', fetch, undefined, Date.now, stop.signal)
+      fal = mock ? new MockFal(p.mockDir) : new LiveFal(p.falKey ?? '', falStandIn()?.fetch ?? fetch, undefined, Date.now, stop.signal)
       say(`${engine}${mock ? ' (mock, $0)' : ` ($${fixed(cost, 2)})`}: ${p.rawInput}`)
       paidRun = !mock
       const engineOutputs = await runEngine(fal, engine, local, p.prompt, p.resolution, path.join(staging, 'raw'))
