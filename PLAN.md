@@ -1,5 +1,10 @@
 # midstudy v1 plan
 
+> **Historical (2026-11-13).** v1 was built from this plan and replaced by v2 (`main` since `84dd8ad`, 2026-11-06),
+> which keeps v1's behaviour. The spec is now [contract/CONTRACT.md](contract/CONTRACT.md); where this file and the
+> contract differ, the contract wins. Details here that v2 changed (Python `serve.py`, Spark, the Python pipeline)
+> are kept as written. Where things stand: [docs/STATUS.md](docs/STATUS.md).
+
 midstudy is a fork of [nook](https://github.com/salehtl/nook) for the same goal: seeing furniture in your own room before you buy it. It drops the room scan. The room is **one photo from a phone**. Furniture is still made from photos at real-world size (Meta's SAM 3D Objects on fal, as in nook). You place the 3D pieces on the photo's floor, turn and move them, save layouts, and render a photoreal image with an image-edit model.
 
 This file is the plan and the spec. It is owned by the main session. Build agents read it directly; they don't get summaries of it.

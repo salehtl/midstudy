@@ -1,7 +1,8 @@
 # midstudy rooms: one layout, several photos
 
-Status: **built; Phase D pending** (Phases A–C done: Gate A chose MASt3R; Phase B's five tracks merged and integrated on
-`rooms-integrate`, see [docs/notes/rooms-integrate.md](notes/rooms-integrate.md)). Written 2026-11-06 on `main` at `7536e25`;
+Status: **built and on `main`; Phase D pending** (Phases A–C done: Gate A chose MASt3R; Phase B's five tracks merged
+and integrated on `rooms-integrate`, then into `main`, see [docs/notes/rooms-integrate.md](notes/rooms-integrate.md);
+MASt3R is in the Nix package since 2026-11-13). Written 2026-11-06 on `main` at `7536e25`;
 A1 (contract + fixtures) came from `rooms-foundation`:
 [CONTRACT.md §4.9](../contract/CONTRACT.md) is the interface from now on, and where it differs from §3 below it wins
 (the differences are listed in [docs/notes/rooms-foundation.md](notes/rooms-foundation.md)). The work runs as dynamic workflows, one per

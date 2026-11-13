@@ -37,7 +37,7 @@ server) is `fc82c5c`, the commit before it, if you ever need to roll back.
 
 | Path | What |
 |---|---|
-| `planner/` | the browser app, strict TypeScript, bundled by esbuild (`scripts/build.mjs`) into `planner/dist/` with three.js and Spark from npm (no CDN) |
+| `planner/` | the browser app, strict TypeScript, bundled by esbuild (`scripts/build.mjs`) into `planner/dist/` with three.js from npm (no CDN) and its own WebGPU splat renderer |
 | `server/` | the HTTP server, `node server/src/main.ts` (Node 22 runs the `.ts` files directly, with its type stripping) |
 | `common/` | what the server and midstudy-add share (the library lock, costs.csv, fal, files) |
 | `pipeline/` | `midstudy-add`, `node pipeline/src/cli.ts`: a furniture photo or model to a normalized library item (contract §3) |
@@ -48,7 +48,7 @@ server) is `fc82c5c`, the commit before it, if you ever need to roll back.
 | `fixtures/` | golden scenes (`scenes/`, `calib/`), fal mock responses (`fal/`), test models |
 | `nix/`, `flake.nix` | the packaging (below) and the dev shells |
 | `docs/notes/*.md` | what each track did and measured; `docs/notes/packaging.md` is this packaging's notes |
-| `library/library.json`, `library/costs.csv` | the (empty) dev library; user data dirs (`scenes/`, `layouts/`, `renders/`) are git-ignored |
+| `library/library.json`, `library/costs.csv` | the (empty) dev library; user data dirs (`scenes/`, `rooms/`, `layouts/`, `renders/`) are git-ignored |
 
 ## 4. What the flake gives you
 
@@ -111,9 +111,9 @@ Design points worth knowing:
 - **Python 3.13.** The calib package uses nixpkgs' `python3` (3.13), the one nook's torch-bin is built for. `calib/`
   is developed on 3.12 under uv; the Nix build runs it on 3.13 with nixpkgs' versions (torch 2.11, numpy 2.4, Pillow
   12.3, pillow-heif 1.4, huggingface-hub 1.16, opencv 4.13, jsonschema 4.26).
-- **Weights offline.** The `midstudy-calib` wrapper sets `HF_HUB_CACHE=<moge-weights>` and `HF_HUB_OFFLINE=1` as
+- **Weights offline.** The `midstudy-calib` wrapper sets `HF_HUB_CACHE=<MoGe-2's and MASt3R's weights>`, `MIDSTUDY_MAST3R_DIR=<mast3r.code>` and `HF_HUB_OFFLINE=1` as
   defaults (`--set-default`), so the service never talks to Hugging Face. §8 has the alternative.
-- **Nothing from a CDN.** three.js and Spark (splats) are bundled from npm into `planner/dist/`; the browser loads
+- **Nothing from a CDN.** three.js is bundled from npm into `planner/dist/`, with the planner's own splat renderer; the browser loads
   everything from midstudy itself. `/library/<id>/splat.spz` is served from `dataDir` like the other library files, as
   `application/octet-stream` with no `Content-Encoding` (it is gzip inside); the proxy may compress it again or not.
   Check that the proxy's response size limit allows 6 MB.
@@ -267,7 +267,7 @@ after deploying, check that a real calibration says `"source": "moge-2"` and `"d
 
 ## 9. Verify, in this order
 
-Run everything from the repo root (branch `v2`, or `main` once v2 is merged). `nix develop -c <cmd>` gives Node 22,
+Run everything from the repo root, on `main`. `nix develop -c <cmd>` gives Node 22,
 Python 3.12, uv, Rust and the rest of the dev tools.
 
 1. **Evaluate.** `nix flake check --no-build` and `nix flake show`. Cheap; catches a bad merge.
@@ -280,7 +280,7 @@ Python 3.12, uv, Rust and the rest of the dev tools.
 3. **torch-bin is nook's.** `nix eval --raw .#midstudy-calib.torch.drvPath`, then
    `nix path-info $(nix eval --raw .#midstudy-calib.torch)`: if it's already valid, nook built it and step 5 builds
    nothing CUDA. If not, see §4 (lock to nook's revision first; the from-source CUDA build takes hours).
-4. **Weights.** `nix build .#moge-weights -L` (1.32 GB download, hash-checked).
+4. **Weights.** `nix build .#moge-weights -L` (1.32 GB download, hash-checked). MASt3R's (2.75 GB) come with step 5.
 5. **Calib.** `nix build .#midstudy-calib -L`. Builds utils3d and MoGe (their import checks load torch, which needs
    no GPU) and runs an install check that imports every module the CLI loads lazily and loads its schemas.
 6. **Calib on the GPU, by hand.**

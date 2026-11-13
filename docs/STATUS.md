@@ -1,8 +1,35 @@
-# midstudy status (v2)
+# midstudy status
 
-As of 2026-11-13, on `main`, which has everything: `v2`, the state-machine waves (`sm-next`) and `nix-mast3r` are
-merged, and no other branch holds work but `v2-webgpu` (Open, below). The plan is [REFACTOR.md](REFACTOR.md); each
-track's notes are in `docs/notes/`. The sections below are dated; each says where its numbers come from.
+As of 2026-11-13, on `main`. Everything is merged there: v2 (the TypeScript, Rust and Lean rebuild), rooms, the
+state-machine waves and `nix-mast3r`. The one branch with unmerged work is `v2-webgpu` (Open, below). Each track's
+notes are in `docs/notes/`; the sections after Open are dated and say where their numbers come from.
+
+## Latest gates
+
+`npm run check` all ok on `sm-next` at c7ba919, the code `main` now carries (443 node tests, TScert 879/921 with every
+baselined function, Rust 210 tests with Miri and Kani, 14 fuzz targets, 574 Lean theorems); `eval:engine-races` 73/73,
+`eval:selftest` 50/50, `eval:ui-smoke` 189/189. The last full `eval:all` was at the rooms integration (18/18 evals,
+1,635 checks, WebGPU and WebGL2); `eval:all` now also runs `eval:engine-races` and `eval:ui-smoke` and has not been run
+as a whole since. After `nix-mast3r`: `check:py` and calib pytest (200 passed). Nothing here was run on a real GPU.
+
+## Open
+
+- **Rooms Phase D**: the user's own room (`eval:real-room`, docs/ROOMS.md) waits for photos and tape measurements.
+- **Speed against v1** (`eval:perf --compare`, SwiftShader only) fails: splat first frame ~12 s against 0.3 s, drags
+  ~108 ms a frame against 67, keep-room render 1.7 s against 0.75, warm load. These predate the state-machine waves
+  (an A/B shows the waves cost nothing). Not yet judged on Metal (Safari or Helium, with and without `?webgpu=0`).
+- **`v2-webgpu`** (branch only; its worktree was removed on 2026-11-13): `466a3f8` (lazy environment maps, one shadow
+  map, passes merged, passes compiled ahead) broke E16.33 and was left out of the WebGPU merge; `632989d` saves the
+  worktree's uncommitted edits (the photo upload's mipmap pipeline compiled ahead, and `PERF-DEBUG` marks in
+  `openScene` that aren't for merging). The likeliest place to start on the load and first-frame gaps.
+- **Phase 4 review findings, unfixed**: all low, plus three medium rigor ones (kernel differential tests in no gate,
+  TS re-implementations of the proved slug and photo-extension rules, Python-compatibility helpers duplicated). Their
+  full list was in the `rf-verify-*` worktrees' `evals/out/`, which are gone; this is what remains of it. Fixed from
+  it: the product route's hang on a body that doesn't decode as its Content-Encoding says (422 in ~10 ms), and
+  private or loopback IPv4 picture links in decimal, hex, octal, short or percent-encoded form (dropped).
+- **Not verified**: live fal, a real GPU or phone, the Linux packaging (evaluated, never built on Linux; the
+  homeserver's RTX 2060 ran MASt3R from `nix-mast3r` before its merge).
+- Fuzz corpora are trimmed to 40 seeds per target (332 files, ~1.3 MB); fuzz runs grow the rest locally.
 
 ## MASt3R in the Nix package (2026-11-13, `nix-mast3r` merged into `main`)
 
@@ -14,9 +41,9 @@ provisioning lock (which can't be taken next to a copy in `/nix/store`). Checked
 200 passed, the Linux derivations evaluate, `nix flake check --no-build --all-systems`. Not built or run on Linux
 since the merge.
 
-## State machines (2026-11-09, waves 1 to 6 merged on `sm-next`)
+## State machines (2026-11-09 to 11-10, waves 1 to 7, merged into `main`)
 
-The fixes from the sweep of implicit state machines are merged through wave 6; each track's notes say what changed.
+The fixes from the sweep of implicit state machines are merged through wave 7 (W7 on 2026-11-10); each track's notes say what changed.
 On `sm-next` at c7ba919: `npm run check` all ok (443 node tests, TScert 879/921 with every baselined function, Rust 210
 tests with Miri and Kani, 14 fuzz targets, 574 Lean theorems); `eval:engine-races` 73/73, `eval:selftest` 50/50,
 `eval:selftest-runner` 18/18, `eval:ui-smoke` 189/189. `eval:all` is the wave merge's to run, and is not counted here.
@@ -25,7 +52,7 @@ wave, at the same size: `planner_load_desktop_warm`, `drag_frames_p50`, `render_
 `splat_first_frame` (13 to 14 s against v1's 0.3 s). `api_scenes_p95` read 1.8 to 1.9 ms in those runs; an A/B on a quiet machine (2026-11-10)
 shows no regression from the waves on any metric. Details: [notes/integration.md](notes/integration.md).
 
-## Rooms (docs/ROOMS.md; integrated 2026-11-07 on `rooms-integrate`)
+## Rooms (docs/ROOMS.md; integrated 2026-11-07 on `rooms-integrate`, then into `main`)
 
 Built; Phase D (the user's own room) pending. A room groups several photos (scenes) into one room frame (contract
 §4.9): `midstudy-calib align-room` gives each photo a pose and scale (MASt3R from the optional `rooms` extra, chosen
@@ -42,7 +69,7 @@ Not yet: real photos of a real room (Phase D), a GPU other than SwiftShader, the
 Gates at integration: `npm run check` all ok; `eval:all` 18/18 evals, 1,635 checks, twice on WebGPU and once on WebGL2;
 `eval:calib` 106/106 (E20 real 34/34); calib pytest 142 passed; the room diff 9/9.
 
-## What v2 is
+## What v2 is (counts as of the cutover, 2026-11-06; Latest gates has today's)
 
 - **Planner, server, `midstudy-add`:** strict TypeScript (no `any`, `!` or casts; eslint strict-type-checked, knip),
   run by Node 22 directly (`node server/src/main.ts`, `node pipeline/src/cli.ts`). Pure logic is certified by TScert
@@ -79,29 +106,10 @@ E11 29, E12 27, E13 51, E14 409, E15 135, E16 57). `npm run check` all ok. Earli
 - After the merge, on WebGPU: `eval:all` 15/15 (E1 235, E3 56, E4 21, E5 35, E6 38, E7 79, E8 72, E9 49, E11 29,
   E12 27, E13 51, E14 409, E15 135, E16 57, E17 52); `check gen types lint dead` ok. WebGL2 fallback not re-run.
 
-## Speed (E17 A/B against v1, interleaved, exclusive; software GPU)
+## Speed (E17 A/B against v1, interleaved, exclusive; software GPU; before WebGPU was the default)
 
-v2 is faster than v1 on every metric; none is worse. Calibration from the second photo −85 % (0.95 s), desktop load
+On WebGL, v2 was faster than v1 on every metric; none was worse (since WebGPU, see Open). Calibration from the second photo −85 % (0.95 s), desktop load
 −23 % (to `ready` −37 %), API calls 0.48–0.83×, requests 53 → 27 with no CDN, Idol add 1.88×, worst product page 592 ms,
 scene open 1.26×. Missed targets: planner load −40 %, keep-room mask 3×, product p95 2×, CLI 3×.
 WebGPU was measured only on SwiftShader (slower there on load, scene open and drags: shader compiles in software);
 judge it in Safari or Helium on Metal, with and without `?webgpu=0`.
-
-## Open
-
-- Phase 4 stopped early (usage limit). Fixed: the product route no longer hangs on a page or feed body that doesn't
-  decode as its Content-Encoding says (422 in ~10 ms, as v1; gzip with trailing junk is now 422 where v1 read it), and
-  picture links to private or loopback IPv4 written in decimal, hex, octal, short or percent-encoded form are dropped
-  (v1 kept them). The other findings (all low, plus three medium rigor ones: kernel differential tests in no gate,
-  TS re-implementations of the proved slug and photo-extension rules, Python-compatibility helpers duplicated) are
-  not fixed. Their full list was in the `rf-verify-*` worktrees' `evals/out/`, which are gone; this paragraph is
-  what remains of it.
-- `v2-webgpu`'s last commit (`466a3f8`: lazy environment maps, one shadow map, passes merged, passes compiled ahead)
-  is left out: it broke E16.33. Its worktree (`.claude/worktrees/rf-webgpu`) also holds uncommitted edits from
-  2026-11-06: a probe that compiles the photo upload's mipmap pipeline ahead, plus `PERF-DEBUG` timing marks in
-  `openScene`. It is the one unmerged piece of work, and the likeliest place to start on the load and first-frame gaps.
-- `eval:perf --compare` fails against v1 (splat first frame ~12 s against 0.3 s, drags, keep-room render, warm load),
-  measured on SwiftShader only; not yet judged on Metal.
-- Phase D of the rooms (the user's own room, `eval:real-room`) waits for photos and tape measurements.
-- Fuzz corpora trimmed to 40 seeds per target (332 files, ~1.3 MB); fuzz runs grow the rest locally.
-- Not verified: live fal, a real GPU or phone, the Linux packaging (Nix is evaluated, not built on Linux).

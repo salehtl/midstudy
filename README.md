@@ -14,8 +14,10 @@ A fork of [nook](https://github.com/salehtl/nook) without the room scan, for per
 3. **Place it.** Drag to move, turn and lift pieces. Real furniture in the photo hides pieces behind it, and the
    furniture is lit by the light in your photo.
 4. **Save layouts**, then **render** a realistic image and **compare** renders side by side.
+5. **Rooms (optional).** Group several photos of one room: **Align photos** places them in one room frame, and a
+   room layout is placed once and drawn in every photo, with a floor plan beside them.
 
-It works on desktop and phone. The photo is the only viewpoint; zoom is a 2D zoom into it.
+It works on desktop and phone. Each photo is its own viewpoint; zoom is a 2D zoom into it.
 
 ## Run it
 
@@ -23,7 +25,7 @@ Tools come from the Nix dev shell; nothing is installed globally.
 
 ```sh
 nix develop -c npm ci                       # once
-nix develop -c uv sync --project calib      # once: the floor-finding model (~1 GB)
+nix develop -c uv sync --project calib --extra rooms   # once: floor finding (~1 GB); rooms' MASt3R (2.6 GB) on first align
 nix develop -c npm run serve                # then open http://127.0.0.1:8765/
 ```
 
@@ -42,13 +44,14 @@ nix develop -c npm run serve                # then open http://127.0.0.1:8765/
 | A photo with SAM 3D / TRELLIS 2 | $0.02 / $0.25–0.35 |
 | A product page | free to read (rarely under $0.001 more) |
 | A 3D file or a flat rug | free |
-| A render | about $0.04 |
+| A render | about $0.04 (GPT Image 2: about $0.07) |
 
 ## What's inside
 
 - **Planner** (in the browser), **server** and the **`midstudy-add`** furniture tool: TypeScript.
 - **Image, geometry and splat code:** Rust, compiled to WebAssembly.
-- **Floor finding and lighting** (`calib/`): Python with the MoGe-2 model, kept loaded between photos.
+- **Floor finding and lighting** (`calib/`): Python with the MoGe-2 model, kept loaded between photos; aligning a
+  room's photos uses MASt3R (or a simpler fallback without it).
 - **Rendering:** WebGPU, with WebGL2 as a fallback (add `?webgpu=0` to the URL to force it).
 - **Proofs** (`proofs/`): Lean proofs of the camera maths and the file-cleaning code.
 
@@ -61,7 +64,8 @@ nix develop -c npm run eval:all    # the end-to-end tests (free: paid services a
 
 ## Docs
 
-- [PLAN.md](PLAN.md) and [contract/CONTRACT.md](contract/CONTRACT.md): what midstudy does, exactly.
+- [contract/CONTRACT.md](contract/CONTRACT.md): what midstudy does, exactly. [PLAN.md](PLAN.md): the v1 plan it
+  started from. [docs/ROOMS.md](docs/ROOMS.md): the rooms plan.
 - [docs/STATUS.md](docs/STATUS.md): where things stand. [docs/REFACTOR.md](docs/REFACTOR.md): how v2 was built.
 - [evals/README.md](evals/README.md): every test. [docs/HANDOFF.md](docs/HANDOFF.md): hosting on homeserver.
 - [CLAUDE.md](CLAUDE.md): rules for agents working in this repo.

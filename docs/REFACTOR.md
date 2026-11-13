@@ -1,5 +1,8 @@
 # midstudy v2: the refactor plan
 
+> **Done.** v2 replaced v1 on `main` at `84dd8ad` (2026-11-06); WebGPU passed its gate and is the default, and Spark
+> went with it. The plan below is kept as written. Where things stand: [STATUS.md](STATUS.md).
+
 Branch `v2`, forked from `main` at `e1b717f` (2026-11-05). Goal: the same product (contract/CONTRACT.md stays the
 behavioural spec), rebuilt so that it is **faster where it matters** and **much more rigorous**: every boundary typed
 from one schema source, the logic certified or proved where tools allow it, hot paths in Rust compiled to WebAssembly,
