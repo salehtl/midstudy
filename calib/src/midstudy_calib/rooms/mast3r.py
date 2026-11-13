@@ -61,6 +61,7 @@ PAIR_BUDGET: Final = 130
 MODULES: Final = ("roma", "einops", "safetensors", "tqdm")
 
 STAMP: Final = ".midstudy-ready"  # in the checkout: holds COMMIT once the submodules are in
+STORE_STAMP: Final = ".midstudy-commit"  # in a read-only copy without .git (nix/mast3r.nix): holds COMMIT
 
 _LOADED: dict[str, Any] = {}  # device -> the network, kept for the worker
 
@@ -111,6 +112,11 @@ def ensure_code() -> Path:
     """The pinned checkout of MASt3R (with its submodules), cloned on first use; no network once it is there. One
     process at a time: the others wait on the lock and find it ready."""
     root = code_dir()
+    store = root / STORE_STAMP
+    if store.is_file() and not (root / ".git").exists():  # a read-only copy (the Nix package's, nix/mast3r.nix): no lock, no git
+        if store.read_text().strip() == COMMIT:
+            return root
+        raise SolverUnavailable(f"MASt3R's code at {root} is not the pinned commit {COMMIT[:7]}")
     root.parent.mkdir(parents=True, exist_ok=True)
     with (root.parent / ".mast3r.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

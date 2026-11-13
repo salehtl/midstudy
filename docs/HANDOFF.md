@@ -60,6 +60,7 @@ server) is `fc82c5c`, the commit before it, if you ever need to roll back.
 | `….midstudy.wasm` | `nix/wasm.nix` | every `core/crates/wasm-*` crate as wasm: `wasm/{web,node,pipeline,product}/` |
 | `….midstudy.nodeModules.{build,runtime}` | `nix/node-modules.nix` | the npm packages: `build` (everything, for the bundle), `runtime` (the `dependencies` only) |
 | `packages.x86_64-linux.midstudy-calib` | `nix/midstudy-calib.nix` | `bin/midstudy-calib` on torch-bin (CUDA 12.8 wheels), MoGe-2 (`nix/moge.nix`), utils3d (`nix/utils3d.nix`), OpenCV, pillow-heif, jsonschema |
+| `….midstudy-calib.mast3r.{code,weights}` | `nix/mast3r.nix` | align-room's MASt3R (the `rooms` extra): naver/mast3r at the pinned commit with its submodules and a `.midstudy-commit` stamp (`MIDSTUDY_MAST3R_DIR`), and the ViT-L weights (2.75 GB) in the Hugging Face cache the wrapper sets next to MoGe-2's. On the RTX 2060 (2026-11-07): the golden room's 6 photos in 44 s, 5 placed, 1.6 cm loop residual; 4.3 GB of VRAM alone, 5.6 GB with MoGe-2 in the same worker |
 | `packages.x86_64-linux.moge-weights` | `nix/moge-weights.nix` | MoGe-2 ViT-L weights (1.32 GB, fixed-output from Hugging Face) laid out as a read-only Hugging Face cache |
 | `nixosModules.default` | `nix/module.nix` | `services.midstudy` (§6) |
 | `checks.x86_64-linux.service` | `nix/test.nix` | NixOS VM test of the module (KVM, no GPU; fal and MoGe mocked) |

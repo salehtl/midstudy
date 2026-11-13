@@ -93,6 +93,36 @@ def test_a_stamp_for_another_commit_is_removed_before_the_tree_changes(root: Pat
     assert not (root / STAMP).exists()
 
 
+def _store_copy(root: Path, commit: str) -> None:
+    """The Nix package's copy (nix/mast3r.nix): the files and a .midstudy-commit stamp, no .git, in a read-only folder."""
+    _tree(root)
+    (root / ".git").rmdir()
+    (root / ".midstudy-commit").write_text(commit)
+    root.parent.chmod(0o555)
+
+
+def test_a_read_only_store_copy_is_used_without_git_or_the_lock(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _store_copy(root, mast3r.COMMIT)
+    git = Recorder(root)
+    monkeypatch.setattr(mast3r, "_git", git)
+    try:
+        assert mast3r.ensure_code() == root
+    finally:
+        root.parent.chmod(0o755)
+    assert git.calls == []
+    assert not (root.parent / ".mast3r.lock").exists()
+
+
+def test_a_store_copy_of_another_commit_is_refused(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _store_copy(root, "another commit")
+    monkeypatch.setattr(mast3r, "_git", Recorder(root))
+    try:
+        with pytest.raises(solver.SolverUnavailable, match="not the pinned commit"):
+            mast3r.ensure_code()
+    finally:
+        root.parent.chmod(0o755)
+
+
 def test_checkout_and_submodule_update_are_forced(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     git = Recorder(root)
     monkeypatch.setattr(mast3r, "_git", git)
