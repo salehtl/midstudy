@@ -1,6 +1,18 @@
 # midstudy status (v2)
 
-As of 2026-11-06, branch `v2`. The plan is [REFACTOR.md](REFACTOR.md); each track's notes are in `docs/notes/`.
+As of 2026-11-13, on `main`, which has everything: `v2`, the state-machine waves (`sm-next`) and `nix-mast3r` are
+merged, and no other branch holds work but `v2-webgpu` (Open, below). The plan is [REFACTOR.md](REFACTOR.md); each
+track's notes are in `docs/notes/`. The sections below are dated; each says where its numbers come from.
+
+## MASt3R in the Nix package (2026-11-13, `nix-mast3r` merged into `main`)
+
+`packages.x86_64-linux.midstudy-calib` carries align-room's MASt3R (`nix/mast3r.nix`: the pinned code with a
+`.midstudy-commit` stamp, and the ViT-L weights in the Hugging Face cache next to MoGe-2's), and `nix/module.nix`
+passes `--rooms-dir`. Measured on the homeserver's RTX 2060 on 2026-11-07, before the merge: the golden room in 44 s, 5 of 6 placed,
+1.6 cm loop residual, 4.3 GB of VRAM. In the merge, `ensure_code()` checks the read-only store copy before main's
+provisioning lock (which can't be taken next to a copy in `/nix/store`). Checked on this Mac: `check:py`, calib pytest
+200 passed, the Linux derivations evaluate, `nix flake check --no-build --all-systems`. Not built or run on Linux
+since the merge.
 
 ## State machines (2026-11-09, waves 1 to 6 merged on `sm-next`)
 
@@ -26,7 +38,7 @@ model. E18 (rooms API), E19 (room planner) and E20 `--mock` are in `eval:all`; E
 On the golden photos with real MoGe-2 depth, align-room places five of six (the bare wall unplaced) within 2.4 cm
 after Set scale, with no confident-wrong placement ([rooms-calib-real.md](notes/rooms-calib-real.md); before that fix,
 one of six). Raw distances before Set scale carry MoGe's height error (3–29 % on these photos).
-Not yet: real photos of a real room (Phase D), a GPU other than SwiftShader, the Nix package's align-room (Manhattan only).
+Not yet: real photos of a real room (Phase D), a GPU other than SwiftShader, the Nix package's MASt3R since the merge (see above).
 Gates at integration: `npm run check` all ok; `eval:all` 18/18 evals, 1,635 checks, twice on WebGPU and once on WebGL2;
 `eval:calib` 106/106 (E20 real 34/34); calib pytest 142 passed; the room diff 9/9.
 
@@ -82,7 +94,14 @@ judge it in Safari or Helium on Metal, with and without `?webgpu=0`.
   picture links to private or loopback IPv4 written in decimal, hex, octal, short or percent-encoded form are dropped
   (v1 kept them). The other findings (all low, plus three medium rigor ones: kernel differential tests in no gate,
   TS re-implementations of the proved slug and photo-extension rules, Python-compatibility helpers duplicated) are
-  in `.claude/worktrees/rf-verify-*/evals/out/`, not fixed.
-- `v2-webgpu`'s last commit (lazy environment maps, `25a9c3a`) is left out: it broke E16.33.
+  not fixed. Their full list was in the `rf-verify-*` worktrees' `evals/out/`, which are gone; this paragraph is
+  what remains of it.
+- `v2-webgpu`'s last commit (`466a3f8`: lazy environment maps, one shadow map, passes merged, passes compiled ahead)
+  is left out: it broke E16.33. Its worktree (`.claude/worktrees/rf-webgpu`) also holds uncommitted edits from
+  2026-11-06: a probe that compiles the photo upload's mipmap pipeline ahead, plus `PERF-DEBUG` timing marks in
+  `openScene`. It is the one unmerged piece of work, and the likeliest place to start on the load and first-frame gaps.
+- `eval:perf --compare` fails against v1 (splat first frame ~12 s against 0.3 s, drags, keep-room render, warm load),
+  measured on SwiftShader only; not yet judged on Metal.
+- Phase D of the rooms (the user's own room, `eval:real-room`) waits for photos and tape measurements.
 - Fuzz corpora trimmed to 40 seeds per target (332 files, ~1.3 MB); fuzz runs grow the rest locally.
 - Not verified: live fal, a real GPU or phone, the Linux packaging (Nix is evaluated, not built on Linux).

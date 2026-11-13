@@ -37,3 +37,8 @@ either. What still fails `--compare` against v1 (splat first frame, drags, keep-
 wave 1: v2 against v1, not the state-machine work.
 
 Deviation: `docs/notes/state-machines.md` is listed in this package but isn't tracked on `sm-next` and sits in the main checkout, outside this worktree; its close-out is here and in STATUS.md instead.
+
+## Merge of `nix-mast3r` (2026-11-13)
+
+`origin/nix-mast3r` (b8f7900, branched at 3a25cc6) merged into `main` as 9b87071. One conflict, `calib/src/midstudy_calib/rooms/mast3r.py`: W7 had replaced `ensure_code()` with a flock on `<parent>/.mast3r.lock` and a `.midstudy-ready` stamp, and the branch had added a `.midstudy-commit` stamp for the Nix store copy (no `.git`). Main's provisioning is kept; the store copy is checked first, with no lock, because the lock file can't be created next to a copy in `/nix/store`. A copy has to be stamped *and* have no `.git` to count, so a git checkout is never trusted on a stamp alone. Two tests in `calib/tests/test_mast3r_provision.py`: the right commit is used with no git call and no lock file (parent folder read-only), and another commit is refused. Gates: `check:py` ok, calib pytest 200 passed and 5 skipped, the `midstudy-calib` and `mast3r.code` derivations for x86_64-linux evaluate, `nix flake check --no-build --all-systems` ok. Not built: they are Linux packages, and nothing here builds them. `docs/notes/rooms-calib.md` still says MASt3R isn't packaged; that was true when it was written.
+
